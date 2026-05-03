@@ -16,15 +16,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
+    // Use onAuthStateChange as the single source of truth for auth state.
+    // In Supabase v2, it fires INITIAL_SESSION *after* any URL hash token
+    // (magic-link) has been fully processed — so loading stays true until
+    // that exchange is complete, preventing PrivateRoute from redirecting
+    // and stripping the hash fragment before Supabase can consume it.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -34,7 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: window.location.origin,
+        // Dynamic origin — works on localhost, Vercel, and any other host.
+        // Never hardcode a URL here.
+        emailRedirectTo: `${window.location.origin}/dashboard`,
       },
     });
     if (error) throw error;
