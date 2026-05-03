@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "focus-workspace",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/ylyrwnl/Downloads/focus-workspace", "run", "dev"],
+      "port": 5173,
+      "autoPort": false
+    }
+  ]
+}

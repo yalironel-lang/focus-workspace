@@ -1,0 +1,120 @@
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
+export interface Database {
+  public: {
+    Tables: {
+      sections: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          created_at: string;
+          exam_date: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          created_at?: string;
+          exam_date?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          created_at?: string;
+          exam_date?: string | null;
+        };
+        Relationships: [];
+      };
+      groups: {
+        Row: {
+          id: string;
+          section_id: string;
+          title: string;
+          order_index: number;
+        };
+        Insert: {
+          id?: string;
+          section_id: string;
+          title: string;
+          order_index: number;
+        };
+        Update: {
+          id?: string;
+          section_id?: string;
+          title?: string;
+          order_index?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'groups_section_id_fkey';
+            columns: ['section_id'];
+            isOneToOne: false;
+            referencedRelation: 'sections';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      items: {
+        Row: {
+          id: string;
+          group_id: string;
+          type: 'task' | 'file' | 'link' | 'note';
+          title: string;
+          content: string | null;
+          file_path: string | null;
+          completed: boolean;
+          order_index: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          group_id: string;
+          type: 'task' | 'file' | 'link' | 'note';
+          title: string;
+          content?: string | null;
+          file_path?: string | null;
+          completed?: boolean;
+          order_index: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          group_id?: string;
+          type?: 'task' | 'file' | 'link' | 'note';
+          title?: string;
+          content?: string | null;
+          file_path?: string | null;
+          completed?: boolean;
+          order_index?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'items_group_id_fkey';
+            columns: ['group_id'];
+            isOneToOne: false;
+            referencedRelation: 'groups';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+  };
+}
