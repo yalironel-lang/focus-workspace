@@ -106,6 +106,84 @@ export interface Database {
           },
         ];
       };
+      schedule_blocks: {
+        Row: {
+          id: string;
+          user_id: string;
+          section_id: string | null;
+          title: string;
+          day_of_week: number;
+          start_time: string;
+          end_time: string;
+          location: string | null;
+          link: string | null;
+          color: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          section_id?: string | null;
+          title: string;
+          day_of_week: number;
+          start_time: string;
+          end_time: string;
+          location?: string | null;
+          link?: string | null;
+          color?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          section_id?: string | null;
+          title?: string;
+          day_of_week?: number;
+          start_time?: string;
+          end_time?: string;
+          location?: string | null;
+          link?: string | null;
+          color?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      deadlines: {
+        Row: {
+          id: string;
+          user_id: string;
+          section_id: string | null;
+          title: string;
+          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          due_date: string;
+          notes: string | null;
+          completed: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          section_id?: string | null;
+          title: string;
+          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          due_date: string;
+          notes?: string | null;
+          completed?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          section_id?: string | null;
+          title?: string;
+          type?: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          due_date?: string;
+          notes?: string | null;
+          completed?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;

@@ -1,12 +1,137 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
+import { useSchedule } from '../hooks/useSchedule';
+import { useDeadlines } from '../hooks/useDeadlines';
 import { Layout } from '../components/Layout';
 import { GroupComponent } from '../components/GroupComponent';
 import { ContinueButton } from '../components/ContinueButton';
-import { Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar, AlertTriangle } from 'lucide-react';
+import { AddDeadlineModal } from '../components/AddDeadlineModal';
+import { Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar, AlertTriangle, Clock, MapPin, CheckSquare, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Item, ItemType } from '../types';
+import { Item, ItemType, SectionWithProgress, ScheduleBlock, Deadline } from '../types';
+
+// ── Compact course cards ─────────────────────────────────────────────────────
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function CourseRhythmCard({ sectionId }: { sectionId: string }) {
+  const { blocks } = useSchedule();
+  const courseBlocks = blocks
+    .filter(b => b.section_id === sectionId)
+    .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time));
+
+  if (courseBlocks.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Weekly classes</span>
+        <Link to="/schedule" className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 transition-colors">
+          View schedule →
+        </Link>
+      </div>
+      <div className="p-3 space-y-1.5">
+        {courseBlocks.map((block: ScheduleBlock) => (
+          <div key={block.id} className="flex items-center gap-2.5 text-xs">
+            <span className="w-7 text-[10px] font-bold text-slate-400 flex-shrink-0">{DAY_SHORT[block.day_of_week]}</span>
+            <span className="flex items-center gap-1 text-slate-600 font-medium">
+              <Clock className="w-3 h-3 text-slate-300" />
+              {block.start_time}–{block.end_time}
+            </span>
+            {block.location && (
+              <span className="flex items-center gap-1 text-slate-400 truncate">
+                <MapPin className="w-3 h-3 flex-shrink-0" />{block.location}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const DEADLINE_TYPE_SHORT: Record<string, string> = {
+  assignment: 'Assign', quiz: 'Quiz', exam: 'Exam', project: 'Project', reading: 'Reading',
+};
+
+function deadlineDiff(due: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(due + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
+}
+
+function CourseDeadlinesCard({ sectionId, sectionTitle }: { sectionId: string; sectionTitle: string }) {
+  const { deadlines, addDeadline, toggleDeadline, deleteDeadline } = useDeadlines(sectionId);
+  const [showAdd, setShowAdd] = useState(false);
+  const sectionForModal = [{ id: sectionId, title: sectionTitle } as SectionWithProgress];
+
+  const upcoming = deadlines
+    .filter(d => !d.completed)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))
+    .slice(0, 5);
+
+  return (
+    <>
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-50 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Upcoming deadlines</span>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 transition-colors"
+          >
+            + Add
+          </button>
+        </div>
+        <div className="p-3">
+          {upcoming.length === 0 ? (
+            <p className="text-xs text-slate-400 py-1">No upcoming deadlines.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {upcoming.map((d: Deadline) => {
+                const diff = deadlineDiff(d.due_date);
+                const urgCls = diff < 0 ? 'text-rose-600 font-bold' : diff === 0 ? 'text-amber-600 font-bold' : diff <= 3 ? 'text-amber-500' : 'text-slate-400';
+                return (
+                  <div key={d.id} className="group flex items-center gap-2 text-xs">
+                    <button
+                      onClick={() => toggleDeadline(d.id, !d.completed).catch(() => toast.error('Failed'))}
+                      className="flex-shrink-0"
+                    >
+                      {d.completed
+                        ? <CheckSquare className="w-3.5 h-3.5 text-primary-500" />
+                        : <Square className="w-3.5 h-3.5 text-slate-300 hover:text-slate-400" />
+                      }
+                    </button>
+                    <span className="flex-1 text-slate-700 font-medium truncate">{d.title}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0">{DEADLINE_TYPE_SHORT[d.type]}</span>
+                    <span className={`text-[10px] flex-shrink-0 ${urgCls}`}>
+                      {diff < 0 ? 'Overdue' : diff === 0 ? 'Today' : `${diff}d`}
+                    </span>
+                    <button
+                      onClick={() => deleteDeadline(d.id).catch(() => toast.error('Failed'))}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3 text-slate-300 hover:text-red-400" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      {showAdd && (
+        <AddDeadlineModal
+          sections={sectionForModal}
+          defaultSectionId={sectionId}
+          onClose={() => setShowAdd(false)}
+          onAdd={addDeadline}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Effort estimate from item ─────────────────────────────────────────────────
 
 // Effort estimate from item
 function getEffort(item: Item): string {
@@ -302,6 +427,12 @@ export function SectionPage() {
           </div>
         </div>
       )}
+
+      {/* Course rhythm + deadlines */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <CourseRhythmCard sectionId={section.id} />
+        <CourseDeadlinesCard sectionId={section.id} sectionTitle={section.title} />
+      </div>
 
       {/* Today's Plan */}
       {todayPlan.length > 0 && (

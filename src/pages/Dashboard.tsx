@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useSections } from '../hooks/useSections';
 import { SectionCard } from '../components/SectionCard';
 import { Layout } from '../components/Layout';
+import { TodayPanel } from '../components/TodayPanel';
 import { Plus, Loader2, Layers, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -98,6 +99,9 @@ export function Dashboard() {
           </form>
         </div>
       )}
+
+      {/* Today panel */}
+      {!loading && <TodayPanel sections={sections} />}
 
       {/* Loading */}
       {loading && (

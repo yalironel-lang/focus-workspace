@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Auth } from './components/Auth';
 import { Dashboard } from './pages/Dashboard';
 import { SectionPage } from './pages/SectionPage';
+import { SchedulePage } from './pages/SchedulePage';
 import { Toaster } from 'react-hot-toast';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <SectionPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/schedule"
+        element={
+          <PrivateRoute>
+            <SchedulePage />
           </PrivateRoute>
         }
       />

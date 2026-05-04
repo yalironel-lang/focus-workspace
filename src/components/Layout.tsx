@@ -1,12 +1,13 @@
 import { ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LogOut, BookOpenCheck } from 'lucide-react';
+import { LogOut, BookOpenCheck, CalendarDays } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const handleSignOut = async () => {
     try {
@@ -32,10 +33,21 @@ export function Layout({ children }: { children: ReactNode }) {
               <span className="font-bold text-slate-900 text-[15px] tracking-tight">Focus</span>
             </Link>
 
-            {/* Right side */}
+            {/* Nav links */}
             {user && (
-              <div className="flex items-center gap-1">
-                <span className="text-sm text-slate-400 hidden sm:block truncate max-w-[200px] mr-1.5">
+              <div className="flex items-center gap-0.5">
+                <Link
+                  to="/schedule"
+                  className={`flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg transition-colors font-medium ${
+                    pathname === '/schedule'
+                      ? 'bg-primary-50 text-primary-700'
+                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <CalendarDays className="w-4 h-4" />
+                  <span className="hidden sm:inline">Schedule</span>
+                </Link>
+                <span className="hidden sm:block text-sm text-slate-300 px-1.5 truncate max-w-[180px]">
                   {user.email}
                 </span>
                 <button
