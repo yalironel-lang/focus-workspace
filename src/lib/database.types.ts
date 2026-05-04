@@ -148,6 +148,44 @@ export interface Database {
         };
         Relationships: [];
       };
+      course_links: {
+        Row: {
+          id: string;
+          user_id: string;
+          section_id: string;
+          label: string;
+          url: string;
+          type: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          section_id: string;
+          label: string;
+          url: string;
+          type?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          section_id?: string;
+          label?: string;
+          url?: string;
+          type?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'course_links_section_id_fkey';
+            columns: ['section_id'];
+            isOneToOne: false;
+            referencedRelation: 'sections';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       deadlines: {
         Row: {
           id: string;

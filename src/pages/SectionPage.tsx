@@ -7,6 +7,7 @@ import { Layout } from '../components/Layout';
 import { GroupComponent } from '../components/GroupComponent';
 import { ContinueButton } from '../components/ContinueButton';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
+import { CourseHub } from '../components/CourseHub';
 import { Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar, AlertTriangle, Clock, MapPin, CheckSquare, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, ScheduleBlock, Deadline } from '../types';
@@ -427,6 +428,9 @@ export function SectionPage() {
           </div>
         </div>
       )}
+
+      {/* Course Hub */}
+      <CourseHub sectionId={section.id} />
 
       {/* Course rhythm + deadlines */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">

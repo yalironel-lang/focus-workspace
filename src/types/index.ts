@@ -61,6 +61,28 @@ export interface ScheduleBlock {
   created_at: string;
 }
 
+// ── Course Hub ────────────────────────────────────────────────────────────────
+export type CourseLinkType =
+  | 'moodle'
+  | 'netpa'
+  | 'drive'
+  | 'chatgpt'
+  | 'whatsapp'
+  | 'email'
+  | 'zoom'
+  | 'teams'
+  | 'custom';
+
+export interface CourseLink {
+  id: string;
+  user_id: string;
+  section_id: string;
+  label: string;
+  url: string;
+  type: CourseLinkType;
+  created_at: string;
+}
+
 // ── Deadlines ─────────────────────────────────────────────────────────────────
 export type DeadlineType = 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
 
