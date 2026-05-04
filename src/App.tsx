@@ -4,6 +4,7 @@ import { Auth } from './components/Auth';
 import { Dashboard } from './pages/Dashboard';
 import { SectionPage } from './pages/SectionPage';
 import { SchedulePage } from './pages/SchedulePage';
+import { SessionPage } from './pages/SessionPage';
 import { Toaster } from 'react-hot-toast';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -55,6 +56,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <SchedulePage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/session"
+        element={
+          <PrivateRoute>
+            <SessionPage />
           </PrivateRoute>
         }
       />

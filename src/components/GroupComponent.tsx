@@ -6,8 +6,11 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import {
   Plus, FileText, ListTodo, ClipboardCheck, StickyNote, Link2, Pencil, Check, X,
-  BookOpen, Sigma, AlertCircle,
+  BookOpen, Sigma, AlertCircle, ChevronDown, ChevronRight,
 } from 'lucide-react';
+
+// Groups open by default; everything else is collapsed (still accessible via click)
+const DEFAULT_OPEN_GROUPS = new Set(['Exercises']);
 
 interface GroupProps {
   group: GroupWithItems;
@@ -84,6 +87,10 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
   const [renameValue, setRenameValue]   = useState(group.title);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  // Exercises open by default; everything else collapsed — click header to expand
+  const defaultOpen = DEFAULT_OPEN_GROUPS.has(group.title) || !DEFAULT_GROUP_NAMES.has(group.title);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
   const cfg = GROUP_CONFIG[group.title] ?? DEFAULT_CONFIG;
   const isDefault = DEFAULT_GROUP_NAMES.has(group.title);
 
@@ -143,12 +150,24 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
       {/* Group header */}
       <div className={`flex items-center justify-between px-4 py-3 border-b ${cfg.headerBg}`}>
 
-        {/* Left: icon + title (or rename input) */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+        {/* Left: collapse toggle + icon + title (or rename input) */}
+        <div
+          className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer select-none"
+          onClick={() => !isRenaming && setIsOpen(o => !o)}
+          title={isOpen ? 'Collapse' : 'Expand'}
+        >
+          {isRenaming ? null : (
+            <span className="flex-shrink-0 opacity-40">
+              {isOpen
+                ? <ChevronDown  className="w-3.5 h-3.5" />
+                : <ChevronRight className="w-3.5 h-3.5" />
+              }
+            </span>
+          )}
           {cfg.icon}
 
           {isRenaming ? (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
               <input
                 ref={renameInputRef}
                 value={renameValue}
@@ -207,7 +226,7 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
         {/* Right: Add button */}
         {!isRenaming && (
           <button
-            onClick={() => openModal()}
+            onClick={e => { e.stopPropagation(); openModal(); }}
             className="flex items-center gap-1 text-xs font-semibold opacity-50 hover:opacity-100 transition-opacity px-2 py-1 rounded-lg hover:bg-white/60 active:scale-95 flex-shrink-0 ml-2"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
@@ -216,8 +235,16 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
         )}
       </div>
 
-      {/* Body */}
-      <div className="p-2">
+      {/* Body — hidden when collapsed */}
+      {!isOpen && (
+        <div className="px-4 py-2 text-xs text-slate-400">
+          {group.items.length === 0
+            ? 'No items yet'
+            : `${group.items.length} item${group.items.length !== 1 ? 's' : ''}${taskItems.length > 0 ? ` · ${completedTasks}/${taskItems.length} done` : ''}`
+          }
+        </div>
+      )}
+      <div className={`p-2 ${!isOpen ? 'hidden' : ''}`}>
         {group.items.length === 0 ? (
           /* Empty state */
           group.title === 'Notes' ? (
