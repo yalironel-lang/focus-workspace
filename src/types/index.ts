@@ -61,7 +61,7 @@ export interface ScheduleBlock {
   created_at: string;
 }
 
-// ── Course Hub ────────────────────────────────────────────────────────────────
+// ── Course Hub / Portal Links ─────────────────────────────────────────────────
 export type CourseLinkType =
   | 'moodle'
   | 'netpa'
@@ -71,15 +71,20 @@ export type CourseLinkType =
   | 'email'
   | 'zoom'
   | 'teams'
+  | 'github'
   | 'custom';
+
+export type PortalScope = 'global' | 'course';
 
 export interface CourseLink {
   id: string;
   user_id: string;
-  section_id: string;
+  section_id: string | null;   // null for global/dashboard portals
   label: string;
   url: string;
   type: CourseLinkType;
+  scope: PortalScope;
+  order_index: number;
   created_at: string;
 }
 

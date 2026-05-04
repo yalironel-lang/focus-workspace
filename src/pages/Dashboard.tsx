@@ -3,6 +3,7 @@ import { useSections } from '../hooks/useSections';
 import { SectionCard } from '../components/SectionCard';
 import { Layout } from '../components/Layout';
 import { TodayPanel } from '../components/TodayPanel';
+import { MyPortals } from '../components/MyPortals';
 import { Plus, Loader2, Layers, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -99,6 +100,9 @@ export function Dashboard() {
           </form>
         </div>
       )}
+
+      {/* Global portal hub */}
+      <MyPortals />
 
       {/* Today panel */}
       {!loading && <TodayPanel sections={sections} />}

@@ -152,28 +152,34 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          section_id: string;
+          section_id: string | null;
           label: string;
           url: string;
           type: string;
+          scope: string;
+          order_index: number;
           created_at: string;
         };
         Insert: {
           id?: string;
           user_id: string;
-          section_id: string;
+          section_id?: string | null;
           label: string;
           url: string;
           type?: string;
+          scope?: string;
+          order_index?: number;
           created_at?: string;
         };
         Update: {
           id?: string;
           user_id?: string;
-          section_id?: string;
+          section_id?: string | null;
           label?: string;
           url?: string;
           type?: string;
+          scope?: string;
+          order_index?: number;
           created_at?: string;
         };
         Relationships: [
