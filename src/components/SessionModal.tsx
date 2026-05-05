@@ -7,6 +7,7 @@ import {
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
+import { nearestDeadline, deadlineUrgencyLabel, deadlineLevel, daysUntil } from '../utils/sessionPlan';
 import { SectionWithProgress, Deadline, CourseLink } from '../types';
 import {
   pickTasks, pickPortals, sortSectionsByUrgency, urgencyHint,
@@ -129,9 +130,10 @@ interface SessionPlanStepProps {
 }
 
 function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepProps) {
-  const { section: detail, loading } = useSectionDetail(section.id);
-  const { links: courseLinks }       = usePortalLinks('course', section.id);
-  const { links: globalLinks }       = usePortalLinks('global');
+  const { section: detail, loading }  = useSectionDetail(section.id);
+  const { deadlines: sectionDates }   = useDeadlines(section.id);
+  const { links: courseLinks }        = usePortalLinks('course', section.id);
+  const { links: globalLinks }        = usePortalLinks('global');
 
   if (loading) {
     return (
@@ -141,9 +143,17 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
     );
   }
 
-  const tasks:   TaskRec[]     = detail ? pickTasks(detail.groups)              : [];
-  const portals: CourseLink[]  = pickPortals(courseLinks, globalLinks);
-  const estimatedMins          = Math.max(20, tasks.length * 20);
+  // Urgency-aware task limit: more tasks surfaced when deadline is close
+  const tasks:   TaskRec[]    = detail ? pickTasks(detail.groups, 3, sectionDates, section.id) : [];
+  const portals: CourseLink[] = pickPortals(courseLinks, globalLinks);
+  const estimatedMins         = Math.max(20, tasks.length * 20);
+
+  // Most urgent deadline for this section — drives the "Preparing for" banner
+  const urgentDate    = nearestDeadline(section.id, sectionDates);
+  const urgentDays    = urgentDate ? daysUntil(urgentDate.due_date) : null;
+  const urgentLevel   = urgentDays != null ? deadlineLevel(urgentDays) : null;
+  const urgentLabel   = urgentDays != null ? deadlineUrgencyLabel(urgentDays) : null;
+  const showDateBadge = urgentDate && urgentLevel && urgentLevel !== 'far';
 
   const handleBegin = () => {
     onBegin(
@@ -180,6 +190,31 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
       </div>
 
       <div className="px-6 py-4 space-y-5 overflow-y-auto max-h-[55vh]">
+
+        {/* Deadline context banner */}
+        {showDateBadge && urgentDate && urgentLabel && (
+          <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border ${
+            urgentLevel === 'overdue' || urgentLevel === 'urgent'
+              ? 'bg-rose-50 border-rose-200'
+              : 'bg-amber-50 border-amber-200'
+          }`}>
+            <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${
+              urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-400' : 'text-amber-400'
+            }`} />
+            <div className="min-w-0">
+              <p className={`text-xs font-bold truncate ${
+                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-800' : 'text-amber-800'
+              }`}>
+                Preparing for: {urgentDate.title}
+              </p>
+              <p className={`text-[11px] mt-0.5 ${
+                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-600' : 'text-amber-600'
+              }`}>
+                {urgentLabel} · {tasks.length} action{tasks.length !== 1 ? 's' : ''} queued
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Tasks */}
         <div>

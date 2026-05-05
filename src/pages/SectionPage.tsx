@@ -98,9 +98,10 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 interface DeadlinesBlockProps {
   sectionId: string;
   sectionTitle: string;
+  pendingTaskCount: number;
 }
 
-function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
+function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: DeadlinesBlockProps) {
   const { deadlines, addDeadline, toggleDeadline, deleteDeadline } = useDeadlines(sectionId);
   const [showAdd, setShowAdd] = useState(false);
   const [isOpen, setIsOpen]   = useState(true);
@@ -199,6 +200,19 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
                       <p className="text-[11px] text-slate-400 mt-0.5">
                         {DEADLINE_TYPE_LABEL[d.type] ?? d.type} · {formatDueDate(d.due_date)}
                       </p>
+                      {!d.completed && (
+                        <p className={`text-[11px] font-semibold mt-1 ${
+                          pendingTaskCount === 0
+                            ? 'text-emerald-600'
+                            : deadlineUrgencyLevel(d) === 'urgent' || deadlineUrgencyLevel(d) === 'overdue'
+                              ? 'text-rose-500'
+                              : 'text-slate-500'
+                        }`}>
+                          {pendingTaskCount === 0
+                            ? "You're ready ✓"
+                            : `${pendingTaskCount} action${pendingTaskCount !== 1 ? 's' : ''} to prepare`}
+                        </p>
+                      )}
                     </div>
 
                     {/* Urgency badge */}
@@ -418,6 +432,12 @@ export function SectionPage() {
   // Split groups: Exercises (primary, full-width) vs everything else (resources)
   const exercisesGroup  = section.groups.find(g => g.title === 'Exercises');
   const resourceGroups  = section.groups.filter(g => g.title !== 'Exercises');
+
+  // Count incomplete tasks across all groups — used by DeadlinesBlock for prep feedback
+  const pendingTaskCount = section.groups
+    .flatMap(g => g.items)
+    .filter(i => i.type === 'task' && !i.completed)
+    .length;
 
   // Today's Plan — up to 3 recommended actions
   const todayPlan = (() => {
@@ -692,7 +712,7 @@ export function SectionPage() {
       )}
 
       {/* Deadlines */}
-      <DeadlinesBlock sectionId={section.id} sectionTitle={section.title} />
+      <DeadlinesBlock sectionId={section.id} sectionTitle={section.title} pendingTaskCount={pendingTaskCount} />
 
       {/* Resources — all other groups, collapsed by default */}
       {resourceGroups.length > 0 && (

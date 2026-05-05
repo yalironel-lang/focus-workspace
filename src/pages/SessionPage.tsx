@@ -7,10 +7,12 @@ import {
 import { Layout } from '../components/Layout';
 import { useSectionDetail } from '../hooks/useSections';
 import { usePortalLinks } from '../hooks/usePortalLinks';
+import { useDeadlines } from '../hooks/useDeadlines';
 import { Item } from '../types';
 import { TYPE_META } from '../components/MyPortals';
 import {
   loadSession, clearSession, pickPortals, ActiveSession, elapsedMinutes,
+  nearestDeadline, deadlineUrgencyLabel, deadlineLevel, daysUntil,
 } from '../utils/sessionPlan';
 import toast from 'react-hot-toast';
 
@@ -119,8 +121,9 @@ function TaskRow({ item, onToggle, toggling }: TaskRowProps) {
 function SessionContent({ session }: { session: ActiveSession }) {
   const navigate = useNavigate();
   const { section, loading, toggleTask, fetchSection } = useSectionDetail(session.sectionId);
-  const { links: courseLinks } = usePortalLinks('course', session.sectionId);
-  const { links: globalLinks }  = usePortalLinks('global');
+  const { links: courseLinks }   = usePortalLinks('course', session.sectionId);
+  const { links: globalLinks }   = usePortalLinks('global');
+  const { deadlines: sectionDates } = useDeadlines(session.sectionId);
 
   const [togglingId,  setTogglingId]  = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
@@ -134,7 +137,15 @@ function SessionContent({ session }: { session: ActiveSession }) {
   const portals     = pickPortals(courseLinks, globalLinks);
   const completedN  = sessionTasks.filter(i => i.completed).length;
   const totalN      = sessionTasks.length;
+  const remainingN  = totalN - completedN;
   const minutes     = elapsedMinutes(session.startedAt);
+
+  // Nearest deadline for this section — drives feedback pressure
+  const nextDate     = nearestDeadline(session.sectionId, sectionDates);
+  const nextDays     = nextDate ? daysUntil(nextDate.due_date) : null;
+  const nextLevel    = nextDays != null ? deadlineLevel(nextDays) : null;
+  const nextLabel    = nextDays != null ? deadlineUrgencyLabel(nextDays) : null;
+  const showDatePressure = nextDate && nextLevel && nextLevel !== 'far';
 
   const handleToggle = async (item: Item) => {
     setTogglingId(item.id);
@@ -198,6 +209,37 @@ function SessionContent({ session }: { session: ActiveSession }) {
           </button>
         </div>
       </div>
+
+      {/* Deadline pressure bar */}
+      {showDatePressure && nextDate && nextLabel && (
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border mb-3 ${
+          nextLevel === 'overdue' || nextLevel === 'urgent'
+            ? 'bg-rose-50 border-rose-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-bold truncate ${
+              nextLevel === 'overdue' || nextLevel === 'urgent' ? 'text-rose-900' : 'text-amber-900'
+            }`}>
+              {completedN === totalN && totalN > 0
+                ? `You're ready for ${nextDate.title} ✓`
+                : `${nextDate.title} — ${nextLabel}`}
+            </p>
+            {!(completedN === totalN && totalN > 0) && (
+              <p className={`text-xs mt-0.5 ${
+                nextLevel === 'overdue' || nextLevel === 'urgent' ? 'text-rose-600' : 'text-amber-700'
+              }`}>
+                {remainingN > 0
+                  ? `${remainingN} action${remainingN !== 1 ? 's' : ''} left to prepare`
+                  : 'All actions done — you\'re ready'}
+              </p>
+            )}
+          </div>
+          {completedN === totalN && totalN > 0 && (
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+          )}
+        </div>
+      )}
 
       {/* Progress bar */}
       {totalN > 0 && (

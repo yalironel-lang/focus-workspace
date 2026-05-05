@@ -28,7 +28,24 @@ export interface TaskRec {
   displayGroup: string;  // UI label  (e.g. 'To Do')
 }
 
-export function pickTasks(groups: GroupWithItems[], limit = 3): TaskRec[] {
+export function pickTasks(
+  groups: GroupWithItems[],
+  limit = 3,
+  /** If supplied, limit auto-expands to 5 when section has an urgent (<3d) deadline */
+  urgencyDeadlines?: Deadline[],
+  sectionId?: string,
+): TaskRec[] {
+  // Expand limit for urgent sections so the session covers more prep work
+  let effectiveLimit = limit;
+  if (urgencyDeadlines && sectionId) {
+    const nearest = nearestDeadline(sectionId, urgencyDeadlines);
+    if (nearest) {
+      const lvl = deadlineLevel(daysUntil(nearest.due_date));
+      if (lvl === 'urgent' || lvl === 'overdue') effectiveLimit = Math.max(limit, 5);
+      else if (lvl === 'soon')                   effectiveLimit = Math.max(limit, 4);
+    }
+  }
+
   const candidates: Array<TaskRec & { score: number }> = [];
 
   for (const group of groups) {
@@ -44,7 +61,7 @@ export function pickTasks(groups: GroupWithItems[], limit = 3): TaskRec[] {
 
   return candidates
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .slice(0, effectiveLimit);
 }
 
 // ── Portal picking ────────────────────────────────────────────────────────────
@@ -78,6 +95,32 @@ export function sortSectionsByUrgency(
     if (aDead !== bDead) return aDead - bDead;
     return a.title.localeCompare(b.title);
   });
+}
+
+// ── Deadline urgency helpers (shared across UI surfaces) ─────────────────────
+
+/** Human-readable label: "Overdue", "Today", "Tomorrow", "3 days left" */
+export function deadlineUrgencyLabel(daysLeft: number): string {
+  if (daysLeft < 0)   return 'Overdue';
+  if (daysLeft === 0) return 'Due today';
+  if (daysLeft === 1) return 'Tomorrow';
+  return `${daysLeft} days left`;
+}
+
+/** 'overdue' | 'urgent' (<3d) | 'soon' (3–7d) | 'far' */
+export function deadlineLevel(daysLeft: number): 'overdue' | 'urgent' | 'soon' | 'far' {
+  if (daysLeft < 0)  return 'overdue';
+  if (daysLeft < 3)  return 'urgent';
+  if (daysLeft <= 7) return 'soon';
+  return 'far';
+}
+
+/** Returns the nearest non-completed deadline for a section, or null. */
+export function nearestDeadline(sectionId: string, deadlines: Deadline[]): Deadline | null {
+  const pending = deadlines
+    .filter(d => d.section_id === sectionId && !d.completed)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date));
+  return pending[0] ?? null;
 }
 
 // ── Urgency hint (used in course picker) ─────────────────────────────────────
