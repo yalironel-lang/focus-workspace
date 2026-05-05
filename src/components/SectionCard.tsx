@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { SectionWithProgress } from '../types';
+import { SectionWithProgress, Deadline } from '../types';
 import { AlertTriangle, ArrowRight, Trash2, CheckSquare, Calendar } from 'lucide-react';
 
 function cardDaysUntil(d: string): number {
@@ -18,6 +18,7 @@ function cardReadiness(pct: number): { label: string; cls: string } {
 interface SectionCardProps {
   section: SectionWithProgress;
   onDelete: (id: string) => void;
+  deadlines?: Deadline[];
 }
 
 const ACCENTS = [
@@ -42,11 +43,18 @@ function displayGroupName(name: string): string {
   return name === 'Exercises' ? 'To Do' : name;
 }
 
-export function SectionCard({ section, onDelete }: SectionCardProps) {
+export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardProps) {
   const accent    = accentFor(section.title);
   const remaining = section.total_items - section.completed_items;
   const readiness = section.total_items > 0 ? cardReadiness(section.progress) : null;
   const examDays  = section.exam_date ? cardDaysUntil(section.exam_date) : null;
+
+  // Nearest upcoming Important Date for this section (≤7 days or overdue)
+  const nearestDate = deadlines
+    .filter(d => !d.completed)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null;
+  const nearestDays = nearestDate ? cardDaysUntil(nearestDate.due_date) : null;
+  const showNearestDate = nearestDays !== null && nearestDays <= 7;
 
   const handleDelete = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -118,8 +126,27 @@ export function SectionCard({ section, onDelete }: SectionCardProps) {
           </div>
         </div>
 
-        {/* Exam countdown */}
-        {section.exam_date && examDays !== null && (
+        {/* Nearest Important Date (deadlines system) — shown when ≤7 days away */}
+        {showNearestDate && nearestDate && nearestDays !== null && (
+          <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full mb-2 w-fit ${
+            nearestDays < 0   ? 'bg-slate-100 text-slate-500'
+            : nearestDays < 3  ? 'bg-rose-100   text-rose-700'
+            : nearestDays <= 7 ? 'bg-amber-100  text-amber-700'
+            :                    'bg-slate-100  text-slate-600'
+          }`}>
+            <Calendar className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate max-w-[120px]">{nearestDate.title}</span>
+            <span className="flex-shrink-0">·
+              {nearestDays < 0   ? ' Overdue'
+              : nearestDays === 0 ? ' Today'
+              : nearestDays === 1 ? ' Tomorrow'
+              :                    ` ${nearestDays}d`}
+            </span>
+          </div>
+        )}
+
+        {/* Exam date fallback — only shown when no closer deadline from the dates system */}
+        {!showNearestDate && section.exam_date && examDays !== null && (
           <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full mb-2 w-fit ${
             examDays <= 7  ? 'bg-rose-100 text-rose-700'
             : examDays <= 14 ? 'bg-amber-100 text-amber-700'

@@ -52,7 +52,6 @@ export function useSections() {
       .order('created_at', { ascending: false });
 
     if (sectionsError) {
-      console.error('Error fetching sections:', sectionsError);
       setLoading(false);
       return;
     }

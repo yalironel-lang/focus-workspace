@@ -263,7 +263,12 @@ export function Dashboard() {
       {!loading && sections.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {sections.map((section) => (
-            <SectionCard key={section.id} section={section} onDelete={deleteSection} />
+            <SectionCard
+              key={section.id}
+              section={section}
+              onDelete={deleteSection}
+              deadlines={deadlines.filter(d => d.section_id === section.id)}
+            />
           ))}
         </div>
       )}

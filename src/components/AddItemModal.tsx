@@ -66,8 +66,7 @@ export function AddItemModal({ groupId, sectionId, onClose, onSuccess, defaultTy
 
       toast.success('Item added');
       onSuccess();
-    } catch (error) {
-      console.error('Error adding item:', error);
+    } catch {
       toast.error('Failed to add item');
     } finally {
       setLoading(false);
