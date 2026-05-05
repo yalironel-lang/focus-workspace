@@ -145,7 +145,7 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
   };
 
   return (
-    <div className={`bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200 ${cfg.cardAccent}`}>
+    <div className={`bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 ${cfg.cardAccent}`}>
 
       {/* Group header */}
       <div className={`flex items-center justify-between px-4 py-3 border-b ${cfg.headerBg}`}>
@@ -202,7 +202,7 @@ export function GroupComponent({ group, sectionId, onUpdate }: GroupProps) {
 
               {/* Count badge */}
               {group.items.length > 0 && (
-                <span className="text-xs bg-white/70 px-1.5 py-0.5 rounded-full font-medium opacity-80 flex-shrink-0">
+                <span className="text-[10px] bg-white/80 px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 tabular-nums">
                   {taskItems.length > 0
                     ? `${completedTasks}/${taskItems.length}`
                     : group.items.length}

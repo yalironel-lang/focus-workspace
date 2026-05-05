@@ -84,10 +84,10 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
 
   return (
     <>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-4">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
         {/* Header */}
         <div
-          className="px-4 py-3 border-b border-slate-50 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50/60 transition-colors"
+          className="px-4 py-3 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50 transition-colors"
           onClick={() => setIsOpen(o => !o)}
         >
           <div className="flex items-center gap-2">
@@ -98,7 +98,7 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
               }
             </span>
             <Calendar className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Deadlines</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Deadlines</span>
             {pending.length > 0 && (
               <span className="text-[10px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-full">
                 {pending.length}
@@ -213,10 +213,10 @@ function ResourcesBlock({ groups, sectionId, onUpdate }: ResourcesBlockProps) {
   const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-4">
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
       {/* Header */}
       <div
-        className="px-4 py-3 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50/60 transition-colors"
+        className="px-4 py-3 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50 transition-colors"
         onClick={() => setIsOpen(o => !o)}
       >
         <div className="flex items-center gap-2">
@@ -227,7 +227,7 @@ function ResourcesBlock({ groups, sectionId, onUpdate }: ResourcesBlockProps) {
             }
           </span>
           <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-          <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Resources</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Resources</span>
           {totalItems > 0 && (
             <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full">
               {totalItems}
@@ -417,12 +417,12 @@ export function SectionPage() {
       </Link>
 
       {/* Mission-control header */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-4">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
         <div className="h-px bg-gradient-to-r from-primary-400 via-primary-300 to-transparent" />
         <div className="px-6 py-5">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-extrabold text-slate-900 truncate tracking-tight mb-2">
+              <h1 className="text-2xl font-extrabold text-slate-900 truncate tracking-tight leading-tight mb-2">
                 {section.title}
               </h1>
 
