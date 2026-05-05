@@ -3,6 +3,7 @@ import { Item } from '../types';
 import { useSectionDetail } from '../hooks/useSections';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { supabase } from '../lib/supabase';
+import { PDFViewerModal } from './PDFViewerModal';
 import {
   CheckSquare, Square, FileText, StickyNote,
   Trash2, ExternalLink, Loader2, Check, ChevronDown, ChevronUp,
@@ -55,7 +56,8 @@ const PRIORITY_CYCLE: Record<string, string | null> = {
 export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
   const { toggleTask, deleteItem } = useSectionDetail(sectionId);
   const { getSignedUrl } = useFileUpload();
-  const [opening, setOpening] = useState(false);
+  const [opening,     setOpening]     = useState(false);
+  const [pdfViewerUrl, setPdfViewerUrl] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(item.title);
   const [editContent, setEditContent] = useState(item.content || '');
@@ -88,7 +90,7 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
     setOpening(true);
     try {
       const url = await getSignedUrl(item.file_path);
-      window.open(url, '_blank');
+      setPdfViewerUrl(url);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open file');
     } finally {
@@ -224,53 +226,63 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
   // ── File / PDF item ────────────────────────────────────────────────────────
   if (item.type === 'file') {
     return (
-      <div
-        id={`item-${item.id}`}
-        className="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all"
-      >
-        <div className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-100 flex items-center justify-center flex-shrink-0">
-          <FileText className="w-3.5 h-3.5 text-rose-500" />
+      <>
+        <div
+          id={`item-${item.id}`}
+          className="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all"
+        >
+          <div className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-100 flex items-center justify-center flex-shrink-0">
+            <FileText className="w-3.5 h-3.5 text-rose-500" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <span
+              className="text-sm font-medium text-slate-800 truncate block cursor-pointer hover:text-slate-600 transition-colors"
+              onClick={() => setIsEditing(true)}
+            >
+              {item.title}
+            </span>
+            <span className="text-xs text-slate-400">PDF document</span>
+          </div>
+
+          {item.file_path && (
+            <button
+              onClick={handleOpenFile}
+              disabled={opening}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white transition-all disabled:opacity-40 flex-shrink-0"
+            >
+              {opening ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5" />
+                  Open PDF
+                </>
+              )}
+            </button>
+          )}
+
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
+            >
+              Edit
+            </button>
+            <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 min-w-0">
-          <span
-            className="text-sm font-medium text-slate-800 truncate block cursor-pointer hover:text-slate-600 transition-colors"
-            onClick={() => setIsEditing(true)}
-          >
-            {item.title}
-          </span>
-          <span className="text-xs text-slate-400">PDF document</span>
-        </div>
-
-        {item.file_path && (
-          <button
-            onClick={handleOpenFile}
-            disabled={opening}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white transition-all disabled:opacity-40 flex-shrink-0"
-          >
-            {opening ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <>
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open
-              </>
-            )}
-          </button>
+        {pdfViewerUrl && (
+          <PDFViewerModal
+            url={pdfViewerUrl}
+            title={item.title}
+            onClose={() => setPdfViewerUrl(null)}
+          />
         )}
-
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          <button
-            onClick={() => setIsEditing(true)}
-            className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
-          >
-            Edit
-          </button>
-          <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+      </>
     );
   }
 
