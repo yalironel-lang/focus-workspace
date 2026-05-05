@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSections } from '../hooks/useSections';
+import { useSections, useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { SectionCard } from '../components/SectionCard';
 import { Layout } from '../components/Layout';
@@ -8,13 +8,14 @@ import { TodayPanel } from '../components/TodayPanel';
 import { MyPortals } from '../components/MyPortals';
 import { SessionModal } from '../components/SessionModal';
 import { loadSession } from '../utils/sessionPlan';
+import { Item } from '../types';
 import { Plus, Loader2, Layers, X, PlayCircle, ArrowRight, AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 function daysUntilDeadline(d: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.ceil((new Date(d + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
-import toast from 'react-hot-toast';
 
 function greeting() {
   const h = new Date().getHours();
@@ -32,13 +33,48 @@ function formattedDate() {
 export function Dashboard() {
   const navigate = useNavigate();
   const { sections, loading, createSection, deleteSection } = useSections();
-  const { deadlines } = useDeadlines(); // all workspaces
+  const { deadlines } = useDeadlines();
   const [showNewSection,   setShowNewSection]   = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [newTitle,  setNewTitle]  = useState('');
   const [creating,  setCreating]  = useState(false);
 
   const activeSession = loadSession();
+
+  // Fetch live task data for the active session so we can show real action titles
+  const { section: activeSection } = useSectionDetail(activeSession?.sectionId);
+
+  // Map session task IDs → live Item objects (up to 3 chips)
+  const sessionChips: Item[] = (activeSession && activeSection)
+    ? activeSession.taskIds
+        .map(id => activeSection.groups.flatMap(g => g.items).find(i => i.id === id))
+        .filter((i): i is Item => !!i)
+        .slice(0, 3)
+    : [];
+
+  // Urgency-aware subtitle for the "Start Session" state
+  const pendingDeadlines   = deadlines.filter(d => !d.completed);
+  const nextUrgentDeadline = [...pendingDeadlines]
+    .filter(d => daysUntilDeadline(d.due_date) < 3)
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null;
+  const urgentSec          = nextUrgentDeadline?.section_id
+    ? sections.find(s => s.id === nextUrgentDeadline.section_id) : null;
+  const urgentActionsLeft  = urgentSec ? (urgentSec.total_items - urgentSec.completed_items) : 0;
+  const urgentDays         = nextUrgentDeadline ? daysUntilDeadline(nextUrgentDeadline.due_date) : null;
+
+  const sessionSubtitle = (nextUrgentDeadline && urgentSec)
+    ? urgentDays === 0         ? `${nextUrgentDeadline.title} due today · ${urgentActionsLeft} action${urgentActionsLeft !== 1 ? 's' : ''}`
+    : urgentDays === 1         ? `${nextUrgentDeadline.title} tomorrow · ${urgentActionsLeft} action${urgentActionsLeft !== 1 ? 's' : ''}`
+    : urgentDays != null && urgentDays < 0
+                               ? `${nextUrgentDeadline.title} overdue · act now`
+    :                            `${nextUrgentDeadline.title} in ${urgentDays}d · ${urgentActionsLeft} action${urgentActionsLeft !== 1 ? 's' : ''}`
+    : 'Pick a workspace — get your 3 next actions';
+
+  // "Has work" = anything pending in any section, or upcoming deadlines ≤7d
+  const hasWork = !loading && (
+    sections.some(s => s.total_items - s.completed_items > 0) ||
+    deadlines.some(d => !d.completed && daysUntilDeadline(d.due_date) <= 7)
+  );
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,62 +173,92 @@ export function Dashboard() {
         );
       })()}
 
-      {/* ── Resume session banner ────────────────────────────────────────── */}
-      {activeSession && (
-        <button
-          onClick={() => navigate('/session')}
-          className="w-full flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl mb-4 hover:bg-emerald-100 transition-colors group text-left"
-        >
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-          <span className="text-sm font-semibold text-emerald-900 flex-1">
-            Session in progress — {activeSession.sectionTitle}
-          </span>
-          <span className="flex items-center gap-1 text-xs font-bold text-emerald-700 group-hover:text-emerald-800">
-            Resume <ArrowRight className="w-3.5 h-3.5" />
-          </span>
-        </button>
+      {/* ── Execution engine card ────────────────────────────────────────── */}
+      {!loading && (activeSession || sections.length > 0) && (
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm mb-6 overflow-hidden hover:-translate-y-0.5 hover:shadow-md transition-all duration-150">
+
+          {activeSession ? (
+            /* ── State: active session → show exact actions queued ── */
+            <div className="p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">In progress</span>
+                  </div>
+                  <p className="text-base font-bold text-slate-900 leading-tight">Continue Session</p>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    Next up: <span className="font-semibold text-slate-700">{activeSession.sectionTitle}</span>
+                    {sessionChips[0] && (
+                      <> · {sessionChips[0].title}</>
+                    )}
+                  </p>
+                </div>
+                <button
+                  onClick={() => navigate('/session')}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-all active:scale-[0.97] flex-shrink-0"
+                >
+                  Continue <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Action chips */}
+              {sessionChips.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-3.5">
+                  {sessionChips.map((item, i) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1 max-w-[220px]"
+                    >
+                      <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">
+                        {i + 1}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-700 truncate">{item.title}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+          ) : hasWork ? (
+            /* ── State: no session, work exists → urgency-aware start ── */
+            <div className="flex items-center gap-4 px-5 py-4">
+              <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
+                <PlayCircle className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900">Start Session</p>
+                <p className={`text-xs mt-0.5 truncate ${nextUrgentDeadline ? 'text-rose-500 font-semibold' : 'text-slate-500'}`}>
+                  {sessionSubtitle}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSessionModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-bold rounded-lg transition-colors flex-shrink-0 active:scale-[0.97]"
+              >
+                {urgentActionsLeft > 0 ? `Prep (${urgentActionsLeft})` : 'Start Now'}
+              </button>
+            </div>
+
+          ) : (
+            /* ── State: sections exist but nothing pending ── */
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Nothing urgent right now</p>
+                <p className="text-xs text-slate-500 mt-0.5">Add actions or deadlines to build momentum</p>
+              </div>
+              <button
+                onClick={() => { setShowNewSection(true); setNewTitle(''); }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-bold rounded-lg transition-colors flex-shrink-0 active:scale-[0.97]"
+              >
+                <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                Add action
+              </button>
+            </div>
+          )}
+
+        </div>
       )}
-
-      {/* ── Compact Start Session card ───────────────────────────────────── */}
-      {!loading && sections.length > 0 && (() => {
-        // Find the most urgent upcoming deadline to drive the session CTA
-        const pending     = deadlines.filter(d => !d.completed);
-        const nextUrgent  = [...pending]
-          .filter(d => daysUntilDeadline(d.due_date) < 3)
-          .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
-        const urgentSec   = nextUrgent?.section_id ? sections.find(s => s.id === nextUrgent.section_id) : null;
-        const urgentLeft  = urgentSec ? (urgentSec.total_items - urgentSec.completed_items) : 0;
-        const urgentDays  = nextUrgent ? daysUntilDeadline(nextUrgent.due_date) : null;
-
-        const subtitle = nextUrgent && urgentSec
-          ? urgentDays === 0  ? `${nextUrgent.title} due today · ${urgentLeft} action${urgentLeft !== 1 ? 's' : ''}`
-          : urgentDays === 1  ? `${nextUrgent.title} tomorrow · ${urgentLeft} action${urgentLeft !== 1 ? 's' : ''}`
-          : urgentDays != null && urgentDays < 0 ? `${nextUrgent.title} overdue · act now`
-          :                      `${nextUrgent.title} in ${urgentDays}d · ${urgentLeft} action${urgentLeft !== 1 ? 's' : ''}`
-          : 'Pick a workspace — get your 3 next actions';
-
-        return (
-          <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-5 py-4 mb-6 hover:shadow-md hover:-translate-y-px transition-all duration-150">
-            <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
-              <PlayCircle className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-900">Start Session</p>
-              <p className={`text-xs mt-0.5 truncate ${nextUrgent ? 'text-rose-500 font-semibold' : 'text-slate-500'}`}>
-                {subtitle}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowSessionModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-bold rounded-lg transition-colors flex-shrink-0 active:scale-[0.97]"
-            >
-              {activeSession
-                ? <><span>Resume</span><ArrowRight className="w-3.5 h-3.5" /></>
-                : urgentLeft > 0 ? `Prep (${urgentLeft})` : 'Start Now'}
-            </button>
-          </div>
-        );
-      })()}
 
       {/* ── New section inline form ──────────────────────────────────────── */}
       {showNewSection && (
