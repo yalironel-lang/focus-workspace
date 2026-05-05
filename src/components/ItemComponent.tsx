@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Item } from '../types';
 import { useSectionDetail } from '../hooks/useSections';
 import { useFileUpload } from '../hooks/useFileUpload';
@@ -58,6 +58,7 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
   const { getSignedUrl } = useFileUpload();
   const [opening,     setOpening]     = useState(false);
   const [pdfViewerUrl, setPdfViewerUrl] = useState<string | null>(null);
+  const handleCloseModal = useCallback(() => setPdfViewerUrl(null), []);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(item.title);
   const [editContent, setEditContent] = useState(item.content || '');
@@ -279,7 +280,7 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
           <PDFViewerModal
             url={pdfViewerUrl}
             title={item.title}
-            onClose={() => setPdfViewerUrl(null)}
+            onClose={handleCloseModal}
           />
         )}
       </>
