@@ -41,10 +41,8 @@ export function Dashboard() {
 
   const activeSession = loadSession();
 
-  // Fetch live task data for the active session — enables real action titles in chips
+  // Live task data for active session chips
   const { section: activeSection } = useSectionDetail(activeSession?.sectionId);
-
-  // Map session task IDs → live Item objects (up to 3 chips)
   const sessionChips: Item[] = (activeSession && activeSection)
     ? activeSession.taskIds
         .map(id => activeSection.groups.flatMap(g => g.items).find(i => i.id === id))
@@ -52,15 +50,15 @@ export function Dashboard() {
         .slice(0, 3)
     : [];
 
-  // Urgency signals for the execution card
+  // Urgency signals
   const pendingDeadlines   = deadlines.filter(d => !d.completed);
   const nextUrgentDeadline = [...pendingDeadlines]
     .filter(d => daysUntilDeadline(d.due_date) < 3)
     .sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null;
-  const urgentSec          = nextUrgentDeadline?.section_id
+  const urgentSec         = nextUrgentDeadline?.section_id
     ? sections.find(s => s.id === nextUrgentDeadline.section_id) : null;
-  const urgentActionsLeft  = urgentSec ? (urgentSec.total_items - urgentSec.completed_items) : 0;
-  const urgentDays         = nextUrgentDeadline ? daysUntilDeadline(nextUrgentDeadline.due_date) : null;
+  const urgentActionsLeft = urgentSec ? (urgentSec.total_items - urgentSec.completed_items) : 0;
+  const urgentDays        = nextUrgentDeadline ? daysUntilDeadline(nextUrgentDeadline.due_date) : null;
 
   const sessionSubtitle = (nextUrgentDeadline && urgentSec)
     ? urgentDays === 0
@@ -72,7 +70,6 @@ export function Dashboard() {
     :   `${nextUrgentDeadline.title} in ${urgentDays}d · ${urgentActionsLeft} action${urgentActionsLeft !== 1 ? 's' : ''}`
     : 'Pick a workspace — get your 3 next actions';
 
-  // "Has work" = pending actions in any section, or upcoming deadlines within 7 days
   const hasWork = !loading && (
     sections.some(s => s.total_items - s.completed_items > 0) ||
     deadlines.some(d => !d.completed && daysUntilDeadline(d.due_date) <= 7)
@@ -97,71 +94,77 @@ export function Dashboard() {
   return (
     <Layout>
 
-      {/* ── 1. Header ───────────────────────────────────────────────────────── */}
+      {/* ── 1. Header ───────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4 mb-8">
         <div>
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5">
+          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-[0.15em] mb-1.5">
             {formattedDate()}
           </p>
-          <h1 className="text-[26px] font-extrabold text-slate-900 tracking-tight leading-none">
+          <h1 className="text-2xl font-bold text-slate-100 tracking-tight leading-none">
             {greeting()}
           </h1>
           {!loading && sections.length > 0 && (
-            <p className="text-sm text-slate-400 mt-1.5 font-medium">
-              {sections.length} workspace{sections.length !== 1 ? 's' : ''}
+            <p className="text-xs text-slate-500 mt-1.5 font-medium">
+              {sections.length} workspace{sections.length !== 1 ? 's' : ''} active
             </p>
           )}
         </div>
 
         <button
           onClick={() => { setShowNewSection(true); setNewTitle(''); }}
-          className="flex items-center gap-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-slate-700 px-3.5 py-2 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md active:scale-[0.97] flex-shrink-0 mt-1"
+          className="flex items-center gap-1.5 border border-[#2a3a5c] bg-transparent hover:bg-[#1a2236] text-slate-400 hover:text-slate-100 px-3.5 py-2 rounded-xl font-semibold text-sm transition-all active:scale-[0.97] flex-shrink-0 mt-1"
         >
           <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
           New workspace
         </button>
       </div>
 
-      {/* ── 2. Execution Preview Card ────────────────────────────────────────── */}
+      {/* ── 2. Execution Preview Card ────────────────────────────────────── */}
       {!loading && (
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm mb-6 overflow-hidden transition-shadow duration-150 hover:shadow-md">
+        <div className={`rounded-2xl mb-6 overflow-hidden transition-all duration-150 ${
+          activeSession
+            ? 'bg-[#0d1424] border border-[#1a2236] border-l-2 border-l-emerald-500'
+            : 'bg-[#0d1424] border border-[#1a2236]'
+        }`}>
 
           {activeSession ? (
-            /* ── Active session → show queued actions ── */
+            /* ── Active session ── */
             <div className="p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                    <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Session active</span>
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
+                      Session active
+                    </span>
                   </div>
-                  <p className="text-[17px] font-bold text-slate-900 leading-tight">Continue Session</p>
+                  <p className="text-lg font-bold text-slate-100 leading-tight">Continue Session</p>
                   <p className="text-xs mt-1 font-medium">
-                    <span className="text-slate-700 font-semibold">{activeSession.sectionTitle}</span>
+                    <span className="text-slate-300">{activeSession.sectionTitle}</span>
                     {sessionChips[0] && (
-                      <span className="text-slate-400"> · {sessionChips[0].title}</span>
+                      <span className="text-slate-600"> · {sessionChips[0].title}</span>
                     )}
                   </p>
                 </div>
                 <button
                   onClick={() => navigate('/session')}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-all active:scale-[0.97] flex-shrink-0 shadow-sm"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold rounded-xl transition-all active:scale-[0.97] flex-shrink-0"
                 >
                   Continue <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {sessionChips.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-4 pt-4 border-t border-gray-100">
+                <div className="flex flex-wrap gap-1.5 mt-4 pt-4 border-t border-[#1a2236]">
                   {sessionChips.map((item, i) => (
                     <div
                       key={item.id}
-                      className="flex items-center gap-1.5 bg-slate-50 border border-gray-100 rounded-lg px-2.5 py-1"
+                      className="flex items-center gap-1.5 bg-[#070b14] border border-[#1a2236] rounded-lg px-2.5 py-1"
                     >
-                      <span className="w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">
+                      <span className="w-4 h-4 rounded-full bg-[#1a2236] text-slate-400 text-[9px] font-bold flex items-center justify-center flex-shrink-0 tabular-nums">
                         {i + 1}
                       </span>
-                      <span className="text-[11px] font-medium text-slate-700 truncate max-w-[200px]">
+                      <span className="text-[11px] font-medium text-slate-300 truncate max-w-[200px]">
                         {item.title}
                       </span>
                     </div>
@@ -171,22 +174,22 @@ export function Dashboard() {
             </div>
 
           ) : hasWork ? (
-            /* ── Work exists → urgency-aware start ── */
+            /* ── Has work — urgency-aware start ── */
             <div className="flex items-center gap-4 px-5 py-4">
-              <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center flex-shrink-0">
-                <PlayCircle className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-xl bg-[#1a2236] flex items-center justify-center flex-shrink-0">
+                <PlayCircle className="w-5 h-5 text-emerald-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-bold text-slate-900">Start Session</p>
+                <p className="text-[15px] font-bold text-slate-100">Start Session</p>
                 <p className={`text-xs mt-0.5 truncate font-medium ${
-                  nextUrgentDeadline ? 'text-rose-500' : 'text-slate-400'
+                  nextUrgentDeadline ? 'text-rose-400' : 'text-slate-500'
                 }`}>
                   {sessionSubtitle}
                 </p>
               </div>
               <button
                 onClick={() => setShowSessionModal(true)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-all active:scale-[0.97] flex-shrink-0 shadow-sm"
+                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold rounded-xl transition-all active:scale-[0.97] flex-shrink-0"
               >
                 {urgentActionsLeft > 0 ? `Prep (${urgentActionsLeft})` : 'Start Now'}
               </button>
@@ -195,12 +198,12 @@ export function Dashboard() {
           ) : (
             /* ── No session ready ── */
             <div className="flex items-center gap-4 px-5 py-4">
-              <div className="w-9 h-9 rounded-xl bg-slate-50 border border-gray-200 flex items-center justify-center flex-shrink-0">
-                <Layers className="w-5 h-5 text-slate-300" />
+              <div className="w-9 h-9 rounded-xl bg-[#1a2236] flex items-center justify-center flex-shrink-0">
+                <Layers className="w-5 h-5 text-slate-600" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-bold text-slate-800">No session ready</p>
-                <p className="text-xs text-slate-400 mt-0.5 font-medium">
+                <p className="text-[15px] font-bold text-slate-400">No session ready</p>
+                <p className="text-xs text-slate-600 mt-0.5 font-medium">
                   {sections.length === 0
                     ? 'Create a workspace to start building momentum'
                     : 'Add actions or deadlines to build momentum'}
@@ -208,7 +211,7 @@ export function Dashboard() {
               </div>
               <button
                 onClick={() => { setShowNewSection(true); setNewTitle(''); }}
-                className="flex items-center gap-1.5 px-3.5 py-2 border border-gray-200 bg-white hover:bg-gray-50 text-slate-600 text-sm font-semibold rounded-xl transition-all active:scale-[0.97] flex-shrink-0"
+                className="flex items-center gap-1.5 px-3.5 py-2 border border-[#2a3a5c] bg-transparent hover:bg-[#1a2236] text-slate-400 hover:text-slate-200 text-sm font-semibold rounded-xl transition-all active:scale-[0.97] flex-shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
                 New workspace
@@ -219,14 +222,16 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ── New workspace inline form ─────────────────────────────────────────── */}
+      {/* ── New workspace inline form ────────────────────────────────────── */}
       {showNewSection && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6 animate-slide-up">
+        <div className="bg-[#0d1424] rounded-xl border border-[#1a2236] p-5 mb-6 animate-slide-up">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">New workspace</p>
+            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-[0.15em]">
+              New workspace
+            </p>
             <button
               onClick={() => setShowNewSection(false)}
-              className="p-1 text-slate-300 hover:text-slate-600 transition-colors rounded-lg"
+              className="p-1 text-slate-600 hover:text-slate-300 transition-colors rounded-lg"
             >
               <X className="w-4 h-4" />
             </button>
@@ -237,13 +242,13 @@ export function Dashboard() {
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="e.g. Calculus 101, Machine Learning, Biology…"
-              className="flex-1 px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+              className="flex-1 px-3.5 py-2.5 border border-[#1a2236] rounded-xl text-sm bg-[#070b14] text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50 transition-all"
               autoFocus
             />
             <button
               type="submit"
               disabled={creating || !newTitle.trim()}
-              className="px-4 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-semibold text-sm transition-colors disabled:opacity-40 whitespace-nowrap flex items-center gap-2 active:scale-[0.97]"
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl font-bold text-sm transition-colors disabled:opacity-40 whitespace-nowrap flex items-center gap-2 active:scale-[0.97]"
             >
               {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
             </button>
@@ -251,29 +256,29 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ── 3. Today / Pressure Panel ─────────────────────────────────────────── */}
+      {/* ── 3. Today / Pressure Panel ────────────────────────────────────── */}
       {!loading && <TodayPanel sections={sections} />}
 
-      {/* ── Loading ───────────────────────────────────────────────────────────── */}
+      {/* ── Loading ──────────────────────────────────────────────────────── */}
       {loading && (
         <div className="flex items-center justify-center py-24">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+          <Loader2 className="w-6 h-6 animate-spin text-slate-700" />
         </div>
       )}
 
-      {/* ── 4. Workspaces ─────────────────────────────────────────────────────── */}
+      {/* ── 4. Workspaces ────────────────────────────────────────────────── */}
       {!loading && sections.length === 0 && !showNewSection && (
-        <div className="text-center py-20 bg-white rounded-2xl border border-gray-200">
-          <div className="w-14 h-14 bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-5">
-            <Layers className="w-7 h-7 text-slate-300" />
+        <div className="text-center py-20 bg-[#0d1424] rounded-2xl border border-[#1a2236]">
+          <div className="w-14 h-14 bg-[#1a2236] rounded-2xl flex items-center justify-center mx-auto mb-5">
+            <Layers className="w-7 h-7 text-slate-600" />
           </div>
-          <h3 className="text-base font-bold text-slate-900 mb-2">No workspaces yet</h3>
-          <p className="text-slate-400 text-sm mb-7 max-w-sm mx-auto leading-relaxed">
+          <h3 className="text-base font-bold text-slate-200 mb-2">No workspaces yet</h3>
+          <p className="text-slate-500 text-sm mb-7 max-w-sm mx-auto leading-relaxed">
             Create one workspace per subject. Each workspace comes with groups for slides, exercises, exams, notes, and links.
           </p>
           <button
             onClick={() => setShowNewSection(true)}
-            className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-all shadow-sm hover:shadow-md active:scale-[0.97]"
+            className="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm px-5 py-2.5 rounded-xl transition-all active:scale-[0.97]"
           >
             <Plus className="w-4 h-4" strokeWidth={2.5} />
             Create your first workspace
@@ -284,10 +289,10 @@ export function Dashboard() {
       {!loading && sections.length > 0 && (
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+            <h2 className="text-[10px] font-bold text-slate-600 uppercase tracking-[0.15em]">
               Workspaces
             </h2>
-            <span className="text-[11px] text-slate-400 font-medium">
+            <span className="text-[10px] text-slate-600 font-medium">
               {sections.length} total
             </span>
           </div>
@@ -304,17 +309,17 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ── 5. Tools ──────────────────────────────────────────────────────────── */}
+      {/* ── 5. Tools ─────────────────────────────────────────────────────── */}
       {!loading && (
         <div>
-          <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4">
+          <h2 className="text-[10px] font-bold text-slate-600 uppercase tracking-[0.15em] mb-4">
             Tools
           </h2>
           <MyPortals />
         </div>
       )}
 
-      {/* ── Session modal ─────────────────────────────────────────────────────── */}
+      {/* ── Session modal ─────────────────────────────────────────────────── */}
       {showSessionModal && (
         <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
       )}

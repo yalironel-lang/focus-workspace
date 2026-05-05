@@ -16,13 +16,13 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_FULL   = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const BLOCK_COLORS: Record<BlockColor, { pill: string; dot: string }> = {
-  indigo:  { pill: 'bg-indigo-50  text-indigo-700  border-indigo-200',  dot: 'bg-indigo-500'  },
-  violet:  { pill: 'bg-violet-50  text-violet-700  border-violet-200',  dot: 'bg-violet-500'  },
-  emerald: { pill: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
-  amber:   { pill: 'bg-amber-50   text-amber-700   border-amber-200',   dot: 'bg-amber-500'   },
-  sky:     { pill: 'bg-sky-50     text-sky-700     border-sky-200',     dot: 'bg-sky-500'     },
-  rose:    { pill: 'bg-rose-50    text-rose-700    border-rose-200',    dot: 'bg-rose-500'    },
-  slate:   { pill: 'bg-slate-50   text-slate-700   border-slate-200',   dot: 'bg-slate-500'   },
+  indigo:  { pill: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',  dot: 'bg-indigo-400'  },
+  violet:  { pill: 'bg-violet-500/10 text-violet-300 border border-violet-500/20',  dot: 'bg-violet-400'  },
+  emerald: { pill: 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20', dot: 'bg-emerald-400' },
+  amber:   { pill: 'bg-amber-500/10 text-amber-300 border border-amber-500/20',   dot: 'bg-amber-400'   },
+  sky:     { pill: 'bg-sky-500/10 text-sky-300 border border-sky-500/20',         dot: 'bg-sky-400'     },
+  rose:    { pill: 'bg-rose-500/10 text-rose-300 border border-rose-500/20',       dot: 'bg-rose-400'    },
+  slate:   { pill: 'bg-slate-500/10 text-slate-300 border border-slate-700',       dot: 'bg-slate-500'   },
 };
 
 const DEADLINE_TYPE_LABEL: Record<string, string> = {
@@ -44,10 +44,10 @@ function deadlineUrgency(dueDate: string): 'overdue' | 'today' | 'this-week' | '
 }
 
 const URGENCY_STYLE = {
-  overdue:    { badge: 'bg-rose-100   text-rose-700   font-bold', label: 'Overdue'  },
-  today:      { badge: 'bg-amber-100  text-amber-700  font-bold', label: 'Today'    },
-  'this-week':{ badge: 'bg-slate-100  text-slate-600',            label: ''         },
-  later:      { badge: 'bg-slate-50   text-slate-400',            label: ''         },
+  overdue:     { badge: 'bg-rose-500/15 text-rose-400 font-bold',   label: 'Overdue' },
+  today:       { badge: 'bg-amber-500/15 text-amber-400 font-bold', label: 'Today'   },
+  'this-week': { badge: 'bg-[#1a2236] text-slate-400',              label: ''        },
+  later:       { badge: 'bg-[#0d1424] text-slate-600',              label: ''        },
 };
 
 function fmt(date: string) {
@@ -69,18 +69,16 @@ export function TodayPanel({ sections }: Props) {
   const [showAddBlock,    setShowAddBlock]    = useState(false);
   const [showAddDeadline, setShowAddDeadline] = useState(false);
 
-  const todayDow   = new Date().getDay();
+  const todayDow    = new Date().getDay();
   const todayBlocks = blocks
     .filter(b => b.day_of_week === todayDow)
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
-  // Upcoming deadlines — not completed, sorted by urgency then date
   const upcoming = deadlines
     .filter(d => !d.completed)
     .filter(d => deadlineUrgency(d.due_date) !== 'later')
     .slice(0, 5);
 
-  // Best focus: section with nearest exam or lowest readiness that has a pending item
   const focusSection = sections
     .filter(s => s.next_item_title)
     .sort((a, b) => {
@@ -94,26 +92,24 @@ export function TodayPanel({ sections }: Props) {
 
   return (
     <>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
-        {/* Rainbow top strip */}
-        <div className="h-px bg-gradient-to-r from-primary-500 via-violet-400 to-emerald-400" />
+      <div className="bg-[#0d1424] rounded-2xl border border-[#1a2236] overflow-hidden mb-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-50">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#1a2236]">
           <div className="flex items-center gap-2">
-            <CalendarDays className="w-4 h-4 text-primary-500" />
-            <span className="text-sm font-semibold text-slate-800">{formattedDate()}</span>
+            <CalendarDays className="w-4 h-4 text-slate-600" />
+            <span className="text-sm font-semibold text-slate-400">{formattedDate()}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setShowAddDeadline(true)}
-              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 px-2.5 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-200 px-2.5 py-1 rounded-lg hover:bg-[#1a2236] transition-colors"
             >
               <Plus className="w-3 h-3" strokeWidth={2.5} /> Deadline
             </button>
             <Link
               to="/schedule"
-              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 px-2.5 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-200 px-2.5 py-1 rounded-lg hover:bg-[#1a2236] transition-colors"
             >
               <CalendarDays className="w-3 h-3" /> Schedule
             </Link>
@@ -122,18 +118,22 @@ export function TodayPanel({ sections }: Props) {
 
         {!hasContent && (
           <div className="px-5 py-8 text-center">
-            <p className="text-sm text-slate-400 mb-1">No classes or deadlines today.</p>
-            <button onClick={() => setShowAddBlock(true)} className="text-xs text-primary-600 hover:text-primary-700 font-semibold transition-colors">
+            <p className="text-sm text-slate-600 mb-1">No classes or deadlines today.</p>
+            <button
+              onClick={() => setShowAddBlock(true)}
+              className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
+            >
               + Add your first class →
             </button>
           </div>
         )}
 
-        <div className="divide-y divide-slate-50">
+        <div className="divide-y divide-[#1a2236]">
+
           {/* Today's classes */}
           {todayBlocks.length > 0 && (
             <section className="px-5 py-3.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600 mb-2.5">
                 {DAY_FULL[todayDow]}'s classes
               </p>
               <div className="space-y-2">
@@ -141,30 +141,35 @@ export function TodayPanel({ sections }: Props) {
                   const c = BLOCK_COLORS[block.color] ?? BLOCK_COLORS.indigo;
                   const course = sectionName(sections, block.section_id);
                   return (
-                    <div key={block.id} className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl border ${c.pill} transition-all`}>
+                    <div key={block.id} className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl ${c.pill} transition-all`}>
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.dot}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{block.title}</p>
+                        <p className="text-sm font-semibold text-slate-200 truncate">{block.title}</p>
                         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <span className="flex items-center gap-0.5 text-xs opacity-70">
+                          <span className="flex items-center gap-0.5 text-xs text-slate-500">
                             <Clock className="w-3 h-3" /> {block.start_time}–{block.end_time}
                           </span>
                           {block.location && (
-                            <span className="flex items-center gap-0.5 text-xs opacity-70">
+                            <span className="flex items-center gap-0.5 text-xs text-slate-500">
                               <MapPin className="w-3 h-3" /> {block.location}
                             </span>
                           )}
-                          {course && <span className="text-xs opacity-60 truncate">{course}</span>}
+                          {course && <span className="text-xs text-slate-600 truncate">{course}</span>}
                         </div>
                       </div>
                       {block.link && (
-                        <a href={block.link} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded-lg hover:bg-white/60">
+                        <a
+                          href={block.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded-lg text-slate-300 hover:bg-[#1a2236]/60"
+                        >
                           Join →
                         </a>
                       )}
                       <button
                         onClick={() => deleteBlock(block.id).catch(() => toast.error('Failed'))}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-current opacity-40 hover:opacity-100 transition-all rounded"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-600 hover:text-rose-400 transition-all rounded"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -174,7 +179,7 @@ export function TodayPanel({ sections }: Props) {
               </div>
               <button
                 onClick={() => setShowAddBlock(true)}
-                className="mt-2 text-xs text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1"
+                className="mt-2 text-xs text-slate-600 hover:text-slate-400 transition-colors flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" strokeWidth={2} /> Add class
               </button>
@@ -183,7 +188,10 @@ export function TodayPanel({ sections }: Props) {
 
           {todayBlocks.length === 0 && hasContent && (
             <section className="px-5 py-3">
-              <button onClick={() => setShowAddBlock(true)} className="text-xs text-slate-400 hover:text-primary-600 transition-colors flex items-center gap-1">
+              <button
+                onClick={() => setShowAddBlock(true)}
+                className="text-xs text-slate-600 hover:text-emerald-400 transition-colors flex items-center gap-1"
+              >
                 <Plus className="w-3 h-3" strokeWidth={2} /> Add today's classes
               </button>
             </section>
@@ -192,13 +200,23 @@ export function TodayPanel({ sections }: Props) {
           {/* Upcoming deadlines */}
           {upcoming.length > 0 && (
             <section className="px-5 py-3.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Coming up</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600 mb-2.5">
+                Coming up
+              </p>
               <div className="space-y-1.5">
-                {upcoming.map(d => <DeadlineRow key={d.id} deadline={d} sections={sections} onToggle={toggleDeadline} onDelete={deleteDeadline} />)}
+                {upcoming.map(d => (
+                  <DeadlineRow
+                    key={d.id}
+                    deadline={d}
+                    sections={sections}
+                    onToggle={toggleDeadline}
+                    onDelete={deleteDeadline}
+                  />
+                ))}
               </div>
               <button
                 onClick={() => setShowAddDeadline(true)}
-                className="mt-2 text-xs text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1"
+                className="mt-2 text-xs text-slate-600 hover:text-slate-400 transition-colors flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" strokeWidth={2} /> Add deadline
               </button>
@@ -208,20 +226,23 @@ export function TodayPanel({ sections }: Props) {
           {/* Focus now */}
           {focusSection && (
             <section className="px-5 py-3.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">Focus now</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-500/70 mb-2.5">
+                Focus now
+              </p>
               <Link
                 to={`/section/${focusSection.id}`}
-                className="flex items-center gap-3 px-3 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 transition-colors group"
+                className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[#070b14] border border-[#1a2236] hover:border-[#2a3a5c] transition-all group"
               >
-                <BookOpen className="w-4 h-4 text-primary-400 flex-shrink-0" />
+                <BookOpen className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-primary-300 mb-0.5 truncate">{focusSection.title}</p>
-                  <p className="text-sm font-semibold text-white truncate">{focusSection.next_item_title}</p>
+                  <p className="text-xs font-bold text-emerald-400/80 mb-0.5 truncate">{focusSection.title}</p>
+                  <p className="text-sm font-semibold text-slate-200 truncate">{focusSection.next_item_title}</p>
                 </div>
-                <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-primary-400 transition-colors flex-shrink-0" />
+                <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-emerald-400 transition-colors flex-shrink-0" />
               </Link>
             </section>
           )}
+
         </div>
       </div>
 
@@ -246,14 +267,14 @@ function DeadlineRow({ deadline, sections, onToggle, onDelete }: {
   const course = sectionName(sections, deadline.section_id);
 
   return (
-    <div className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+    <div className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[#1a2236] transition-colors">
       <button
         onClick={() => onToggle(deadline.id, !deadline.completed).catch(() => toast.error('Failed'))}
         className="flex-shrink-0"
       >
         {deadline.completed
-          ? <CheckSquare className="w-4 h-4 text-primary-500" />
-          : <Square className="w-4 h-4 text-slate-300 hover:text-slate-400" />}
+          ? <CheckSquare className="w-4 h-4 text-emerald-400" />
+          : <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />}
       </button>
 
       <div className="flex-1 min-w-0">
@@ -262,14 +283,14 @@ function DeadlineRow({ deadline, sections, onToggle, onDelete }: {
             {label || fmt(deadline.due_date)}
           </span>
           {!label && urgency === 'this-week' && (
-            <span className="text-[10px] text-slate-400">{DAY_LABELS[new Date(deadline.due_date + 'T12:00:00').getDay()]}</span>
+            <span className="text-[10px] text-slate-600">{DAY_LABELS[new Date(deadline.due_date + 'T12:00:00').getDay()]}</span>
           )}
-          <span className="text-[10px] text-slate-400">{DEADLINE_TYPE_LABEL[deadline.type]}</span>
+          <span className="text-[10px] text-slate-600">{DEADLINE_TYPE_LABEL[deadline.type]}</span>
         </div>
-        <p className={`text-sm font-medium truncate mt-0.5 ${deadline.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+        <p className={`text-sm font-medium truncate mt-0.5 ${deadline.completed ? 'line-through text-slate-600' : 'text-slate-200'}`}>
           {deadline.title}
         </p>
-        {course && <p className="text-[11px] text-slate-400 truncate">{course}</p>}
+        {course && <p className="text-[11px] text-slate-600 truncate">{course}</p>}
       </div>
 
       {urgency === 'overdue' && !deadline.completed && (
@@ -278,7 +299,7 @@ function DeadlineRow({ deadline, sections, onToggle, onDelete }: {
 
       <button
         onClick={() => onDelete(deadline.id).catch(() => toast.error('Failed'))}
-        className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 transition-all rounded flex-shrink-0"
+        className="opacity-0 group-hover:opacity-100 p-1 text-slate-700 hover:text-rose-400 transition-all rounded flex-shrink-0"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
