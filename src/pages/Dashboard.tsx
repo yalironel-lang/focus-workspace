@@ -1,31 +1,19 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useSections } from '../hooks/useSections';
+import { useDeadlines } from '../hooks/useDeadlines';
 import { SectionCard } from '../components/SectionCard';
 import { Layout } from '../components/Layout';
 import { TodayPanel } from '../components/TodayPanel';
 import { MyPortals } from '../components/MyPortals';
 import { SessionModal } from '../components/SessionModal';
+import { StartSessionHero } from '../components/StartSessionHero';
 import { loadSession } from '../utils/sessionPlan';
-import { Plus, Loader2, Layers, X, PlayCircle, ArrowRight } from 'lucide-react';
+import { Plus, Loader2, Layers, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
-
-function formattedDate() {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
-  });
-}
-
 export function Dashboard() {
-  const navigate = useNavigate();
   const { sections, loading, createSection, deleteSection } = useSections();
+  const { deadlines } = useDeadlines();
   const [showNewSection,  setShowNewSection]  = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [newTitle,  setNewTitle]  = useState('');
@@ -51,70 +39,27 @@ export function Dashboard() {
 
   return (
     <Layout>
-      {/* Resume session banner */}
-      {activeSession && (
-        <button
-          onClick={() => navigate('/session')}
-          className="w-full flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-2xl mb-5 hover:bg-emerald-100 transition-colors group"
-        >
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-          <span className="text-sm font-semibold text-emerald-800 flex-1 text-left">
-            Session in progress — {activeSession.sectionTitle}
-          </span>
-          <span className="flex items-center gap-1 text-xs font-bold text-emerald-600 group-hover:text-emerald-700">
-            Resume <ArrowRight className="w-3.5 h-3.5" />
-          </span>
-        </button>
-      )}
+      {/* Hero — full visual focus */}
+      <StartSessionHero
+        onStart={() => setShowSessionModal(true)}
+        sections={sections}
+        deadlines={deadlines}
+        activeSession={activeSession}
+      />
 
-      {/* Hero */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-5">
-        <div>
-          <div className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-500 text-xs font-semibold px-3 py-1 rounded-full mb-3">
-            <span>{formattedDate()}</span>
-          </div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">{greeting()} 👋</h1>
-          <p className="text-slate-500 text-sm mt-1.5">
-            {loading
-              ? 'Loading your workspace…'
-              : sections.length === 0
-                ? 'Add your first subject to get started.'
-                : `${sections.length} subject${sections.length !== 1 ? 's' : ''} in your workspace`}
-          </p>
+      {/* Rest of dashboard — visually suppressed */}
+      <div className="opacity-60 space-y-5">
+
+        {/* New section button */}
+        <div className="flex justify-end">
+          <button
+            onClick={() => { setShowNewSection(true); setNewTitle(''); }}
+            className="flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md active:scale-[0.98] whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" strokeWidth={2.5} />
+            New section
+          </button>
         </div>
-
-        <button
-          onClick={() => { setShowNewSection(true); setNewTitle(''); }}
-          className="flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-md active:scale-[0.98] self-start sm:self-auto whitespace-nowrap"
-        >
-          <Plus className="w-4 h-4" strokeWidth={2.5} />
-          New section
-        </button>
-      </div>
-
-      {/* ── START STUDY SESSION CTA ────────────────────────────────────── */}
-      {!loading && sections.length > 0 && (
-        <button
-          onClick={() => setShowSessionModal(true)}
-          className="w-full group relative flex items-center gap-4 px-6 py-5 mb-6 rounded-2xl overflow-hidden transition-all active:scale-[0.99] hover:shadow-lg"
-          style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #334155 100%)' }}
-        >
-          {/* Subtle grid texture */}
-          <div className="absolute inset-0 opacity-[0.03]"
-            style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
-
-          <div className="relative flex-shrink-0 w-11 h-11 bg-white/10 rounded-xl flex items-center justify-center group-hover:bg-white/20 transition-colors">
-            <PlayCircle className="w-6 h-6 text-white" />
-          </div>
-
-          <div className="relative flex-1 text-left">
-            <p className="text-base font-bold text-white leading-tight">Start Study Session</p>
-            <p className="text-xs text-slate-400 mt-0.5">Pick a course → get your 3 next actions</p>
-          </div>
-
-          <ArrowRight className="relative w-5 h-5 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0" />
-        </button>
-      )}
 
       {/* New section form */}
       {showNewSection && (
@@ -190,7 +135,9 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Session modal */}
+      </div>{/* end opacity wrapper */}
+
+      {/* Session modal — outside opacity wrapper */}
       {showSessionModal && (
         <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
       )}
