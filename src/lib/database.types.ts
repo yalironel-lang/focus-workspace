@@ -198,7 +198,7 @@ export interface Database {
           user_id: string;
           section_id: string | null;
           title: string;
-          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading' | 'custom';
           due_date: string;
           notes: string | null;
           completed: boolean;
@@ -209,7 +209,7 @@ export interface Database {
           user_id: string;
           section_id?: string | null;
           title: string;
-          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          type: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading' | 'custom';
           due_date: string;
           notes?: string | null;
           completed?: boolean;
@@ -220,7 +220,7 @@ export interface Database {
           user_id?: string;
           section_id?: string | null;
           title?: string;
-          type?: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+          type?: 'assignment' | 'quiz' | 'exam' | 'project' | 'reading' | 'custom';
           due_date?: string;
           notes?: string | null;
           completed?: boolean;

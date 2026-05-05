@@ -17,11 +17,12 @@ interface Props {
 }
 
 const TYPES: { value: DeadlineType; label: string }[] = [
-  { value: 'assignment', label: 'Assignment' },
-  { value: 'quiz',       label: 'Quiz'       },
   { value: 'exam',       label: 'Exam'       },
+  { value: 'assignment', label: 'Assignment' },
   { value: 'project',    label: 'Project'    },
+  { value: 'quiz',       label: 'Quiz'       },
   { value: 'reading',    label: 'Reading'    },
+  { value: 'custom',     label: 'Custom'     },
 ];
 
 export function AddDeadlineModal({ sections, defaultSectionId, onClose, onAdd }: Props) {
@@ -44,7 +45,7 @@ export function AddDeadlineModal({ sections, defaultSectionId, onClose, onAdd }:
         due_date: dueDate,
         notes: notes.trim() || null,
       });
-      toast.success('Deadline added');
+      toast.success('Date added');
       onClose();
     } catch {
       toast.error('Failed to add deadline');
@@ -60,7 +61,7 @@ export function AddDeadlineModal({ sections, defaultSectionId, onClose, onAdd }:
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-900">Add deadline</h3>
+          <h3 className="font-semibold text-slate-900">Add important date</h3>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
             <X className="w-4 h-4" />
           </button>
@@ -103,7 +104,7 @@ export function AddDeadlineModal({ sections, defaultSectionId, onClose, onAdd }:
 
           {/* Course */}
           <div>
-            <label className="label-xs">Course <span className="text-slate-400 font-normal normal-case">(optional)</span></label>
+            <label className="label-xs">Workspace <span className="text-slate-400 font-normal normal-case">(optional)</span></label>
             <select value={sectionId} onChange={e => setSectionId(e.target.value)} className="input">
               <option value="">— none —</option>
               {sections.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
@@ -128,7 +129,7 @@ export function AddDeadlineModal({ sections, defaultSectionId, onClose, onAdd }:
               disabled={loading || !title.trim() || !dueDate}
               className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-semibold text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add deadline'}
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add date'}
             </button>
             <button type="button" onClick={onClose} className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-medium text-sm transition-colors">
               Cancel

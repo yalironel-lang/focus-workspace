@@ -1,13 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSections } from '../hooks/useSections';
+import { useDeadlines } from '../hooks/useDeadlines';
 import { SectionCard } from '../components/SectionCard';
 import { Layout } from '../components/Layout';
 import { TodayPanel } from '../components/TodayPanel';
 import { MyPortals } from '../components/MyPortals';
 import { SessionModal } from '../components/SessionModal';
 import { loadSession } from '../utils/sessionPlan';
-import { Plus, Loader2, Layers, X, PlayCircle, ArrowRight } from 'lucide-react';
+import { Plus, Loader2, Layers, X, PlayCircle, ArrowRight, AlertTriangle } from 'lucide-react';
+
+function daysUntilDeadline(d: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(d + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
+}
 import toast from 'react-hot-toast';
 
 function greeting() {
@@ -26,6 +32,7 @@ function formattedDate() {
 export function Dashboard() {
   const navigate = useNavigate();
   const { sections, loading, createSection, deleteSection } = useSections();
+  const { deadlines } = useDeadlines(); // all workspaces
   const [showNewSection,   setShowNewSection]   = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [newTitle,  setNewTitle]  = useState('');
@@ -76,6 +83,55 @@ export function Dashboard() {
           New section
         </button>
       </div>
+
+      {/* ── Urgency surface ─────────────────────────────────────────────── */}
+      {(() => {
+        const pending  = deadlines.filter(d => !d.completed);
+        const overdue  = pending.filter(d => daysUntilDeadline(d.due_date) < 0);
+        const urgent   = pending.filter(d => { const n = daysUntilDeadline(d.due_date); return n >= 0 && n < 3; });
+        const upcoming = pending.filter(d => { const n = daysUntilDeadline(d.due_date); return n >= 3 && n <= 7; });
+        const next     = [...pending].sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+
+        const show  = (overdue.length + urgent.length + upcoming.length) > 0 && !loading && sections.length > 0;
+        const isRed = overdue.length > 0 || urgent.length > 0;
+
+        if (!show) return null;
+
+        const headline = overdue.length > 0
+          ? `${overdue.length} overdue — act now`
+          : urgent.length > 0
+            ? `${urgent.length} due within 3 days`
+            : `${upcoming.length} coming up this week`;
+
+        const nextDays  = next ? daysUntilDeadline(next.due_date) : null;
+        const nextLabel = nextDays == null ? '' : nextDays < 0 ? 'Overdue' : nextDays === 0 ? 'Today' : nextDays === 1 ? 'Tomorrow' : `in ${nextDays} days`;
+
+        return (
+          <div
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border mb-4 cursor-pointer transition-all hover:shadow-sm ${
+              isRed
+                ? 'bg-rose-50 border-rose-200 hover:bg-rose-100/70'
+                : 'bg-amber-50 border-amber-200 hover:bg-amber-100/70'
+            }`}
+            onClick={() => next?.section_id && navigate(`/section/${next.section_id}`)}
+          >
+            <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${isRed ? 'text-rose-500' : 'text-amber-500'}`} />
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-bold ${isRed ? 'text-rose-900' : 'text-amber-900'}`}>
+                {headline}
+              </p>
+              {next && (
+                <p className={`text-xs mt-0.5 truncate ${isRed ? 'text-rose-600' : 'text-amber-700'}`}>
+                  Next: {next.title} — {nextLabel}
+                </p>
+              )}
+            </div>
+            {next?.section_id && (
+              <ArrowRight className={`w-4 h-4 flex-shrink-0 ${isRed ? 'text-rose-400' : 'text-amber-400'}`} />
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Resume session banner ────────────────────────────────────────── */}
       {activeSession && (

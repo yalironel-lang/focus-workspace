@@ -89,7 +89,7 @@ export interface CourseLink {
 }
 
 // ── Deadlines ─────────────────────────────────────────────────────────────────
-export type DeadlineType = 'assignment' | 'quiz' | 'exam' | 'project' | 'reading';
+export type DeadlineType = 'assignment' | 'quiz' | 'exam' | 'project' | 'reading' | 'custom';
 
 export interface Deadline {
   id: string;

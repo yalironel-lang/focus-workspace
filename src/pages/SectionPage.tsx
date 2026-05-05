@@ -59,9 +59,37 @@ function deadlineDiff(due: string): number {
   return Math.ceil((new Date(due + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
 
-const DEADLINE_TYPE_SHORT: Record<string, string> = {
-  assignment: 'Assign', quiz: 'Quiz', exam: 'Exam', project: 'Project', reading: 'Reading',
+const DEADLINE_TYPE_LABEL: Record<string, string> = {
+  assignment: 'Assignment', quiz: 'Quiz', exam: 'Exam',
+  project: 'Project', reading: 'Reading', custom: 'Custom',
 };
+
+const URGENCY_ORDER = { overdue: 0, urgent: 1, soon: 2, far: 3 } as const;
+type UrgencyLevel = keyof typeof URGENCY_ORDER;
+
+function deadlineUrgencyLevel(d: Deadline): UrgencyLevel {
+  if (d.completed) return 'far';
+  const diff = deadlineDiff(d.due_date);
+  if (diff < 0)  return 'overdue';
+  if (diff < 3)  return 'urgent';
+  if (diff <= 7) return 'soon';
+  return 'far';
+}
+
+function deadlineUrgencyStyle(d: Deadline): { badge: string; dot: string; row: string; label: string } {
+  if (d.completed) return { badge: '', dot: 'bg-slate-200', row: 'border-slate-100', label: '' };
+  const diff = deadlineDiff(d.due_date);
+  if (diff < 0)   return { badge: 'bg-slate-100 text-slate-500',      dot: 'bg-slate-300',   row: 'border-slate-200', label: 'Overdue'          };
+  if (diff === 0) return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-500',    row: 'border-rose-200',  label: 'Due today'        };
+  if (diff === 1) return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-400',    row: 'border-rose-200',  label: 'Tomorrow'         };
+  if (diff < 3)   return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-400',    row: 'border-rose-100',  label: `${diff} days left` };
+  if (diff <= 7)  return { badge: 'bg-amber-100 text-amber-700',       dot: 'bg-amber-400',   row: 'border-amber-100', label: `${diff} days left` };
+  return                { badge: 'bg-emerald-100 text-emerald-700',   dot: 'bg-emerald-400', row: 'border-slate-100', label: `${diff} days left` };
+}
+
+function formatDueDate(d: string): string {
+  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
@@ -78,9 +106,20 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
   const [isOpen, setIsOpen]   = useState(true);
   const sectionForModal = [{ id: sectionId, title: sectionTitle } as SectionWithProgress];
 
-  const pending   = deadlines.filter(d => !d.completed).sort((a, b) => a.due_date.localeCompare(b.due_date));
-  const completed = deadlines.filter(d =>  d.completed).sort((a, b) => b.due_date.localeCompare(a.due_date));
-  const sorted    = [...pending, ...completed];
+  // Sort by urgency (overdue → urgent → soon → far), completed last
+  const sorted = [...deadlines].sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    const au = URGENCY_ORDER[deadlineUrgencyLevel(a)];
+    const bu = URGENCY_ORDER[deadlineUrgencyLevel(b)];
+    if (au !== bu) return au - bu;
+    return a.due_date.localeCompare(b.due_date);
+  });
+
+  const pending = deadlines.filter(d => !d.completed);
+  const urgentCount = pending.filter(d => {
+    const lvl = deadlineUrgencyLevel(d);
+    return lvl === 'overdue' || lvl === 'urgent';
+  }).length;
 
   return (
     <>
@@ -92,15 +131,17 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
         >
           <div className="flex items-center gap-2">
             <span className="flex-shrink-0 opacity-40">
-              {isOpen
-                ? <ChevronDown  className="w-3.5 h-3.5" />
-                : <ChevronRight className="w-3.5 h-3.5" />
-              }
+              {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             </span>
-            <Calendar className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Deadlines</span>
-            {pending.length > 0 && (
-              <span className="text-[10px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded-full">
+            <Calendar className="w-3.5 h-3.5 text-rose-400" />
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Important Dates</span>
+            {urgentCount > 0 && (
+              <span className="text-[10px] bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded-full">
+                {urgentCount} urgent
+              </span>
+            )}
+            {urgentCount === 0 && pending.length > 0 && (
+              <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full">
                 {pending.length}
               </span>
             )}
@@ -115,74 +156,79 @@ function DeadlinesBlock({ sectionId, sectionTitle }: DeadlinesBlockProps) {
 
         {/* Body */}
         {isOpen && (
-          <div className="p-3">
+          <div className="p-3 space-y-1.5">
             {sorted.length === 0 ? (
-              <div className="text-center py-6">
-                <p className="text-xs text-slate-400">No deadlines yet.</p>
+              <div className="text-center py-7">
+                <Calendar className="w-6 h-6 text-slate-200 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">No dates yet.</p>
                 <button
                   onClick={() => setShowAdd(true)}
                   className="mt-2 text-xs text-primary-600 hover:text-primary-700 font-semibold transition-colors"
                 >
-                  + Add a deadline
+                  + Add a date
                 </button>
               </div>
             ) : (
-              <div className="space-y-1">
-                {sorted.map((d: Deadline) => {
-                  const diff   = deadlineDiff(d.due_date);
-                  const urgCls = d.completed ? 'text-slate-300'
-                    : diff < 0  ? 'text-rose-600 font-bold'
-                    : diff === 0 ? 'text-amber-600 font-bold'
-                    : diff <= 3  ? 'text-amber-500 font-semibold'
-                    : 'text-slate-400';
-                  const badgeCls = d.completed ? ''
-                    : diff < 0  ? 'bg-rose-100 text-rose-700'
-                    : diff === 0 ? 'bg-amber-100 text-amber-700'
-                    : diff <= 3  ? 'bg-orange-50 text-orange-600'
-                    : '';
+              sorted.map((d: Deadline) => {
+                const urg = deadlineUrgencyStyle(d);
+                return (
+                  <div
+                    key={d.id}
+                    className={`group flex items-center gap-3 px-3.5 py-3 rounded-xl border bg-white transition-all hover:shadow-sm ${
+                      d.completed ? 'opacity-50 border-slate-100' : urg.row
+                    }`}
+                  >
+                    {/* Urgency dot */}
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${urg.dot}`} />
 
-                  return (
-                    <div
-                      key={d.id}
-                      className={`group flex items-center gap-2 text-xs px-1.5 py-1.5 rounded-xl transition-colors hover:bg-slate-50 ${d.completed ? 'opacity-50' : ''}`}
+                    {/* Toggle */}
+                    <button
+                      onClick={() => toggleDeadline(d.id, !d.completed).catch(() => toast.error('Failed'))}
+                      className="flex-shrink-0"
                     >
-                      <button
-                        onClick={() => toggleDeadline(d.id, !d.completed).catch(() => toast.error('Failed'))}
-                        className="flex-shrink-0"
-                      >
-                        {d.completed
-                          ? <CheckSquare className="w-3.5 h-3.5 text-primary-500" />
-                          : <Square      className="w-3.5 h-3.5 text-slate-300 hover:text-slate-400" />
-                        }
-                      </button>
-                      <span className={`flex-1 font-medium truncate ${d.completed ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                      {d.completed
+                        ? <CheckSquare className="w-4 h-4 text-primary-500" />
+                        : <Square      className="w-4 h-4 text-slate-300 hover:text-slate-400" />}
+                    </button>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold truncate ${d.completed ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                         {d.title}
-                      </span>
-                      <span className="text-[10px] text-slate-400 flex-shrink-0">{DEADLINE_TYPE_SHORT[d.type] ?? d.type}</span>
-                      {!d.completed && (
-                        <span className={`text-[10px] flex-shrink-0 px-1.5 py-0.5 rounded-full ${badgeCls || urgCls}`}>
-                          {diff < 0 ? 'Overdue' : diff === 0 ? 'Today' : `${diff}d`}
-                        </span>
-                      )}
-                      <button
-                        onClick={() => deleteDeadline(d.id).catch(() => toast.error('Failed'))}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                      >
-                        <X className="w-3 h-3 text-slate-300 hover:text-red-400" />
-                      </button>
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {DEADLINE_TYPE_LABEL[d.type] ?? d.type} · {formatDueDate(d.due_date)}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* Urgency badge */}
+                    {!d.completed && urg.label && (
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex-shrink-0 ${urg.badge}`}>
+                        {urg.label}
+                      </span>
+                    )}
+
+                    {/* Delete */}
+                    <button
+                      onClick={() => deleteDeadline(d.id).catch(() => toast.error('Failed'))}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5 text-slate-300 hover:text-red-400 transition-colors" />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         )}
 
         {!isOpen && sorted.length > 0 && (
           <div className="px-4 py-2 text-xs text-slate-400">
-            {pending.length > 0
-              ? `${pending.length} pending · ${completed.length} done`
-              : `${completed.length} all done ✓`
+            {urgentCount > 0
+              ? `${urgentCount} urgent · ${pending.length - urgentCount} upcoming`
+              : pending.length > 0
+                ? `${pending.length} upcoming`
+                : 'All done ✓'
             }
           </div>
         )}
