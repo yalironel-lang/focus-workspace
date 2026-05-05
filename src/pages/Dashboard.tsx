@@ -63,7 +63,7 @@ export function Dashboard() {
           </h1>
           {!loading && sections.length > 0 && (
             <p className="text-sm text-slate-500 mt-0.5">
-              {sections.length} course{sections.length !== 1 ? 's' : ''} in workspace
+              {sections.length} workspace{sections.length !== 1 ? 's' : ''}
             </p>
           )}
         </div>
@@ -100,9 +100,9 @@ export function Dashboard() {
             <PlayCircle className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-slate-900">Start Study Session</p>
+            <p className="text-sm font-bold text-slate-900">Start Session</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Pick a course — get your 3 next actions
+              Pick a workspace — get your 3 next actions
             </p>
           </div>
           <button

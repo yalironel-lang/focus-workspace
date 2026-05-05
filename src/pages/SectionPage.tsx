@@ -600,7 +600,7 @@ export function SectionPage() {
               className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-semibold transition-all active:scale-[0.98] group"
             >
               <PlayCircle className="w-4 h-4 group-hover:scale-110 transition-transform" />
-              {sessionIsThisCourse ? 'Resume Session →' : 'Start Study Session'}
+              {sessionIsThisCourse ? 'Resume Session →' : 'Start Session'}
             </button>
           </div>
         </div>
@@ -614,7 +614,7 @@ export function SectionPage() {
             type="text"
             value={quickAdd}
             onChange={(e) => setQuickAdd(e.target.value)}
-            placeholder="Quick add — type a task, paste a URL, or write a long note…"
+            placeholder="Quick add — type an action, paste a URL, or write a note…"
             className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-300"
           />
           {quickAdd.trim() && (
@@ -626,7 +626,7 @@ export function SectionPage() {
               {quickAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (
                 <>
                   <Plus className="w-3 h-3" strokeWidth={2.5} />
-                  {detectQuickType(quickAdd).type === 'link' ? 'Save link' : detectQuickType(quickAdd).type === 'note' ? 'Save note' : 'Add task'}
+                  {detectQuickType(quickAdd).type === 'link' ? 'Save link' : detectQuickType(quickAdd).type === 'note' ? 'Save note' : 'Add action'}
                 </>
               )}
             </button>

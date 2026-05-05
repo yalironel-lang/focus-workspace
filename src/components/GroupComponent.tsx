@@ -44,7 +44,7 @@ const GROUP_CONFIG: Record<string, {
     icon: <ListTodo className="w-4 h-4" />,
     headerBg: 'bg-slate-50 text-slate-600 border-slate-200',
     cardAccent: 'border-l-[3px] border-l-slate-400',
-    emptyText: 'Add your first task',
+    emptyText: 'Add your first action',
     emptyHint: 'Readings, submissions, deadlines',
   },
   Exams: {

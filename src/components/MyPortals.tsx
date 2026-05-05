@@ -324,9 +324,9 @@ export function MyPortals() {
                 <Sparkles className="w-4 h-4 text-primary-500" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-slate-700 leading-snug">Your study portals, one click away</p>
+                <p className="text-sm font-semibold text-slate-700 leading-snug">Your portals, one click away</p>
                 <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                  Save Moodle, NetPA, Drive, ChatGPT, WhatsApp groups — anything you open every study session.
+                  Save Moodle, NetPA, Drive, ChatGPT, WhatsApp groups — anything you open every session.
                 </p>
               </div>
             </div>

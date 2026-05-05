@@ -41,8 +41,8 @@ function CoursePicker({ sections, deadlines, selectedId, onSelect, onContinue, o
       {/* Modal header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Start Study Session</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Which course are you working on?</p>
+          <h2 className="text-base font-bold text-slate-900">Start Session</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Which workspace are you working on?</p>
         </div>
         <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
           <X className="w-4 h-4" />
@@ -54,7 +54,7 @@ function CoursePicker({ sections, deadlines, selectedId, onSelect, onContinue, o
         {sorted.length === 0 && (
           <div className="text-center py-10">
             <BookOpen className="w-8 h-8 text-slate-200 mx-auto mb-3" />
-            <p className="text-sm text-slate-400">No courses yet.</p>
+            <p className="text-sm text-slate-400">No workspaces yet.</p>
             <p className="text-xs text-slate-300 mt-1">Add a section from the dashboard first.</p>
           </div>
         )}
@@ -170,7 +170,7 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
                 <Clock className="w-3 h-3" />~{estimatedMins} min
               </span>
               <span className="text-slate-200">·</span>
-              <span className="text-xs text-slate-400">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-slate-400">{tasks.length} action{tasks.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
         </div>
@@ -184,15 +184,15 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
         {/* Tasks */}
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
-            Tasks for this session
+            Actions for this session
           </p>
           {tasks.length === 0 ? (
             <div className="flex items-start gap-3 px-4 py-3.5 bg-amber-50 border border-amber-100 rounded-xl">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-amber-800">No pending tasks found</p>
+                <p className="text-sm font-semibold text-amber-800">No pending actions found</p>
                 <p className="text-xs text-amber-600 mt-0.5">
-                  Add tasks to the <span className="font-bold">To Do</span> list in this course first.
+                  Add actions to the <span className="font-bold">To Do</span> list in this workspace first.
                 </p>
               </div>
             </div>
@@ -253,7 +253,7 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
         {portals.length === 0 && (
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <Calendar className="w-3.5 h-3.5" />
-            No portals saved for this course yet. Add them via Course Hub.
+            No portals saved for this workspace yet. Add them via Course Hub.
           </div>
         )}
       </div>
@@ -269,7 +269,7 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
           Begin Session
         </button>
         {tasks.length === 0 && (
-          <p className="text-center text-xs text-slate-400 mt-2">Add tasks to your To Do list first.</p>
+          <p className="text-center text-xs text-slate-400 mt-2">Add actions to your To Do list first.</p>
         )}
       </div>
     </>

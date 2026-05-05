@@ -50,11 +50,11 @@ function SessionSummary({ completed, total, minutes, sectionTitle, onDone }: Sum
           <div className="grid grid-cols-2 gap-3 mb-8">
             <div className="bg-slate-50 rounded-xl p-4">
               <p className="text-2xl font-bold text-slate-900">{completed}<span className="text-slate-300 text-lg">/{total}</span></p>
-              <p className="text-xs text-slate-400 mt-0.5">tasks done</p>
+              <p className="text-xs text-slate-400 mt-0.5">actions done</p>
             </div>
             <div className="bg-slate-50 rounded-xl p-4">
               <p className="text-2xl font-bold text-slate-900">{minutes}<span className="text-xs font-normal text-slate-400 ml-0.5">min</span></p>
-              <p className="text-xs text-slate-400 mt-0.5">study time</p>
+              <p className="text-xs text-slate-400 mt-0.5">time logged</p>
             </div>
           </div>
 
@@ -218,7 +218,7 @@ function SessionContent({ session }: { session: ActiveSession }) {
           </div>
           {completedN === totalN && totalN > 0 && (
             <p className="text-xs font-semibold text-emerald-600 mt-2 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> All done — great session!
+              <CheckCircle2 className="w-3.5 h-3.5" /> All done — great work!
             </p>
           )}
         </div>
@@ -229,7 +229,7 @@ function SessionContent({ session }: { session: ActiveSession }) {
         <div className="lg:col-span-2">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-50 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-800">Tasks</span>
+              <span className="text-sm font-semibold text-slate-800">Actions</span>
               {completedN > 0 && (
                 <span className="text-xs font-semibold text-emerald-600">
                   {completedN} done ✓
@@ -241,7 +241,7 @@ function SessionContent({ session }: { session: ActiveSession }) {
               {sessionTasks.length === 0 && (
                 <div className="text-center py-8">
                   <PlayCircle className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-                  <p className="text-sm text-slate-400">No tasks in this session.</p>
+                  <p className="text-sm text-slate-400">No actions in this session.</p>
                 </div>
               )}
               {sessionTasks.map(task => (
@@ -257,7 +257,7 @@ function SessionContent({ session }: { session: ActiveSession }) {
                 className="flex items-center gap-2 px-4 py-2 text-xs text-slate-400 hover:text-primary-600 transition-colors rounded-xl hover:bg-primary-50/30"
               >
                 <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-                Open course to add more tasks
+                Open workspace to add more actions
               </a>
             </div>
           </div>
@@ -271,7 +271,7 @@ function SessionContent({ session }: { session: ActiveSession }) {
             </div>
             <div className="p-3 space-y-1.5">
               {portals.length === 0 && (
-                <p className="text-xs text-slate-400 px-2 py-3">No portals saved for this course.</p>
+                <p className="text-xs text-slate-400 px-2 py-3">No portals saved for this workspace.</p>
               )}
               {portals.map(p => {
                 const meta = TYPE_META[p.type] ?? TYPE_META.custom;

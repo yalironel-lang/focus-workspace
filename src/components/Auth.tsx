@@ -54,7 +54,7 @@ export function Auth() {
             <BookOpenCheck className="w-7 h-7 text-white" strokeWidth={2.5} />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Focus Workspace</h1>
-          <p className="text-slate-400 text-sm mt-1.5">Your personal study command center</p>
+          <p className="text-slate-400 text-sm mt-1.5">Your personal execution command center</p>
         </div>
 
         {/* Card */}
