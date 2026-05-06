@@ -127,6 +127,14 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
           </div>
         </div>
 
+        {/* Next action — prominent, above progress */}
+        {section.next_item_title && (
+          <div className="mb-3.5 px-3 py-2.5 bg-[#070b14] border border-[#1a2236] rounded-xl">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Next up</p>
+            <p className="text-sm font-semibold text-slate-200 truncate leading-snug">{section.next_item_title}</p>
+          </div>
+        )}
+
         {/* Progress bar */}
         <div className="mb-3.5">
           <div className="h-1 bg-[#1a2236] rounded-full overflow-hidden">
@@ -179,22 +187,14 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
           </div>
         )}
 
-        {/* Next action */}
-        {section.next_item_title && (
-          <p className="text-[11px] truncate mb-3 leading-snug flex items-center gap-1.5">
-            <span className="text-slate-700 flex-shrink-0">→</span>
-            <span className="text-slate-500 font-medium">{section.next_item_title}</span>
-          </p>
-        )}
-
         {/* CTA */}
         <div className="mt-auto pt-3.5 border-t border-[#1a2236]">
           <Link
             to={`/section/${section.id}`}
-            className="flex items-center justify-between w-full text-[13px] font-bold text-slate-400 hover:text-slate-100 transition-colors group/link"
+            className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#1a2236] hover:bg-[#2a3a5c] text-slate-200 hover:text-white text-sm font-bold rounded-xl transition-all group/link"
           >
             <span>Open workspace</span>
-            <ArrowRight className="w-3.5 h-3.5 text-slate-600 group-hover/link:text-slate-300 group-hover/link:translate-x-0.5 transition-all" />
+            <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover/link:text-slate-200 group-hover/link:translate-x-0.5 transition-all" />
           </Link>
         </div>
 
