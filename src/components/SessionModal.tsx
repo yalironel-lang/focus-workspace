@@ -15,15 +15,13 @@ import {
 } from '../utils/sessionPlan';
 import { TYPE_META } from './MyPortals';
 
-// ── Priority badge ────────────────────────────────────────────────────────────
-
 const PRIORITY_DOT: Record<string, string> = {
   high:   'bg-rose-400',
   medium: 'bg-amber-400',
-  low:    'bg-sky-300',
+  low:    'bg-sky-400',
 };
 
-// ── Step 1: Course picker ─────────────────────────────────────────────────────
+// ── Course picker ─────────────────────────────────────────────────────────────
 
 interface CoursePickerProps {
   sections: SectionWithProgress[];
@@ -39,28 +37,25 @@ function CoursePicker({ sections, deadlines, selectedId, onSelect, onContinue, o
 
   return (
     <>
-      {/* Modal header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2a3a]">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Start Session</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Which workspace are you working on?</p>
+          <h2 className="text-sm font-bold text-slate-100">Start Session</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Which workspace are you working on?</p>
         </div>
-        <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+        <button onClick={onClose} className="p-1.5 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Course list */}
       <div className="px-4 py-3 space-y-1.5 overflow-y-auto max-h-[50vh]">
         {sorted.length === 0 && (
           <div className="text-center py-10">
-            <BookOpen className="w-8 h-8 text-slate-200 mx-auto mb-3" />
-            <p className="text-sm text-slate-400">No workspaces yet.</p>
-            <p className="text-xs text-slate-300 mt-1">Add a section from the dashboard first.</p>
+            <BookOpen className="w-8 h-8 text-slate-700 mx-auto mb-3" />
+            <p className="text-sm text-slate-500">No workspaces yet.</p>
           </div>
         )}
         {sorted.map(section => {
-          const hint    = urgencyHint(section, deadlines);
+          const hint     = urgencyHint(section, deadlines);
           const isUrgent = hint && (hint.includes('today') || hint.includes('tomorrow') || hint.includes('Overdue'));
           const isSelected = selectedId === section.id;
 
@@ -70,49 +65,46 @@ function CoursePicker({ sections, deadlines, selectedId, onSelect, onContinue, o
               onClick={() => onSelect(section.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left ${
                 isSelected
-                  ? 'bg-slate-900 border-slate-900 text-white'
-                  : 'bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50'
+                  ? 'bg-amber-500/10 border-amber-500/30'
+                  : 'bg-[#080c14] border-[#1e2a3a] hover:border-[#2a3a4e]'
               }`}
             >
-              {/* Selection indicator */}
               <span className={`flex-shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
-                isSelected ? 'border-white' : 'border-slate-300'
+                isSelected ? 'border-amber-400' : 'border-slate-600'
               }`}>
-                {isSelected && <span className="w-2 h-2 rounded-full bg-white" />}
+                {isSelected && <span className="w-2 h-2 rounded-full bg-amber-400" />}
               </span>
 
-              <span className={`flex-1 text-sm font-semibold truncate ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+              <span className={`flex-1 text-sm font-medium truncate ${isSelected ? 'text-amber-100' : 'text-slate-300'}`}>
                 {section.title}
               </span>
 
-              {/* Urgency hint */}
               {hint && (
                 <span className={`flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
                   isSelected
-                    ? 'bg-white/20 text-white'
+                    ? 'bg-amber-500/20 text-amber-300'
                     : isUrgent
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-slate-100 text-slate-500'
+                      ? 'bg-rose-500/15 text-rose-400'
+                      : 'bg-[#1e2a3a] text-slate-500'
                 }`}>
                   {isUrgent && <AlertTriangle className="w-3 h-3" />}
                   {hint}
                 </span>
               )}
 
-              {isSelected && <ChevronRight className="w-4 h-4 text-white/70 flex-shrink-0" />}
+              {isSelected && <ChevronRight className="w-4 h-4 text-amber-400/70 flex-shrink-0" />}
             </button>
           );
         })}
       </div>
 
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-100">
+      <div className="px-6 py-4 border-t border-[#1e2a3a]">
         <button
           onClick={onContinue}
           disabled={!selectedId || sorted.length === 0}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-40 active:scale-[0.98]"
+          className="w-full flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm rounded-xl transition-all disabled:opacity-30"
         >
-          Build my session plan
+          Build session plan
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
@@ -120,7 +112,7 @@ function CoursePicker({ sections, deadlines, selectedId, onSelect, onContinue, o
   );
 }
 
-// ── Step 2: Session plan ──────────────────────────────────────────────────────
+// ── Session plan step ─────────────────────────────────────────────────────────
 
 interface SessionPlanStepProps {
   section: SectionWithProgress;
@@ -130,85 +122,71 @@ interface SessionPlanStepProps {
 }
 
 function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepProps) {
-  const { section: detail, loading }  = useSectionDetail(section.id);
-  const { deadlines: sectionDates }   = useDeadlines(section.id);
-  const { links: courseLinks }        = usePortalLinks('course', section.id);
-  const { links: globalLinks }        = usePortalLinks('global');
+  const { section: detail, loading } = useSectionDetail(section.id);
+  const { deadlines: sectionDates }  = useDeadlines(section.id);
+  const { links: courseLinks }       = usePortalLinks('course', section.id);
+  const { links: globalLinks }       = usePortalLinks('global');
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-5 h-5 animate-spin text-slate-300" />
+        <Loader2 className="w-5 h-5 animate-spin text-slate-600" />
       </div>
     );
   }
 
-  // Urgency-aware task limit: more tasks surfaced when deadline is close
   const tasks:   TaskRec[]    = detail ? pickTasks(detail.groups, 3, sectionDates, section.id) : [];
   const portals: CourseLink[] = pickPortals(courseLinks, globalLinks);
   const estimatedMins         = Math.max(20, tasks.length * 20);
 
-  // Most urgent deadline for this section — drives the "Preparing for" banner
-  const urgentDate    = nearestDeadline(section.id, sectionDates);
-  const urgentDays    = urgentDate ? daysUntil(urgentDate.due_date) : null;
-  const urgentLevel   = urgentDays != null ? deadlineLevel(urgentDays) : null;
-  const urgentLabel   = urgentDays != null ? deadlineUrgencyLabel(urgentDays) : null;
-  const showDateBadge = urgentDate && urgentLevel && urgentLevel !== 'far';
-
-  const handleBegin = () => {
-    onBegin(
-      tasks.map(t => t.item.id),
-      portals.map(p => p.id),
-    );
-  };
+  const urgentDate  = nearestDeadline(section.id, sectionDates);
+  const urgentDays  = urgentDate ? daysUntil(urgentDate.due_date) : null;
+  const urgentLevel = urgentDays != null ? deadlineLevel(urgentDays) : null;
+  const urgentLabel = urgentDays != null ? deadlineUrgencyLabel(urgentDays) : null;
+  const showBadge   = urgentDate && urgentLevel && urgentLevel !== 'far';
 
   return (
     <>
-      {/* Modal header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2a3a]">
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={onBack}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-          >
+          <button onClick={onBack} className="p-1.5 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h2 className="text-base font-bold text-slate-900 truncate max-w-[200px]">{section.title}</h2>
+            <h2 className="text-sm font-bold text-slate-100 truncate max-w-[200px]">{section.title}</h2>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="flex items-center gap-1 text-xs text-slate-400">
+              <span className="flex items-center gap-1 text-xs text-slate-500">
                 <Clock className="w-3 h-3" />~{estimatedMins} min
               </span>
-              <span className="text-slate-200">·</span>
-              <span className="text-xs text-slate-400">{tasks.length} action{tasks.length !== 1 ? 's' : ''}</span>
+              <span className="text-slate-700">·</span>
+              <span className="text-xs text-slate-500">{tasks.length} action{tasks.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
         </div>
-        <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+        <button onClick={onClose} className="p-1.5 text-slate-600 hover:text-slate-300 rounded-lg transition-colors">
           <X className="w-4 h-4" />
         </button>
       </div>
 
       <div className="px-6 py-4 space-y-5 overflow-y-auto max-h-[55vh]">
 
-        {/* Deadline context banner */}
-        {showDateBadge && urgentDate && urgentLabel && (
+        {showBadge && urgentDate && urgentLabel && (
           <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border ${
             urgentLevel === 'overdue' || urgentLevel === 'urgent'
-              ? 'bg-rose-50 border-rose-200'
-              : 'bg-amber-50 border-amber-200'
+              ? 'bg-rose-500/10 border-rose-500/20'
+              : 'bg-amber-500/10 border-amber-500/20'
           }`}>
             <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${
               urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-400' : 'text-amber-400'
             }`} />
             <div className="min-w-0">
               <p className={`text-xs font-bold truncate ${
-                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-800' : 'text-amber-800'
+                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-300' : 'text-amber-300'
               }`}>
                 Preparing for: {urgentDate.title}
               </p>
               <p className={`text-[11px] mt-0.5 ${
-                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-600' : 'text-amber-600'
+                urgentLevel === 'overdue' || urgentLevel === 'urgent' ? 'text-rose-400/70' : 'text-amber-400/70'
               }`}>
                 {urgentLabel} · {tasks.length} action{tasks.length !== 1 ? 's' : ''} queued
               </p>
@@ -216,68 +194,57 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
           </div>
         )}
 
-        {/* Tasks */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
-            Actions for this session
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2.5">
+            Actions
           </p>
           {tasks.length === 0 ? (
-            <div className="flex items-start gap-3 px-4 py-3.5 bg-amber-50 border border-amber-100 rounded-xl">
-              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 px-4 py-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+              <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-amber-800">No pending actions found</p>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  Add actions to the <span className="font-bold">To Do</span> list in this workspace first.
-                </p>
+                <p className="text-sm font-semibold text-amber-300">No pending actions</p>
+                <p className="text-xs text-amber-400/70 mt-0.5">Add actions to the To Do list in this workspace first.</p>
               </div>
             </div>
           ) : (
             <div className="space-y-1.5">
               {tasks.map((rec, i) => (
-                <div
-                  key={rec.item.id}
-                  className="flex items-center gap-3 px-3.5 py-3 bg-slate-50 rounded-xl border border-slate-100"
-                >
-                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-200 text-slate-500 text-xs font-bold flex items-center justify-center">
+                <div key={rec.item.id} className="flex items-center gap-3 px-3.5 py-2.5 bg-[#080c14] border border-[#1e2a3a] rounded-xl">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#1e2a3a] text-slate-500 text-xs font-bold flex items-center justify-center">
                     {i + 1}
                   </span>
-                  <span className="flex-1 text-sm text-slate-800 font-medium truncate">
-                    {rec.item.title}
-                  </span>
+                  <span className="flex-1 text-sm text-slate-200 font-medium truncate">{rec.item.title}</span>
                   {rec.item.content && PRIORITY_DOT[rec.item.content] && (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 flex-shrink-0">
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-600 flex-shrink-0">
                       <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[rec.item.content]}`} />
                       {rec.item.content}
                     </span>
                   )}
-                  <span className="text-[10px] text-slate-300 flex-shrink-0">{rec.displayGroup}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Portals */}
         {portals.length > 0 && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2.5">
               Open before you start
             </p>
             <div className="flex flex-wrap gap-2">
               {portals.map(p => {
                 const meta = TYPE_META[p.type] ?? TYPE_META.custom;
-                const href = p.url.startsWith('mailto:') ? p.url : p.url;
                 return (
                   <a
                     key={p.id}
-                    href={href}
+                    href={p.url}
                     target={p.url.startsWith('mailto:') ? '_self' : '_blank'}
                     rel="noopener noreferrer"
-                    className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all hover:shadow-sm ${meta.badge}`}
+                    className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${meta.badge}`}
                   >
                     {meta.icon}
                     {p.label}
-                    <ExternalLink className="w-3 h-3 opacity-60" />
+                    <ExternalLink className="w-3 h-3 opacity-50" />
                   </a>
                 );
               })}
@@ -285,26 +252,19 @@ function SessionPlanStep({ section, onBack, onBegin, onClose }: SessionPlanStepP
           </div>
         )}
 
-        {portals.length === 0 && (
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <Calendar className="w-3.5 h-3.5" />
-            No portals saved for this workspace yet. Add them via Course Hub.
-          </div>
-        )}
       </div>
 
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-slate-100">
+      <div className="px-6 py-4 border-t border-[#1e2a3a]">
         <button
-          onClick={handleBegin}
+          onClick={() => onBegin(tasks.map(t => t.item.id), portals.map(p => p.id))}
           disabled={tasks.length === 0}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-40 active:scale-[0.98] group"
+          className="w-full flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm rounded-xl transition-all disabled:opacity-30"
         >
-          <PlayCircle className="w-4 h-4 group-hover:scale-110 transition-transform" />
+          <PlayCircle className="w-4 h-4" />
           Begin Session
         </button>
         {tasks.length === 0 && (
-          <p className="text-center text-xs text-slate-400 mt-2">Add actions to your To Do list first.</p>
+          <p className="text-center text-xs text-slate-600 mt-2">Add actions to your To Do list first.</p>
         )}
       </div>
     </>
@@ -320,12 +280,11 @@ interface Props {
 
 export function SessionModal({ sections, onClose }: Props) {
   const navigate = useNavigate();
-  const { deadlines } = useDeadlines(); // all deadlines, no section filter
+  const { deadlines } = useDeadlines();
 
   const [step,       setStep]       = useState<'pick' | 'plan'>('pick');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Auto-select most urgent course on open
   useEffect(() => {
     if (sections.length > 0 && !selectedId) {
       const sorted = sortSectionsByUrgency(sections, deadlines);
@@ -349,12 +308,11 @@ export function SessionModal({ sections, onClose }: Props) {
   };
 
   return (
-    /* Backdrop */
     <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up">
+      <div className="bg-[#0f1520] border border-[#1e2a3a] rounded-2xl w-full max-w-md overflow-hidden animate-slide-up">
         {step === 'pick' && (
           <CoursePicker
             sections={sections}

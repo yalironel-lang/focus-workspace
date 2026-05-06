@@ -10,12 +10,8 @@
   }
 
   body {
-    background-color: #f8f9fc;
-    /* Very subtle ambient color — imperceptible unless you look for it */
-    background-image:
-      radial-gradient(ellipse at 15% 40%, rgba(99, 102, 241, 0.04) 0%, transparent 60%),
-      radial-gradient(ellipse at 85% 15%, rgba(16, 185, 129, 0.025) 0%, transparent 55%);
-    color: #0f172a;
+    background-color: #0b0f14;
+    color: #f1f5f9;
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
     font-size: 15px;
     line-height: 1.6;
@@ -27,15 +23,15 @@
   }
 
   * {
-    @apply border-gray-200;
+    border-color: #1e2a3a;
   }
 }
 
 @layer components {
   .input {
-    @apply w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50
-           focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500
-           focus:border-transparent transition-all;
+    @apply w-full px-3.5 py-2.5 border rounded-xl text-sm transition-all
+           bg-[#0b0f14] border-[#1e2a3a] text-slate-100 placeholder:text-slate-600
+           focus:outline-none focus:border-amber-500/40;
   }
   .label-xs {
     @apply block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5;
