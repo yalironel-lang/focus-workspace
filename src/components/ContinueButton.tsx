@@ -45,12 +45,14 @@ export function ContinueButton({ section }: ContinueButtonProps) {
 
     const { item } = next;
 
-    if (item.type === 'task') {
+    if (item.type === 'task' || item.type === 'note') {
       const el = document.getElementById(`item-${item.id}`);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2', 'ring-primary-400', 'ring-offset-2', 'rounded-xl');
-        setTimeout(() => el.classList.remove('ring-2', 'ring-primary-400', 'ring-offset-2', 'rounded-xl'), 2000);
+        el.style.outline = '2px solid #f59e0b';
+        el.style.outlineOffset = '2px';
+        el.style.borderRadius = '12px';
+        setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2000);
       }
     } else if (item.type === 'file' && item.file_path) {
       try {
@@ -64,13 +66,6 @@ export function ContinueButton({ section }: ContinueButtonProps) {
       }
     } else if (item.type === 'link' && item.content) {
       window.open(item.content, '_blank');
-    } else if (item.type === 'note') {
-      const el = document.getElementById(`item-${item.id}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2', 'ring-primary-400', 'ring-offset-2', 'rounded-xl');
-        setTimeout(() => el.classList.remove('ring-2', 'ring-primary-400', 'ring-offset-2', 'rounded-xl'), 2000);
-      }
     }
   };
 
@@ -79,11 +74,18 @@ export function ContinueButton({ section }: ContinueButtonProps) {
   return (
     <button
       onClick={handleContinue}
-      className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
-        isAllCaughtUp
-          ? 'bg-emerald-100 text-emerald-700 cursor-default'
-          : 'bg-slate-900 hover:bg-slate-800 text-white shadow-sm hover:shadow-md active:scale-[0.98]'
-      }`}
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all"
+      style={isAllCaughtUp ? {
+        backgroundColor: 'rgba(16,185,129,0.1)',
+        color: '#10b981',
+        border: '1px solid rgba(16,185,129,0.2)',
+        cursor: 'default',
+      } : {
+        backgroundColor: '#f59e0b',
+        color: '#000',
+      }}
+      onMouseEnter={e => { if (!isAllCaughtUp) e.currentTarget.style.backgroundColor = '#fbbf24'; }}
+      onMouseLeave={e => { if (!isAllCaughtUp) e.currentTarget.style.backgroundColor = '#f59e0b'; }}
     >
       {isAllCaughtUp ? (
         <>

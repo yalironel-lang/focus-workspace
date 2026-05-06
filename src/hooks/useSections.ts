@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { SectionWithProgress, SectionDetail, GroupWithItems } from '../types';
+import { SectionWithProgress, SectionDetail, GroupWithItems, Item } from '../types';
 import { useAuth } from './useAuth';
 
 const DEFAULT_GROUPS = ['Slides', 'Exercises', 'Exams', 'Notes', 'Links'];
@@ -36,6 +36,8 @@ async function ensureDefaultGroups(sectionId: string, existingTitles: string[]) 
   return missing.length > 0;
 }
 
+// ── useSections (dashboard list) ──────────────────────────────────────────────
+
 export function useSections() {
   const { user } = useAuth();
   const [sections, setSections] = useState<SectionWithProgress[]>([]);
@@ -51,10 +53,7 @@ export function useSections() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (sectionsError) {
-      setLoading(false);
-      return;
-    }
+    if (sectionsError) { setLoading(false); return; }
 
     const sectionsWithProgress: SectionWithProgress[] = [];
 
@@ -88,21 +87,16 @@ export function useSections() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => {
-    fetchSections();
-  }, [fetchSections]);
+  useEffect(() => { fetchSections(); }, [fetchSections]);
 
   const createSection = async (title: string) => {
     if (!user) return;
-
     const { data: section, error } = await supabase
       .from('sections')
       .insert({ user_id: user.id, title })
       .select()
       .single();
-
     if (error) throw error;
-
     await ensureDefaultGroups(section.id, []);
     await fetchSections();
     return section;
@@ -117,10 +111,20 @@ export function useSections() {
   return { sections, loading, fetchSections, createSection, deleteSection };
 }
 
+// ── useSectionDetail (workspace page) ────────────────────────────────────────
+//
+// PERFORMANCE DESIGN:
+// - fetchSection is called only on mount and for rare operations (addGroup, setExamDate, file upload)
+// - toggleTask, deleteItem, updateItem, updateGroup, deleteGroup, addItem → all OPTIMISTIC
+//   (state updated immediately from local data; no full re-fetch)
+// - ensureDefaultGroups runs only once per sectionId (tracked via ref)
+
 export function useSectionDetail(sectionId: string | undefined) {
   const { user } = useAuth();
   const [section, setSection] = useState<SectionDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // Track which sectionId we have already run ensureDefaultGroups for
+  const ensuredRef = useRef<string | null>(null);
 
   const fetchSection = useCallback(async () => {
     if (!user || !sectionId) return;
@@ -132,10 +136,7 @@ export function useSectionDetail(sectionId: string | undefined) {
       .eq('id', sectionId)
       .single();
 
-    if (sectionError || !sectionData) {
-      setLoading(false);
-      return;
-    }
+    if (sectionError || !sectionData) { setLoading(false); return; }
 
     let { data: groupsData } = await supabase
       .from('groups')
@@ -143,116 +144,201 @@ export function useSectionDetail(sectionId: string | undefined) {
       .eq('section_id', sectionId)
       .order('order_index');
 
-    // Backfill any missing default groups (handles existing sections too)
-    const existingTitles = (groupsData || []).map((g) => g.title);
-    const hadMissing = await ensureDefaultGroups(sectionId, existingTitles);
-    if (hadMissing) {
-      const { data: refetched } = await supabase
-        .from('groups')
-        .select('*')
-        .eq('section_id', sectionId)
-        .order('order_index');
-      groupsData = refetched;
+    // Only run ensureDefaultGroups once per sectionId across the lifetime of this hook
+    if (ensuredRef.current !== sectionId) {
+      ensuredRef.current = sectionId;
+      const existingTitles = (groupsData || []).map((g) => g.title);
+      const hadMissing = await ensureDefaultGroups(sectionId, existingTitles);
+      if (hadMissing) {
+        const { data: refetched } = await supabase
+          .from('groups')
+          .select('*')
+          .eq('section_id', sectionId)
+          .order('order_index');
+        groupsData = refetched;
+      }
     }
 
-    const groups: GroupWithItems[] = [];
+    // Single batched items query — one round-trip for all groups
+    const groupIds = (groupsData || []).map(g => g.id);
+    const { data: allItemsData } = groupIds.length > 0
+      ? await supabase.from('items').select('*').in('group_id', groupIds).order('order_index')
+      : { data: [] };
 
-    for (const group of groupsData || []) {
-      const { data: itemsData } = await supabase
-        .from('items')
-        .select('*')
-        .eq('group_id', group.id)
-        .order('order_index');
+    const groups: GroupWithItems[] = (groupsData || []).map(group => ({
+      ...group,
+      items: (allItemsData || []).filter(i => i.group_id === group.id),
+    }));
 
-      groups.push({
-        ...group,
-        items: itemsData || [],
-      });
-    }
-
-    setSection({
-      ...sectionData,
-      groups,
-    });
+    setSection({ ...sectionData, groups });
     setLoading(false);
   }, [user, sectionId]);
 
-  useEffect(() => {
-    fetchSection();
-  }, [fetchSection]);
+  useEffect(() => { fetchSection(); }, [fetchSection]);
 
-  const addItem = async (
+  // ── Optimistic helpers ─────────────────────────────────────────────────────
+
+  const optimisticUpdateItems = useCallback((
+    updater: (prev: SectionDetail) => SectionDetail
+  ) => {
+    setSection(prev => prev ? updater(prev) : prev);
+  }, []);
+
+  // ── Item operations (all optimistic — no fetchSection) ─────────────────────
+
+  const addItem = useCallback(async (
     groupId: string,
     type: 'task' | 'file' | 'link' | 'note',
     title: string,
     content?: string,
     filePath?: string,
   ) => {
-    const { data: existingItems } = await supabase
+    // Compute next order from current local state
+    const group = section?.groups.find(g => g.id === groupId);
+    const maxOrder = group && group.items.length > 0
+      ? Math.max(...group.items.map(i => i.order_index))
+      : -1;
+
+    const { data: newItem, error } = await supabase
       .from('items')
-      .select('order_index')
-      .eq('group_id', groupId)
-      .order('order_index', { ascending: false })
-      .limit(1);
-
-    const nextOrder = (existingItems?.[0]?.order_index ?? -1) + 1;
-
-    const { error } = await supabase.from('items').insert({
-      group_id: groupId,
-      type,
-      title,
-      content: content || null,
-      file_path: filePath || null,
-      order_index: nextOrder,
-    });
+      .insert({
+        group_id: groupId,
+        type,
+        title,
+        content: content || null,
+        file_path: filePath || null,
+        order_index: maxOrder + 1,
+      })
+      .select()
+      .single();
 
     if (error) throw error;
-    await fetchSection();
-  };
 
-  const updateItem = async (
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g =>
+        g.id === groupId ? { ...g, items: [...g.items, newItem as Item] } : g
+      ),
+    }));
+  }, [section, optimisticUpdateItems]);
+
+  // Push a pre-built item into local state (used after file upload)
+  const pushItem = useCallback((groupId: string, item: Item) => {
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g =>
+        g.id === groupId ? { ...g, items: [...g.items, item] } : g
+      ),
+    }));
+  }, [optimisticUpdateItems]);
+
+  const updateItem = useCallback(async (
     itemId: string,
-    updates: Partial<{ title: string; content: string; completed: boolean }>,
+    updates: { title?: string; content?: string | null },
   ) => {
     const { error } = await supabase.from('items').update(updates).eq('id', itemId);
     if (error) throw error;
-    await fetchSection();
-  };
 
-  const deleteItem = async (itemId: string) => {
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => ({
+        ...g,
+        items: g.items.map(i => i.id === itemId ? { ...i, ...updates } : i),
+      })),
+    }));
+  }, [optimisticUpdateItems]);
+
+  const deleteItem = useCallback(async (itemId: string) => {
     const { error } = await supabase.from('items').delete().eq('id', itemId);
     if (error) throw error;
-    await fetchSection();
-  };
 
-  const toggleTask = async (itemId: string, completed: boolean) => {
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => ({
+        ...g,
+        items: g.items.filter(i => i.id !== itemId),
+      })),
+    }));
+  }, [optimisticUpdateItems]);
+
+  const toggleTask = useCallback(async (itemId: string, completed: boolean) => {
     const { error } = await supabase.from('items').update({ completed }).eq('id', itemId);
     if (error) throw error;
-    await fetchSection();
-  };
 
-  const setExamDate = async (date: string | null) => {
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => ({
+        ...g,
+        items: g.items.map(i => i.id === itemId ? { ...i, completed } : i),
+      })),
+    }));
+  }, [optimisticUpdateItems]);
+
+  // ── Group operations ────────────────────────────────────────────────────────
+
+  const addGroup = useCallback(async (title: string) => {
+    if (!sectionId) return;
+    const maxOrder = section
+      ? section.groups.reduce((m, g) => Math.max(m, g.order_index), -1)
+      : -1;
+
+    const { data: newGroup, error } = await supabase
+      .from('groups')
+      .insert({ section_id: sectionId, title: title.trim(), order_index: maxOrder + 1 })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: [...prev.groups, { ...newGroup, items: [] }],
+    }));
+  }, [sectionId, section, optimisticUpdateItems]);
+
+  const updateGroup = useCallback(async (groupId: string, title: string) => {
+    const { error } = await supabase.from('groups').update({ title }).eq('id', groupId);
+    if (error) throw error;
+
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => g.id === groupId ? { ...g, title } : g),
+    }));
+  }, [optimisticUpdateItems]);
+
+  const deleteGroup = useCallback(async (groupId: string) => {
+    const { error } = await supabase.from('groups').delete().eq('id', groupId);
+    if (error) throw error;
+
+    optimisticUpdateItems(prev => ({
+      ...prev,
+      groups: prev.groups.filter(g => g.id !== groupId),
+    }));
+  }, [optimisticUpdateItems]);
+
+  const setExamDate = useCallback(async (date: string | null) => {
     if (!sectionId) return;
     const { error } = await supabase
       .from('sections')
       .update({ exam_date: date || null })
       .eq('id', sectionId);
     if (error) throw error;
+    // Exam date is section-level metadata — small refetch is acceptable
     await fetchSection();
-  };
+  }, [sectionId, fetchSection]);
 
-  // Add a new custom group to this section
-  const addGroup = async (title: string) => {
-    if (!sectionId) return;
-    const maxOrder = section
-      ? section.groups.reduce((m, g) => Math.max(m, g.order_index), -1)
-      : -1;
-    const { error } = await supabase
-      .from('groups')
-      .insert({ section_id: sectionId, title: title.trim(), order_index: maxOrder + 1 });
-    if (error) throw error;
-    await fetchSection();
+  return {
+    section,
+    loading,
+    fetchSection,
+    addItem,
+    pushItem,
+    updateItem,
+    deleteItem,
+    toggleTask,
+    addGroup,
+    updateGroup,
+    deleteGroup,
+    setExamDate,
   };
-
-  return { section, loading, fetchSection, addItem, updateItem, deleteItem, toggleTask, addGroup, setExamDate };
 }

@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { Item } from '../types';
-import { useSectionDetail } from '../hooks/useSections';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { supabase } from '../lib/supabase';
 import { PDFViewerModal } from './PDFViewerModal';
@@ -10,28 +9,29 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+// NOTE: This component intentionally does NOT call useSectionDetail.
+// All data mutations are passed as stable callbacks from the parent (GroupComponent → SectionPage).
+// This eliminates per-item hook instances which caused massive re-render storms.
+
 interface ItemProps {
   item: Item;
   sectionId: string;
   groupId: string;
-  onUpdate: () => void;
+  onToggle: (itemId: string, completed: boolean) => Promise<void>;
+  onDelete: (itemId: string) => Promise<void>;
+  onUpdate: (itemId: string, updates: { title?: string; content?: string | null }) => Promise<void>;
 }
 
 function parseDomain(url: string): string | null {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return null;
-  }
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return null; }
 }
 
-// First letter of domain for the badge
 function domainInitial(domain: string | null): string {
   if (!domain) return '↗';
   return domain[0].toUpperCase();
 }
 
-// Detect link type from URL for the resource badge
 function detectLinkType(url: string): string | null {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -45,42 +45,44 @@ function detectLinkType(url: string): string | null {
 }
 
 const PRIORITY_CONFIG: Record<string, { dot: string; label: string }> = {
-  high:   { dot: 'bg-rose-400',   label: 'High'   },
-  medium: { dot: 'bg-amber-400',  label: 'Medium' },
-  low:    { dot: 'bg-sky-300',    label: 'Low'    },
+  high:   { dot: 'bg-rose-500',   label: 'High'   },
+  medium: { dot: 'bg-amber-500',  label: 'Medium' },
+  low:    { dot: 'bg-sky-400',    label: 'Low'    },
 };
 const PRIORITY_CYCLE: Record<string, string | null> = {
   '': 'high', high: 'medium', medium: 'low', low: '',
 };
 
-export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
-  const { toggleTask, deleteItem } = useSectionDetail(sectionId);
+const cardStyle: React.CSSProperties = { backgroundColor: '#0d111a', border: '1px solid #263043' };
+const inputStyle: React.CSSProperties = {
+  backgroundColor: '#05070b', border: '1px solid #263043',
+  color: '#f8fafc', borderRadius: '10px',
+  padding: '6px 12px', fontSize: '13px', width: '100%', outline: 'none',
+};
+
+export function ItemComponent({ item, onToggle, onDelete, onUpdate }: ItemProps) {
   const { getSignedUrl } = useFileUpload();
-  const [opening,     setOpening]     = useState(false);
+  const [opening,      setOpening]      = useState(false);
   const [pdfViewerUrl, setPdfViewerUrl] = useState<string | null>(null);
   const handleCloseModal = useCallback(() => setPdfViewerUrl(null), []);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState(item.title);
-  const [editContent, setEditContent] = useState(item.content || '');
+  const [isEditing,    setIsEditing]    = useState(false);
+  const [editTitle,    setEditTitle]    = useState(item.title);
+  const [editContent,  setEditContent]  = useState(item.content || '');
   const [noteExpanded, setNoteExpanded] = useState(false);
 
   const handleToggle = async () => {
-    try {
-      await toggleTask(item.id, !item.completed);
-      onUpdate();
-    } catch {
-      toast.error('Failed to update task');
-    }
+    try { await onToggle(item.id, !item.completed); }
+    catch { toast.error('Failed to update task'); }
   };
 
   const handleDelete = async () => {
     if (!confirm('Delete this item?')) return;
     try {
+      // Remove from storage first if it's a file
       if (item.file_path) {
         await supabase.storage.from('pdfs').remove([item.file_path]);
       }
-      await deleteItem(item.id);
-      onUpdate();
+      await onDelete(item.id);
     } catch {
       toast.error('Failed to delete item');
     }
@@ -101,13 +103,8 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
 
   const handleSaveEdit = async () => {
     try {
-      const { error } = await supabase
-        .from('items')
-        .update({ title: editTitle, content: editContent || null })
-        .eq('id', item.id);
-      if (error) throw error;
+      await onUpdate(item.id, { title: editTitle, content: editContent || null });
       setIsEditing(false);
-      onUpdate();
     } catch {
       toast.error('Failed to save changes');
     }
@@ -117,26 +114,18 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
     e.stopPropagation();
     const current = item.content ?? '';
     const next = PRIORITY_CYCLE[current] ?? 'high';
-    try {
-      const { error } = await supabase
-        .from('items')
-        .update({ content: next || null })
-        .eq('id', item.id);
-      if (error) throw error;
-      onUpdate();
-    } catch {
-      toast.error('Failed to update priority');
-    }
+    try { await onUpdate(item.id, { content: next || null }); }
+    catch { toast.error('Failed to update priority'); }
   };
 
   // ── Edit mode ──────────────────────────────────────────────────────────────
   if (isEditing) {
     return (
-      <div id={`item-${item.id}`} className="bg-slate-50 rounded-xl p-3 my-1 border border-slate-200 animate-fade-in">
+      <div id={`item-${item.id}`} className="rounded-xl p-3 my-1" style={cardStyle}>
         <input
           value={editTitle}
           onChange={(e) => setEditTitle(e.target.value)}
-          className="w-full px-3 py-2 border border-slate-200 rounded-lg mb-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          style={{ ...inputStyle, marginBottom: '8px' }}
           placeholder="Title"
           autoFocus
         />
@@ -144,21 +133,22 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg mb-2 text-sm min-h-[72px] resize-none bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            style={{ ...inputStyle, minHeight: '72px', resize: 'none', marginBottom: '8px' }}
             placeholder={item.type === 'link' ? 'https://…' : 'Notes…'}
           />
         )}
         <div className="flex gap-2">
           <button
             onClick={handleSaveEdit}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors"
+            style={{ backgroundColor: '#f59e0b', color: '#000' }}
           >
-            <Check className="w-3.5 h-3.5" />
-            Save
+            <Check className="w-3.5 h-3.5" /> Save
           </button>
           <button
             onClick={() => { setIsEditing(false); setEditTitle(item.title); setEditContent(item.content || ''); }}
-            className="px-3 py-1.5 text-slate-500 text-xs hover:text-slate-900 transition-colors"
+            className="px-3 py-1.5 text-xs transition-colors rounded-lg"
+            style={{ color: '#4b5563' }}
           >
             Cancel
           </button>
@@ -167,7 +157,7 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
     );
   }
 
-  // ── Link item — saved resource row ────────────────────────────────────────
+  // ── Link item ──────────────────────────────────────────────────────────────
   if (item.type === 'link') {
     const domain = item.content ? parseDomain(item.content) : null;
     const initial = domainInitial(domain);
@@ -176,47 +166,53 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
     return (
       <div
         id={`item-${item.id}`}
-        className="group flex items-center rounded-xl border border-transparent hover:border-sky-100 hover:bg-sky-50/50 transition-all"
+        className="group flex items-center rounded-xl transition-all"
+        style={{ border: '1px solid transparent' }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = '#1a2230')}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}
       >
-        {/* Full-width clickable link area */}
         <a
           href={item.content || '#'}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-3 flex-1 min-w-0 px-3 py-2.5"
         >
-          {/* Sky-tinted domain initial badge */}
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-100 to-blue-100 border border-sky-200 flex items-center justify-center flex-shrink-0 shadow-sm">
-            <span className="text-xs font-bold text-sky-700">{initial}</span>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+               style={{ backgroundColor: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.2)' }}>
+            <span className="text-xs font-bold" style={{ color: '#38bdf8' }}>{initial}</span>
           </div>
-
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-sm font-semibold text-slate-800 truncate group-hover:text-sky-700 transition-colors">
+              <span className="text-sm font-semibold truncate transition-colors"
+                    style={{ color: '#f8fafc' }}>
                 {item.title}
               </span>
               {linkType && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 flex-shrink-0 uppercase tracking-wide">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0"
+                      style={{ backgroundColor: '#111827', color: '#4b5563' }}>
                   {linkType}
                 </span>
               )}
-              <ExternalLink className="w-3 h-3 text-sky-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ color: '#38bdf8' }} />
             </div>
             {domain && (
-              <p className="text-xs text-slate-400 font-medium mt-0.5 truncate">{domain}</p>
+              <p className="text-xs mt-0.5 truncate" style={{ color: '#374151' }}>{domain}</p>
             )}
           </div>
         </a>
-
-        {/* Actions — outside the <a> to avoid nested click issues */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 pr-2">
-          <button
-            onClick={() => setIsEditing(true)}
-            className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
-          >
+          <button onClick={() => setIsEditing(true)}
+                  className="px-2 py-1 text-[11px] font-medium transition-colors rounded"
+                  style={{ color: '#4b5563' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#4b5563')}>
             Edit
           </button>
-          <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+          <button onClick={handleDelete} className="p-1 rounded transition-colors"
+                  style={{ color: '#374151' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#374151')}>
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -230,114 +226,111 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
       <>
         <div
           id={`item-${item.id}`}
-          className="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all"
+          className="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+          style={{ border: '1px solid transparent' }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = '#1a2230')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}
         >
-          <div className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-100 flex items-center justify-center flex-shrink-0">
-            <FileText className="w-3.5 h-3.5 text-rose-500" />
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+               style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <FileText className="w-3.5 h-3.5" style={{ color: '#ef4444' }} />
           </div>
-
           <div className="flex-1 min-w-0">
             <span
-              className="text-sm font-medium text-slate-800 truncate block cursor-pointer hover:text-slate-600 transition-colors"
+              className="text-sm font-medium truncate block cursor-pointer transition-colors"
+              style={{ color: '#f8fafc' }}
               onClick={() => setIsEditing(true)}
             >
               {item.title}
             </span>
-            <span className="text-xs text-slate-400">PDF document</span>
+            <span className="text-xs" style={{ color: '#374151' }}>PDF document</span>
           </div>
-
           {item.file_path && (
             <button
               onClick={handleOpenFile}
               disabled={opening}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white transition-all disabled:opacity-40 flex-shrink-0"
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all disabled:opacity-40 flex-shrink-0"
+              style={{ backgroundColor: '#111827', color: '#94a3b8', border: '1px solid #263043' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f59e0b'; e.currentTarget.style.color = '#000'; e.currentTarget.style.borderColor = '#f59e0b'; }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#111827'; e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.borderColor = '#263043'; }}
             >
-              {opening ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <>
-                  <FileText className="w-3.5 h-3.5" />
-                  Open PDF
-                </>
-              )}
+              {opening ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><FileText className="w-3.5 h-3.5" /> Open</>}
             </button>
           )}
-
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => setIsEditing(true)}
-              className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
-            >
-              Edit
-            </button>
-            <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+            <button onClick={() => setIsEditing(true)}
+                    className="px-2 py-1 text-[11px] font-medium transition-colors rounded"
+                    style={{ color: '#4b5563' }}>Edit</button>
+            <button onClick={handleDelete} className="p-1 rounded transition-colors"
+                    style={{ color: '#374151' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#374151')}>
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
-
         {pdfViewerUrl && (
-          <PDFViewerModal
-            url={pdfViewerUrl}
-            title={item.title}
-            onClose={handleCloseModal}
-          />
+          <PDFViewerModal url={pdfViewerUrl} title={item.title} onClose={handleCloseModal} />
         )}
       </>
     );
   }
 
-  // ── Note item — knowledge card ────────────────────────────────────────────
+  // ── Note item ──────────────────────────────────────────────────────────────
   if (item.type === 'note') {
     return (
       <div id={`item-${item.id}`} className="px-1 py-0.5">
-        {/* White card with strong left emerald accent */}
-        <div className="group relative bg-white border border-slate-100 border-l-[3px] border-l-emerald-400 rounded-xl p-3.5 hover:border-slate-200 hover:shadow-sm transition-all">
+        <div
+          className="group relative rounded-xl p-3.5 transition-all"
+          style={{
+            backgroundColor: '#0d111a',
+            border: '1px solid #1a2230',
+            borderLeft: '3px solid #10b981',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = '#263043')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2230')}
+        >
           <div className="flex items-start gap-3">
-            {/* Filled icon badge */}
-            <div className="w-7 h-7 rounded-lg bg-emerald-500 flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
-              <StickyNote className="w-3.5 h-3.5 text-white" />
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+                 style={{ backgroundColor: 'rgba(16,185,129,0.15)' }}>
+              <StickyNote className="w-3.5 h-3.5" style={{ color: '#10b981' }} />
             </div>
-
-            {/* Content */}
             <div className="flex-1 min-w-0">
               <span
-                className="text-sm font-semibold text-slate-900 cursor-pointer leading-snug block mb-1"
+                className="text-sm font-semibold cursor-pointer leading-snug block mb-1"
+                style={{ color: '#f8fafc' }}
                 onClick={() => setIsEditing(true)}
               >
                 {item.title}
               </span>
               {item.content && (
                 <div>
-                  {/* Content in its own subtle box */}
-                  <div className={`bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2 ${noteExpanded ? '' : ''}`}>
-                    <p className={`text-xs text-slate-600 leading-relaxed whitespace-pre-wrap ${noteExpanded ? '' : 'line-clamp-3'}`}>
+                  <div className="rounded-lg px-2.5 py-2" style={{ backgroundColor: '#111827' }}>
+                    <p className={`text-xs leading-relaxed whitespace-pre-wrap ${noteExpanded ? '' : 'line-clamp-3'}`}
+                       style={{ color: '#94a3b8' }}>
                       {item.content}
                     </p>
                   </div>
                   {item.content.length > 100 && (
                     <button
                       onClick={() => setNoteExpanded(!noteExpanded)}
-                      className="flex items-center gap-0.5 text-[11px] font-medium text-emerald-600 hover:text-emerald-800 mt-1.5 transition-colors"
+                      className="flex items-center gap-0.5 text-[11px] font-medium mt-1.5 transition-colors"
+                      style={{ color: '#10b981' }}
                     >
-                      {noteExpanded
-                        ? <><ChevronUp className="w-3 h-3" />Show less</>
-                        : <><ChevronDown className="w-3 h-3" />Show more</>}
+                      {noteExpanded ? <><ChevronUp className="w-3 h-3" />Show less</> : <><ChevronDown className="w-3 h-3" />Show more</>}
                     </button>
                   )}
                 </div>
               )}
             </div>
-
-            {/* Hover actions */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
-              >
-                Edit
-              </button>
-              <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+              <button onClick={() => setIsEditing(true)}
+                      className="px-2 py-1 text-[11px] font-medium transition-colors rounded"
+                      style={{ color: '#4b5563' }}>Edit</button>
+              <button onClick={handleDelete} className="p-1 rounded transition-colors"
+                      style={{ color: '#374151' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={e => (e.currentTarget.style.color = '#374151')}>
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -352,7 +345,10 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
   return (
     <div
       id={`item-${item.id}`}
-      className="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 border border-transparent transition-all"
+      className="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+      style={{ border: '1px solid transparent' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = '#1a2230')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}
     >
       <button
         onClick={handleToggle}
@@ -360,38 +356,44 @@ export function ItemComponent({ item, sectionId, onUpdate }: ItemProps) {
         title={item.completed ? 'Mark incomplete' : 'Mark complete'}
       >
         {item.completed
-          ? <CheckSquare className="w-4 h-4 text-primary-600" />
-          : <Square className="w-4 h-4 text-slate-300 hover:text-slate-400" />}
+          ? <CheckSquare className="w-4 h-4" style={{ color: '#f59e0b' }} />
+          : <Square className="w-4 h-4" style={{ color: '#263043' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#4b5563')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#263043')} />
+        }
       </button>
 
       <span
-        className={`flex-1 text-sm leading-snug cursor-pointer select-none transition-colors ${
-          item.completed ? 'line-through text-slate-400' : 'text-slate-800'
-        }`}
+        className={`flex-1 text-sm leading-snug cursor-pointer select-none transition-colors`}
+        style={{ color: item.completed ? '#374151' : '#f8fafc',
+                 textDecoration: item.completed ? 'line-through' : 'none' }}
         onClick={() => setIsEditing(true)}
       >
         {item.title}
       </span>
 
-      {/* Priority dot — visible on hover or when set; click to cycle */}
       {!item.completed && (
         <button
           onClick={cyclePriority}
           title={priorityCfg ? `Priority: ${priorityCfg.label} (click to change)` : 'Set priority'}
           className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         >
-          <span className={`block w-2 h-2 rounded-full transition-colors ${priorityCfg ? priorityCfg.dot : 'bg-slate-200 hover:bg-slate-300'}`} />
+          <span className={`block w-2 h-2 rounded-full transition-colors ${priorityCfg ? priorityCfg.dot : 'bg-[#263043] hover:bg-[#374151]'}`} />
         </button>
       )}
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-        <button
-          onClick={() => setIsEditing(true)}
-          className="px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 transition-colors rounded"
-        >
+        <button onClick={() => setIsEditing(true)}
+                className="px-2 py-1 text-[11px] font-medium transition-colors rounded"
+                style={{ color: '#4b5563' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#4b5563')}>
           Edit
         </button>
-        <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+        <button onClick={handleDelete} className="p-1 rounded transition-colors"
+                style={{ color: '#374151' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                onMouseLeave={e => (e.currentTarget.style.color = '#374151')}>
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>

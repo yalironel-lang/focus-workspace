@@ -3,21 +3,21 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
+import { useWorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { Layout } from '../components/Layout';
 import { GroupComponent } from '../components/GroupComponent';
 import { ContinueButton } from '../components/ContinueButton';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
+import { CustomizeModal } from '../components/CustomizeModal';
+import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar,
   AlertTriangle, CheckSquare, Square, PlayCircle, ChevronDown, ChevronRight,
-  BookOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Item, ItemType, SectionWithProgress, Deadline, GroupWithItems } from '../types';
-import {
-  loadSession, saveSession, pickTasks, pickPortals,
-} from '../utils/sessionPlan';
+import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
+import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -36,9 +36,9 @@ const EFFORT_COLOR: Record<string, string> = {
 };
 
 function detectQuickType(val: string): { type: ItemType; groupName: string } {
-  if (/^https?:\/\//i.test(val.trim())) return { type: 'link',  groupName: 'Links'     };
-  if (val.trim().length > 80)           return { type: 'note',  groupName: 'Notes'     };
-  return                                       { type: 'task',  groupName: 'Exercises' };
+  if (/^https?:\/\//i.test(val.trim())) return { type: 'link', groupName: 'Links'     };
+  if (val.trim().length > 80)           return { type: 'note', groupName: 'Notes'     };
+  return                                       { type: 'task', groupName: 'Exercises' };
 }
 
 function formatExamDate(d: string): string {
@@ -47,11 +47,6 @@ function formatExamDate(d: string): string {
 function daysUntil(d: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.ceil((new Date(d + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
-}
-function readinessCfg(pct: number): { label: string; cls: string } {
-  if (pct >= 70) return { label: 'On track', cls: 'bg-emerald-100 text-emerald-700' };
-  if (pct >= 30) return { label: 'Building',  cls: 'bg-amber-100  text-amber-700'   };
-  return               { label: 'At risk',   cls: 'bg-rose-100   text-rose-700'    };
 }
 
 function deadlineDiff(due: string): number {
@@ -63,7 +58,6 @@ const DEADLINE_TYPE_LABEL: Record<string, string> = {
   assignment: 'Assignment', quiz: 'Quiz', exam: 'Exam',
   project: 'Project', reading: 'Reading', custom: 'Custom',
 };
-
 const URGENCY_ORDER = { overdue: 0, urgent: 1, soon: 2, far: 3 } as const;
 type UrgencyLevel = keyof typeof URGENCY_ORDER;
 
@@ -76,19 +70,28 @@ function deadlineUrgencyLevel(d: Deadline): UrgencyLevel {
   return 'far';
 }
 
-function deadlineUrgencyStyle(d: Deadline): { badge: string; dot: string; row: string; label: string } {
-  if (d.completed) return { badge: '', dot: 'bg-slate-200', row: 'border-slate-100', label: '' };
-  const diff = deadlineDiff(d.due_date);
-  if (diff < 0)   return { badge: 'bg-slate-100 text-slate-500',      dot: 'bg-slate-300',   row: 'border-slate-200', label: 'Overdue'          };
-  if (diff === 0) return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-500',    row: 'border-rose-200',  label: 'Due today'        };
-  if (diff === 1) return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-400',    row: 'border-rose-200',  label: 'Tomorrow'         };
-  if (diff < 3)   return { badge: 'bg-rose-100 text-rose-700',         dot: 'bg-rose-400',    row: 'border-rose-100',  label: `${diff} days left` };
-  if (diff <= 7)  return { badge: 'bg-amber-100 text-amber-700',       dot: 'bg-amber-400',   row: 'border-amber-100', label: `${diff} days left` };
-  return                { badge: 'bg-emerald-100 text-emerald-700',   dot: 'bg-emerald-400', row: 'border-slate-100', label: `${diff} days left` };
-}
-
 function formatDueDate(d: string): string {
   return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function urgencyDot(d: Deadline): string {
+  if (d.completed) return '#263043';
+  const diff = deadlineDiff(d.due_date);
+  if (diff < 0)   return '#4b5563';
+  if (diff <= 1)  return '#ef4444';
+  if (diff < 3)   return '#ef4444';
+  if (diff <= 7)  return '#f59e0b';
+  return '#374151';
+}
+function urgencyLabel(d: Deadline): { text: string; color: string } {
+  if (d.completed) return { text: '', color: '' };
+  const diff = deadlineDiff(d.due_date);
+  if (diff < 0)   return { text: `${Math.abs(diff)}d overdue`, color: '#4b5563' };
+  if (diff === 0) return { text: 'Today',                       color: '#ef4444' };
+  if (diff === 1) return { text: 'Tomorrow',                    color: '#f59e0b' };
+  if (diff < 3)   return { text: `${diff} days`,                color: '#ef4444' };
+  if (diff <= 7)  return { text: `${diff} days`,                color: '#f59e0b' };
+  return               { text: `${diff}d`,                  color: '#374151' };
 }
 
 const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
@@ -107,7 +110,6 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
   const [isOpen, setIsOpen]   = useState(true);
   const sectionForModal = [{ id: sectionId, title: sectionTitle } as SectionWithProgress];
 
-  // Sort by urgency (overdue → urgent → soon → far), completed last
   const sorted = [...deadlines].sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
     const au = URGENCY_ORDER[deadlineUrgencyLevel(a)];
@@ -124,32 +126,44 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
 
   return (
     <>
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+      <div className="rounded-xl overflow-hidden mb-4"
+           style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
         {/* Header */}
         <div
-          className="px-4 py-3 border-b border-slate-100 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50 transition-colors"
+          className="px-4 py-3 flex items-center justify-between cursor-pointer select-none transition-colors"
+          style={{ borderBottom: isOpen ? '1px solid #1a2230' : 'none' }}
           onClick={() => setIsOpen(o => !o)}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
         >
           <div className="flex items-center gap-2">
-            <span className="flex-shrink-0 opacity-40">
+            <span className="flex-shrink-0" style={{ color: '#374151' }}>
               {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             </span>
-            <Calendar className="w-3.5 h-3.5 text-rose-400" />
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Important Dates</span>
+            <Calendar className="w-3.5 h-3.5" style={{ color: '#ef4444' }} />
+            <span className="text-xs font-bold uppercase tracking-[0.12em]"
+                  style={{ color: '#f8fafc' }}>
+              Important Dates
+            </span>
             {urgentCount > 0 && (
-              <span className="text-[10px] bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded-full">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
                 {urgentCount} urgent
               </span>
             )}
             {urgentCount === 0 && pending.length > 0 && (
-              <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ backgroundColor: '#111827', color: '#4b5563' }}>
                 {pending.length}
               </span>
             )}
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); setShowAdd(true); }}
-            className="text-[10px] font-semibold text-primary-600 hover:text-primary-700 transition-colors px-2 py-1 rounded-lg hover:bg-primary-50"
+            className="text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors flex-shrink-0"
+            style={{ color: '#4b5563' }}
+            onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#4b5563'; e.currentTarget.style.backgroundColor = 'transparent'; }}
           >
             + Add
           </button>
@@ -159,75 +173,76 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
         {isOpen && (
           <div className="p-3 space-y-1.5">
             {sorted.length === 0 ? (
-              <div className="text-center py-7">
-                <Calendar className="w-6 h-6 text-slate-200 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">No dates yet.</p>
+              <div className="text-center py-6">
+                <Calendar className="w-5 h-5 mx-auto mb-2" style={{ color: '#263043' }} />
+                <p className="text-xs" style={{ color: '#374151' }}>No dates yet.</p>
                 <button
                   onClick={() => setShowAdd(true)}
-                  className="mt-2 text-xs text-primary-600 hover:text-primary-700 font-semibold transition-colors"
+                  className="mt-2 text-xs font-semibold transition-colors"
+                  style={{ color: '#f59e0b' }}
                 >
                   + Add a date
                 </button>
               </div>
             ) : (
               sorted.map((d: Deadline) => {
-                const urg = deadlineUrgencyStyle(d);
+                const lbl = urgencyLabel(d);
+                const dot = urgencyDot(d);
                 return (
                   <div
                     key={d.id}
-                    className={`group flex items-center gap-3 px-3.5 py-3 rounded-xl border bg-white transition-all hover:shadow-sm ${
-                      d.completed ? 'opacity-50 border-slate-100' : urg.row
-                    }`}
+                    className="group flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all"
+                    style={{
+                      backgroundColor: '#080b12',
+                      border: '1px solid #1a2230',
+                      opacity: d.completed ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#263043')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2230')}
                   >
-                    {/* Urgency dot */}
-                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${urg.dot}`} />
-
-                    {/* Toggle */}
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />
                     <button
                       onClick={() => toggleDeadline(d.id, !d.completed).catch(() => toast.error('Failed'))}
                       className="flex-shrink-0"
                     >
                       {d.completed
-                        ? <CheckSquare className="w-4 h-4 text-primary-500" />
-                        : <Square      className="w-4 h-4 text-slate-300 hover:text-slate-400" />}
+                        ? <CheckSquare className="w-4 h-4" style={{ color: '#f59e0b' }} />
+                        : <Square      className="w-4 h-4" style={{ color: '#263043' }} />}
                     </button>
-
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold truncate ${d.completed ? 'line-through text-slate-400' : 'text-slate-900'}`}>
+                      <p className="text-sm font-semibold truncate"
+                         style={{ color: d.completed ? '#374151' : '#f8fafc',
+                                  textDecoration: d.completed ? 'line-through' : 'none' }}>
                         {d.title}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
+                      <p className="text-[11px] mt-0.5"
+                         style={{ color: '#374151' }}>
                         {DEADLINE_TYPE_LABEL[d.type] ?? d.type} · {formatDueDate(d.due_date)}
                       </p>
-                      {!d.completed && (
-                        <p className={`text-[11px] font-semibold mt-1 ${
-                          pendingTaskCount === 0
-                            ? 'text-emerald-600'
-                            : deadlineUrgencyLevel(d) === 'urgent' || deadlineUrgencyLevel(d) === 'overdue'
-                              ? 'text-rose-500'
-                              : 'text-slate-500'
-                        }`}>
-                          {pendingTaskCount === 0
-                            ? "You're ready ✓"
-                            : `${pendingTaskCount} action${pendingTaskCount !== 1 ? 's' : ''} to prepare`}
+                      {!d.completed && pendingTaskCount > 0 && (
+                        <p className="text-[11px] font-medium mt-0.5" style={{ color: '#4b5563' }}>
+                          {pendingTaskCount} action{pendingTaskCount !== 1 ? 's' : ''} to prepare
+                        </p>
+                      )}
+                      {!d.completed && pendingTaskCount === 0 && (
+                        <p className="text-[11px] font-medium mt-0.5" style={{ color: '#10b981' }}>
+                          Ready ✓
                         </p>
                       )}
                     </div>
-
-                    {/* Urgency badge */}
-                    {!d.completed && urg.label && (
-                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg flex-shrink-0 ${urg.badge}`}>
-                        {urg.label}
+                    {!d.completed && lbl.text && (
+                      <span className="text-[11px] font-bold flex-shrink-0" style={{ color: lbl.color }}>
+                        {lbl.text}
                       </span>
                     )}
-
-                    {/* Delete */}
                     <button
                       onClick={() => deleteDeadline(d.id).catch(() => toast.error('Failed'))}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-0.5"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-0.5 rounded"
+                      style={{ color: '#374151' }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
                     >
-                      <X className="w-3.5 h-3.5 text-slate-300 hover:text-red-400 transition-colors" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 );
@@ -237,7 +252,7 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
         )}
 
         {!isOpen && sorted.length > 0 && (
-          <div className="px-4 py-2 text-xs text-slate-400">
+          <div className="px-4 py-2 text-xs" style={{ color: '#374151' }}>
             {urgentCount > 0
               ? `${urgentCount} urgent · ${pending.length - urgentCount} upcoming`
               : pending.length > 0
@@ -260,89 +275,34 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
   );
 }
 
-// ── ResourcesBlock ────────────────────────────────────────────────────────────
-
-interface ResourcesBlockProps {
-  groups: GroupWithItems[];
-  sectionId: string;
-  onUpdate: () => void;
-}
-
-function ResourcesBlock({ groups, sectionId, onUpdate }: ResourcesBlockProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
-      {/* Header */}
-      <div
-        className="px-4 py-3 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50 transition-colors"
-        onClick={() => setIsOpen(o => !o)}
-      >
-        <div className="flex items-center gap-2">
-          <span className="flex-shrink-0 opacity-40">
-            {isOpen
-              ? <ChevronDown  className="w-3.5 h-3.5" />
-              : <ChevronRight className="w-3.5 h-3.5" />
-            }
-          </span>
-          <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-          <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Resources</span>
-          {totalItems > 0 && (
-            <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full">
-              {totalItems}
-            </span>
-          )}
-        </div>
-        <span className="text-[10px] text-slate-400 font-medium">
-          {groups.map(g => g.title === 'Exercises' ? 'To Do' : g.title).join(' · ')}
-        </span>
-      </div>
-
-      {/* Body */}
-      {isOpen && (
-        <div className="p-3 border-t border-slate-50">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {groups.map((group) => (
-              <GroupComponent
-                key={group.id}
-                group={group}
-                sectionId={sectionId}
-                onUpdate={onUpdate}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── SectionPage ───────────────────────────────────────────────────────────────
 
 export function SectionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { section, loading, fetchSection, addGroup, addItem, setExamDate } = useSectionDetail(id);
+  const {
+    section, loading, fetchSection,
+    addItem, pushItem, updateItem, deleteItem, toggleTask,
+    addGroup, updateGroup, deleteGroup, setExamDate,
+  } = useSectionDetail(id);
   const { links: courseLinks } = usePortalLinks('course', id);
   const { links: globalLinks } = usePortalLinks('global');
+  const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
 
-  const [showAddLane, setShowAddLane]         = useState(false);
-  const [newLaneTitle, setNewLaneTitle]       = useState('');
-  const [addingLane, setAddingLane]           = useState(false);
-  const [quickAdd, setQuickAdd]               = useState('');
-  const [quickAdding, setQuickAdding]         = useState(false);
-  const [editingExamDate, setEditingExamDate] = useState(false);
+  const [showAddLane,     setShowAddLane]     = useState(false);
+  const [newLaneTitle,    setNewLaneTitle]     = useState('');
+  const [addingLane,      setAddingLane]       = useState(false);
+  const [quickAdd,        setQuickAdd]         = useState('');
+  const [quickAdding,     setQuickAdding]      = useState(false);
+  const [editingExamDate, setEditingExamDate]  = useState(false);
+  const [showCustomize,   setShowCustomize]    = useState(false);
 
-  const activeSession = loadSession();
-  const sessionIsThisCourse = activeSession?.sectionId === id;
+  const activeSession        = loadSession();
+  const sessionIsThisCourse  = activeSession?.sectionId === id;
 
   const handleStartSession = () => {
     if (!section) return;
-    if (sessionIsThisCourse) {
-      navigate('/session');
-      return;
-    }
+    if (sessionIsThisCourse) { navigate('/session'); return; }
     const tasks   = pickTasks(section.groups);
     const portals = pickPortals(courseLinks, globalLinks);
     if (tasks.length === 0) {
@@ -371,8 +331,7 @@ export function SectionPage() {
       const url = type === 'link' ? val : undefined;
       await addItem(target.id, type, val, url);
       setQuickAdd('');
-      const displayName = groupName === 'Exercises' ? 'To Do' : groupName;
-      toast.success(`Added to ${displayName}`);
+      toast.success(`Added to ${groupName === 'Exercises' ? 'To Do' : groupName}`);
     } catch {
       toast.error('Failed to add item');
     } finally {
@@ -400,7 +359,7 @@ export function SectionPage() {
     return (
       <Layout>
         <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+          <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#263043' }} />
         </div>
       </Layout>
     );
@@ -410,8 +369,10 @@ export function SectionPage() {
     return (
       <Layout>
         <div className="text-center py-20">
-          <h2 className="text-lg font-semibold text-slate-900 mb-3">Section not found</h2>
-          <Link to="/dashboard" className="text-sm text-primary-600 hover:text-primary-700 font-semibold transition-colors">
+          <h2 className="text-lg font-semibold mb-3" style={{ color: '#f8fafc' }}>
+            Workspace not found
+          </h2>
+          <Link to="/dashboard" className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
             ← Back to dashboard
           </Link>
         </div>
@@ -425,15 +386,21 @@ export function SectionPage() {
   const progress       = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
   const allDone        = totalItems > 0 && remaining === 0;
 
-  const examDays  = section.exam_date ? daysUntil(section.exam_date) : null;
-  const readiness = readinessCfg(progress);
-  const isPanic   = !!section.exam_date && progress < 50;
+  const examDays = section.exam_date ? daysUntil(section.exam_date) : null;
 
-  // Split groups: Exercises (primary, full-width) vs everything else (resources)
-  const exercisesGroup  = section.groups.find(g => g.title === 'Exercises');
-  const resourceGroups  = section.groups.filter(g => g.title !== 'Exercises');
+  const progressColor = allDone || progress >= 70 ? '#10b981'
+                      : progress >= 30             ? '#f59e0b'
+                      :                              '#ef4444';
 
-  // Count incomplete tasks across all groups — used by DeadlinesBlock for prep feedback
+  // Customization — accent overrides progress-based color for decorative elements only
+  const accentColor = customization.accent || progressColor;
+
+  const isPanic = !!section.exam_date && progress < 50;
+
+  // Split: Exercises (primary) vs everything else (resources)
+  const exercisesGroup = section.groups.find(g => g.title === 'Exercises');
+  const resourceGroups = section.groups.filter(g => g.title !== 'Exercises');
+
   const pendingTaskCount = section.groups
     .flatMap(g => g.items)
     .filter(i => i.type === 'task' && !i.completed)
@@ -459,9 +426,8 @@ export function SectionPage() {
         if (result.length >= 3) break;
         if ([...PLAN_PRIORITY, 'Links', 'Notes'].includes(g.title)) continue;
         for (const item of g.items) {
-          if (!item.completed && result.length < 3) {
+          if (!item.completed && result.length < 3)
             result.push({ item, lane: g.title, reason: 'Next best action', effort: getEffort(item) });
-          }
         }
       }
     }
@@ -471,79 +437,123 @@ export function SectionPage() {
   const scrollToItem = (itemId: string) =>
     document.getElementById(`item-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
+  // Common props passed to every GroupComponent
+  const groupCallbacks = {
+    onAddItem:    addItem,
+    onPushItem:   pushItem,
+    onToggleItem: toggleTask,
+    onDeleteItem: deleteItem,
+    onUpdateItem: updateItem,
+    onRenameGroup: updateGroup,
+    onDeleteGroup: deleteGroup,
+    onRefresh:     fetchSection,
+  };
+
   return (
     <Layout>
       {/* Back */}
       <Link
         to="/dashboard"
-        className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-700 mb-5 transition-colors font-medium"
+        className="inline-flex items-center gap-1.5 text-sm mb-5 transition-colors font-medium"
+        style={{ color: '#374151' }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+        onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
       >
         <ArrowLeft className="w-4 h-4" />
         Dashboard
       </Link>
 
-      {/* Mission-control header */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-4">
-        <div className="h-px bg-gradient-to-r from-primary-400 via-primary-300 to-transparent" />
+      {/* ── 1. WORKSPACE HEADER ─────────────────────────────────────────────── */}
+      <div className="rounded-xl overflow-hidden mb-4"
+           style={{
+             backgroundColor: '#0d111a',
+             border: '1px solid #263043',
+             borderTop: `2px solid ${accentColor}`,
+             ...(customization.cover === 'focus' ? { borderLeft: `3px solid ${accentColor}` } : {}),
+             ...(customization.cover === 'urgent' ? { backgroundColor: 'rgba(239,68,68,0.04)' } : {}),
+           }}>
         <div className="px-6 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-extrabold text-slate-900 truncate tracking-tight leading-tight mb-2">
-                {section.title}
-              </h1>
+              <div className="flex items-center gap-2.5 mb-2">
+                {customization.icon && (
+                  <span className="text-xl leading-none flex-shrink-0" role="img">
+                    {customization.icon}
+                  </span>
+                )}
+                <h1 className="text-xl font-bold truncate leading-tight"
+                    style={{ color: '#f8fafc' }}>
+                  {section.title}
+                </h1>
+                <button
+                  onClick={() => setShowCustomize(true)}
+                  className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors"
+                  style={{ color: '#263043', border: '1px solid #1a2230' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.borderColor = '#263043'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#263043'; e.currentTarget.style.borderColor = '#1a2230'; }}
+                  title="Customize workspace"
+                >
+                  ✦
+                </button>
+              </div>
 
               {/* Stats row */}
-              <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
                 {totalItems === 0 ? (
-                  <span className="text-sm text-slate-400">Add content to the lanes below.</span>
+                  <span className="text-sm" style={{ color: '#374151' }}>Add content to the lanes below.</span>
                 ) : allDone ? (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
+                        style={{ color: '#10b981' }}>
                     <CheckCircle2 className="w-4 h-4" /> All caught up
                   </span>
                 ) : (
                   <>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      {completedItems} done
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+                          style={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                      <CheckCircle2 className="w-3.5 h-3.5" />{completedItems} done
                     </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                      <Circle className="w-3.5 h-3.5" />
-                      {remaining} remaining
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+                          style={{ backgroundColor: '#111827', color: '#94a3b8' }}>
+                      <Circle className="w-3.5 h-3.5" />{remaining} remaining
                     </span>
                   </>
                 )}
                 {totalItems > 0 && !allDone && (
-                  <span className="text-xs text-slate-400 font-medium ml-1">{progress}%</span>
+                  <span className="text-xs font-medium ml-1" style={{ color: '#374151' }}>
+                    {progress}%
+                  </span>
                 )}
               </div>
 
               {/* Progress bar */}
               {totalItems > 0 && (
-                <div className="mt-3 space-y-1 max-w-sm">
-                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="mt-3 max-w-xs">
+                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: '#111827' }}>
                     <div
-                      className={`h-full rounded-full transition-all duration-700 ${
-                        allDone || progress >= 70 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
-                        : progress >= 30          ? 'bg-gradient-to-r from-amber-400  to-amber-500'
-                        :                           'bg-gradient-to-r from-primary-500 to-primary-400'
-                      }`}
-                      style={{ width: `${progress}%` }}
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${progress}%`, backgroundColor: progressColor }}
                     />
                   </div>
                   {progress >= 70 && !allDone && (
-                    <p className="text-[11px] font-semibold text-emerald-600">You&apos;re close — keep going 🎯</p>
+                    <p className="text-[11px] font-semibold mt-1" style={{ color: '#10b981' }}>
+                      You&apos;re close — keep going 🎯
+                    </p>
                   )}
                 </div>
               )}
 
-              {/* Exam date + readiness */}
+              {/* Exam date */}
               <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                 {editingExamDate ? (
                   <input
                     type="date"
                     defaultValue={section.exam_date ?? ''}
                     autoFocus
-                    className="text-xs px-2.5 py-1 border border-slate-300 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    className="text-xs px-2.5 py-1 rounded-lg focus:outline-none"
+                    style={{
+                      backgroundColor: '#111827', border: '1px solid #f59e0b',
+                      color: '#f8fafc',
+                    }}
                     onBlur={(e) => {
                       setEditingExamDate(false);
                       setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date'));
@@ -556,17 +566,21 @@ export function SectionPage() {
                 ) : section.exam_date ? (
                   <button
                     onClick={() => setEditingExamDate(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full hover:bg-slate-200 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors"
+                    style={{ backgroundColor: '#111827', color: '#94a3b8' }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1a2230')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}
                   >
                     <Calendar className="w-3 h-3 flex-shrink-0" />
                     {formatExamDate(section.exam_date)}
                     {examDays !== null && (
-                      <span className={
-                        examDays <= 0  ? 'text-slate-400'
-                        : examDays <= 7  ? 'text-rose-600 font-bold'
-                        : examDays <= 14 ? 'text-amber-600'
-                        : 'text-slate-500'
-                      }>
+                      <span style={{
+                        color: examDays <= 0  ? '#4b5563'
+                             : examDays <= 7  ? '#ef4444'
+                             : examDays <= 14 ? '#f59e0b'
+                             : '#4b5563',
+                        fontWeight: 600,
+                      }}>
                         · {examDays > 0 ? `${examDays}d left` : examDays === 0 ? 'Today!' : 'Past'}
                       </span>
                     )}
@@ -574,21 +588,18 @@ export function SectionPage() {
                 ) : (
                   <button
                     onClick={() => setEditingExamDate(true)}
-                    className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-slate-500 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs transition-colors"
+                    style={{ color: '#263043' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#263043')}
                   >
                     <Calendar className="w-3 h-3" />
                     Set exam date
                   </button>
                 )}
-                {totalItems > 0 && (
-                  <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${readiness.cls}`}>
-                    Readiness: {readiness.label}
-                  </span>
-                )}
               </div>
             </div>
 
-            {/* Continue button */}
             <div className="flex-shrink-0">
               <ContinueButton section={section} />
             </div>
@@ -596,103 +607,136 @@ export function SectionPage() {
         </div>
       </div>
 
-      {/* Panic Mode banner */}
+      {/* Panic mode */}
       {isPanic && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5 mb-4 flex items-start gap-3 animate-fade-in">
-          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+        <div className="rounded-xl px-5 py-3.5 mb-4 flex items-start gap-3"
+             style={{ backgroundColor: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
           <div>
-            <p className="text-sm font-semibold text-amber-800">Panic mode — focus on high-impact items</p>
-            <p className="text-xs text-amber-600 mt-0.5 leading-relaxed">
-              Start with <span className="font-semibold">Exams</span> and <span className="font-semibold">To Do</span> — these move the needle most before your exam.
+            <p className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
+              Exam approaching — focus on high-impact items
+            </p>
+            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#4b5563' }}>
+              Start with <span style={{ color: '#94a3b8', fontWeight: 600 }}>Exams</span> and{' '}
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>To Do</span> — these move the needle most.
             </p>
           </div>
         </div>
       )}
 
-      {/* Course Hub */}
+      {/* ── 2. COURSE HUB ────────────────────────────────────────────────────── */}
       <CourseHub sectionId={section.id} />
 
-      {/* Today's Plan */}
+      {/* ── 3. TODAY'S PLAN ──────────────────────────────────────────────────── */}
       {todayPlan.length > 0 && (
-        <div
-          className="rounded-2xl mb-4 overflow-hidden animate-fade-in"
-          style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 55%, #3730a3 100%)' }}
-        >
-          {/* Card header */}
-          <div className="flex items-center justify-between px-5 py-2.5 border-b border-white/10">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-primary-300">Today&apos;s Plan</span>
-            <span className="text-[10px] font-semibold text-primary-400">{todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}</span>
+        <div className="rounded-xl mb-4 overflow-hidden"
+             style={{ backgroundColor: '#0d111a', border: '1px solid #263043', borderLeft: '2px solid #f59e0b' }}>
+          <div className="flex items-center justify-between px-5 py-2.5"
+               style={{ borderBottom: '1px solid #1a2230' }}>
+            <span className="text-[10px] font-bold uppercase tracking-widest"
+                  style={{ color: '#f59e0b' }}>
+              Today&apos;s Plan
+            </span>
+            <span className="text-[10px] font-semibold" style={{ color: '#374151' }}>
+              {todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}
+            </span>
           </div>
 
-          {/* First item — highlighted */}
+          {/* First item */}
           <button
             onClick={() => scrollToItem(todayPlan[0].item.id)}
-            className="w-full flex items-center gap-4 px-5 py-3.5 text-left hover:bg-white/5 transition-colors border-b border-white/10"
+            className="w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors"
+            style={{ borderBottom: '1px solid #1a2230' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse flex-shrink-0 mt-0.5" />
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse mt-0.5"
+                  style={{ backgroundColor: '#f59e0b' }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-primary-300">
+                <span className="text-[10px] font-bold uppercase tracking-widest"
+                      style={{ color: '#374151' }}>
                   {todayPlan[0].lane} · {todayPlan[0].reason}
                 </span>
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${EFFORT_COLOR[todayPlan[0].effort]}`}>
                   {todayPlan[0].effort}
                 </span>
               </div>
-              <p className="text-sm font-semibold text-white truncate leading-snug">{todayPlan[0].item.title}</p>
+              <p className="text-sm font-semibold truncate leading-snug"
+                 style={{ color: '#f8fafc' }}>
+                {todayPlan[0].item.title}
+              </p>
             </div>
-            <ArrowRight className="w-4 h-4 text-primary-300 flex-shrink-0" />
+            <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: '#374151' }} />
           </button>
 
-          {/* Items 2–3 */}
+          {/* Items 2-3 */}
           {todayPlan.slice(1).map((rec, i) => (
             <button
               key={rec.item.id}
               onClick={() => scrollToItem(rec.item.id)}
-              className="w-full flex items-center gap-4 px-5 py-2.5 text-left hover:bg-white/5 transition-colors border-b border-white/10 last:border-0"
+              className="w-full flex items-center gap-4 px-5 py-2.5 text-left transition-colors"
+              style={{ borderBottom: '1px solid #1a2230' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
-              <span className="text-[10px] font-bold text-primary-500 w-4 text-center flex-shrink-0">{i + 2}</span>
+              <span className="text-[10px] font-bold w-4 text-center flex-shrink-0"
+                    style={{ color: '#374151' }}>
+                {i + 2}
+              </span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-white/80 truncate">{rec.item.title}</p>
-                <p className="text-[10px] text-primary-400 mt-0.5">{rec.lane} · {rec.reason}</p>
+                <p className="text-xs font-semibold truncate" style={{ color: '#94a3b8' }}>
+                  {rec.item.title}
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#374151' }}>
+                  {rec.lane} · {rec.reason}
+                </p>
               </div>
             </button>
           ))}
 
           {/* Session CTA */}
-          <div className="px-5 py-3 border-t border-white/10">
+          <div className="px-5 py-3" style={{ borderTop: '1px solid #1a2230' }}>
             <button
               onClick={handleStartSession}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-semibold transition-all active:scale-[0.98] group"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all"
+              style={{ backgroundColor: '#f59e0b', color: '#000' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#fbbf24')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
             >
-              <PlayCircle className="w-4 h-4 group-hover:scale-110 transition-transform" />
+              <PlayCircle className="w-4 h-4" />
               {sessionIsThisCourse ? 'Resume Session →' : 'Start Session'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Quick Add bar */}
+      {/* ── 4. QUICK ADD ─────────────────────────────────────────────────────── */}
       <form onSubmit={handleQuickAdd} className="mb-4">
-        <div className="flex items-center gap-2 bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-2.5">
-          <Zap className="w-4 h-4 text-slate-300 flex-shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl px-4 py-2.5"
+             style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
+          <Zap className="w-4 h-4 flex-shrink-0" style={{ color: '#374151' }} />
           <input
             type="text"
             value={quickAdd}
             onChange={(e) => setQuickAdd(e.target.value)}
             placeholder="Quick add — type an action, paste a URL, or write a note…"
-            className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-300"
+            className="flex-1 text-sm bg-transparent outline-none"
+            style={{ color: '#f8fafc' }}
           />
           {quickAdd.trim() && (
             <button
               type="submit"
               disabled={quickAdding}
-              className="flex items-center gap-1.5 px-3 py-1 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-40 flex-shrink-0"
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 flex-shrink-0"
+              style={{ backgroundColor: '#f59e0b', color: '#000' }}
             >
               {quickAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (
                 <>
                   <Plus className="w-3 h-3" strokeWidth={2.5} />
-                  {detectQuickType(quickAdd).type === 'link' ? 'Save link' : detectQuickType(quickAdd).type === 'note' ? 'Save note' : 'Add action'}
+                  {detectQuickType(quickAdd).type === 'link' ? 'Save link'
+                   : detectQuickType(quickAdd).type === 'note' ? 'Save note'
+                   : 'Add action'}
                 </>
               )}
             </button>
@@ -700,56 +744,66 @@ export function SectionPage() {
         </div>
       </form>
 
-      {/* Tasks — Exercises group full-width */}
+      {/* ── 5. TO DO (Exercises group — full width, primary) ─────────────────── */}
       {exercisesGroup && (
         <div className="mb-4">
           <GroupComponent
             group={exercisesGroup}
             sectionId={section.id}
-            onUpdate={fetchSection}
+            {...groupCallbacks}
           />
         </div>
       )}
 
-      {/* Deadlines */}
-      <DeadlinesBlock sectionId={section.id} sectionTitle={section.title} pendingTaskCount={pendingTaskCount} />
+      {/* ── 6. IMPORTANT DATES ───────────────────────────────────────────────── */}
+      <DeadlinesBlock
+        sectionId={section.id}
+        sectionTitle={section.title}
+        pendingTaskCount={pendingTaskCount}
+      />
 
-      {/* Resources — all other groups, collapsed by default */}
+      {/* ── 7. RESOURCES (all other groups) ──────────────────────────────────── */}
       {resourceGroups.length > 0 && (
         <ResourcesBlock
           groups={resourceGroups}
           sectionId={section.id}
-          onUpdate={fetchSection}
+          groupCallbacks={groupCallbacks}
         />
       )}
 
-      {/* Add lane */}
-      <div className="mt-2">
+      {/* ── 8. ADD LANE ──────────────────────────────────────────────────────── */}
+      <div className="mt-2 mb-6">
         {showAddLane ? (
           <form
             onSubmit={handleAddLane}
-            className="flex gap-2.5 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 animate-slide-up"
+            className="flex gap-2.5 rounded-xl p-3"
+            style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}
           >
             <input
               type="text"
               value={newLaneTitle}
               onChange={(e) => setNewLaneTitle(e.target.value)}
-              placeholder="Lane name (e.g. Flashcards, Vocabulary, Lab Reports…)"
-              className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+              placeholder="Lane name (e.g. Flashcards, Lab Reports, Vocabulary…)"
+              className="flex-1 text-sm bg-transparent outline-none"
+              style={{ color: '#f8fafc' }}
               autoFocus
               onKeyDown={(e) => { if (e.key === 'Escape') { setShowAddLane(false); setNewLaneTitle(''); } }}
             />
             <button
               type="submit"
               disabled={addingLane || !newLaneTitle.trim()}
-              className="px-4 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-semibold text-sm transition-colors disabled:opacity-40 flex items-center gap-2 whitespace-nowrap"
+              className="px-3.5 py-1.5 rounded-lg font-semibold text-sm transition-colors disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap"
+              style={{ backgroundColor: '#f59e0b', color: '#000' }}
             >
-              {addingLane ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create lane'}
+              {addingLane ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create'}
             </button>
             <button
               type="button"
               onClick={() => { setShowAddLane(false); setNewLaneTitle(''); }}
-              className="p-2 text-slate-400 hover:text-slate-700 transition-colors rounded-xl hover:bg-slate-100"
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ color: '#374151' }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -757,13 +811,106 @@ export function SectionPage() {
         ) : (
           <button
             onClick={() => setShowAddLane(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-200 hover:border-primary-300 hover:bg-primary-50/20 rounded-2xl text-sm font-semibold text-slate-400 hover:text-primary-600 transition-all"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all"
+            style={{ border: '2px dashed #1a2230', color: '#374151' }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = '#f59e0b';
+              e.currentTarget.style.color = '#f59e0b';
+              e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.04)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = '#1a2230';
+              e.currentTarget.style.color = '#374151';
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
             Add lane
           </button>
         )}
       </div>
+
+      {showCustomize && (
+        <CustomizeModal
+          sectionTitle={section.title}
+          value={customization}
+          onChange={setCustomization}
+          onClose={() => setShowCustomize(false)}
+        />
+      )}
     </Layout>
+  );
+}
+
+// ── ResourcesBlock ────────────────────────────────────────────────────────────
+
+function ResourcesBlock({
+  groups, sectionId, groupCallbacks,
+}: {
+  groups: GroupWithItems[];
+  sectionId: string;
+  groupCallbacks: {
+    onAddItem: (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
+    onPushItem: (groupId: string, item: Item) => void;
+    onToggleItem: (itemId: string, completed: boolean) => Promise<void>;
+    onDeleteItem: (itemId: string) => Promise<void>;
+    onUpdateItem: (itemId: string, updates: { title?: string; content?: string | null }) => Promise<void>;
+    onRenameGroup: (groupId: string, title: string) => Promise<void>;
+    onDeleteGroup: (groupId: string) => Promise<void>;
+    onRefresh: () => void;
+  };
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
+
+  return (
+    <div className="rounded-xl overflow-hidden mb-4"
+         style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
+      {/* Header */}
+      <div
+        className="px-4 py-3 flex items-center justify-between cursor-pointer select-none transition-colors"
+        style={{ borderBottom: isOpen ? '1px solid #1a2230' : 'none' }}
+        onClick={() => setIsOpen(o => !o)}
+        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
+        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+      >
+        <div className="flex items-center gap-2">
+          <span className="flex-shrink-0" style={{ color: '#374151' }}>
+            {isOpen
+              ? <ChevronDown  className="w-3.5 h-3.5" />
+              : <ChevronRight className="w-3.5 h-3.5" />}
+          </span>
+          <span className="text-xs font-bold uppercase tracking-[0.12em]"
+                style={{ color: '#f8fafc' }}>
+            Resources
+          </span>
+          {totalItems > 0 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ backgroundColor: '#111827', color: '#4b5563' }}>
+              {totalItems}
+            </span>
+          )}
+        </div>
+        <span className="text-[10px]" style={{ color: '#374151' }}>
+          {groups.map(g => g.title === 'Exercises' ? 'To Do' : g.title).join(' · ')}
+        </span>
+      </div>
+
+      {/* Body */}
+      {isOpen && (
+        <div className="p-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {groups.map((group) => (
+              <GroupComponent
+                key={group.id}
+                group={group}
+                sectionId={sectionId}
+                {...groupCallbacks}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -20,17 +20,21 @@ export function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#05070b', color: '#f8fafc' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: '#05070b', color: '#f8fafc' }}>
 
-      <nav style={{ backgroundColor: '#080b12', borderBottom: '1px solid #263043' }}
-           className="sticky top-0 z-50 backdrop-blur-sm">
+      <nav
+        className="sticky top-0 z-50"
+        style={{ backgroundColor: '#05070b', borderBottom: '1px solid #0f1520' }}
+      >
         <div className="max-w-4xl mx-auto px-6">
-          <div className="flex items-center justify-between h-12">
+          <div className="flex items-center justify-between h-11">
 
-            <Link to="/dashboard" className="flex items-center gap-2.5 group">
-              <div className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
-                   style={{ backgroundColor: '#f59e0b' }}>
-                <BookOpenCheck className="w-3.5 h-3.5 text-black" strokeWidth={2.5} />
+            <Link to="/dashboard" className="flex items-center gap-2 group">
+              <div
+                className="w-5 h-5 rounded flex items-center justify-center"
+                style={{ backgroundColor: '#f59e0b' }}
+              >
+                <BookOpenCheck className="w-3 h-3 text-black" strokeWidth={2.5} />
               </div>
               <span className="font-bold text-white text-sm tracking-tight">Focus</span>
             </Link>
@@ -39,27 +43,33 @@ export function Layout({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-0.5">
                 <Link
                   to="/dashboard"
-                  className="text-sm px-3 py-1.5 rounded-lg transition-colors"
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
                   style={pathname === '/dashboard'
-                    ? { backgroundColor: '#111827', color: '#f8fafc' }
-                    : { color: '#94a3b8' }}
+                    ? { color: '#f8fafc', backgroundColor: '#0d111a' }
+                    : { color: '#4b5563' }}
+                  onMouseEnter={e => { if (pathname !== '/dashboard') e.currentTarget.style.color = '#94a3b8'; }}
+                  onMouseLeave={e => { if (pathname !== '/dashboard') e.currentTarget.style.color = '#4b5563'; }}
                 >
                   Dashboard
                 </Link>
                 <Link
                   to="/schedule"
-                  className="text-sm px-3 py-1.5 rounded-lg transition-colors"
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
                   style={pathname === '/schedule'
-                    ? { backgroundColor: '#111827', color: '#f8fafc' }
-                    : { color: '#94a3b8' }}
+                    ? { color: '#f8fafc', backgroundColor: '#0d111a' }
+                    : { color: '#4b5563' }}
+                  onMouseEnter={e => { if (pathname !== '/schedule') e.currentTarget.style.color = '#94a3b8'; }}
+                  onMouseLeave={e => { if (pathname !== '/schedule') e.currentTarget.style.color = '#4b5563'; }}
                 >
                   Schedule
                 </Link>
-                <span className="w-px h-3.5 mx-2" style={{ backgroundColor: '#263043' }} />
+                <span className="w-px h-3 mx-2" style={{ backgroundColor: '#0f1520' }} />
                 <button
                   onClick={handleSignOut}
-                  className="text-sm px-2 py-1.5 transition-colors"
-                  style={{ color: '#94a3b8' }}
+                  className="text-xs px-2 py-1.5 transition-colors"
+                  style={{ color: '#263043' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#4b5563')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#263043')}
                 >
                   Sign out
                 </button>
@@ -70,7 +80,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </nav>
 
-      <main className="max-w-4xl mx-auto px-6 py-10">
+      <main className="max-w-4xl mx-auto px-6 py-8">
         {children}
       </main>
 
