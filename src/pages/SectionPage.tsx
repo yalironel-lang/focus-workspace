@@ -1,19 +1,21 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
-import { useWorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
+import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { Layout } from '../components/Layout';
 import { GroupComponent } from '../components/GroupComponent';
 import { ContinueButton } from '../components/ContinueButton';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
+import { DesignModeBar } from '../components/DesignModeBar';
 import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar,
   AlertTriangle, CheckSquare, Square, PlayCircle, ChevronDown, ChevronRight,
+  Sliders,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -296,6 +298,79 @@ export function SectionPage() {
   const [quickAdding,     setQuickAdding]      = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
+
+  // ── Design Mode state ─────────────────────────────────────────────────────
+  const [designMode,      setDesignMode]      = useState(false);
+  const designSnapshot = useRef<WorkspaceCustomization | null>(null);
+
+  // Drag-and-drop for lane reorder (HTML5 drag API)
+  const [dragId,     setDragId]     = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+
+  const enterDesignMode = () => {
+    designSnapshot.current = { ...customization };
+    setDesignMode(true);
+  };
+
+  const exitDesignMode = () => setDesignMode(false);
+
+  const resetDesign = () => {
+    if (designSnapshot.current) setCustomization(designSnapshot.current);
+    setDesignMode(false);
+  };
+
+  const toggleHideLane = (groupId: string) => {
+    const hidden = customization.hiddenLanes ?? [];
+    const next = hidden.includes(groupId)
+      ? hidden.filter(id => id !== groupId)
+      : [...hidden, groupId];
+    setCustomization({ ...customization, hiddenLanes: next });
+  };
+
+  // Groups in user-defined order (Design Mode drag reorder)
+  const orderedGroups: GroupWithItems[] = (() => {
+    if (!section) return [];
+    const all = section.groups;
+    const order = customization.laneOrder ?? [];
+    if (!order.length) return all;
+    const known = order
+      .map(gid => all.find(g => g.id === gid))
+      .filter((g): g is GroupWithItems => !!g);
+    const rest = all.filter(g => !order.includes(g.id));
+    return [...known, ...rest];
+  })();
+
+  const handleDragStart = (_e: React.DragEvent, groupId: string) => {
+    dragIdRef.current = groupId;
+    setDragId(groupId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, groupId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (groupId !== dragIdRef.current) setDragOverId(groupId);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = dragIdRef.current;
+    if (!sourceId || sourceId === targetId) { handleDragEnd(); return; }
+    const allIds = orderedGroups.map(g => g.id);
+    const fromIdx = allIds.indexOf(sourceId);
+    const toIdx   = allIds.indexOf(targetId);
+    const newOrder = [...allIds];
+    newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, sourceId);
+    setCustomization({ ...customization, laneOrder: newOrder });
+    handleDragEnd();
+  };
+
+  const handleDragEnd = () => {
+    setDragId(null);
+    setDragOverId(null);
+    dragIdRef.current = null;
+  };
 
   const activeSession        = loadSession();
   const sessionIsThisCourse  = activeSession?.sectionId === id;
@@ -600,15 +675,28 @@ export function SectionPage() {
               </div>
             </div>
 
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0 flex flex-col items-end gap-2">
               <ContinueButton section={section} />
+              {!designMode && (
+                <button
+                  onClick={enterDesignMode}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                  style={{ backgroundColor: '#f59e0b', color: '#000' }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#fbbf24')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
+                  title="Customize layout"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  Design Mode
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Panic mode */}
-      {isPanic && (
+      {/* Panic mode (hidden in Design Mode) */}
+      {isPanic && !designMode && (
         <div className="rounded-xl px-5 py-3.5 mb-4 flex items-start gap-3"
              style={{ backgroundColor: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
           <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
@@ -624,11 +712,21 @@ export function SectionPage() {
         </div>
       )}
 
-      {/* ── 2. COURSE HUB ────────────────────────────────────────────────────── */}
-      <CourseHub sectionId={section.id} />
+      {/* ── 1b. DESIGN MODE BAR ─────────────────────────────────────────────── */}
+      {designMode && (
+        <DesignModeBar
+          customization={customization}
+          onChange={setCustomization}
+          onDone={exitDesignMode}
+          onReset={resetDesign}
+        />
+      )}
 
-      {/* ── 3. TODAY'S PLAN ──────────────────────────────────────────────────── */}
-      {todayPlan.length > 0 && (
+      {/* ── 2. COURSE HUB (hidden in Design Mode for focus) ─────────────────── */}
+      {!designMode && <CourseHub sectionId={section.id} />}
+
+      {/* ── 3. TODAY'S PLAN (hidden in Design Mode) ──────────────────────────── */}
+      {!designMode && todayPlan.length > 0 && (
         <div className="rounded-xl mb-4 overflow-hidden"
              style={{ backgroundColor: '#0d111a', border: '1px solid #263043', borderLeft: '2px solid #f59e0b' }}>
           <div className="flex items-center justify-between px-5 py-2.5"
@@ -711,8 +809,8 @@ export function SectionPage() {
         </div>
       )}
 
-      {/* ── 4. QUICK ADD ─────────────────────────────────────────────────────── */}
-      <form onSubmit={handleQuickAdd} className="mb-4">
+      {/* ── 4. QUICK ADD (hidden in Design Mode) ─────────────────────────────── */}
+      {!designMode && <form onSubmit={handleQuickAdd} className="mb-4">
         <div className="flex items-center gap-2 rounded-xl px-4 py-2.5"
              style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
           <Zap className="w-4 h-4 flex-shrink-0" style={{ color: '#374151' }} />
@@ -742,37 +840,81 @@ export function SectionPage() {
             </button>
           )}
         </div>
-      </form>
+      </form>}
 
-      {/* ── 5. TO DO (Exercises group — full width, primary) ─────────────────── */}
-      {exercisesGroup && (
-        <div className="mb-4">
-          <GroupComponent
-            group={exercisesGroup}
-            sectionId={section.id}
-            {...groupCallbacks}
-          />
+      {/* ── 5 / 7. GROUPS ────────────────────────────────────────────────────── */}
+      {designMode ? (
+        /* ─ Design Mode: flat draggable list of ALL groups ─ */
+        <div className="space-y-3 mb-4">
+          {orderedGroups.map(group => {
+            const isDragging  = dragId     === group.id;
+            const isDragOver  = dragOverId === group.id && dragId !== group.id;
+            return (
+              <div
+                key={group.id}
+                draggable
+                onDragStart={e => handleDragStart(e, group.id)}
+                onDragOver={e  => handleDragOver(e,  group.id)}
+                onDrop={e      => handleDrop(e,      group.id)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  opacity:       isDragging ? 0.35 : 1,
+                  outline:       isDragOver ? '2px solid #f59e0b' : 'none',
+                  outlineOffset: '3px',
+                  borderRadius:  '14px',
+                  transition:    'opacity 0.15s',
+                  cursor:        'grab',
+                }}
+              >
+                <GroupComponent
+                  group={group}
+                  sectionId={section.id}
+                  {...groupCallbacks}
+                  designMode
+                  isHidden={(customization.hiddenLanes ?? []).includes(group.id)}
+                  onToggleHide={() => toggleHideLane(group.id)}
+                  density={customization.density || 'comfortable'}
+                />
+              </div>
+            );
+          })}
         </div>
-      )}
+      ) : (
+        /* ─ Normal mode: existing two-tier layout ─ */
+        <>
+          {/* Primary: Exercises (To Do) — full width, visible only if not hidden */}
+          {exercisesGroup && !(customization.hiddenLanes ?? []).includes(exercisesGroup.id) && (
+            <div className="mb-4">
+              <GroupComponent
+                group={exercisesGroup}
+                sectionId={section.id}
+                {...groupCallbacks}
+                density={customization.density || ''}
+              />
+            </div>
+          )}
 
-      {/* ── 6. IMPORTANT DATES ───────────────────────────────────────────────── */}
-      <DeadlinesBlock
-        sectionId={section.id}
-        sectionTitle={section.title}
-        pendingTaskCount={pendingTaskCount}
-      />
+          {/* ── 6. IMPORTANT DATES ─────────────────────────────────────────── */}
+          <DeadlinesBlock
+            sectionId={section.id}
+            sectionTitle={section.title}
+            pendingTaskCount={pendingTaskCount}
+          />
 
-      {/* ── 7. RESOURCES (all other groups) ──────────────────────────────────── */}
-      {resourceGroups.length > 0 && (
-        <ResourcesBlock
-          groups={resourceGroups}
-          sectionId={section.id}
-          groupCallbacks={groupCallbacks}
-        />
+          {/* Resources: all other groups filtered by hiddenLanes */}
+          {resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id)).length > 0 && (
+            <ResourcesBlock
+              groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
+              sectionId={section.id}
+              groupCallbacks={groupCallbacks}
+              density={customization.density || ''}
+            />
+          )}
+        </>
       )}
 
       {/* ── 8. ADD LANE ──────────────────────────────────────────────────────── */}
-      <div className="mt-2 mb-6">
+      {!designMode && <div className="mt-2 mb-6">
         {showAddLane ? (
           <form
             onSubmit={handleAddLane}
@@ -828,7 +970,7 @@ export function SectionPage() {
             Add lane
           </button>
         )}
-      </div>
+      </div>}
 
       {showCustomize && (
         <CustomizeModal
@@ -845,10 +987,11 @@ export function SectionPage() {
 // ── ResourcesBlock ────────────────────────────────────────────────────────────
 
 function ResourcesBlock({
-  groups, sectionId, groupCallbacks,
+  groups, sectionId, groupCallbacks, density = '',
 }: {
   groups: GroupWithItems[];
   sectionId: string;
+  density?: 'compact' | 'comfortable' | 'spacious' | '';
   groupCallbacks: {
     onAddItem: (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
     onPushItem: (groupId: string, item: Item) => void;
@@ -906,6 +1049,7 @@ function ResourcesBlock({
                 group={group}
                 sectionId={sectionId}
                 {...groupCallbacks}
+                density={density}
               />
             ))}
           </div>

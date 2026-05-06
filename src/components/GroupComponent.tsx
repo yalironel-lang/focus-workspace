@@ -5,7 +5,7 @@ import { AddItemModal } from './AddItemModal';
 import {
   Plus, FileText, ListTodo, ClipboardCheck, StickyNote, Link2,
   BookOpen, Sigma, AlertCircle, ChevronDown, ChevronRight,
-  Pencil, Check, X, Trash2, MoreHorizontal,
+  Pencil, Check, X, Trash2, MoreHorizontal, GripVertical, Eye, EyeOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -26,6 +26,11 @@ interface GroupProps {
   onDeleteGroup: (groupId: string) => Promise<void>;
   // Full refresh — used only after file uploads
   onRefresh: () => void;
+  // Design Mode props (all optional — normal mode works without them)
+  designMode?: boolean;
+  isHidden?: boolean;
+  onToggleHide?: () => void;
+  density?: 'compact' | 'comfortable' | 'spacious' | '';
 }
 
 // Display-only rename: DB "Exercises" shown as "To Do"
@@ -68,6 +73,10 @@ export function GroupComponent({
   onAddItem, onPushItem, onToggleItem, onDeleteItem, onUpdateItem,
   onRenameGroup, onDeleteGroup,
   onRefresh,
+  designMode = false,
+  isHidden   = false,
+  onToggleHide,
+  density    = '',
 }: GroupProps) {
   const [showAddModal,  setShowAddModal]  = useState(false);
   const [modalDefaults, setModalDefaults] = useState<{ type?: ItemType; title?: string }>({});
@@ -135,161 +144,300 @@ export function GroupComponent({
     setIsRenaming(true);
   };
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Density-aware sizes ───────────────────────────────────────────────────────
+  const eff = density || 'comfortable';
+  const headerPadding = eff === 'compact' ? '7px 14px' : eff === 'spacious' ? '15px 14px' : '10px 14px';
+  const bodyPad       = eff === 'compact' ? 'p-1'      : eff === 'spacious' ? 'p-3'       : 'p-2';
+  const itemsGap      = eff === 'compact' ? 'space-y-0'  : eff === 'spacious' ? 'space-y-2' : 'space-y-0.5';
+
+  // ── Styles ────────────────────────────────────────────────────────────────────
   const cardStyle: React.CSSProperties = {
     backgroundColor: '#0d111a',
     border: '1px solid #263043',
     borderLeft: `3px solid ${accent}`,
     borderRadius: '12px',
     overflow: 'hidden',
+    opacity: designMode && isHidden ? 0.45 : 1,
+    transition: 'opacity 0.2s',
   };
 
   const headerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '10px 14px',
-    borderBottom: isOpen ? '1px solid #1a2230' : 'none',
+    padding: headerPadding,
+    borderBottom: isOpen && !designMode ? '1px solid #1a2230' : designMode ? '1px solid #1a2230' : 'none',
     backgroundColor: 'transparent',
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div style={cardStyle}>
 
-      {/* Group header */}
+      {/* ── Group header ───────────────────────────────────────────────────── */}
       <div style={headerStyle}>
 
-        {/* Left: toggle + icon + title */}
-        <div
-          className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer select-none"
-          onClick={() => !isRenaming && setIsOpen(o => !o)}
-        >
-          {!isRenaming && (
-            <span className="flex-shrink-0" style={{ color: '#374151' }}>
-              {isOpen
-                ? <ChevronDown  className="w-3 h-3" />
-                : <ChevronRight className="w-3 h-3" />}
-            </span>
-          )}
-
-          <span className="flex-shrink-0" style={{ color: accent }}>
-            {icon}
-          </span>
-
-          {isRenaming ? (
-            <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
-              <input
-                value={renameValue}
-                onChange={e => setRenameValue(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-                  if (e.key === 'Escape') cancelRename();
-                }}
-                className="flex-1 min-w-0 text-sm font-semibold rounded-lg px-2 py-0.5 focus:outline-none"
-                style={{
-                  backgroundColor: '#111827', border: '1px solid #f59e0b',
-                  color: '#f8fafc',
-                }}
-                autoFocus
-                onClick={e => e.stopPropagation()}
-              />
-              <button
-                onMouseDown={e => { e.preventDefault(); commitRename(); }}
-                className="p-0.5 rounded transition-colors flex-shrink-0"
-                style={{ color: '#10b981' }}
+        {designMode ? (
+          /* ─ Design Mode header ─ */
+          <>
+            {/* Drag handle + icon + title (+ rename input if active) */}
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {/* Drag handle — visual cue, actual drag is on wrapper in SectionPage */}
+              <span
+                className="flex-shrink-0 cursor-grab"
+                style={{ color: '#2a3a50', touchAction: 'none' }}
+                title="Drag to reorder"
               >
-                <Check className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onMouseDown={e => { e.preventDefault(); cancelRename(); }}
-                className="p-0.5 rounded transition-colors flex-shrink-0"
-                style={{ color: '#4b5563' }}
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-semibold text-sm truncate" style={{ color: '#f8fafc' }}>
-                {displayGroupName(group.title)}
+                <GripVertical className="w-4 h-4" />
               </span>
-              {group.items.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 tabular-nums"
-                      style={{ backgroundColor: '#111827', color: '#4b5563' }}>
-                  {taskItems.length > 0
-                    ? `${completedTasks}/${taskItems.length}`
-                    : group.items.length}
+
+              <span className="flex-shrink-0" style={{ color: accent }}>
+                {icon}
+              </span>
+
+              {isRenaming ? (
+                <div
+                  className="flex items-center gap-1.5 flex-1 min-w-0"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <input
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                    className="flex-1 min-w-0 text-sm font-semibold rounded-lg px-2 py-0.5 focus:outline-none"
+                    style={{ backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc' }}
+                    autoFocus
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <button
+                    onMouseDown={e => { e.preventDefault(); commitRename(); }}
+                    className="p-0.5 rounded transition-colors flex-shrink-0"
+                    style={{ color: '#10b981' }}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); cancelRename(); }}
+                    className="p-0.5 rounded transition-colors flex-shrink-0"
+                    style={{ color: '#4b5563' }}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-semibold text-sm truncate" style={{ color: isHidden ? '#475569' : '#f8fafc' }}>
+                    {displayGroupName(group.title)}
+                    {isHidden && (
+                      <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: '#334155' }}>
+                        hidden
+                      </span>
+                    )}
+                  </span>
+                  {group.items.length > 0 && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 tabular-nums"
+                      style={{ backgroundColor: '#111827', color: '#4b5563' }}
+                    >
+                      {taskItems.length > 0
+                        ? `${completedTasks}/${taskItems.length}`
+                        : group.items.length}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Design Mode right controls */}
+            {!isRenaming && (
+              <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+                {/* Rename */}
+                <button
+                  onClick={e => { e.stopPropagation(); handleStartRename(); }}
+                  className="p-1.5 rounded-lg transition-all"
+                  style={{ color: '#334155' }}
+                  title="Rename lane"
+                  onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = '#111827'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#334155'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Hide / Show toggle */}
+                {onToggleHide && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onToggleHide(); }}
+                    className="p-1.5 rounded-lg transition-all"
+                    style={{ color: isHidden ? '#f59e0b' : '#475569' }}
+                    title={isHidden ? 'Show lane' : 'Hide lane'}
+                    onMouseEnter={e => { e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.1)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = isHidden ? '#f59e0b' : '#475569'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    {isHidden
+                      ? <EyeOff className="w-3.5 h-3.5" />
+                      : <Eye    className="w-3.5 h-3.5" />
+                    }
+                  </button>
+                )}
+
+                {/* Delete */}
+                <button
+                  onClick={e => { e.stopPropagation(); handleDeleteGroup(); }}
+                  className="p-1.5 rounded-lg transition-all"
+                  style={{ color: '#334155' }}
+                  title="Delete lane"
+                  onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#334155'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          /* ─ Normal mode header ─ */
+          <>
+            {/* Left: toggle + icon + title */}
+            <div
+              className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer select-none"
+              onClick={() => !isRenaming && setIsOpen(o => !o)}
+            >
+              {!isRenaming && (
+                <span className="flex-shrink-0" style={{ color: '#374151' }}>
+                  {isOpen
+                    ? <ChevronDown  className="w-3 h-3" />
+                    : <ChevronRight className="w-3 h-3" />}
                 </span>
               )}
-            </div>
-          )}
-        </div>
 
-        {/* Right: Add + More menu */}
-        {!isRenaming && (
-          <div className="flex items-center gap-0.5 flex-shrink-0 ml-2" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => openModal()}
-              className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-all"
-              style={{ color: '#4b5563' }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#f8fafc'; e.currentTarget.style.backgroundColor = '#111827'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#4b5563'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-              Add
-            </button>
+              <span className="flex-shrink-0" style={{ color: accent }}>
+                {icon}
+              </span>
 
-            {/* More menu */}
-            <div className="relative">
-              <button
-                onClick={() => setShowMore(v => !v)}
-                className="p-1 rounded-lg transition-all"
-                style={{ color: '#374151' }}
-                onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = '#111827'; }}
-                onMouseLeave={e => { e.currentTarget.style.color = '#374151'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-              >
-                <MoreHorizontal className="w-3.5 h-3.5" />
-              </button>
-
-              {showMore && (
-                <>
-                  {/* Backdrop */}
-                  <div className="fixed inset-0 z-20" onClick={() => setShowMore(false)} />
-                  <div
-                    className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden shadow-2xl"
-                    style={{ backgroundColor: '#0d111a', border: '1px solid #263043', minWidth: '140px' }}
+              {isRenaming ? (
+                <div
+                  className="flex items-center gap-1.5 flex-1 min-w-0"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <input
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter')  { e.preventDefault(); commitRename(); }
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                    className="flex-1 min-w-0 text-sm font-semibold rounded-lg px-2 py-0.5 focus:outline-none"
+                    style={{ backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc' }}
+                    autoFocus
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <button
+                    onMouseDown={e => { e.preventDefault(); commitRename(); }}
+                    className="p-0.5 rounded transition-colors flex-shrink-0"
+                    style={{ color: '#10b981' }}
                   >
-                    <button
-                      onClick={handleStartRename}
-                      className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm text-left transition-colors"
-                      style={{ color: '#94a3b8' }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); cancelRename(); }}
+                    className="p-0.5 rounded transition-colors flex-shrink-0"
+                    style={{ color: '#4b5563' }}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-semibold text-sm truncate" style={{ color: '#f8fafc' }}>
+                    {displayGroupName(group.title)}
+                  </span>
+                  {group.items.length > 0 && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 tabular-nums"
+                      style={{ backgroundColor: '#111827', color: '#4b5563' }}
                     >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Rename
-                    </button>
-                    <button
-                      onClick={handleDeleteGroup}
-                      className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm text-left transition-colors"
-                      style={{ color: '#ef4444' }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.1)')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete lane
-                    </button>
-                  </div>
-                </>
+                      {taskItems.length > 0
+                        ? `${completedTasks}/${taskItems.length}`
+                        : group.items.length}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
-          </div>
+
+            {/* Right: Add + More menu */}
+            {!isRenaming && (
+              <div
+                className="flex items-center gap-0.5 flex-shrink-0 ml-2"
+                onClick={e => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => openModal()}
+                  className="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-all"
+                  style={{ color: '#4b5563' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#f8fafc'; e.currentTarget.style.backgroundColor = '#111827'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#4b5563'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  Add
+                </button>
+
+                {/* More menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowMore(v => !v)}
+                    className="p-1 rounded-lg transition-all"
+                    style={{ color: '#374151' }}
+                    onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = '#111827'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#374151'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <MoreHorizontal className="w-3.5 h-3.5" />
+                  </button>
+
+                  {showMore && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setShowMore(false)} />
+                      <div
+                        className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden shadow-2xl"
+                        style={{ backgroundColor: '#0d111a', border: '1px solid #263043', minWidth: '140px' }}
+                      >
+                        <button
+                          onClick={handleStartRename}
+                          className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm text-left transition-colors"
+                          style={{ color: '#94a3b8' }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Rename
+                        </button>
+                        <button
+                          onClick={handleDeleteGroup}
+                          className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm text-left transition-colors"
+                          style={{ color: '#ef4444' }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.1)')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete lane
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Collapsed summary */}
-      {!isOpen && (
+      {/* ── Collapsed summary (normal mode only) ──────────────────────────── */}
+      {!designMode && !isOpen && (
         <div className="px-4 py-2 text-xs" style={{ color: '#374151' }}>
           {group.items.length === 0
             ? 'No items yet'
@@ -297,11 +445,18 @@ export function GroupComponent({
         </div>
       )}
 
-      {/* Body */}
-      {isOpen && (
-        <div className="p-2">
+      {/* ── Body ─────────────────────────────────────────────────────────── */}
+      {(isOpen || designMode) && (
+        <div className={bodyPad}>
           {group.items.length === 0 ? (
-            group.title === 'Notes' ? (
+            designMode ? (
+              /* Compact empty state in design mode */
+              <div className="px-3 py-3 text-center">
+                <p className="text-xs italic" style={{ color: '#334155' }}>
+                  {emptyState.text}
+                </p>
+              </div>
+            ) : group.title === 'Notes' ? (
               <div className="px-2 py-2 space-y-1">
                 <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2"
                    style={{ color: '#374151' }}>Quick templates</p>
@@ -355,7 +510,7 @@ export function GroupComponent({
               </button>
             )
           ) : (
-            <div className="space-y-0.5">
+            <div className={itemsGap}>
               {sortedItems.map((item) => (
                 <ItemComponent
                   key={item.id}
@@ -367,16 +522,18 @@ export function GroupComponent({
                   onUpdate={onUpdateItem}
                 />
               ))}
-              <button
-                onClick={() => openModal()}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs rounded-xl transition-colors"
-                style={{ color: '#374151' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
-                onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
-              >
-                <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-                Add item
-              </button>
+              {!designMode && (
+                <button
+                  onClick={() => openModal()}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs rounded-xl transition-colors"
+                  style={{ color: '#374151' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                  Add item
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -1,9 +1,12 @@
 import { useState, useCallback } from 'react';
 
 export interface WorkspaceCustomization {
-  icon:   string;                                        // emoji / text
-  accent: string;                                        // preset hex or ''
-  cover:  'minimal' | 'focus' | 'urgent' | '';          // card cover style
+  icon:         string;
+  accent:       string;
+  cover:        'minimal' | 'focus' | 'urgent' | '';
+  density:      'compact' | 'comfortable' | 'spacious' | '';
+  laneOrder:    string[];   // group IDs in preferred display order; [] = natural DB order
+  hiddenLanes:  string[];   // group IDs hidden in normal view
 }
 
 export const ACCENT_PRESETS: { key: string; label: string; color: string }[] = [
@@ -17,7 +20,10 @@ export const ACCENT_PRESETS: { key: string; label: string; color: string }[] = [
 
 const STORAGE_KEY = 'focus_workspace_customization';
 
-const DEFAULT: WorkspaceCustomization = { icon: '', accent: '', cover: '' };
+const DEFAULT: WorkspaceCustomization = {
+  icon: '', accent: '', cover: '',
+  density: '', laneOrder: [], hiddenLanes: [],
+};
 
 function readAll(): Record<string, WorkspaceCustomization> {
   try {
@@ -34,10 +40,22 @@ function writeAll(data: Record<string, WorkspaceCustomization>) {
   } catch { /* storage quota — silently ignore */ }
 }
 
+/** Merge stored (partial) data with DEFAULT so old records without new fields work fine. */
+function hydrate(raw: Partial<WorkspaceCustomization>): WorkspaceCustomization {
+  return {
+    icon:         raw.icon         ?? DEFAULT.icon,
+    accent:       raw.accent       ?? DEFAULT.accent,
+    cover:        raw.cover        ?? DEFAULT.cover,
+    density:      raw.density      ?? DEFAULT.density,
+    laneOrder:    raw.laneOrder    ?? DEFAULT.laneOrder,
+    hiddenLanes:  raw.hiddenLanes  ?? DEFAULT.hiddenLanes,
+  };
+}
+
 export function useWorkspaceCustomization(sectionId: string) {
   const [customization, setCustomizationState] = useState<WorkspaceCustomization>(() => {
     if (!sectionId) return DEFAULT;
-    return readAll()[sectionId] ?? DEFAULT;
+    return hydrate(readAll()[sectionId] ?? {});
   });
 
   const setCustomization = useCallback((next: WorkspaceCustomization) => {
@@ -54,5 +72,5 @@ export function useWorkspaceCustomization(sectionId: string) {
 /** Read-only helper for components that only need to display the customization
  *  (e.g. SectionCard on the dashboard) without subscribing to changes. */
 export function getWorkspaceCustomization(sectionId: string): WorkspaceCustomization {
-  return readAll()[sectionId] ?? DEFAULT;
+  return hydrate(readAll()[sectionId] ?? {});
 }
