@@ -127,12 +127,11 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
           </div>
         </div>
 
-        {/* Next action — prominent, above progress */}
+        {/* Next action */}
         {section.next_item_title && (
-          <div className="mb-3.5 px-3 py-2.5 bg-[#070b14] border border-[#1a2236] rounded-xl">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-600 mb-1">Next up</p>
-            <p className="text-sm font-semibold text-slate-200 truncate leading-snug">{section.next_item_title}</p>
-          </div>
+          <p className="text-xs text-slate-500 truncate mb-3.5">
+            → <span className="text-slate-400">{section.next_item_title}</span>
+          </p>
         )}
 
         {/* Progress bar */}

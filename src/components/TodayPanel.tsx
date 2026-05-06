@@ -72,12 +72,13 @@ export function TodayPanel({ sections }: Props) {
   const todayDow    = new Date().getDay();
   const todayBlocks = blocks
     .filter(b => b.day_of_week === todayDow)
-    .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    .sort((a, b) => a.start_time.localeCompare(b.start_time))
+    .slice(0, 1);
 
   const upcoming = deadlines
     .filter(d => !d.completed)
     .filter(d => deadlineUrgency(d.due_date) !== 'later')
-    .slice(0, 5);
+    .slice(0, 1);
 
   const focusSection = sections
     .filter(s => s.next_item_title)
@@ -177,23 +178,6 @@ export function TodayPanel({ sections }: Props) {
                   );
                 })}
               </div>
-              <button
-                onClick={() => setShowAddBlock(true)}
-                className="mt-2 text-xs text-slate-600 hover:text-slate-400 transition-colors flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" strokeWidth={2} /> Add class
-              </button>
-            </section>
-          )}
-
-          {todayBlocks.length === 0 && hasContent && (
-            <section className="px-5 py-3">
-              <button
-                onClick={() => setShowAddBlock(true)}
-                className="text-xs text-slate-600 hover:text-emerald-400 transition-colors flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" strokeWidth={2} /> Add today's classes
-              </button>
             </section>
           )}
 
@@ -214,12 +198,6 @@ export function TodayPanel({ sections }: Props) {
                   />
                 ))}
               </div>
-              <button
-                onClick={() => setShowAddDeadline(true)}
-                className="mt-2 text-xs text-slate-600 hover:text-slate-400 transition-colors flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" strokeWidth={2} /> Add deadline
-              </button>
             </section>
           )}
 
