@@ -8,14 +8,13 @@ import { TYPE_META } from './MyPortals';
 import { CourseLink, CourseLinkType, PortalScope } from '../types';
 import toast from 'react-hot-toast';
 
-// Starters for this context (course-specific)
 const COURSE_STARTERS: { type: CourseLinkType; label: string; placeholder: string }[] = [
-  { type: 'moodle',   label: 'Moodle',         placeholder: 'https://moodle.university.edu/...'         },
-  { type: 'netpa',    label: 'NetPA',           placeholder: 'https://netpa.university.edu/...'          },
-  { type: 'drive',    label: 'Google Drive',    placeholder: 'https://drive.google.com/drive/folders/...' },
-  { type: 'chatgpt',  label: 'ChatGPT tutor',  placeholder: 'https://chatgpt.com/...'                   },
-  { type: 'whatsapp', label: 'WhatsApp group',  placeholder: 'https://chat.whatsapp.com/...'            },
-  { type: 'email',    label: 'Professor email', placeholder: 'prof.name@university.edu'                 },
+  { type: 'moodle',   label: 'Moodle',          placeholder: 'https://moodle.university.edu/...'          },
+  { type: 'netpa',    label: 'NetPA',            placeholder: 'https://netpa.university.edu/...'           },
+  { type: 'drive',    label: 'Google Drive',     placeholder: 'https://drive.google.com/drive/folders/...' },
+  { type: 'chatgpt',  label: 'ChatGPT tutor',   placeholder: 'https://chatgpt.com/...'                    },
+  { type: 'whatsapp', label: 'WhatsApp group',   placeholder: 'https://chat.whatsapp.com/...'             },
+  { type: 'email',    label: 'Professor email',  placeholder: 'prof.name@university.edu'                  },
 ];
 
 // ── Smart add form ────────────────────────────────────────────────────────────
@@ -64,32 +63,38 @@ function SmartAddForm({ sectionId, defaultType = 'custom', defaultLabel = '', de
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5 animate-fade-in">
+    <form
+      onSubmit={handleSubmit}
+      className="mt-3 rounded-xl p-3 space-y-2.5 animate-fade-in"
+      style={{ backgroundColor: '#070b14', border: '1px solid #1a2638' }}
+    >
       {/* Scope selector */}
       <div>
         <label className="label-xs">Where to save</label>
         <div className="flex gap-1.5 mt-1">
           {([
-            { value: 'course' as PortalScope, icon: <BookMarked   className="w-3 h-3" />, label: 'This course' },
-            { value: 'global' as PortalScope, icon: <LayoutDashboard className="w-3 h-3" />, label: 'Dashboard' },
+            { value: 'course' as PortalScope, icon: <BookMarked      className="w-3 h-3" />, label: 'This course' },
+            { value: 'global' as PortalScope, icon: <LayoutDashboard className="w-3 h-3" />, label: 'Dashboard'   },
           ] as const).map(opt => (
             <button
               key={opt.value}
               type="button"
               onClick={() => setScope(opt.value)}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all ${
-                scope === opt.value
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-              }`}
+              className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all"
+              style={scope === opt.value
+                ? { backgroundColor: '#f59e0b', color: '#000' }
+                : { border: '1px solid #1a2638', color: '#475569' }
+              }
+              onMouseEnter={e => { if (scope !== opt.value) { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.color = '#94a3b8'; }}}
+              onMouseLeave={e => { if (scope !== opt.value) { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.color = '#475569'; }}}
             >
               {opt.icon}{opt.label}
             </button>
           ))}
         </div>
         {scope === 'global' && (
-          <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
-            This link will appear in <span className="font-semibold text-slate-500">My Portals</span> on your dashboard.
+          <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: '#334155' }}>
+            This link will appear in <span className="font-semibold" style={{ color: '#475569' }}>My Portals</span> on your dashboard.
           </p>
         )}
       </div>
@@ -120,7 +125,9 @@ function SmartAddForm({ sectionId, defaultType = 'custom', defaultLabel = '', de
         <label className="label-xs">
           Label
           {!labelTouched && suggestedLabel && url.trim() && (
-            <span className="ml-1.5 font-normal text-slate-400 normal-case tracking-normal">auto-detected — rename freely</span>
+            <span className="ml-1.5 font-normal normal-case tracking-normal" style={{ color: '#334155' }}>
+              auto-detected — rename freely
+            </span>
           )}
         </label>
         <input
@@ -137,14 +144,24 @@ function SmartAddForm({ sectionId, defaultType = 'custom', defaultLabel = '', de
         <button
           type="submit"
           disabled={saving || !label.trim() || !url.trim()}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all disabled:opacity-30"
+          style={{ backgroundColor: '#f59e0b', color: '#000' }}
+          onMouseEnter={e => { if (!saving && label.trim() && url.trim()) e.currentTarget.style.backgroundColor = '#fbbf24'; }}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
         >
           {saving
-            ? <span className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+            ? <span className="w-3 h-3 border border-black border-t-transparent rounded-full animate-spin" />
             : <Check className="w-3 h-3" />}
           Save link
         </button>
-        <button type="button" onClick={onCancel} className="px-3 py-1.5 border border-slate-200 text-slate-500 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all"
+          style={{ border: '1px solid #1a2638', color: '#475569' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.color = '#94a3b8'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.color = '#475569'; }}
+        >
           Cancel
         </button>
       </div>
@@ -175,7 +192,11 @@ function EditForm({ link, onSave, onCancel }: {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2 animate-fade-in">
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-xl p-3 space-y-2 animate-fade-in"
+      style={{ backgroundColor: '#070b14', border: '1px solid #1a2638' }}
+    >
       <div className="relative">
         <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="URL or email" className="input text-xs py-1.5 pr-20" required />
         {url.trim() && (
@@ -186,11 +207,25 @@ function EditForm({ link, onSave, onCancel }: {
       </div>
       <input type="text" value={label} onChange={e => setLabel(e.target.value)} placeholder="Label" className="input text-xs py-1.5" required />
       <div className="flex gap-2">
-        <button type="submit" disabled={saving || !label.trim() || !url.trim()} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-40">
-          {saving ? <span className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-3 h-3" />}
+        <button
+          type="submit"
+          disabled={saving || !label.trim() || !url.trim()}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all disabled:opacity-30"
+          style={{ backgroundColor: '#f59e0b', color: '#000' }}
+          onMouseEnter={e => { if (!saving) e.currentTarget.style.backgroundColor = '#fbbf24'; }}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
+        >
+          {saving ? <span className="w-3 h-3 border border-black border-t-transparent rounded-full animate-spin" /> : <Check className="w-3 h-3" />}
           Update
         </button>
-        <button type="button" onClick={onCancel} className="px-3 py-1.5 border border-slate-200 text-slate-500 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg transition-all"
+          style={{ border: '1px solid #1a2638', color: '#475569' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.color = '#94a3b8'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.color = '#475569'; }}
+        >
           Cancel
         </button>
       </div>
@@ -201,7 +236,7 @@ function EditForm({ link, onSave, onCancel }: {
 // ── Link row ──────────────────────────────────────────────────────────────────
 
 function LinkRow({ link, onEdit, onDelete }: { link: CourseLink; onEdit: () => void; onDelete: () => void }) {
-  const meta = TYPE_META[link.type] ?? TYPE_META.custom;
+  const meta   = TYPE_META[link.type] ?? TYPE_META.custom;
   const rawUrl = link.url;
   const href   = rawUrl.startsWith('mailto:') ? rawUrl
     : (!rawUrl.startsWith('http') && rawUrl.includes('@')) ? `mailto:${rawUrl}` : rawUrl;
@@ -212,26 +247,51 @@ function LinkRow({ link, onEdit, onDelete }: { link: CourseLink; onEdit: () => v
   catch { domain = rawUrl.replace(/^mailto:/, '').slice(0, 24); }
 
   return (
-    <div className="group flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white border border-slate-100 hover:border-slate-200 hover:shadow-sm transition-all">
+    <div
+      className="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+      style={{ backgroundColor: '#111d2e', border: '1px solid #1a2638' }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = '#2a3a54')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2638')}
+    >
       <span className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${meta.iconBg}`}>
         {meta.icon}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{link.label}</p>
-        <p className="text-[10px] text-slate-400 truncate">{domain}</p>
+        <p className="text-sm font-semibold truncate leading-tight" style={{ color: '#e2e8f0' }}>
+          {link.label}
+        </p>
+        <p className="text-[10px] truncate" style={{ color: '#334155' }}>{domain}</p>
       </div>
       <a
         href={href}
         target={isEmail ? '_self' : '_blank'}
         rel="noopener noreferrer"
         onClick={e => e.stopPropagation()}
-        className={`flex-shrink-0 flex items-center gap-0.5 text-xs font-bold px-2 py-1 rounded-lg transition-colors ${meta.textColor} hover:bg-slate-50`}
+        className={`flex-shrink-0 flex items-center gap-0.5 text-xs font-bold px-2 py-1 rounded-lg transition-colors ${meta.textColor}`}
+        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1a2638')}
+        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         Open <ExternalLink className="w-3 h-3" />
       </a>
       <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-        <button onClick={onEdit}   className="p-1 text-slate-300 hover:text-slate-600 rounded transition-colors"><Pencil className="w-3 h-3" /></button>
-        <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500  rounded transition-colors"><Trash2 className="w-3 h-3" /></button>
+        <button
+          onClick={onEdit}
+          className="p-1 rounded transition-colors"
+          style={{ color: '#334155' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#334155')}
+        >
+          <Pencil className="w-3 h-3" />
+        </button>
+        <button
+          onClick={onDelete}
+          className="p-1 rounded transition-colors"
+          style={{ color: '#334155' }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#334155')}
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
       </div>
     </div>
   );
@@ -288,25 +348,45 @@ export function CourseHub({ sectionId }: Props) {
   const hasLinks    = links.length > 0;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-4">
+    <div
+      className="rounded-2xl overflow-hidden mb-4"
+      style={{ backgroundColor: '#0d1424', border: '1px solid #1a2638' }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-50">
+      <div
+        className="flex items-center justify-between px-4 py-3"
+        style={{ borderBottom: '1px solid #1a2638' }}
+      >
         <div className="flex items-center gap-2">
-          <Link2 className="w-4 h-4 text-primary-500" />
-          <span className="text-sm font-semibold text-slate-800">Course Hub</span>
+          <Link2 className="w-4 h-4" style={{ color: '#f59e0b' }} />
+          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>Course Hub</span>
           {hasLinks && (
-            <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{links.length}</span>
+            <span
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: '#111d2e', color: '#475569' }}
+            >
+              {links.length}
+            </span>
           )}
         </div>
         {!showingForm && editingId === null ? (
           <button
             onClick={() => setShowAddCustom(true)}
-            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-900 px-2.5 py-1 rounded-lg hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all"
+            style={{ color: '#475569' }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = '#111d2e'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#475569'; e.currentTarget.style.backgroundColor = 'transparent'; }}
           >
             <Plus className="w-3 h-3" strokeWidth={2.5} />Add link
           </button>
         ) : (showingForm &&
-          <button onClick={closeAdd} className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors">
+          <button
+            onClick={closeAdd}
+            className="p-1 rounded-lg transition-colors"
+            style={{ color: '#334155' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#334155')}
+          >
             <X className="w-3.5 h-3.5" />
           </button>
         )}
@@ -316,7 +396,9 @@ export function CourseHub({ sectionId }: Props) {
         {/* Empty state */}
         {!hasLinks && !showingForm && (
           <div>
-            <p className="text-xs text-slate-400 mb-3">Save links specific to this course — Moodle page, shared Drive, professor email, etc.</p>
+            <p className="text-xs mb-3" style={{ color: '#334155' }}>
+              Save links specific to this course — Moodle page, shared Drive, professor email, etc.
+            </p>
             <div className="flex flex-wrap gap-2">
               {COURSE_STARTERS.map(s => {
                 const m = TYPE_META[s.type];
@@ -332,7 +414,10 @@ export function CourseHub({ sectionId }: Props) {
               })}
               <button
                 onClick={() => setShowAddCustom(true)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-all"
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
+                style={{ border: '1px dashed #1a2638', color: '#334155' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.color = '#64748b'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.color = '#334155'; }}
               >
                 <Globe className="w-3.5 h-3.5" />+ Custom
               </button>
@@ -386,7 +471,10 @@ export function CourseHub({ sectionId }: Props) {
 
         {/* Add more row */}
         {hasLinks && !showingForm && editingId === null && (
-          <div className="mt-2.5 pt-2.5 border-t border-slate-50 flex flex-wrap gap-1.5">
+          <div
+            className="mt-2.5 pt-2.5 flex flex-wrap gap-1.5"
+            style={{ borderTop: '1px solid #111d2e' }}
+          >
             {COURSE_STARTERS
               .filter(s => !links.some(l => l.type === s.type))
               .map(s => {
@@ -395,7 +483,10 @@ export function CourseHub({ sectionId }: Props) {
                   <button
                     key={s.type}
                     onClick={() => setAddState({ type: s.type, label: s.label, placeholder: s.placeholder })}
-                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-all"
+                    style={{ border: '1px solid #1a2638', color: '#475569' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.backgroundColor = '#111d2e'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.backgroundColor = 'transparent'; }}
                   >
                     {m.icon}{s.label}
                   </button>
@@ -403,7 +494,10 @@ export function CourseHub({ sectionId }: Props) {
               })}
             <button
               onClick={() => setShowAddCustom(true)}
-              className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+              className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-all"
+              style={{ border: '1px dashed #1a2638', color: '#334155' }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#64748b'; e.currentTarget.style.borderColor = '#2a3a54'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#334155'; e.currentTarget.style.borderColor = '#1a2638'; }}
             >
               <Plus className="w-3 h-3" strokeWidth={2} />custom
             </button>

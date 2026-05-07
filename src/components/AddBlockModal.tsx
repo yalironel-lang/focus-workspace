@@ -28,20 +28,20 @@ const DAYS = [
   { value: 0, label: 'Sunday'    },
 ];
 
-const COLORS: { value: BlockColor; bg: string }[] = [
-  { value: 'indigo',  bg: 'bg-indigo-500'  },
-  { value: 'violet',  bg: 'bg-violet-500'  },
-  { value: 'emerald', bg: 'bg-emerald-500' },
-  { value: 'amber',   bg: 'bg-amber-500'   },
-  { value: 'sky',     bg: 'bg-sky-500'     },
-  { value: 'rose',    bg: 'bg-rose-500'    },
-  { value: 'slate',   bg: 'bg-slate-500'   },
-];
+const COLOR_HEX: Record<BlockColor, string> = {
+  indigo:  '#6366f1',
+  violet:  '#8b5cf6',
+  emerald: '#10b981',
+  amber:   '#f59e0b',
+  sky:     '#38bdf8',
+  rose:    '#f43f5e',
+  slate:   '#64748b',
+};
 
 export function AddBlockModal({ sections, onClose, onAdd }: Props) {
-  const today = new Date().getDay(); // 0=Sun...6=Sat
+  const today = new Date().getDay();
   const [title,     setTitle]     = useState('');
-  const [day,       setDay]       = useState(today === 0 ? 1 : today); // default to Mon if Sun
+  const [day,       setDay]       = useState(today === 0 ? 1 : today);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime,   setEndTime]   = useState('10:00');
   const [location,  setLocation]  = useState('');
@@ -77,25 +77,47 @@ export function AddBlockModal({ sections, onClose, onAdd }: Props) {
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed inset-0 flex items-center justify-center z-50 p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-900">Add class to schedule</h3>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+      <div
+        className="w-full max-w-md rounded-2xl overflow-hidden animate-slide-up"
+        style={{ backgroundColor: '#0d1424', border: '1px solid #1a2638' }}
+      >
+        <div
+          className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid #1a2638' }}
+        >
+          <h3 className="font-semibold text-sm" style={{ color: '#f1f5f9' }}>
+            Add class to schedule
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: '#334155' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#334155')}
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {/* Title */}
+
           <div>
             <label className="label-xs">Class name</label>
-            <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Calculus 101" className="input" autoFocus required />
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g. Calculus 101"
+              className="input"
+              autoFocus
+              required
+            />
           </div>
 
-          {/* Day */}
           <div>
             <label className="label-xs">Day</label>
             <select value={day} onChange={e => setDay(Number(e.target.value))} className="input">
@@ -103,7 +125,6 @@ export function AddBlockModal({ sections, onClose, onAdd }: Props) {
             </select>
           </div>
 
-          {/* Times */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label-xs">Start time</label>
@@ -115,37 +136,49 @@ export function AddBlockModal({ sections, onClose, onAdd }: Props) {
             </div>
           </div>
 
-          {/* Location + Link */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label-xs">Location <span className="text-slate-400 font-normal normal-case">(opt.)</span></label>
+              <label className="label-xs">
+                Location <span className="normal-case font-normal" style={{ color: '#475569' }}>(opt.)</span>
+              </label>
               <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="Room 204" className="input" />
             </div>
             <div>
-              <label className="label-xs">Link <span className="text-slate-400 font-normal normal-case">(opt.)</span></label>
+              <label className="label-xs">
+                Link <span className="normal-case font-normal" style={{ color: '#475569' }}>(opt.)</span>
+              </label>
               <input type="url" value={link} onChange={e => setLink(e.target.value)} placeholder="https://…" className="input" />
             </div>
           </div>
 
-          {/* Course */}
           <div>
-            <label className="label-xs">Course <span className="text-slate-400 font-normal normal-case">(optional)</span></label>
+            <label className="label-xs">
+              Course <span className="normal-case font-normal" style={{ color: '#475569' }}>(optional)</span>
+            </label>
             <select value={sectionId} onChange={e => setSectionId(e.target.value)} className="input">
               <option value="">— none —</option>
               {sections.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
             </select>
           </div>
 
-          {/* Color */}
           <div>
             <label className="label-xs">Color</label>
             <div className="flex items-center gap-2 mt-1.5">
-              {COLORS.map(c => (
+              {(Object.entries(COLOR_HEX) as [BlockColor, string][]).map(([val, hex]) => (
                 <button
-                  key={c.value}
+                  key={val}
                   type="button"
-                  onClick={() => setColor(c.value)}
-                  className={`w-6 h-6 rounded-full ${c.bg} transition-all ${color === c.value ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : 'opacity-60 hover:opacity-100'}`}
+                  onClick={() => setColor(val)}
+                  className="w-6 h-6 rounded-full transition-all"
+                  style={{
+                    backgroundColor: hex,
+                    transform: color === val ? 'scale(1.2)' : 'scale(1)',
+                    outline: color === val ? `2px solid ${hex}` : 'none',
+                    outlineOffset: '2px',
+                    opacity: color === val ? 1 : 0.5,
+                  }}
+                  onMouseEnter={e => { if (color !== val) e.currentTarget.style.opacity = '0.8'; }}
+                  onMouseLeave={e => { if (color !== val) e.currentTarget.style.opacity = '0.5'; }}
                 />
               ))}
             </div>
@@ -155,14 +188,25 @@ export function AddBlockModal({ sections, onClose, onAdd }: Props) {
             <button
               type="submit"
               disabled={loading || !title.trim()}
-              className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-semibold text-sm transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-30 flex items-center justify-center gap-2"
+              style={{ backgroundColor: '#f59e0b', color: '#000' }}
+              onMouseEnter={e => { if (!loading && title.trim()) e.currentTarget.style.backgroundColor = '#fbbf24'; }}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add to schedule'}
             </button>
-            <button type="button" onClick={onClose} className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-medium text-sm transition-colors">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all"
+              style={{ border: '1px solid #1a2638', color: '#475569' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.color = '#94a3b8'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.color = '#475569'; }}
+            >
               Cancel
             </button>
           </div>
+
         </form>
       </div>
     </div>
