@@ -5,7 +5,7 @@ import { User } from '@supabase/supabase-js';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithEmail: (email: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -16,11 +16,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Use onAuthStateChange as the single source of truth for auth state.
-    // In Supabase v2, it fires INITIAL_SESSION *after* any URL hash token
-    // (magic-link) has been fully processed — so loading stays true until
-    // that exchange is complete, preventing PrivateRoute from redirecting
-    // and stripping the hash fragment before Supabase can consume it.
+    // onAuthStateChange fires INITIAL_SESSION once the OAuth callback
+    // (or any stored session) has been fully resolved, so loading stays
+    // true until that exchange is complete — preventing PrivateRoute from
+    // redirecting away before the session is established.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setLoading(false);
@@ -29,13 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithEmail = async (email: string) => {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
       options: {
         // Dynamic origin — works on localhost, Vercel, and any other host.
-        // Never hardcode a URL here.
-        emailRedirectTo: `${window.location.origin}/dashboard`,
+        redirectTo: `${window.location.origin}/dashboard`,
       },
     });
     if (error) throw error;
@@ -47,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
