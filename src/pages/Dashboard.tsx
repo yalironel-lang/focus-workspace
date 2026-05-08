@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSections, useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -9,6 +9,7 @@ import { useWorkspaceTheme, mergeAccent, computeCanvasBg } from '../hooks/useWor
 import type { ModuleTheme } from '../hooks/useWorkspaceTheme';
 import { useCustomBlocks } from '../hooks/useCustomBlocks';
 import type { BlockType, BlockTheme } from '../hooks/useCustomBlocks';
+import { STARTER_TEMPLATES } from '../data/starterTemplates';
 import { SessionModal } from '../components/SessionModal';
 
 // ── Canvas primitives ─────────────────────────────────────────────────────────
@@ -46,6 +47,18 @@ function firstName(email: string): string {
 
 type InspectorTab = 'module' | 'theme' | 'presets';
 
+/** Key used by useWorkspaceLayout to persist layout — if absent → first visit */
+const LAYOUT_STORAGE_KEY = 'fw_workspace_layout_v3';
+
+// ── Canvas zone definitions ───────────────────────────────────────────────────
+
+const CANVAS_ZONES = [
+  { id: 'focus',     label: 'Focus Area',    icon: '◎', afterModuleIndex: -1 },
+  { id: 'capture',   label: 'Capture',       icon: '⊕', afterModuleIndex: 2  },
+  { id: 'personal',  label: 'Personal',      icon: '◇', afterModuleIndex: 5  },
+  { id: 'resources', label: 'Resources',     icon: '⊞', afterModuleIndex: 8  },
+] as const;
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export function Dashboard() {
@@ -54,64 +67,55 @@ export function Dashboard() {
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
   const { modules, toggleModule, reorder, setSize,
-          applyPreset: applyLayoutPreset, reset, presets,
-          duplicateModule }                                       = useWorkspaceLayout();
+          applyPreset: applyLayoutPreset, applyModules,
+          reset, presets, duplicateModule }                      = useWorkspaceLayout();
   const { tokens: atmTokens, atmosphereId, setAtmosphere }      = useAtmosphere();
 
   // ── Theme system ─────────────────────────────────────────────────────────────
   const {
-    global: globalTheme,
-    design,
-    moduleThemes,
-    userPresets,
-    presets: themePresets,
-    updateGlobal,
-    applyPreset: applyThemePreset,
-    saveAsPreset,
-    deleteUserPreset,
-    updateModule,
-    resetModule,
+    global: globalTheme, design, moduleThemes, userPresets, presets: themePresets,
+    updateGlobal, applyPreset: applyThemePreset, saveAsPreset, deleteUserPreset,
+    updateModule, resetModule,
   } = useWorkspaceTheme();
 
   // ── Custom blocks ────────────────────────────────────────────────────────────
   const {
-    blocks,
-    addBlock,
-    updateContent,
-    updateTheme:    updateBlockTheme,
-    setBlockSize,
-    deleteBlock,
-    duplicateBlock,
-    reorderBlocks,
+    blocks, addBlock, addBlockWithContent, clearAllBlocks,
+    updateContent, updateTheme: updateBlockTheme,
+    setBlockSize, deleteBlock, duplicateBlock, reorderBlocks,
   } = useCustomBlocks();
 
-  // Merge accent overrides from theme into atmosphere tokens
   const tokens = mergeAccent(atmTokens, design);
 
   // ── UI state ─────────────────────────────────────────────────────────────────
-  const [designMode,        setDesignMode]        = useState(false);
-  const [selectedId,        setSelectedId]        = useState<string | null>(null);
-  const [addPanelOpen,      setAddPanelOpen]      = useState(false);
-  const [inspectorOpen,     setInspectorOpen]     = useState(false);
-  const [inspectorTab,      setInspectorTab]      = useState<InspectorTab>('module');
-  const [showNewSection,    setShowNewSection]    = useState(false);
-  const [showSessionModal,  setShowSessionModal]  = useState(false);
-  const [newTitle,          setNewTitle]          = useState('');
-  const [creating,          setCreating]          = useState(false);
+
+  // First visit: no saved layout → open in design mode automatically
+  const [designMode, setDesignMode] = useState<boolean>(() =>
+    !localStorage.getItem(LAYOUT_STORAGE_KEY)
+  );
+  const [selectedId,       setSelectedId]       = useState<string | null>(null);
+  const [addPanelOpen,     setAddPanelOpen]      = useState(false);
+  const [inspectorOpen,    setInspectorOpen]     = useState(false);
+  const [inspectorTab,     setInspectorTab]      = useState<InspectorTab>('module');
+  const [showNewSection,   setShowNewSection]    = useState(false);
+  const [showSessionModal, setShowSessionModal]  = useState(false);
+  const [newTitle,         setNewTitle]          = useState('');
+  const [creating,         setCreating]          = useState(false);
+
+  // Pulse a newly added block once so user can see where it appeared
+  const [pulsingId, setPulsingId] = useState<string | null>(null);
 
   // ── Drag state ───────────────────────────────────────────────────────────────
   const dragIdRef = useRef<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOver,   setDragOver]   = useState<string | null>(null);
 
-  // Pre-warm section data for SessionModal
   const activeSession    = loadSession();
   useSectionDetail(activeSession?.sectionId);
 
   const suggestedSection = sortSectionsByUrgency(sections, deadlines)[0] ?? null;
   const displayName      = user?.email ? firstName(user.email) : '';
 
-  // Inspector is open when a module is selected OR we force-opened it (Theme button)
   const isInspectorOpen = inspectorOpen || !!selectedId;
 
   const openInspectorAtTab = useCallback((tab: InspectorTab) => {
@@ -130,7 +134,7 @@ export function Dashboard() {
     dragIdRef.current = id;
     setDraggingId(id);
   }, []);
-  const handleDragOver  = useCallback((e: React.DragEvent, id: string) => {
+  const handleDragOver = useCallback((e: React.DragEvent, id: string) => {
     e.preventDefault();
     if (dragIdRef.current !== id) setDragOver(id);
   }, []);
@@ -140,9 +144,8 @@ export function Dashboard() {
     if (fromId && fromId !== toId) {
       const fromIsBlock = fromId.startsWith('block-');
       const toIsBlock   = toId.startsWith('block-');
-      if (fromIsBlock && toIsBlock)    reorderBlocks(fromId, toId);
+      if (fromIsBlock && toIsBlock)        reorderBlocks(fromId, toId);
       else if (!fromIsBlock && !toIsBlock) reorder(fromId, toId);
-      // cross-kind drops: ignore
     }
     dragIdRef.current = null;
     setDraggingId(null);
@@ -178,25 +181,66 @@ export function Dashboard() {
     }
   }, [modules, blocks, reorder, reorderBlocks]);
 
+  // ── Add block with auto-select + scroll-into-view ─────────────────────────
+
+  const handleAddBlock = useCallback((type: BlockType) => {
+    const newId = addBlock(type);
+    // Give the DOM a tick to render the new block, then select + scroll to it
+    setTimeout(() => {
+      setSelectedId(newId);
+      setPulsingId(newId);
+      const el = document.querySelector(`[data-module-id="${newId}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      // Remove pulse after animation completes
+      setTimeout(() => setPulsingId(null), 1200);
+    }, 80);
+  }, [addBlock]);
+
+  // ── Apply starter template ────────────────────────────────────────────────
+
+  const handleApplyTemplate = useCallback((templateId: string) => {
+    const template = STARTER_TEMPLATES.find(t => t.id === templateId);
+    if (!template) return;
+
+    // 1. Apply module layout
+    applyModules(template.modules);
+
+    // 2. Clear existing custom blocks and seed template blocks
+    clearAllBlocks();
+
+    // Wait a tick so clearAllBlocks state flush lands, then add blocks sequentially
+    // (each addBlockWithContent needs the updated prev.length for correct order)
+    let delay = 0;
+    for (const spec of template.blocks) {
+      const d = delay;
+      setTimeout(() => {
+        addBlockWithContent(spec.type, spec.size, spec.prefill);
+      }, d);
+      delay += 10; // stagger slightly so state updates don't collide
+    }
+
+    toast.success(`"${template.name}" loaded`, {
+      icon: template.emoji,
+      style: {
+        background: tokens.cardBg,
+        border:     `1px solid ${tokens.cardBorder}`,
+        color:      tokens.textPrimary,
+      },
+    });
+  }, [applyModules, clearAllBlocks, addBlockWithContent, tokens]);
+
   // ── Capture ────────────────────────────────────────────────────────────────
 
   const handleCapture = async (text: string) => {
     const d = new Date();
     d.setDate(d.getDate() + 3);
     await addDeadline({
-      section_id: null,
-      title:      text,
-      type:       'custom',
-      due_date:   d.toISOString().split('T')[0],
-      notes:      null,
+      section_id: null, title: text, type: 'custom',
+      due_date:   d.toISOString().split('T')[0], notes: null,
     });
     toast.success('Captured', {
       icon: '⚡',
-      style: {
-        background: tokens.cardBg,
-        border:     `1px solid ${tokens.cardBorder}`,
-        color:      tokens.textPrimary,
-      },
+      style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
     });
   };
 
@@ -237,12 +281,9 @@ export function Dashboard() {
   const renderModuleContent = (id: string): React.ReactNode | null => {
     const baseId = id.replace(/-copy$/, '');
     switch (baseId) {
-      case 'daily-intention':
-        return <DailyIntention tokens={tokens} />;
-      case 'capture':
-        return <CapturePanel onCapture={handleCapture} />;
-      case 'momentum':
-        return <MomentumMeter sections={sections} />;
+      case 'daily-intention': return <DailyIntention tokens={tokens} />;
+      case 'capture':         return <CapturePanel onCapture={handleCapture} />;
+      case 'momentum':        return <MomentumMeter sections={sections} />;
       case 'focus-mode':
         return (
           <FocusMode
@@ -252,23 +293,16 @@ export function Dashboard() {
           />
         );
       case 'execute':
-        return sections.some(s => s.total_items > 0)
-          ? <ExecutePanel sections={sections} />
-          : null;
+        return sections.some(s => s.total_items > 0) ? <ExecutePanel sections={sections} /> : null;
       case 'focus-queue':
         return sections.some(s => s.total_items - s.completed_items > 0)
           ? <FocusQueue sections={sections} deadlines={deadlines} />
           : null;
-      case 'today':
-        return <PressureRadar sections={sections} />;
-      case 'workspaces':
-        return <WorkspacesPanel />;
-      case 'deep-work-timer':
-        return <DeepWorkTimer tokens={tokens} />;
-      case 'tools':
-        return <MyPortals />;
-      default:
-        return null;
+      case 'today':       return <PressureRadar sections={sections} />;
+      case 'workspaces':  return <WorkspacesPanel />;
+      case 'deep-work-timer': return <DeepWorkTimer tokens={tokens} />;
+      case 'tools':       return <MyPortals />;
+      default:            return null;
     }
   };
 
@@ -284,9 +318,7 @@ export function Dashboard() {
           className="flex items-center justify-between px-5 py-3.5"
           style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}
         >
-          <span style={{ fontSize: '14px', fontWeight: 600, color: tokens.textPrimary }}>
-            Workspaces
-          </span>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: tokens.textPrimary }}>Workspaces</span>
           <button
             onClick={() => { setShowNewSection(s => !s); setNewTitle(''); }}
             className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
@@ -308,9 +340,7 @@ export function Dashboard() {
           <div className="px-4 py-3 animate-fade-in" style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}>
             <form onSubmit={handleCreate} className="flex gap-2">
               <input
-                type="text"
-                value={newTitle}
-                onChange={e => setNewTitle(e.target.value)}
+                type="text" value={newTitle} onChange={e => setNewTitle(e.target.value)}
                 placeholder="Workspace name…"
                 className="flex-1 px-3 py-2 rounded-xl text-sm focus:outline-none transition-all"
                 style={{ backgroundColor: tokens.wellBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary }}
@@ -319,8 +349,7 @@ export function Dashboard() {
                 autoFocus
               />
               <button
-                type="submit"
-                disabled={creating || !newTitle.trim()}
+                type="submit" disabled={creating || !newTitle.trim()}
                 className="px-4 py-2 rounded-xl font-bold text-xs disabled:opacity-30 flex items-center gap-1 whitespace-nowrap transition-all"
                 style={{ backgroundColor: tokens.accent, color: '#000' }}
                 onMouseEnter={e => { if (!creating && newTitle.trim()) (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover; }}
@@ -329,8 +358,7 @@ export function Dashboard() {
                 {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Create'}
               </button>
               <button
-                type="button"
-                onClick={() => setShowNewSection(false)}
+                type="button" onClick={() => setShowNewSection(false)}
                 className="p-2 rounded-xl transition-colors"
                 style={{ color: tokens.textGhost }}
                 onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textSecondary)}
@@ -362,9 +390,7 @@ export function Dashboard() {
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {sections.map(section => (
               <SectionCard
-                key={section.id}
-                section={section}
-                onDelete={deleteSection}
+                key={section.id} section={section} onDelete={deleteSection}
                 deadlines={deadlines.filter(d => d.section_id === section.id)}
               />
             ))}
@@ -375,7 +401,7 @@ export function Dashboard() {
   }
 
   // ── Unified inspector adapters ────────────────────────────────────────────
-  // Present custom blocks to the inspector as if they were modules
+
   const allModuleConfigs = [
     ...modules,
     ...blocks.map(b => ({ id: b.id, enabled: true, size: b.size, order: b.order + 10000 })),
@@ -410,16 +436,133 @@ export function Dashboard() {
     else resetModule(id);
   }, [updateBlockTheme, resetModule]);
 
-  // ── Canvas background ────────────────────────────────────────────────────
+  // ── Canvas ────────────────────────────────────────────────────────────────
 
   const canvasStyle = computeCanvasBg(design, tokens, designMode);
+  const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
+  const hasContent = enabledModules.length > 0 || blocks.length > 0;
 
-  // ── Module list ─────────────────────────────────────────────────────────
+  // ── Canvas zone helper ────────────────────────────────────────────────────
 
-  const enabledModules = modules
-    .filter(m => m.enabled)
-    .sort((a, b) => a.order - b.order);
-  const hasModules = enabledModules.length > 0 || blocks.length > 0;
+  function ZoneLabel({ label, icon }: { label: string; icon: string }) {
+    return (
+      <div
+        style={{
+          gridColumn:   'span 12',
+          display:      'flex',
+          alignItems:   'center',
+          gap:          '8px',
+          padding:      '4px 2px',
+          pointerEvents: 'none',
+          userSelect:   'none',
+        }}
+      >
+        <span style={{ fontSize: '10px', color: tokens.accent, opacity: 0.6 }}>{icon}</span>
+        <div
+          style={{
+            fontFamily:    "'Space Grotesk', sans-serif",
+            fontSize:      '9px',
+            fontWeight:    700,
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color:         tokens.textGhost,
+            opacity:       0.7,
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            flex:            1,
+            height:          '1px',
+            backgroundColor: tokens.divider,
+            opacity:         0.4,
+          }}
+        />
+      </div>
+    );
+  }
+
+  // ── Inline "Add anything" zone ────────────────────────────────────────────
+
+  function InlineAddZone() {
+    return (
+      <div
+        style={{
+          gridColumn:      'span 12',
+          marginTop:       `${design.gap}px`,
+        }}
+      >
+        <button
+          onClick={() => setAddPanelOpen(true)}
+          style={{
+            width:           '100%',
+            display:         'flex',
+            alignItems:      'center',
+            justifyContent:  'center',
+            gap:             '10px',
+            padding:         '28px 24px',
+            borderRadius:    `${design.radius}px`,
+            border:          `1.5px dashed ${tokens.accent}30`,
+            backgroundColor: `${tokens.accent}05`,
+            cursor:          'pointer',
+            transition:      'all 0.2s ease',
+            color:           tokens.textGhost,
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.borderColor      = `${tokens.accent}70`;
+            el.style.backgroundColor  = `${tokens.accent}08`;
+            el.style.color            = tokens.textMuted;
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.borderColor      = `${tokens.accent}30`;
+            el.style.backgroundColor  = `${tokens.accent}05`;
+            el.style.color            = tokens.textGhost;
+          }}
+        >
+          <div
+            style={{
+              width:           '28px',
+              height:          '28px',
+              borderRadius:    '50%',
+              backgroundColor: `${tokens.accent}15`,
+              border:          `1px solid ${tokens.accent}30`,
+              display:         'flex',
+              alignItems:      'center',
+              justifyContent:  'center',
+              flexShrink:      0,
+            }}
+          >
+            <Plus style={{ width: '14px', height: '14px', color: tokens.accent }} strokeWidth={2} />
+          </div>
+          <span
+            style={{
+              fontFamily:    "'Space Grotesk', sans-serif",
+              fontSize:      '12px',
+              fontWeight:    600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Add anything
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  // ── Design mode hint banner (first time only) ─────────────────────────────
+
+  const [showDesignHint, setShowDesignHint] = useState(() =>
+    !localStorage.getItem(LAYOUT_STORAGE_KEY)
+  );
+
+  // Dismiss hint once they interact with the canvas
+  useEffect(() => {
+    if (hasContent) setShowDesignHint(false);
+  }, [hasContent]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -432,7 +575,6 @@ export function Dashboard() {
         transition:      `background-color ${design.transition}`,
       }}
     >
-
       {/* ── Command Bar ───────────────────────────────────────── */}
       <CommandBar
         tokens={tokens}
@@ -467,67 +609,154 @@ export function Dashboard() {
           <div className="flex items-center justify-center" style={{ minHeight: 'calc(100vh - 48px)' }}>
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.cardBorder }} />
           </div>
-        ) : !hasModules ? (
+
+        ) : !hasContent ? (
+          /* ── Empty / first-time state ── */
           <CanvasEmptyState
             tokens={tokens}
+            designMode={designMode}
+            starterTemplates={STARTER_TEMPLATES}
             presets={presets}
             onOpenAdd={() => setAddPanelOpen(true)}
-            onApplyPreset={id => { applyLayoutPreset(id); }}
+            onAddBlock={handleAddBlock}
+            onApplyPreset={id => applyLayoutPreset(id)}
+            onApplyTemplate={handleApplyTemplate}
           />
+
         ) : (
           <>
-          {/* ── Design mode grid pulse overlay ── */}
-          {designMode && (
-            <div
-              className="design-grid-pulse pointer-events-none fixed inset-0 z-0"
-              style={{
-                backgroundImage: [
-                  `radial-gradient(circle, ${tokens.accent}18 1px, transparent 1px)`,
-                ].join(', '),
-                backgroundSize:     '32px 32px',
-                backgroundPosition: '16px 16px',
-              }}
-            />
-          )}
+            {/* ── Design mode dot-grid overlay ── */}
+            {designMode && (
+              <div
+                className="design-grid-pulse pointer-events-none fixed inset-0 z-0"
+                style={{
+                  backgroundImage:  `radial-gradient(circle, ${tokens.accent}18 1px, transparent 1px)`,
+                  backgroundSize:   '32px 32px',
+                  backgroundPosition: '16px 16px',
+                }}
+              />
+            )}
 
-          <div
-            className="mx-auto pb-32 relative z-10"
-            style={{
-              maxWidth: '1200px',
-              padding:  design.canvasPad,
-              paddingBottom: '128px',
-            }}
-          >
-            {/* 12-column bento grid */}
+            {/* ── First-time design mode banner ── */}
+            {designMode && showDesignHint && (
+              <div
+                className="animate-slide-up"
+                style={{
+                  position:        'sticky',
+                  top:             '48px',
+                  zIndex:          35,
+                  margin:          '0',
+                  padding:         '10px 20px',
+                  backgroundColor: `${tokens.accent}12`,
+                  borderBottom:    `1px solid ${tokens.accent}25`,
+                  display:         'flex',
+                  alignItems:      'center',
+                  justifyContent:  'space-between',
+                  gap:             '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '14px' }}>✦</span>
+                  <span style={{
+                    fontFamily:    "'Space Grotesk', sans-serif",
+                    fontSize:      '12px',
+                    fontWeight:    600,
+                    color:         tokens.accent,
+                  }}>
+                    Design Mode is on
+                  </span>
+                  <span style={{ fontSize: '12px', color: tokens.textMuted }}>
+                    — drag modules, resize cards, add blocks, and shape your space.
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowDesignHint(false)}
+                  style={{ color: tokens.textGhost, background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+                >
+                  <X style={{ width: '14px', height: '14px' }} />
+                </button>
+              </div>
+            )}
+
             <div
-              className="grid"
+              className="mx-auto relative z-10"
               style={{
-                gridTemplateColumns: 'repeat(12, 1fr)',
-                gap:                 `${design.gap}px`,
-                transition:          `gap ${design.transition}`,
+                maxWidth:      '1200px',
+                padding:       design.canvasPad,
+                paddingBottom: '160px',
               }}
             >
-              {/* ── System modules ── */}
-              {enabledModules.map(m => {
-                const content = renderModuleContent(m.id);
-                if (content === null) return null;
+              {/* 12-col bento grid — spacious gap */}
+              <div
+                className="grid"
+                style={{
+                  gridTemplateColumns: 'repeat(12, 1fr)',
+                  gap:                 `${Math.max(design.gap, 20)}px`,
+                  transition:          `gap ${design.transition}`,
+                }}
+              >
+                {/* ── System modules with zone labels ── */}
+                {enabledModules.map((m, idx) => {
+                  const content = renderModuleContent(m.id);
+                  if (content === null) return null;
 
-                return (
+                  // Inject zone label before this module if zone threshold matches
+                  const zoneHere = designMode
+                    ? CANVAS_ZONES.find(z => z.afterModuleIndex === idx - 1)
+                    : undefined;
+
+                  return (
+                    <React.Fragment key={m.id}>
+                      {zoneHere && <ZoneLabel label={zoneHere.label} icon={zoneHere.icon} />}
+                      <div
+                        className="min-w-0"
+                        data-module-id={m.id}
+                        style={{ gridColumn: SIZE_SPAN[m.size] }}
+                      >
+                        <WorkspaceModule
+                          id={m.id}
+                          size={m.size}
+                          designMode={designMode}
+                          selected={selectedId === m.id}
+                          dragOver={dragOver === m.id}
+                          isDragging={draggingId === m.id}
+                          tokens={tokens}
+                          design={design}
+                          moduleTheme={moduleThemes[m.id]}
+                          onSelect={id => {
+                            setSelectedId(id);
+                            if (id) setInspectorOpen(false);
+                          }}
+                          onDragStart={handleDragStart}
+                          onDragOver={handleDragOver}
+                          onDrop={handleDrop}
+                          onDragEnd={handleDragEnd}
+                        >
+                          {content}
+                        </WorkspaceModule>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* ── Custom blocks ── */}
+                {blocks.map(b => (
                   <div
-                    key={m.id}
-                    className="min-w-0"
-                    style={{ gridColumn: SIZE_SPAN[m.size] }}
+                    key={b.id}
+                    className={`min-w-0 ${pulsingId === b.id ? 'module-selected-pulse' : 'block-appear'}`}
+                    data-module-id={b.id}
+                    style={{ gridColumn: SIZE_SPAN[b.size] }}
                   >
                     <WorkspaceModule
-                      id={m.id}
-                      size={m.size}
+                      id={b.id}
+                      size={b.size}
                       designMode={designMode}
-                      selected={selectedId === m.id}
-                      dragOver={dragOver === m.id}
-                      isDragging={draggingId === m.id}
+                      selected={selectedId === b.id}
+                      dragOver={dragOver === b.id}
+                      isDragging={draggingId === b.id}
                       tokens={tokens}
                       design={design}
-                      moduleTheme={moduleThemes[m.id]}
+                      moduleTheme={b.theme}
                       onSelect={id => {
                         setSelectedId(id);
                         if (id) setInspectorOpen(false);
@@ -537,71 +766,20 @@ export function Dashboard() {
                       onDrop={handleDrop}
                       onDragEnd={handleDragEnd}
                     >
-                      {content}
+                      <BlockRenderer
+                        block={b}
+                        tokens={tokens}
+                        onChange={content => updateContent(b.id, content)}
+                      />
                     </WorkspaceModule>
                   </div>
-                );
-              })}
+                ))}
 
-              {/* ── Custom blocks ── */}
-              {blocks.map(b => (
-                <div
-                  key={b.id}
-                  className="min-w-0 block-appear"
-                  style={{ gridColumn: SIZE_SPAN[b.size] }}
-                >
-                  <WorkspaceModule
-                    id={b.id}
-                    size={b.size}
-                    designMode={designMode}
-                    selected={selectedId === b.id}
-                    dragOver={dragOver === b.id}
-                    isDragging={draggingId === b.id}
-                    tokens={tokens}
-                    design={design}
-                    moduleTheme={b.theme}
-                    onSelect={id => {
-                      setSelectedId(id);
-                      if (id) setInspectorOpen(false);
-                    }}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                    onDragEnd={handleDragEnd}
-                  >
-                    <BlockRenderer
-                      block={b}
-                      tokens={tokens}
-                      onChange={content => updateContent(b.id, content)}
-                    />
-                  </WorkspaceModule>
-                </div>
-              ))}
+                {/* ── Inline "Add anything" zone — always visible in design mode ── */}
+                {designMode && <InlineAddZone />}
 
-              {/* ── Drop zone hint when blocks exist but design mode on ── */}
-              {designMode && blocks.length === 0 && enabledModules.length > 0 && (
-                <div
-                  className="min-w-0"
-                  style={{
-                    gridColumn:     'span 12',
-                    border:         `1.5px dashed ${tokens.accent}25`,
-                    borderRadius:   `${design.radius}px`,
-                    padding:        '20px',
-                    display:        'flex',
-                    alignItems:     'center',
-                    justifyContent: 'center',
-                    gap:            '8px',
-                    color:          tokens.textGhost,
-                    fontSize:       '12px',
-                    marginTop:      `${design.gap}px`,
-                  }}
-                >
-                  <span style={{ opacity: 0.5 }}>✦</span>
-                  Use the <strong style={{ color: tokens.accent }}>+</strong> button below to add custom blocks
-                </div>
-              )}
+              </div>
             </div>
-          </div>
           </>
         )}
       </main>
@@ -649,14 +827,14 @@ export function Dashboard() {
         modules={modules}
         tokens={tokens}
         onToggle={toggleModule}
-        onAddBlock={(type: BlockType) => addBlock(type)}
+        onAddBlock={handleAddBlock}
         onClose={() => setAddPanelOpen(false)}
       />
 
       {/* ── Quick-add FAB ─────────────────────────────────────── */}
       <QuickAddFab
         tokens={tokens}
-        onAddBlock={(type: BlockType) => addBlock(type)}
+        onAddBlock={handleAddBlock}
         onOpenModules={() => setAddPanelOpen(true)}
       />
 
@@ -668,3 +846,4 @@ export function Dashboard() {
     </div>
   );
 }
+

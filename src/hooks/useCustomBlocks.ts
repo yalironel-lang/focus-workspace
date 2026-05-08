@@ -116,6 +116,62 @@ export function useCustomBlocks() {
     return id;
   }, []);
 
+  /** Add a block with optional pre-filled content (used by starter templates). */
+  const addBlockWithContent = useCallback((
+    type: BlockType,
+    size: ModuleSize,
+    prefill?: {
+      body?: string; emoji?: string; items?: string[];
+      title?: string; url?: string; author?: string;
+      style?: 'line' | 'dots' | 'gradient';
+    },
+  ): string => {
+    const id = `block-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setBlocks(prev => {
+      const maxOrder = prev.length > 0 ? Math.max(...prev.map(b => b.order)) : -1;
+
+      // Merge prefill into default content
+      let content = makeDefaultContent(type);
+      if (prefill) {
+        if (content.type === 'text'      && prefill.body  !== undefined) content = { ...content, body: prefill.body };
+        if (content.type === 'quote'     && prefill.body  !== undefined) content = { ...content, body: prefill.body, author: prefill.author ?? '' };
+        if (content.type === 'note'      && prefill.body  !== undefined) content = { ...content, body: prefill.body };
+        if (content.type === 'emoji'     && prefill.emoji !== undefined) content = { ...content, emoji: prefill.emoji };
+        if (content.type === 'link'      && prefill.url   !== undefined) content = { ...content, url: prefill.url, title: prefill.title ?? 'Link' };
+        if (content.type === 'image'     && prefill.url   !== undefined) content = { ...content, url: prefill.url };
+        if (content.type === 'divider'   && prefill.style !== undefined) content = { ...content, style: prefill.style };
+        if (content.type === 'checklist' && prefill.items) {
+          content = {
+            type: 'checklist',
+            items: prefill.items.map((text, i) => ({
+              id:      `item-${i}-${Math.random().toString(36).slice(2, 5)}`,
+              text,
+              checked: false,
+            })),
+          };
+        }
+      }
+
+      const block: CustomBlock = {
+        id, type, size,
+        order:     maxOrder + 1,
+        content,
+        theme:     { customTitle: BLOCK_META[type].label },
+        createdAt: Date.now(),
+      };
+      const next = [...prev, block];
+      persist(next);
+      return next;
+    });
+    return id;
+  }, []);
+
+  /** Remove all blocks — used when applying a starter template. */
+  const clearAllBlocks = useCallback(() => {
+    setBlocks([]);
+    persist([]);
+  }, []);
+
   const updateContent = useCallback((id: string, content: BlockContent) => {
     setBlocks(prev => {
       const next = prev.map(b => b.id === id ? { ...b, content } : b);
@@ -183,6 +239,8 @@ export function useCustomBlocks() {
   return {
     blocks: sorted,
     addBlock,
+    addBlockWithContent,
+    clearAllBlocks,
     updateContent,
     updateTheme,
     setBlockSize,

@@ -123,7 +123,10 @@ const STORAGE_KEY = 'fw_workspace_layout_v3';
 function load(): ModuleConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [...DEFAULT_MODULES];
+    // No saved layout → first visit. Return all modules DISABLED so the
+    // creation-first CanvasEmptyState renders instead of the default dashboard.
+    // DEFAULT_MODULES is still used by reset() and applyPreset('adaptive').
+    if (!raw) return DEFAULT_MODULES.map(m => ({ ...m, enabled: false }));
     const parsed: ModuleConfig[] = JSON.parse(raw);
     // Merge in any new modules added since last save
     const ids = new Set(parsed.map(m => m.id));
@@ -200,11 +203,16 @@ export function useWorkspaceLayout() {
     if (preset) mutate([...preset.modules]);
   }, [mutate]);
 
+  /** Apply an arbitrary module config array — used by starter templates. */
+  const applyModules = useCallback((configs: ModuleConfig[]) => {
+    mutate([...configs]);
+  }, [mutate]);
+
   const reset = useCallback(() => mutate([...DEFAULT_MODULES]), [mutate]);
 
   const ordered = [...modules].sort((a, b) => a.order - b.order);
 
-  return { modules: ordered, toggleModule, reorder, setSize, applyPreset, reset, presets: PRESETS, duplicateModule };
+  return { modules: ordered, toggleModule, reorder, setSize, applyPreset, applyModules, reset, presets: PRESETS, duplicateModule };
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

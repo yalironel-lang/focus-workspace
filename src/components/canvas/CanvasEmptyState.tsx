@@ -1,276 +1,281 @@
+import { useState } from 'react';
+import { Plus, Layout, Sparkles } from 'lucide-react';
 import { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import { WorkspacePreset } from '../../hooks/useWorkspaceLayout';
-import { Plus } from 'lucide-react';
+import { WorkspacePreset }  from '../../hooks/useWorkspaceLayout';
+import type { BlockType }   from '../../hooks/useCustomBlocks';
+import type { StarterTemplate } from '../../data/starterTemplates';
 
 interface Props {
-  tokens:        AtmosphereTokens;
-  presets:       WorkspacePreset[];
-  onOpenAdd:     () => void;
-  onApplyPreset: (id: string) => void;
+  tokens:            AtmosphereTokens;
+  designMode:        boolean;
+  starterTemplates:  StarterTemplate[];
+  presets:           WorkspacePreset[];
+  onOpenAdd:         () => void;
+  onAddBlock:        (type: BlockType) => void;
+  onApplyPreset:     (id: string) => void;
+  onApplyTemplate:   (id: string) => void;
 }
 
 const LABEL: React.CSSProperties = {
   fontFamily:    "'Space Grotesk', sans-serif",
   fontSize:      '9px',
   fontWeight:    700,
-  letterSpacing: '0.14em',
+  letterSpacing: '0.15em',
   textTransform: 'uppercase' as const,
 };
 
-const PILLARS = [
+// The 3 dominant creation actions
+const BIG_ACTIONS = [
   {
-    icon: '✦',
-    title: 'Place anything',
-    body: 'Text, quotes, images, notes, checklists — every thought deserves a home.',
+    id:      'add',
+    icon:    <Plus style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
+    label:   'Add anything',
+    sub:     'Text, note, checklist, image, quote…',
+    accent:  true,
   },
   {
-    icon: '◈',
-    title: 'Design your space',
-    body: 'Choose atmospheres, surfaces, accents. Make the environment match your mind.',
+    id:      'template',
+    icon:    <Sparkles style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
+    label:   'Choose a starter layout',
+    sub:     'Student, deep work, moodboard, capture…',
+    accent:  false,
   },
   {
-    icon: '⟡',
-    title: 'Flow freely',
-    body: 'Drag, resize, reorder. Your workspace bends to how you think.',
+    id:      'blank',
+    icon:    <Layout style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
+    label:   'Start from blank canvas',
+    sub:     'Clean slate, all panels hidden.',
+    accent:  false,
   },
-];
+] as const;
 
-export function CanvasEmptyState({ tokens, presets, onOpenAdd, onApplyPreset }: Props) {
+export function CanvasEmptyState({
+  tokens, starterTemplates, onOpenAdd, onAddBlock, onApplyTemplate,
+}: Props) {
+  const [showTemplates, setShowTemplates] = useState(false);
+
+  const handleAction = (id: string) => {
+    if (id === 'add')      { onOpenAdd(); return; }
+    if (id === 'template') { setShowTemplates(true); return; }
+    if (id === 'blank')    { onApplyTemplate('blank-canvas'); onAddBlock('text'); return; }
+  };
+
   return (
     <div
-      className="flex flex-col items-center justify-center text-center animate-entrance"
-      style={{ minHeight: '70vh', padding: '48px 24px 80px' }}
+      className="flex flex-col items-center justify-center"
+      style={{ minHeight: '80vh', padding: '48px 24px 120px' }}
     >
 
-      {/* ── Ambient rings ──────────────────────────────────────────────── */}
+      {/* ── Ambient rings ─────────────────────────────────────── */}
       <div
-        className="relative flex items-center justify-center mb-12"
-        style={{ width: '140px', height: '140px', flexShrink: 0 }}
+        className="relative flex items-center justify-center mb-10"
+        style={{ width: '100px', height: '100px', flexShrink: 0 }}
       >
-        {/* Outermost ring */}
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{
-            border:     `1px solid ${tokens.cardBorder}`,
-            animation:  'fadeIn 0.8s ease both',
-          }}
-        />
-        {/* Middle ring — subtle glow */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            inset:      '18px',
-            border:     `1px solid ${tokens.accent}25`,
-            boxShadow:  `0 0 32px ${tokens.accentGlow}`,
-            animation:  'fadeIn 1s 0.15s ease both',
-          }}
-        />
-        {/* Inner ring */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            inset:      '36px',
-            border:     `1px solid ${tokens.accent}40`,
-            animation:  'fadeIn 1.1s 0.25s ease both',
-          }}
-        />
-        {/* Center mark */}
-        <div
-          style={{
-            fontSize:   '28px',
-            lineHeight: 1,
-            color:      tokens.accent,
-            userSelect: 'none',
-            animation:  'scaleIn 0.5s 0.3s var(--fw-ease-spring, cubic-bezier(0.34,1.56,0.64,1)) both',
-            filter:     `drop-shadow(0 0 8px ${tokens.accentGlow})`,
-          }}
-        >
+        <div className="absolute inset-0 rounded-full" style={{ border: `1px solid ${tokens.cardBorder}` }} />
+        <div className="absolute rounded-full" style={{
+          inset: '14px', border: `1px solid ${tokens.accent}22`,
+          boxShadow: `0 0 28px ${tokens.accentGlow}`,
+        }} />
+        <div className="absolute rounded-full" style={{ inset: '28px', border: `1px solid ${tokens.accent}38` }} />
+        <span style={{
+          fontSize: '22px', lineHeight: 1, color: tokens.accent, userSelect: 'none',
+          filter: `drop-shadow(0 0 8px ${tokens.accentGlow})`,
+          animation: 'scaleIn 0.5s 0.2s var(--fw-ease-spring, cubic-bezier(0.34,1.56,0.64,1)) both',
+        }}>
           ✦
-        </div>
+        </span>
       </div>
 
-      {/* ── Heading ──────────────────────────────────────────────────── */}
+      {/* ── Heading ───────────────────────────────────────────── */}
       <h2
-        className="animate-slide-up stagger-1"
+        className="animate-slide-up stagger-1 text-center"
         style={{
-          fontFamily:   "'Plus Jakarta Sans', sans-serif",
-          fontSize:     'clamp(24px, 4vw, 34px)',
-          fontWeight:   800,
+          fontFamily:    "'Plus Jakarta Sans', sans-serif",
+          fontSize:      'clamp(22px, 4vw, 30px)',
+          fontWeight:    800,
           letterSpacing: '-0.03em',
-          lineHeight:   1.15,
-          color:        tokens.textPrimary,
-          marginBottom: '12px',
-          maxWidth:     '400px',
+          lineHeight:    1.15,
+          color:         tokens.textPrimary,
+          marginBottom:  '10px',
         }}
       >
-        Your space.{' '}
-        <span style={{ color: tokens.accent }}>Your rules.</span>
+        Start shaping your workspace.
       </h2>
 
       <p
-        className="animate-slide-up stagger-2"
+        className="animate-slide-up stagger-2 text-center"
         style={{
-          fontSize:     '14px',
-          lineHeight:   1.7,
+          fontSize:     '13px',
+          lineHeight:   1.65,
           color:        tokens.textMuted,
-          maxWidth:     '320px',
-          marginBottom: '48px',
+          maxWidth:     '300px',
+          marginBottom: '44px',
         }}
       >
-        A personal canvas that adapts to how you think.
-        Start with a module or build from scratch.
+        This space is yours. Add modules, blocks, and layouts — make it fit exactly how you think.
       </p>
 
-      {/* ── Three pillars ───────────────────────────────────────────── */}
-      <div
-        className="animate-slide-up stagger-3"
-        style={{
-          display:              'grid',
-          gridTemplateColumns:  'repeat(3, 1fr)',
-          gap:                  '12px',
-          width:                '100%',
-          maxWidth:             '540px',
-          marginBottom:         '48px',
-        }}
-      >
-        {PILLARS.map((p, i) => (
+      {/* ── Template picker (conditional) ─────────────────────── */}
+      {showTemplates ? (
+        <div
+          className="animate-slide-up w-full"
+          style={{ maxWidth: '600px' }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span style={{ ...LABEL, color: tokens.textMuted }}>Choose a starter layout</span>
+            <button
+              onClick={() => setShowTemplates(false)}
+              style={{
+                fontSize:  '11px', color: tokens.textGhost,
+                background: 'none', border: 'none', cursor: 'pointer',
+              }}
+            >
+              ← Back
+            </button>
+          </div>
+
           <div
-            key={p.title}
             style={{
-              backgroundColor: tokens.cardBg,
-              border:          `1px solid ${tokens.cardBorder}`,
-              borderRadius:    `${tokens.radius}px`,
-              padding:         '20px 16px',
-              textAlign:       'left',
-              animation:       `slideUp 0.4s ${0.2 + i * 0.06}s var(--fw-ease-smooth, cubic-bezier(0.32,0.72,0,1)) both`,
+              display:             'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+              gap:                 '10px',
             }}
           >
-            <div
-              style={{
-                fontSize:     '18px',
-                marginBottom: '10px',
-                color:        tokens.accent,
-                lineHeight:   1,
-                filter:       `drop-shadow(0 0 6px ${tokens.accentGlow})`,
-              }}
-            >
-              {p.icon}
-            </div>
-            <p
-              style={{
-                fontFamily:   "'Space Grotesk', sans-serif",
-                fontSize:     '11px',
-                fontWeight:   700,
-                letterSpacing: '0.02em',
-                color:        tokens.textSecondary,
-                marginBottom: '6px',
-              }}
-            >
-              {p.title}
-            </p>
-            <p
-              style={{
-                fontSize:  '11px',
-                lineHeight: 1.55,
-                color:     tokens.textMuted,
-              }}
-            >
-              {p.body}
-            </p>
+            {starterTemplates.map((t, i) => (
+              <button
+                key={t.id}
+                onClick={() => onApplyTemplate(t.id)}
+                style={{
+                  display:         'flex',
+                  flexDirection:   'column',
+                  alignItems:      'flex-start',
+                  gap:             '8px',
+                  padding:         '16px',
+                  borderRadius:    `${tokens.radius}px`,
+                  border:          `1px solid ${tokens.cardBorder}`,
+                  backgroundColor: tokens.cardBg,
+                  cursor:          'pointer',
+                  textAlign:       'left',
+                  transition:      'all 0.15s ease',
+                  animation:       `slideUp 0.35s ${i * 40}ms var(--fw-ease-smooth, cubic-bezier(0.32,0.72,0,1)) both`,
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.borderColor     = `${tokens.accent}50`;
+                  el.style.backgroundColor = tokens.accentSubtle;
+                  el.style.transform       = 'translateY(-2px)';
+                  el.style.boxShadow       = `0 6px 20px ${tokens.accentGlow}`;
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.borderColor     = tokens.cardBorder;
+                  el.style.backgroundColor = tokens.cardBg;
+                  el.style.transform       = 'none';
+                  el.style.boxShadow       = 'none';
+                }}
+              >
+                <span style={{ fontSize: '20px', lineHeight: 1 }}>{t.emoji}</span>
+                <div>
+                  <p style={{ fontSize: '13px', fontWeight: 700, color: tokens.textPrimary, margin: 0 }}>
+                    {t.name}
+                  </p>
+                  <p style={{ fontSize: '11px', color: tokens.textMuted, margin: '3px 0 0', lineHeight: 1.45 }}>
+                    {t.tagline}
+                  </p>
+                </div>
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
 
-      {/* ── Primary CTA ─────────────────────────────────────────────── */}
-      <button
-        onClick={onOpenAdd}
-        className="animate-slide-up stagger-4 flex items-center gap-2"
-        style={{
-          fontFamily:      "'Space Grotesk', sans-serif",
-          fontSize:        '13px',
-          fontWeight:      700,
-          letterSpacing:   '0.04em',
-          padding:         '11px 24px',
-          borderRadius:    '40px',
-          border:          'none',
-          backgroundColor: tokens.accent,
-          color:           '#000',
-          cursor:          'pointer',
-          boxShadow:       `0 4px 24px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`,
-          marginBottom:    '32px',
-          transition:      'all 0.2s cubic-bezier(0.34,1.56,0.64,1)',
-        }}
-        onMouseEnter={e => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover;
-          (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px) scale(1.02)';
-          (e.currentTarget as HTMLButtonElement).style.boxShadow =
-            `0 8px 32px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accentHover}60`;
-        }}
-        onMouseLeave={e => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent;
-          (e.currentTarget as HTMLButtonElement).style.transform = 'none';
-          (e.currentTarget as HTMLButtonElement).style.boxShadow =
-            `0 4px 24px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`;
-        }}
-      >
-        <Plus className="w-4 h-4" strokeWidth={2.5} />
-        Add first module
-      </button>
-
-      {/* ── Preset quick-starts ─────────────────────────────────────── */}
-      <div className="animate-slide-up stagger-5 flex flex-col items-center gap-3">
-        <p style={{ ...LABEL, color: tokens.textGhost }}>
-          or start from a layout preset
-        </p>
+      ) : (
+        /* ── Three big action cards ───────────────────────────── */
         <div
+          className="animate-slide-up stagger-3 w-full"
           style={{
-            display:        'flex',
-            flexWrap:       'wrap',
-            justifyContent: 'center',
-            gap:            '8px',
-            maxWidth:       '480px',
+            display:             'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap:                 '12px',
+            maxWidth:            '660px',
           }}
         >
-          {presets.map(p => (
+          {BIG_ACTIONS.map((action, i) => (
             <button
-              key={p.id}
-              onClick={() => onApplyPreset(p.id)}
+              key={action.id}
+              onClick={() => handleAction(action.id)}
               style={{
                 display:         'flex',
-                alignItems:      'center',
-                gap:             '6px',
-                fontSize:        '12px',
-                fontWeight:      600,
-                padding:         '7px 14px',
-                borderRadius:    '20px',
-                border:          `1px solid ${tokens.cardBorder}`,
-                backgroundColor: tokens.cardBg,
-                color:           tokens.textSecondary,
+                flexDirection:   'column',
+                alignItems:      'flex-start',
+                gap:             '12px',
+                padding:         '22px 20px',
+                borderRadius:    `${tokens.radius}px`,
+                border:          `1.5px solid ${action.accent ? tokens.accent + '60' : tokens.cardBorder}`,
+                backgroundColor: action.accent ? `${tokens.accent}10` : tokens.cardBg,
                 cursor:          'pointer',
-                transition:      'all 0.15s ease',
-                backdropFilter:  'blur(12px)',
+                textAlign:       'left',
+                transition:      'all 0.18s cubic-bezier(0.34,1.56,0.64,1)',
+                animation:       `slideUp 0.4s ${0.12 + i * 0.07}s var(--fw-ease-smooth, cubic-bezier(0.32,0.72,0,1)) both`,
               }}
               onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.borderColor  = `${tokens.accent}50`;
-                (e.currentTarget as HTMLElement).style.backgroundColor = tokens.accentSubtle;
-                (e.currentTarget as HTMLElement).style.color        = tokens.accent;
-                (e.currentTarget as HTMLElement).style.transform    = 'translateY(-1px)';
-                (e.currentTarget as HTMLElement).style.boxShadow    = `0 4px 16px ${tokens.accentGlow}`;
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.borderColor     = action.accent ? tokens.accent : `${tokens.accent}50`;
+                el.style.backgroundColor = action.accent ? `${tokens.accent}18` : tokens.accentSubtle;
+                el.style.transform       = 'translateY(-3px) scale(1.01)';
+                el.style.boxShadow       = `0 8px 28px ${tokens.accentGlow}`;
               }}
               onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.borderColor  = tokens.cardBorder;
-                (e.currentTarget as HTMLElement).style.backgroundColor = tokens.cardBg;
-                (e.currentTarget as HTMLElement).style.color        = tokens.textSecondary;
-                (e.currentTarget as HTMLElement).style.transform    = 'none';
-                (e.currentTarget as HTMLElement).style.boxShadow    = 'none';
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.borderColor     = action.accent ? tokens.accent + '60' : tokens.cardBorder;
+                el.style.backgroundColor = action.accent ? `${tokens.accent}10` : tokens.cardBg;
+                el.style.transform       = 'none';
+                el.style.boxShadow       = 'none';
               }}
             >
-              <span style={{ fontSize: '14px', lineHeight: 1 }}>{p.emoji}</span>
-              {p.name}
+              {/* Icon pill */}
+              <div
+                style={{
+                  width:           '40px',
+                  height:          '40px',
+                  borderRadius:    '12px',
+                  backgroundColor: action.accent ? tokens.accent : `${tokens.accent}18`,
+                  border:          `1px solid ${action.accent ? 'transparent' : tokens.accent + '30'}`,
+                  display:         'flex',
+                  alignItems:      'center',
+                  justifyContent:  'center',
+                  color:           action.accent ? '#000' : tokens.accent,
+                  flexShrink:      0,
+                  boxShadow:       action.accent ? `0 4px 16px ${tokens.accentGlow}` : 'none',
+                }}
+              >
+                {action.icon}
+              </div>
+
+              {/* Text */}
+              <div>
+                <p style={{
+                  fontFamily:    "'Plus Jakarta Sans', sans-serif",
+                  fontSize:      '14px',
+                  fontWeight:    700,
+                  color:         tokens.textPrimary,
+                  margin:        0,
+                  letterSpacing: '-0.01em',
+                }}>
+                  {action.label}
+                </p>
+                <p style={{
+                  fontSize:  '11px',
+                  color:     tokens.textMuted,
+                  margin:    '4px 0 0',
+                  lineHeight: 1.45,
+                }}>
+                  {action.sub}
+                </p>
+              </div>
             </button>
           ))}
         </div>
-      </div>
+      )}
 
     </div>
   );
