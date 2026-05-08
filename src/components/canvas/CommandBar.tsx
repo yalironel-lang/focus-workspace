@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AtmosphereTokens, ATMOSPHERES } from '../../hooks/useAtmosphere';
-import { BookOpenCheck, Sliders, Plus, ChevronDown, LogOut } from 'lucide-react';
+import { BookOpenCheck, Sliders, Plus, ChevronDown, LogOut, LayoutDashboard, Move } from 'lucide-react';
+import type { CanvasMode } from '../../hooks/useCanvasMode';
 
 interface Props {
   tokens:           AtmosphereTokens;
   atmosphereId:     string;
   designMode:       boolean;
+  canvasMode:       CanvasMode;
   userName:         string;
   onToggleDesign:   () => void;
+  onToggleCanvas:   () => void;
   onOpenAdd:        () => void;
   onSetAtmosphere:  (id: string) => void;
   onSignOut:        () => void;
@@ -35,8 +38,8 @@ const navBtn = (
 });
 
 export function CommandBar({
-  tokens, atmosphereId, designMode, userName,
-  onToggleDesign, onOpenAdd, onSetAtmosphere, onSignOut,
+  tokens, atmosphereId, designMode, canvasMode, userName,
+  onToggleDesign, onToggleCanvas, onOpenAdd, onSetAtmosphere, onSignOut,
 }: Props) {
   const [atmOpen, setAtmOpen] = useState(false);
   const currentAtm = ATMOSPHERES.find(a => a.id === atmosphereId) ?? ATMOSPHERES[0];
@@ -323,6 +326,42 @@ export function CommandBar({
           >
             <Plus style={{ width: '13px', height: '13px' }} strokeWidth={2.5} />
             <span className="hidden sm:inline">Add</span>
+          </button>
+
+          {/* Canvas mode toggle: Grid ↔ Freeform */}
+          <button
+            onClick={onToggleCanvas}
+            title={canvasMode === 'freeform' ? 'Switch to Grid layout' : 'Switch to Freeform canvas'}
+            style={{
+              ...navBtn(tokens, canvasMode === 'freeform'),
+              ...(canvasMode === 'freeform' ? {
+                backgroundColor: `${tokens.accent}18`,
+                color:           tokens.accent,
+                border:          `1px solid ${tokens.accent}35`,
+              } : {}),
+            }}
+            onMouseEnter={e => {
+              if (canvasMode !== 'freeform') Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                backgroundColor: tokens.cardBorder,
+                color: tokens.textSecondary,
+                borderColor: tokens.cardBorder,
+              });
+            }}
+            onMouseLeave={e => {
+              if (canvasMode !== 'freeform') Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                backgroundColor: 'transparent',
+                color: tokens.textGhost,
+                borderColor: 'transparent',
+              });
+            }}
+          >
+            {canvasMode === 'freeform'
+              ? <Move style={{ width: '12px', height: '12px' }} />
+              : <LayoutDashboard style={{ width: '12px', height: '12px' }} />
+            }
+            <span className="hidden sm:inline">
+              {canvasMode === 'freeform' ? 'Freeform' : 'Grid'}
+            </span>
           </button>
 
           {/* Edit layout toggle */}

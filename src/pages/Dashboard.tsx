@@ -13,16 +13,25 @@ import { STARTER_TEMPLATES } from '../data/starterTemplates';
 import { SessionModal } from '../components/SessionModal';
 
 // ── Canvas primitives ─────────────────────────────────────────────────────────
-import { CommandBar }       from '../components/canvas/CommandBar';
-import { WorkspaceModule }  from '../components/canvas/WorkspaceModule';
-import { DesignToolbar }    from '../components/canvas/DesignToolbar';
-import { ModuleInspector }  from '../components/canvas/ModuleInspector';
+import { CommandBar }        from '../components/canvas/CommandBar';
+import { WorkspaceModule }   from '../components/canvas/WorkspaceModule';
+import { DesignToolbar }     from '../components/canvas/DesignToolbar';
+import { ModuleInspector }   from '../components/canvas/ModuleInspector';
 import { AddWorkspacePanel } from '../components/canvas/AddWorkspacePanel';
-import { CanvasEmptyState }    from '../components/canvas/CanvasEmptyState';
-import { OnboardingLanding }  from '../components/onboarding/OnboardingLanding';
+import { CanvasEmptyState }  from '../components/canvas/CanvasEmptyState';
+import { OnboardingLanding } from '../components/onboarding/OnboardingLanding';
 import type { OnboardingPath } from '../components/onboarding/OnboardingLanding';
-import { BlockRenderer }    from '../components/canvas/BlockRenderer';
-import { QuickAddFab }      from '../components/canvas/QuickAddFab';
+import { BlockRenderer }     from '../components/canvas/BlockRenderer';
+import { QuickAddFab }       from '../components/canvas/QuickAddFab';
+import { FreeformCanvas }    from '../components/canvas/FreeformCanvas';
+import { CreateToolModal }   from '../components/canvas/CreateToolModal';
+
+// ── Freeform canvas hooks ─────────────────────────────────────────────────────
+import { useCanvasMode }      from '../hooks/useCanvasMode';
+import { useBlockPositions }  from '../hooks/useBlockPositions';
+import { useCustomTools }     from '../hooks/useCustomTools';
+import { MODULE_REGISTRY }    from '../modules/registry';
+import { BLOCK_META }         from '../hooks/useCustomBlocks';
 
 // ── Workspace module content ──────────────────────────────────────────────────
 import { DailyIntention } from '../components/workspace/DailyIntention';
@@ -96,6 +105,12 @@ export function Dashboard() {
   } = useCustomBlocks();
 
   const tokens = mergeAccent(atmTokens, design);
+
+  // ── Freeform canvas ──────────────────────────────────────────────────────
+  const canvasMode   = useCanvasMode();
+  const blockPos     = useBlockPositions();
+  const customTools  = useCustomTools();
+  const [createToolOpen, setCreateToolOpen] = useState(false);
 
   // ── Intelligence + daily loop ────────────────────────────────────────────
   const dailyLoop    = useDailyLoop();
@@ -358,6 +373,61 @@ export function Dashboard() {
     }
   };
 
+  // ── Freeform content renderer (modules + blocks by ID) ───────────────────
+  //    FreeformCanvas calls this for both system modules and custom blocks.
+
+  const renderFreeformContent = useCallback((id: string): React.ReactNode | null => {
+    // Custom block?
+    const block = blocks.find(b => b.id === id);
+    if (block) {
+      return (
+        <BlockRenderer
+          block={block}
+          tokens={tokens}
+          onChange={content => updateContent(block.id, content)}
+        />
+      );
+    }
+    // System module — reuse same renderer
+    return renderModuleContent(id);
+  }, [blocks, tokens, updateContent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Label for a freeform block (shown in drag handle) ────────────────────
+
+  const getFreeformLabel = useCallback((id: string): string => {
+    if (id.startsWith('block-')) {
+      const block = blocks.find(b => b.id === id);
+      if (!block) return 'Block';
+      return block.theme?.customTitle ?? BLOCK_META[block.type]?.label ?? 'Block';
+    }
+    if (id.startsWith('tool-')) {
+      const tool = customTools.tools.find(t => t.id === id);
+      return tool?.name ?? 'Tool';
+    }
+    const meta = MODULE_REGISTRY.find(m => m.id === id || id.startsWith(m.id));
+    return meta?.label ?? id;
+  }, [blocks, customTools.tools]);
+
+  // ── Init positions when entering freeform mode ────────────────────────────
+  //    Any item without a saved position gets placed automatically.
+
+  React.useEffect(() => {
+    if (canvasMode.mode !== 'freeform') return;
+    const allIds = [
+      ...enabledModulesForFreeform.map(m => m.id),
+      ...blocks.map(b => b.id),
+      ...customTools.tools.map(t => t.id),
+    ];
+    allIds.forEach(id => {
+      if (!blockPos.positions[id]) {
+        const { x, y } = blockPos.nextFreePos(blockPos.positions);
+        blockPos.initPos(id, { x, y, w: 340 });
+      }
+    });
+  // Re-run whenever mode changes or item list changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasMode.mode, blocks.length, customTools.tools.length]);
+
   // ── Workspaces inline panel ───────────────────────────────────────────────
 
   function WorkspacesPanel() {
@@ -492,7 +562,9 @@ export function Dashboard() {
 
   const canvasStyle = computeCanvasBg(design, tokens, designMode);
   const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
-  const hasContent = enabledModules.length > 0 || blocks.length > 0;
+  // Alias used by freeform useEffect (defined before the effect that reads it)
+  const enabledModulesForFreeform = enabledModules;
+  const hasContent = enabledModules.length > 0 || blocks.length > 0 || customTools.tools.length > 0;
 
   // ── Contextual hints ──────────────────────────────────────────────────────
   const hintCtx = React.useMemo(() => ({
@@ -668,6 +740,7 @@ export function Dashboard() {
         tokens={tokens}
         atmosphereId={atmosphereId}
         designMode={designMode}
+        canvasMode={canvasMode.mode}
         userName={displayName}
         onToggleDesign={() => {
           setDesignMode(d => {
@@ -676,15 +749,40 @@ export function Dashboard() {
             return next;
           });
         }}
+        onToggleCanvas={canvasMode.toggleMode}
         onOpenAdd={() => setAddPanelOpen(true)}
         onSetAtmosphere={setAtmosphere}
         onSignOut={handleSignOut}
       />
 
-      {/* ── Canvas ────────────────────────────────────────────── */}
+      {/* ── Freeform Canvas (when in freeform mode) ──────────── */}
+      {canvasMode.mode === 'freeform' && !loading && (
+        <FreeformCanvas
+          tokens={tokens}
+          modules={modules}
+          blocks={blocks}
+          tools={customTools.tools}
+          positions={blockPos.positions}
+          canvasState={canvasMode}
+          designMode={designMode}
+          selectedId={selectedId}
+          onSetPos={blockPos.setPos}
+          onSelect={id => setSelectedId(id)}
+          onRemoveModule={id => toggleModule(id)}
+          onRemoveBlock={deleteBlock}
+          onRemoveTool={customTools.deleteTool}
+          onDuplicateBlock={duplicateBlock}
+          onOpenAdd={() => setAddPanelOpen(true)}
+          renderModuleContent={renderFreeformContent}
+          getLabel={getFreeformLabel}
+        />
+      )}
+
+      {/* ── Grid Canvas (default mode) ────────────────────────── */}
       <main
         className="relative"
         style={{
+          display:    canvasMode.mode === 'freeform' ? 'none' : undefined,
           minHeight:  'calc(100vh - 48px)',
           ...canvasStyle,
           transition: `all ${design.transition}`,
@@ -932,8 +1030,31 @@ export function Dashboard() {
         tokens={tokens}
         onToggle={toggleModule}
         onAddBlock={handleAddBlock}
+        onOpenCreateTool={() => { setAddPanelOpen(false); setCreateToolOpen(true); }}
         onClose={() => setAddPanelOpen(false)}
       />
+
+      {/* ── Create Tool modal ─────────────────────────────────── */}
+      {createToolOpen && (
+        <CreateToolModal
+          tokens={tokens}
+          onCreate={spec => {
+            const id = customTools.addTool(spec);
+            setCreateToolOpen(false);
+            // Place new tool on canvas with a free position
+            const { x, y } = blockPos.nextFreePos(blockPos.positions);
+            blockPos.initPos(id, { x, y, w: 340 });
+            // Auto-switch to freeform mode so user sees it placed
+            if (canvasMode.mode !== 'freeform') canvasMode.setMode('freeform');
+            setSelectedId(id);
+            toast.success(`Tool "${spec.name}" created`, {
+              icon: spec.emoji,
+              style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
+            });
+          }}
+          onClose={() => setCreateToolOpen(false)}
+        />
+      )}
 
       {/* ── Quick-add FAB ─────────────────────────────────────── */}
       <QuickAddFab

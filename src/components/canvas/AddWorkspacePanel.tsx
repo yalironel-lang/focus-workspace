@@ -20,12 +20,13 @@ import { BLOCK_META, BlockType }  from '../../hooks/useCustomBlocks';
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
-  open:       boolean;
-  modules:    ModuleConfig[];
-  tokens:     AtmosphereTokens;
-  onToggle:   (id: string) => void;   // enable/disable system module
-  onAddBlock: (type: BlockType) => void;
-  onClose:    () => void;
+  open:            boolean;
+  modules:         ModuleConfig[];
+  tokens:          AtmosphereTokens;
+  onToggle:        (id: string) => void;   // enable/disable system module
+  onAddBlock:      (type: BlockType) => void;
+  onOpenCreateTool?: () => void;           // open the Create Tool modal
+  onClose:         () => void;
 }
 
 // ── Unified catalog item ──────────────────────────────────────────────────────
@@ -216,7 +217,7 @@ function ItemPreview({ item, tokens }: { item: CatalogItem; tokens: AtmosphereTo
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
-export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock, onClose }: Props) {
+export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock, onOpenCreateTool, onClose }: Props) {
   const [search,  setSearch]  = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('all');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -774,6 +775,63 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
                       <CompactRow key={item.kind === 'module' ? item.id : item.blockType} item={item} />
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Custom Tools section */}
+              {onOpenCreateTool && (activeTab === 'all' || activeTab === 'focus') && !search && (
+                <div>
+                  <SectionLabel label="Custom Tools" />
+                  <button
+                    onClick={() => { onOpenCreateTool(); onClose(); }}
+                    style={{
+                      width:           '100%',
+                      display:         'flex',
+                      alignItems:      'center',
+                      gap:             '12px',
+                      padding:         '12px 14px',
+                      borderRadius:    '12px',
+                      border:          `1.5px dashed ${tokens.accent}40`,
+                      backgroundColor: `${tokens.accent}06`,
+                      cursor:          'pointer',
+                      textAlign:       'left' as const,
+                      transition:      'all 0.15s ease',
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = `${tokens.accent}80`;
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = `${tokens.accent}10`;
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = `${tokens.accent}40`;
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = `${tokens.accent}06`;
+                    }}
+                  >
+                    <div style={{
+                      width:           '36px',
+                      height:          '36px',
+                      borderRadius:    '10px',
+                      backgroundColor: `${tokens.accent}15`,
+                      border:          `1px solid ${tokens.accent}25`,
+                      display:         'flex',
+                      alignItems:      'center',
+                      justifyContent:  'center',
+                      flexShrink:      0,
+                      fontSize:        '18px',
+                    }}>
+                      🧮
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: '13px', fontWeight: 700, color: tokens.textPrimary, margin: 0 }}>
+                        Create a Tool
+                      </p>
+                      <p style={{ fontSize: '10px', color: tokens.textGhost, margin: 0, marginTop: '1px' }}>
+                        Grade calculator, budget splitter, formula card — no code.
+                      </p>
+                    </div>
+                    <span style={{ fontSize: '10px', fontWeight: 700, color: tokens.accent, opacity: 0.7 }}>
+                      New →
+                    </span>
+                  </button>
                 </div>
               )}
 
