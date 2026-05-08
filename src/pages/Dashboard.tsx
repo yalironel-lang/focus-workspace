@@ -18,7 +18,8 @@ import { WorkspaceModule }  from '../components/canvas/WorkspaceModule';
 import { DesignToolbar }    from '../components/canvas/DesignToolbar';
 import { ModuleInspector }  from '../components/canvas/ModuleInspector';
 import { AddWorkspacePanel } from '../components/canvas/AddWorkspacePanel';
-import { CanvasEmptyState } from '../components/canvas/CanvasEmptyState';
+import { CanvasEmptyState }   from '../components/canvas/CanvasEmptyState';
+import { GuidedOnboarding }  from '../components/canvas/GuidedOnboarding';
 import { BlockRenderer }    from '../components/canvas/BlockRenderer';
 import { QuickAddFab }      from '../components/canvas/QuickAddFab';
 
@@ -49,6 +50,8 @@ type InspectorTab = 'module' | 'theme' | 'presets';
 
 /** Key used by useWorkspaceLayout to persist layout — if absent → first visit */
 const LAYOUT_STORAGE_KEY = 'fw_workspace_layout_v3';
+/** Marks that the user has seen the guided onboarding intro */
+const ONBOARDING_KEY = 'fw_onboarding_v1';
 
 // ── Canvas zone definitions ───────────────────────────────────────────────────
 
@@ -104,6 +107,15 @@ export function Dashboard() {
 
   // Pulse a newly added block once so user can see where it appeared
   const [pulsingId, setPulsingId] = useState<string | null>(null);
+
+  // Guided onboarding — only shown once, on very first visit
+  const [onboardingDone, setOnboardingDone] = useState(() =>
+    !!localStorage.getItem(ONBOARDING_KEY)
+  );
+  const completeOnboarding = useCallback(() => {
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    setOnboardingDone(true);
+  }, []);
 
   // ── Drag state ───────────────────────────────────────────────────────────────
   const dragIdRef = useRef<string | null>(null);
@@ -564,6 +576,18 @@ export function Dashboard() {
     if (hasContent) setShowDesignHint(false);
   }, [hasContent]);
 
+  // ── CMD+K / CTRL+K → open "Add to workspace" panel ───────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setAddPanelOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -610,8 +634,18 @@ export function Dashboard() {
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.cardBorder }} />
           </div>
 
+        ) : !hasContent && !onboardingDone ? (
+          /* ── First-ever visit: cinematic guided intro ── */
+          <GuidedOnboarding
+            tokens={tokens}
+            starterTemplates={STARTER_TEMPLATES}
+            onComplete={completeOnboarding}
+            onApplyTemplate={id => { completeOnboarding(); handleApplyTemplate(id); }}
+            onOpenAdd={() => { completeOnboarding(); setAddPanelOpen(true); }}
+          />
+
         ) : !hasContent ? (
-          /* ── Empty / first-time state ── */
+          /* ── Returning empty state (onboarding already seen) ── */
           <CanvasEmptyState
             tokens={tokens}
             designMode={designMode}

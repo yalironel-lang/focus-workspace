@@ -29,25 +29,68 @@ const BIG_ACTIONS = [
   {
     id:      'add',
     icon:    <Plus style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
-    label:   'Add anything',
-    sub:     'Text, note, checklist, image, quote…',
+    label:   'Add something you need',
+    sub:     'Note, timer, checklist, image, quote…',
     accent:  true,
   },
   {
     id:      'template',
     icon:    <Sparkles style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
-    label:   'Choose a starter layout',
+    label:   'Start from a layout',
     sub:     'Student, deep work, moodboard, capture…',
     accent:  false,
   },
   {
     id:      'blank',
     icon:    <Layout style={{ width: '20px', height: '20px' }} strokeWidth={1.5} />,
-    label:   'Start from blank canvas',
-    sub:     'Clean slate, all panels hidden.',
+    label:   'Clean slate',
+    sub:     'Completely empty. Build it your way.',
     accent:  false,
   },
 ] as const;
+
+// Ambient floating particles — pure decorative CSS elements
+function AmbientParticles({ tokens }: { tokens: AtmosphereTokens }) {
+  const PARTICLES = [
+    { size: 2,  top: '18%', left: '12%',  delay: '0s',    dur: '7s'  },
+    { size: 3,  top: '72%', left: '8%',   delay: '1.2s',  dur: '9s'  },
+    { size: 2,  top: '35%', left: '88%',  delay: '0.4s',  dur: '6s'  },
+    { size: 4,  top: '58%', left: '82%',  delay: '2.1s',  dur: '8s'  },
+    { size: 2,  top: '82%', left: '55%',  delay: '0.8s',  dur: '11s' },
+    { size: 3,  top: '15%', left: '65%',  delay: '3.0s',  dur: '7s'  },
+    { size: 2,  top: '45%', left: '5%',   delay: '1.8s',  dur: '10s' },
+    { size: 2,  top: '90%', left: '30%',  delay: '0.2s',  dur: '8s'  },
+  ] as const;
+
+  return (
+    <div
+      style={{
+        position:      'absolute',
+        inset:         0,
+        pointerEvents: 'none',
+        overflow:      'hidden',
+      }}
+      aria-hidden="true"
+    >
+      {PARTICLES.map((p, i) => (
+        <div
+          key={i}
+          style={{
+            position:        'absolute',
+            top:             p.top,
+            left:            p.left,
+            width:           `${p.size}px`,
+            height:          `${p.size}px`,
+            borderRadius:    '50%',
+            backgroundColor: tokens.accent,
+            opacity:         0,
+            animation:       `emptyStateParticle ${p.dur} ${p.delay} ease-in-out infinite`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function CanvasEmptyState({
   tokens, starterTemplates, onOpenAdd, onAddBlock, onApplyTemplate,
@@ -63,27 +106,70 @@ export function CanvasEmptyState({
   return (
     <div
       className="flex flex-col items-center justify-center"
-      style={{ minHeight: '80vh', padding: '48px 24px 120px' }}
+      style={{
+        minHeight:  '80vh',
+        padding:    '48px 24px 120px',
+        position:   'relative',
+        overflow:   'hidden',
+      }}
     >
+      <AmbientParticles tokens={tokens} />
 
       {/* ── Ambient rings ─────────────────────────────────────── */}
       <div
         className="relative flex items-center justify-center mb-10"
-        style={{ width: '100px', height: '100px', flexShrink: 0 }}
+        style={{ width: '110px', height: '110px', flexShrink: 0 }}
       >
-        <div className="absolute inset-0 rounded-full" style={{ border: `1px solid ${tokens.cardBorder}` }} />
-        <div className="absolute rounded-full" style={{
-          inset: '14px', border: `1px solid ${tokens.accent}22`,
-          boxShadow: `0 0 28px ${tokens.accentGlow}`,
-        }} />
-        <div className="absolute rounded-full" style={{ inset: '28px', border: `1px solid ${tokens.accent}38` }} />
-        <span style={{
-          fontSize: '22px', lineHeight: 1, color: tokens.accent, userSelect: 'none',
-          filter: `drop-shadow(0 0 8px ${tokens.accentGlow})`,
-          animation: 'scaleIn 0.5s 0.2s var(--fw-ease-spring, cubic-bezier(0.34,1.56,0.64,1)) both',
-        }}>
-          ✦
-        </span>
+        {/* Outermost slow-breathing ring */}
+        <div
+          className="absolute inset-0 rounded-full"
+          style={{
+            border:    `1px solid ${tokens.cardBorder}`,
+            animation: 'onboardRingPulse 4s ease-in-out infinite',
+          }}
+        />
+        {/* Middle ring with glow */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            inset:     '15px',
+            border:    `1px solid ${tokens.accent}28`,
+            boxShadow: `0 0 40px ${tokens.accentGlow}`,
+            animation: 'onboardRingPulse 4s 0.8s ease-in-out infinite',
+          }}
+        />
+        {/* Inner ring */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            inset:     '30px',
+            border:    `1px solid ${tokens.accent}45`,
+            animation: 'onboardRingPulse 4s 1.6s ease-in-out infinite',
+          }}
+        />
+        {/* Innermost dot */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            inset:           '42px',
+            backgroundColor: `${tokens.accent}18`,
+            boxShadow:       `0 0 28px ${tokens.accentGlow}`,
+            display:         'flex',
+            alignItems:      'center',
+            justifyContent:  'center',
+          }}
+        >
+          <span style={{
+            fontSize:   '13px',
+            lineHeight: 1,
+            color:      tokens.accent,
+            userSelect: 'none',
+            filter:     `drop-shadow(0 0 8px ${tokens.accentGlow})`,
+            animation:  'onboardGlyphFloat 4.5s ease-in-out infinite',
+          }}>
+            ✦
+          </span>
+        </div>
       </div>
 
       {/* ── Heading ───────────────────────────────────────────── */}
@@ -99,7 +185,7 @@ export function CanvasEmptyState({
           marginBottom:  '10px',
         }}
       >
-        Start shaping your workspace.
+        Start shaping your space.
       </h2>
 
       <p
@@ -112,7 +198,8 @@ export function CanvasEmptyState({
           marginBottom: '44px',
         }}
       >
-        This space is yours. Add modules, blocks, and layouts — make it fit exactly how you think.
+        Add tools, notes, and layouts —
+        make it fit exactly how you think.
       </p>
 
       {/* ── Template picker (conditional) ─────────────────────── */}
@@ -122,7 +209,7 @@ export function CanvasEmptyState({
           style={{ maxWidth: '600px' }}
         >
           <div className="flex items-center justify-between mb-4">
-            <span style={{ ...LABEL, color: tokens.textMuted }}>Choose a starter layout</span>
+            <span style={{ ...LABEL, color: tokens.textMuted }}>Choose a layout</span>
             <button
               onClick={() => setShowTemplates(false)}
               style={{
@@ -277,6 +364,34 @@ export function CanvasEmptyState({
         </div>
       )}
 
+      {/* ── Keyboard shortcut hint ────────────────────────────── */}
+      {!showTemplates && (
+        <p
+          className="animate-slide-up stagger-5 text-center"
+          style={{
+            fontSize:   '11px',
+            color:      tokens.textGhost,
+            marginTop:  '28px',
+            display:    'flex',
+            alignItems: 'center',
+            gap:        '5px',
+          }}
+        >
+          <kbd style={{
+            fontFamily:      "'Space Grotesk', monospace",
+            fontSize:        '10px',
+            fontWeight:      600,
+            padding:         '1px 5px',
+            borderRadius:    '5px',
+            border:          `1px solid ${tokens.cardBorderHover}`,
+            backgroundColor: tokens.cardBg,
+            color:           tokens.textGhost,
+          }}>
+            ⌘K
+          </kbd>
+          to add anything, anytime
+        </p>
+      )}
     </div>
   );
 }

@@ -301,10 +301,10 @@ export function CommandBar({
             )}
           </div>
 
-          {/* Add module */}
+          {/* Add to workspace (⌘K) */}
           <button
             onClick={onOpenAdd}
-            title="Add module"
+            title="Add to workspace  ⌘K"
             style={navBtn(tokens)}
             onMouseEnter={e => {
               Object.assign((e.currentTarget as HTMLButtonElement).style, {

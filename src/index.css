@@ -245,6 +245,26 @@
     animation: fabOptionIn 0.2s var(--fw-ease-spring) both;
   }
 
+  /* ── Guided onboarding ambient ring pulse ── */
+  @keyframes onboardRingPulse {
+    0%, 100% { opacity: 0.4; transform: scale(1);    }
+    50%       { opacity: 0.9; transform: scale(1.04); }
+  }
+
+  /* ── Onboarding center glyph float ── */
+  @keyframes onboardGlyphFloat {
+    0%, 100% { transform: translateY(0px);   opacity: 0.8; }
+    50%       { transform: translateY(-3px);  opacity: 1;   }
+  }
+
+  /* ── Empty state ambient floating particles ── */
+  @keyframes emptyStateParticle {
+    0%   { opacity: 0;    transform: translateY(0px);   }
+    20%  { opacity: 0.35; }
+    80%  { opacity: 0.35; }
+    100% { opacity: 0;    transform: translateY(-24px); }
+  }
+
   /* ── Shimmer (loading skeleton) ── */
   @keyframes shimmer {
     0%   { background-position: -200% 0; }

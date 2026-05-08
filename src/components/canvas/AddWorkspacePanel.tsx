@@ -529,10 +529,10 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — intentionally light so the canvas stays visible */}
       <div
         className="fixed inset-0 z-50"
-        style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
+        style={{ backgroundColor: 'rgba(0,0,0,0.22)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }}
         onClick={onClose}
       />
 
@@ -571,9 +571,25 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
               }}>
                 Add to your workspace
               </h3>
-              <p style={{ ...CAP, fontSize: '9px', color: tokens.textGhost, marginTop: '3px' }}>
-                {modules.filter(m => m.enabled).length} items on canvas
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                <p style={{ ...CAP, fontSize: '9px', color: tokens.textGhost, margin: 0 }}>
+                  {modules.filter(m => m.enabled).length} items on canvas
+                </p>
+                <kbd style={{
+                  fontFamily:      "'Space Grotesk', monospace",
+                  fontSize:        '9px',
+                  fontWeight:      600,
+                  padding:         '1px 5px',
+                  borderRadius:    '5px',
+                  border:          `1px solid ${tokens.cardBorderHover}`,
+                  backgroundColor: tokens.wellBg,
+                  color:           tokens.textGhost,
+                  letterSpacing:   '0.03em',
+                  lineHeight:      '1.6',
+                }}>
+                  ⌘K
+                </kbd>
+              </div>
             </div>
             <button
               onClick={onClose}
