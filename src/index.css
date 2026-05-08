@@ -257,12 +257,43 @@
     50%       { transform: translateY(-3px);  opacity: 1;   }
   }
 
-  /* ── Empty state ambient floating particles ── */
+  /* ── Empty state / onboarding ambient floating particles ── */
   @keyframes emptyStateParticle {
     0%   { opacity: 0;    transform: translateY(0px);   }
     20%  { opacity: 0.35; }
     80%  { opacity: 0.35; }
     100% { opacity: 0;    transform: translateY(-24px); }
+  }
+
+  /* ── Workspace preview float ── */
+  @keyframes previewFloat {
+    0%, 100% { transform: translateY(0px);  }
+    50%       { transform: translateY(-7px); }
+  }
+
+  /* ── Preview dot pulse (Focus Mode active dot, product label dot) ── */
+  @keyframes previewDotPulse {
+    0%, 100% { opacity: 0.7; transform: scale(1);    box-shadow: inherit; }
+    50%       { opacity: 1;   transform: scale(1.15); box-shadow: inherit; }
+  }
+
+  /* ── Preview timer arc oscillation ── */
+  /* Declared as a CSS animation; values set via JS stroke-dashoffset override */
+  @keyframes previewTimerArc {
+    0%   { stroke-dashoffset: 102; }   /* ~45% progress */
+    100% { stroke-dashoffset: 54;  }   /* ~73% progress */
+  }
+
+  /* ── Preview cursor blink ── */
+  @keyframes previewCursorBlink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+
+  /* ── Preview momentum bar fill ── */
+  @keyframes previewBarFill {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
   }
 
   /* ── Shimmer (loading skeleton) ── */

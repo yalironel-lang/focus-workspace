@@ -18,8 +18,9 @@ import { WorkspaceModule }  from '../components/canvas/WorkspaceModule';
 import { DesignToolbar }    from '../components/canvas/DesignToolbar';
 import { ModuleInspector }  from '../components/canvas/ModuleInspector';
 import { AddWorkspacePanel } from '../components/canvas/AddWorkspacePanel';
-import { CanvasEmptyState }   from '../components/canvas/CanvasEmptyState';
-import { GuidedOnboarding }  from '../components/canvas/GuidedOnboarding';
+import { CanvasEmptyState }    from '../components/canvas/CanvasEmptyState';
+import { OnboardingLanding }  from '../components/onboarding/OnboardingLanding';
+import type { OnboardingPath } from '../components/onboarding/OnboardingLanding';
 import { BlockRenderer }    from '../components/canvas/BlockRenderer';
 import { QuickAddFab }      from '../components/canvas/QuickAddFab';
 
@@ -240,6 +241,17 @@ export function Dashboard() {
       },
     });
   }, [applyModules, clearAllBlocks, addBlockWithContent, tokens]);
+
+  // ── Onboarding path handler — after handleApplyTemplate to avoid TDZ ────────
+  const handleOnboardingEnter = useCallback((path: OnboardingPath) => {
+    completeOnboarding();
+    if (path === 'blank-canvas') {
+      setDesignMode(true);
+      setTimeout(() => setAddPanelOpen(true), 500);
+    } else {
+      handleApplyTemplate(path);
+    }
+  }, [completeOnboarding, handleApplyTemplate]);
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
@@ -599,6 +611,14 @@ export function Dashboard() {
         transition:      `background-color ${design.transition}`,
       }}
     >
+      {/* ── First-ever visit: cinematic onboarding landing (full-screen, above nav) ── */}
+      {!onboardingDone && (
+        <OnboardingLanding
+          tokens={tokens}
+          onEnter={handleOnboardingEnter}
+        />
+      )}
+
       {/* ── Command Bar ───────────────────────────────────────── */}
       <CommandBar
         tokens={tokens}
@@ -634,18 +654,8 @@ export function Dashboard() {
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.cardBorder }} />
           </div>
 
-        ) : !hasContent && !onboardingDone ? (
-          /* ── First-ever visit: cinematic guided intro ── */
-          <GuidedOnboarding
-            tokens={tokens}
-            starterTemplates={STARTER_TEMPLATES}
-            onComplete={completeOnboarding}
-            onApplyTemplate={id => { completeOnboarding(); handleApplyTemplate(id); }}
-            onOpenAdd={() => { completeOnboarding(); setAddPanelOpen(true); }}
-          />
-
         ) : !hasContent ? (
-          /* ── Returning empty state (onboarding already seen) ── */
+          /* ── Empty state (onboarding complete, no content yet) ── */
           <CanvasEmptyState
             tokens={tokens}
             designMode={designMode}
