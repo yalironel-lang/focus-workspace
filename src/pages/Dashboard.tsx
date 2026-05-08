@@ -49,7 +49,8 @@ export function Dashboard() {
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
   const { modules, toggleModule, reorder, setSize,
-          applyPreset: applyLayoutPreset, reset, presets }       = useWorkspaceLayout();
+          applyPreset: applyLayoutPreset, reset, presets,
+          duplicateModule }                                       = useWorkspaceLayout();
   const { tokens: atmTokens, atmosphereId, setAtmosphere }      = useAtmosphere();
 
   // ── Theme system ─────────────────────────────────────────────────────────────
@@ -57,9 +58,12 @@ export function Dashboard() {
     global: globalTheme,
     design,
     moduleThemes,
+    userPresets,
     presets: themePresets,
     updateGlobal,
     applyPreset: applyThemePreset,
+    saveAsPreset,
+    deleteUserPreset,
     updateModule,
     resetModule,
   } = useWorkspaceTheme();
@@ -80,7 +84,8 @@ export function Dashboard() {
 
   // ── Drag state ───────────────────────────────────────────────────────────────
   const dragIdRef = useRef<string | null>(null);
-  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOver,   setDragOver]   = useState<string | null>(null);
 
   // Pre-warm section data for SessionModal
   const activeSession    = loadSession();
@@ -104,7 +109,10 @@ export function Dashboard() {
 
   // ── Drag handlers ─────────────────────────────────────────────────────────────
 
-  const handleDragStart = useCallback((id: string) => { dragIdRef.current = id; }, []);
+  const handleDragStart = useCallback((id: string) => {
+    dragIdRef.current = id;
+    setDraggingId(id);
+  }, []);
   const handleDragOver  = useCallback((e: React.DragEvent, id: string) => {
     e.preventDefault();
     if (dragIdRef.current !== id) setDragOver(id);
@@ -114,10 +122,12 @@ export function Dashboard() {
     const fromId = dragIdRef.current;
     if (fromId && fromId !== toId) reorder(fromId, toId);
     dragIdRef.current = null;
+    setDraggingId(null);
     setDragOver(null);
   }, [reorder]);
   const handleDragEnd = useCallback(() => {
     dragIdRef.current = null;
+    setDraggingId(null);
     setDragOver(null);
   }, []);
 
@@ -192,7 +202,8 @@ export function Dashboard() {
   // ── Module renderer ───────────────────────────────────────────────────────
 
   const renderModuleContent = (id: string): React.ReactNode | null => {
-    switch (id) {
+    const baseId = id.replace(/-copy$/, '');
+    switch (baseId) {
       case 'daily-intention':
         return <DailyIntention tokens={tokens} />;
       case 'capture':
@@ -395,8 +406,23 @@ export function Dashboard() {
             onApplyPreset={id => { applyLayoutPreset(id); }}
           />
         ) : (
+          <>
+          {/* ── Design mode grid pulse overlay ── */}
+          {designMode && (
+            <div
+              className="design-grid-pulse pointer-events-none fixed inset-0 z-0"
+              style={{
+                backgroundImage: [
+                  `radial-gradient(circle, ${tokens.accent}18 1px, transparent 1px)`,
+                ].join(', '),
+                backgroundSize:     '32px 32px',
+                backgroundPosition: '16px 16px',
+              }}
+            />
+          )}
+
           <div
-            className="mx-auto pb-32"
+            className="mx-auto pb-32 relative z-10"
             style={{
               maxWidth: '1200px',
               padding:  design.canvasPad,
@@ -428,6 +454,7 @@ export function Dashboard() {
                       designMode={designMode}
                       selected={selectedId === m.id}
                       dragOver={dragOver === m.id}
+                      isDragging={draggingId === m.id}
                       tokens={tokens}
                       design={design}
                       moduleTheme={moduleThemes[m.id]}
@@ -447,6 +474,7 @@ export function Dashboard() {
               })}
             </div>
           </div>
+          </>
         )}
       </main>
 
@@ -471,14 +499,18 @@ export function Dashboard() {
         global={globalTheme}
         moduleThemes={moduleThemes}
         presets={themePresets}
+        userPresets={userPresets}
         defaultTab={inspectorTab}
         onClose={closeInspector}
         onSetSize={(id, size: ModuleSize) => setSize(id, size)}
         onMoveUp={handleMoveUp}
         onMoveDown={handleMoveDown}
         onRemove={toggleModule}
+        onDuplicate={duplicateModule}
         updateGlobal={updateGlobal}
         applyPreset={applyThemePreset}
+        saveAsPreset={saveAsPreset}
+        deleteUserPreset={deleteUserPreset}
         updateModule={updateModule}
         resetModule={resetModule}
       />

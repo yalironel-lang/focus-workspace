@@ -181,6 +181,20 @@ export function useWorkspaceLayout() {
     });
   }, []);
 
+  const duplicateModule = useCallback((id: string): string => {
+    const copyId = `${id}-copy`;
+    setModules(prev => {
+      if (prev.find(m => m.id === copyId)) return prev; // already a copy
+      const src = prev.find(m => m.id === id);
+      if (!src) return prev;
+      const maxOrder = prev.length > 0 ? Math.max(...prev.map(m => m.order)) : 0;
+      const next = [...prev, { id: copyId, enabled: true, size: src.size, order: maxOrder + 1 }];
+      persist(next);
+      return next;
+    });
+    return copyId;
+  }, []);
+
   const applyPreset = useCallback((presetId: string) => {
     const preset = PRESETS.find(p => p.id === presetId);
     if (preset) mutate([...preset.modules]);
@@ -190,7 +204,7 @@ export function useWorkspaceLayout() {
 
   const ordered = [...modules].sort((a, b) => a.order - b.order);
 
-  return { modules: ordered, toggleModule, reorder, setSize, applyPreset, reset, presets: PRESETS };
+  return { modules: ordered, toggleModule, reorder, setSize, applyPreset, reset, presets: PRESETS, duplicateModule };
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

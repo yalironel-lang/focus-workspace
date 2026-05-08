@@ -442,6 +442,18 @@ export function computeCanvasBg(
   }
 }
 
+// ── User preset type ──────────────────────────────────────────────────────────
+
+export interface UserPreset {
+  id:        string;
+  name:      string;
+  emoji:     string;
+  createdAt: number;
+  theme:     GlobalTheme;
+}
+
+const USER_PRESETS_KEY = 'fw_user_presets_v1';
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useWorkspaceTheme() {
@@ -459,8 +471,16 @@ export function useWorkspaceTheme() {
     } catch { return {}; }
   });
 
-  useEffect(() => { localStorage.setItem(GLOBAL_KEY,  JSON.stringify(global));       }, [global]);
-  useEffect(() => { localStorage.setItem(MODULES_KEY, JSON.stringify(moduleThemes)); }, [moduleThemes]);
+  const [userPresets, setUserPresets] = useState<UserPreset[]>(() => {
+    try {
+      const s = localStorage.getItem(USER_PRESETS_KEY);
+      return s ? JSON.parse(s) : [];
+    } catch { return []; }
+  });
+
+  useEffect(() => { localStorage.setItem(GLOBAL_KEY,       JSON.stringify(global));       }, [global]);
+  useEffect(() => { localStorage.setItem(MODULES_KEY,      JSON.stringify(moduleThemes)); }, [moduleThemes]);
+  useEffect(() => { localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(userPresets));  }, [userPresets]);
 
   const design = computeDesignTokens(global);
 
@@ -478,8 +498,22 @@ export function useWorkspaceTheme() {
   }, []);
 
   const applyPreset = useCallback((id: string) => {
-    const p = THEME_PRESETS.find(x => x.id === id);
-    if (p) setGlobal(prev => ({ ...prev, ...p.theme, activePreset: id }));
+    // Check built-in presets first, then user presets
+    const builtin = THEME_PRESETS.find(x => x.id === id);
+    if (builtin) { setGlobal(prev => ({ ...prev, ...builtin.theme, activePreset: id })); return; }
+    const user = userPresets.find(x => x.id === id);
+    if (user) setGlobal({ ...user.theme, activePreset: id });
+  }, [userPresets]);
+
+  const saveAsPreset = useCallback((name: string, emoji: string) => {
+    const id = `user-${Date.now()}`;
+    const preset: UserPreset = { id, name, emoji, createdAt: Date.now(), theme: global };
+    setUserPresets(prev => [...prev, preset]);
+    return id;
+  }, [global]);
+
+  const deleteUserPreset = useCallback((id: string) => {
+    setUserPresets(prev => prev.filter(p => p.id !== id));
   }, []);
 
   const updateModule = useCallback((id: string, patch: Partial<ModuleTheme>) => {
@@ -490,5 +524,9 @@ export function useWorkspaceTheme() {
     setModuleThemes(prev => { const n = { ...prev }; delete n[id]; return n; });
   }, []);
 
-  return { global, design, moduleThemes, presets: THEME_PRESETS, updateGlobal, applyPreset, updateModule, resetModule };
+  return {
+    global, design, moduleThemes, userPresets, presets: THEME_PRESETS,
+    updateGlobal, applyPreset, saveAsPreset, deleteUserPreset,
+    updateModule, resetModule,
+  };
 }

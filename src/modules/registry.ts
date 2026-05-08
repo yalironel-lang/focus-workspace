@@ -84,5 +84,7 @@ export const MODULE_REGISTRY: ModuleMeta[] = [
 ];
 
 export function getMeta(id: string): ModuleMeta | undefined {
-  return MODULE_REGISTRY.find(m => m.id === id);
+  // Strip duplicate suffix — 'capture-copy' resolves to 'capture'
+  const baseId = id.replace(/-copy$/, '');
+  return MODULE_REGISTRY.find(m => m.id === baseId);
 }

@@ -56,4 +56,40 @@
     from { opacity: 0; transform: translateY(10px) scale(0.98); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
+
+  /* Design mode: grid overlay pulsing */
+  @keyframes designGridPulse {
+    0%, 100% { opacity: 0.35; }
+    50%       { opacity: 0.9;  }
+  }
+  .design-grid-pulse {
+    animation: designGridPulse 6s ease-in-out infinite;
+  }
+
+  /* Selected module glow pulse */
+  @keyframes moduleSelectPulse {
+    0%, 100% { outline-color: var(--fw-accent); box-shadow: 0 0 0 3px var(--fw-accent-glow), 0 20px 60px rgba(0,0,0,0.5); }
+    50%       { outline-color: var(--fw-accent); box-shadow: 0 0 0 6px var(--fw-accent-glow), 0 20px 60px rgba(0,0,0,0.5); }
+  }
+  .module-selected-pulse {
+    animation: moduleSelectPulse 2.5s ease-in-out infinite;
+  }
+
+  /* Drop zone pulse */
+  @keyframes dropZonePulse {
+    0%, 100% { opacity: 0.5;  }
+    50%       { opacity: 1.0; }
+  }
+  .drop-zone-pulse {
+    animation: dropZonePulse 1s ease-in-out infinite;
+  }
+
+  /* Empty-state ambient ring spin */
+  @keyframes ambientRingSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .ambient-ring-spin {
+    animation: ambientRingSpin 20s linear infinite;
+  }
 }
