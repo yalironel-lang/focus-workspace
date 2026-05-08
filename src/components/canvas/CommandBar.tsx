@@ -325,9 +325,10 @@ export function CommandBar({
             <span className="hidden sm:inline">Add</span>
           </button>
 
-          {/* Design mode toggle */}
+          {/* Edit layout toggle */}
           <button
             onClick={onToggleDesign}
+            title={designMode ? 'Exit edit mode' : 'Edit layout'}
             style={{
               ...navBtn(tokens, designMode),
               ...(designMode ? {
@@ -354,7 +355,7 @@ export function CommandBar({
             }}
           >
             <Sliders style={{ width: '12px', height: '12px' }} />
-            <span>Design</span>
+            <span>{designMode ? 'Editing' : 'Edit'}</span>
           </button>
 
           {/* Divider */}

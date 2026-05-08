@@ -37,7 +37,12 @@ import { PressureRadar }  from '../components/PressureRadar';
 import { MyPortals }      from '../components/MyPortals';
 
 import { loadSession, sortSectionsByUrgency } from '../utils/sessionPlan';
-import { Loader2, Plus, X } from 'lucide-react';
+import { computeIntelligence, getGreeting, getDayContext } from '../utils/workspaceIntelligence';
+import { useDailyLoop }         from '../hooks/useDailyLoop';
+import { useContextualHints }   from '../hooks/useContextualHints';
+import { DailyEntryBanner }     from '../components/canvas/DailyEntryBanner';
+import { ContextualHint }       from '../components/canvas/ContextualHint';
+import { Loader2, Plus, X }     from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -90,6 +95,14 @@ export function Dashboard() {
   } = useCustomBlocks();
 
   const tokens = mergeAccent(atmTokens, design);
+
+  // ── Intelligence + daily loop ────────────────────────────────────────────
+  const dailyLoop = useDailyLoop();
+  // sections/deadlines may not be loaded yet — intelligence degrades gracefully
+  const intel = React.useMemo(
+    () => computeIntelligence(sections, deadlines),
+    [sections, deadlines],
+  );
 
   // ── UI state ─────────────────────────────────────────────────────────────────
 
@@ -466,6 +479,22 @@ export function Dashboard() {
   const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
   const hasContent = enabledModules.length > 0 || blocks.length > 0;
 
+  // ── Contextual hints ──────────────────────────────────────────────────────
+  const hintCtx = React.useMemo(() => ({
+    hasContent,
+    designMode,
+    blocksCount:       blocks.length,
+    enabledModuleIds:  enabledModules.map(m => m.id),
+    sectionsCount:     sections.length,
+    sessionCount:      dailyLoop.sessionCount,
+  }), [hasContent, designMode, blocks.length, enabledModules, sections.length, dailyLoop.sessionCount]);
+
+  const hints = useContextualHints(
+    hintCtx,
+    () => setAddPanelOpen(true),                          // onCmdK
+    () => { toggleModule('capture'); },                   // onAddCapture
+  );
+
   // ── Canvas zone helper ────────────────────────────────────────────────────
 
   function ZoneLabel({ label, icon }: { label: string; icon: string }) {
@@ -707,10 +736,10 @@ export function Dashboard() {
                     fontWeight:    600,
                     color:         tokens.accent,
                   }}>
-                    Design Mode is on
+                    Editing layout
                   </span>
                   <span style={{ fontSize: '12px', color: tokens.textMuted }}>
-                    — drag modules, resize cards, add blocks, and shape your space.
+                    — drag to reorder, resize cards, or press ⌘K to add anything.
                   </span>
                 </div>
                 <button
@@ -739,6 +768,18 @@ export function Dashboard() {
                   transition:          `gap ${design.transition}`,
                 }}
               >
+                {/* ── Daily intelligence banner ── */}
+                {!designMode && (
+                  <DailyEntryBanner
+                    tokens={tokens}
+                    intel={intel}
+                    loop={dailyLoop}
+                    greeting={getGreeting(displayName)}
+                    dayContext={getDayContext()}
+                    onStartSession={() => setShowSessionModal(true)}
+                  />
+                )}
+
                 {/* ── System modules with zone labels ── */}
                 {enabledModules.map((m, idx) => {
                   const content = renderModuleContent(m.id);
@@ -881,6 +922,14 @@ export function Dashboard() {
         panelOpen={addPanelOpen}
         onAddBlock={handleAddBlock}
         onOpenModules={() => setAddPanelOpen(o => !o)}
+      />
+
+      {/* ── Contextual hint (progressive disclosure) ─────────── */}
+      <ContextualHint
+        hint={hints.activeHint}
+        tokens={tokens}
+        onDismiss={hints.dismissHint}
+        onAction={hints.triggerAction}
       />
 
       {/* ── Session modal ─────────────────────────────────────── */}
