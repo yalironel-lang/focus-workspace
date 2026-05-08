@@ -1,103 +1,108 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSections, useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { useAuth } from '../hooks/useAuth';
-import { useWorkspaceLayout, SIZE_SPAN } from '../hooks/useWorkspaceLayout';
+import { useWorkspaceLayout, SIZE_SPAN, ModuleSize } from '../hooks/useWorkspaceLayout';
 import { useAtmosphere } from '../hooks/useAtmosphere';
-import { Layout } from '../components/Layout';
 import { SessionModal } from '../components/SessionModal';
 
-// ── Workspace modules ─────────────────────────────────────────────────────────
-import { DailyIntention }    from '../components/workspace/DailyIntention';
-import { CapturePanel }      from '../components/workspace/CapturePanel';
-import { MomentumMeter }     from '../components/workspace/MomentumMeter';
-import { FocusMode }         from '../components/workspace/FocusMode';
-import { ExecutePanel }      from '../components/workspace/ExecutePanel';
-import { FocusQueue }        from '../components/workspace/FocusQueue';
-import { DeepWorkTimer }     from '../components/workspace/DeepWorkTimer';
-import { ModuleShell }       from '../components/workspace/ModuleShell';
-import { WorkspaceDesigner } from '../components/workspace/WorkspaceDesigner';
+// ── Canvas primitives ─────────────────────────────────────────────────────────
+import { CommandBar }       from '../components/canvas/CommandBar';
+import { WorkspaceModule }  from '../components/canvas/WorkspaceModule';
+import { DesignToolbar }    from '../components/canvas/DesignToolbar';
+import { ModuleInspector }  from '../components/canvas/ModuleInspector';
+import { AddModulePanel }   from '../components/canvas/AddModulePanel';
+import { CanvasEmptyState } from '../components/canvas/CanvasEmptyState';
 
-// ── Existing components ───────────────────────────────────────────────────────
-import { SectionCard }   from '../components/SectionCard';
-import { PressureRadar } from '../components/PressureRadar';
-import { MyPortals }     from '../components/MyPortals';
+// ── Workspace module content ──────────────────────────────────────────────────
+import { DailyIntention } from '../components/workspace/DailyIntention';
+import { CapturePanel }   from '../components/workspace/CapturePanel';
+import { MomentumMeter }  from '../components/workspace/MomentumMeter';
+import { FocusMode }      from '../components/workspace/FocusMode';
+import { ExecutePanel }   from '../components/workspace/ExecutePanel';
+import { FocusQueue }     from '../components/workspace/FocusQueue';
+import { DeepWorkTimer }  from '../components/workspace/DeepWorkTimer';
+import { SectionCard }    from '../components/SectionCard';
+import { PressureRadar }  from '../components/PressureRadar';
+import { MyPortals }      from '../components/MyPortals';
 
 import { loadSession, sortSectionsByUrgency } from '../utils/sessionPlan';
-import { Loader2, Plus, X, Sliders } from 'lucide-react';
+import { Loader2, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
-
-function formatDate(): string {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
-  });
-}
 
 function firstName(email: string): string {
   const local = email.split('@')[0];
   return local.charAt(0).toUpperCase() + local.slice(1).split(/[._-]/)[0];
 }
 
-const META: React.CSSProperties = {
-  fontFamily: "'Space Grotesk', sans-serif",
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase' as const,
-  fontWeight: 600,
-};
-
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export function Dashboard() {
-  const { user }                                                = useAuth();
+  const navigate = useNavigate();
+  const { user, signOut }                                       = useAuth();
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
   const { modules, toggleModule, reorder, setSize,
           applyPreset, reset, presets }                          = useWorkspaceLayout();
   const { tokens, atmosphereId, setAtmosphere }                 = useAtmosphere();
 
+  // ── UI state ────────────────────────────────────────────────────────────────
   const [designMode,       setDesignMode]       = useState(false);
-  const [designerOpen,     setDesignerOpen]     = useState(false);
+  const [selectedId,       setSelectedId]       = useState<string | null>(null);
+  const [addPanelOpen,     setAddPanelOpen]     = useState(false);
   const [showNewSection,   setShowNewSection]   = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [newTitle,         setNewTitle]         = useState('');
   const [creating,         setCreating]         = useState(false);
 
-  // Drag state for design mode
-  const dragIdRef  = useRef<string | null>(null);
+  // ── Drag state ──────────────────────────────────────────────────────────────
+  const dragIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
 
+  // Pre-warm section data for SessionModal
   const activeSession    = loadSession();
-  useSectionDetail(activeSession?.sectionId); // pre-warm
+  useSectionDetail(activeSession?.sectionId);
 
   const suggestedSection = sortSectionsByUrgency(sections, deadlines)[0] ?? null;
   const displayName      = user?.email ? firstName(user.email) : '';
 
-  // ── Drag handlers ───────────────────────────────────────────────────────────
+  // ── Drag handlers ────────────────────────────────────────────────────────────
 
-  const handleDragStart = (id: string) => { dragIdRef.current = id; };
-  const handleDragOver  = (e: React.DragEvent, id: string) => {
+  const handleDragStart = useCallback((id: string) => { dragIdRef.current = id; }, []);
+  const handleDragOver  = useCallback((e: React.DragEvent, id: string) => {
     e.preventDefault();
     if (dragIdRef.current !== id) setDragOver(id);
-  };
-  const handleDrop      = (e: React.DragEvent, toId: string) => {
+  }, []);
+  const handleDrop = useCallback((e: React.DragEvent, toId: string) => {
     e.preventDefault();
     const fromId = dragIdRef.current;
     if (fromId && fromId !== toId) reorder(fromId, toId);
     dragIdRef.current = null;
     setDragOver(null);
-  };
-  const handleDragEnd   = () => { dragIdRef.current = null; setDragOver(null); };
+  }, [reorder]);
+  const handleDragEnd = useCallback(() => {
+    dragIdRef.current = null;
+    setDragOver(null);
+  }, []);
 
-  // ── Data handlers ───────────────────────────────────────────────────────────
+  // ── Inspector helpers ────────────────────────────────────────────────────────
+
+  const handleMoveUp = useCallback((id: string) => {
+    const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
+    const idx = ordered.findIndex(m => m.id === id);
+    if (idx > 0) reorder(id, ordered[idx - 1].id);
+  }, [modules, reorder]);
+
+  const handleMoveDown = useCallback((id: string) => {
+    const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
+    const idx = ordered.findIndex(m => m.id === id);
+    if (idx < ordered.length - 1) reorder(id, ordered[idx + 1].id);
+  }, [modules, reorder]);
+
+  // ── Capture handler ──────────────────────────────────────────────────────────
 
   const handleCapture = async (text: string) => {
     const d = new Date();
@@ -111,9 +116,27 @@ export function Dashboard() {
     });
     toast.success('Captured', {
       icon: '⚡',
-      style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
+      style: {
+        background: tokens.cardBg,
+        border: `1px solid ${tokens.cardBorder}`,
+        color: tokens.textPrimary,
+      },
     });
   };
+
+  // ── Sign out ─────────────────────────────────────────────────────────────────
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success('Signed out');
+      navigate('/');
+    } catch {
+      toast.error('Failed to sign out');
+    }
+  };
+
+  // ── Workspace create ─────────────────────────────────────────────────────────
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,9 +156,9 @@ export function Dashboard() {
     }
   };
 
-  // ── Module renderer ─────────────────────────────────────────────────────────
+  // ── Module renderer ──────────────────────────────────────────────────────────
 
-  const renderModule = (id: string) => {
+  const renderModuleContent = (id: string): React.ReactNode | null => {
     switch (id) {
       case 'daily-intention':
         return <DailyIntention tokens={tokens} />;
@@ -169,7 +192,7 @@ export function Dashboard() {
         return <PressureRadar sections={sections} />;
 
       case 'workspaces':
-        return <WorkspacesModule />;
+        return <WorkspacesPanel />;
 
       case 'deep-work-timer':
         return <DeepWorkTimer tokens={tokens} />;
@@ -182,56 +205,49 @@ export function Dashboard() {
     }
   };
 
-  // ── Workspaces module (inline) ──────────────────────────────────────────────
+  // ── Workspaces panel (inline sub-component) ──────────────────────────────────
 
-  function WorkspacesModule() {
+  function WorkspacesPanel() {
     return (
-      <div>
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-sm font-bold" style={{ color: tokens.textPrimary }}>
-              Workspaces
-            </h2>
-            {sections.length > 0 && (
-              <p className="text-xs mt-0.5" style={{ color: tokens.textGhost }}>
-                {sections.length} space{sections.length !== 1 ? 's' : ''}
-              </p>
-            )}
-          </div>
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.cardBorder}` }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-3.5"
+          style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}
+        >
+          <span className="text-sm font-semibold" style={{ color: tokens.textPrimary }}>
+            Workspaces
+          </span>
           <button
             onClick={() => { setShowNewSection(s => !s); setNewTitle(''); }}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl transition-all"
-            style={{ border: `1px solid ${tokens.cardBorder}`, color: tokens.textMuted }}
+            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
+            style={{ color: tokens.textGhost }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = tokens.cardBorderHover;
-              (e.currentTarget as HTMLElement).style.color = tokens.textSecondary;
-              (e.currentTarget as HTMLElement).style.backgroundColor = tokens.cardBg;
+              (e.currentTarget as HTMLElement).style.color = tokens.accent;
+              (e.currentTarget as HTMLElement).style.backgroundColor = tokens.accentSubtle;
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = tokens.cardBorder;
-              (e.currentTarget as HTMLElement).style.color = tokens.textMuted;
+              (e.currentTarget as HTMLElement).style.color = tokens.textGhost;
               (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
             }}
           >
-            <Plus className="w-3.5 h-3.5" strokeWidth={2.5} /> New workspace
+            <Plus className="w-3 h-3" strokeWidth={2.5} /> New
           </button>
         </div>
 
+        {/* New workspace form */}
         {showNewSection && (
-          <div
-            className="rounded-2xl p-4 mb-5 animate-fade-in"
-            style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.cardBorder}` }}
-          >
-            <p style={{ ...META, fontSize: '10px', color: tokens.textGhost, marginBottom: '12px' }}>
-              New workspace
-            </p>
+          <div className="px-4 py-3 animate-fade-in" style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}>
             <form onSubmit={handleCreate} className="flex gap-2">
               <input
                 type="text"
                 value={newTitle}
                 onChange={e => setNewTitle(e.target.value)}
-                placeholder="e.g. Calculus II"
-                className="flex-1 px-3.5 py-2.5 rounded-xl text-sm transition-all focus:outline-none"
+                placeholder="Workspace name…"
+                className="flex-1 px-3 py-2 rounded-xl text-sm focus:outline-none transition-all"
                 style={{ backgroundColor: tokens.wellBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary }}
                 onFocus={e => ((e.currentTarget as HTMLInputElement).style.borderColor = tokens.focusBorder)}
                 onBlur={e  => ((e.currentTarget as HTMLInputElement).style.borderColor = tokens.cardBorder)}
@@ -240,57 +256,42 @@ export function Dashboard() {
               <button
                 type="submit"
                 disabled={creating || !newTitle.trim()}
-                className="px-4 py-2.5 rounded-xl font-bold text-sm disabled:opacity-30 flex items-center gap-1.5 whitespace-nowrap transition-all"
+                className="px-4 py-2 rounded-xl font-bold text-xs disabled:opacity-30 flex items-center gap-1 whitespace-nowrap transition-all"
                 style={{ backgroundColor: tokens.accent, color: '#000' }}
                 onMouseEnter={e => { if (!creating && newTitle.trim()) (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover; }}
                 onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent)}
               >
-                {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create'}
+                {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Create'}
               </button>
-              <button
-                type="button"
-                onClick={() => setShowNewSection(false)}
-                className="p-2.5 rounded-xl transition-colors"
-                style={{ color: tokens.textGhost }}
+              <button type="button" onClick={() => setShowNewSection(false)} className="p-2 rounded-xl transition-colors" style={{ color: tokens.textGhost }}
                 onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textSecondary)}
                 onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost)}
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </form>
           </div>
         )}
 
+        {/* Content */}
         {sections.length === 0 && !showNewSection ? (
-          <div
-            className="rounded-2xl px-6 py-10 text-center"
-            style={{ border: `1px dashed ${tokens.cardBorder}` }}
-          >
-            <div
-              className="w-10 h-10 rounded-2xl flex items-center justify-center mx-auto mb-3"
-              style={{ backgroundColor: tokens.cardBg }}
-            >
-              <Plus className="w-5 h-5" style={{ color: tokens.textGhost }} />
-            </div>
-            <p className="text-sm font-semibold mb-1" style={{ color: tokens.textMuted }}>
-              No workspaces yet
-            </p>
-            <p className="text-xs mb-5" style={{ color: tokens.textGhost }}>
+          <div className="px-5 py-8 text-center">
+            <p className="text-sm mb-1" style={{ color: tokens.textMuted }}>No workspaces yet</p>
+            <p className="text-xs mb-4" style={{ color: tokens.textGhost }}>
               Create a workspace for each course or project.
             </p>
             <button
               onClick={() => setShowNewSection(true)}
-              className="inline-flex items-center gap-1.5 font-bold text-sm px-4 py-2.5 rounded-xl transition-all"
+              className="inline-flex items-center gap-1.5 font-bold text-xs px-4 py-2 rounded-xl transition-all"
               style={{ backgroundColor: tokens.accent, color: '#000' }}
               onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover)}
               onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent)}
             >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-              Create workspace
+              <Plus className="w-3 h-3" /> Create workspace
             </button>
           </div>
         ) : sections.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {sections.map(section => (
               <SectionCard
                 key={section.id}
@@ -305,142 +306,164 @@ export function Dashboard() {
     );
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Canvas grid background ───────────────────────────────────────────────────
+
+  const canvasBg: React.CSSProperties = {
+    backgroundImage: designMode
+      ? `radial-gradient(circle, ${tokens.cardBorder} 1px, transparent 1px)`
+      : `radial-gradient(circle, ${tokens.cardBorder}50 1px, transparent 1px)`,
+    backgroundSize: '32px 32px',
+    backgroundPosition: '16px 16px',
+  };
+
+  // ── Enabled modules ──────────────────────────────────────────────────────────
 
   const enabledModules = modules.filter(m => m.enabled);
+  const hasModules     = enabledModules.length > 0;
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <Layout tokens={tokens} onOpenDesigner={() => setDesignerOpen(true)} designMode={designMode} onToggleDesignMode={() => setDesignMode(d => !d)}>
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: tokens.pageBg,
+        color: tokens.textPrimary,
+        transition: 'background-color 0.4s ease',
+      }}
+    >
 
-      {loading ? (
-        <div className="flex items-center justify-center py-32">
-          <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.cardBorder }} />
-        </div>
-      ) : (
-        <div
-          style={{
-            minHeight: '100%',
-            transition: 'all 0.3s ease',
-            // Ambient background glow
-            backgroundImage:
-              tokens.glowIntensity > 0
-                ? `radial-gradient(ellipse 80% 50% at 20% 0%, ${tokens.ambientGlow1}, transparent),
-                   radial-gradient(ellipse 60% 40% at 80% 100%, ${tokens.ambientGlow2}, transparent)`
-                : 'none',
-          }}
-        >
+      {/* ── Command Bar ──────────────────────────────────────────────── */}
+      <CommandBar
+        tokens={tokens}
+        atmosphereId={atmosphereId}
+        designMode={designMode}
+        userName={displayName}
+        onToggleDesign={() => {
+          setDesignMode(d => {
+            const next = !d;
+            if (!next) setSelectedId(null); // deselect on exit
+            return next;
+          });
+        }}
+        onOpenAdd={() => setAddPanelOpen(true)}
+        onSetAtmosphere={setAtmosphere}
+        onSignOut={handleSignOut}
+      />
 
-          {/* ── Greeting ────────────────────────────────────────────── */}
-          <div className="mb-7">
-            <p style={{ ...META, fontSize: '10px', color: tokens.textGhost, marginBottom: '5px' }}>
-              {formatDate()}
-            </p>
-            <div className="flex items-end justify-between gap-4 mb-3">
-              <h1
-                className="text-2xl font-bold tracking-tight"
-                style={{ color: tokens.textPrimary }}
-              >
-                {getGreeting()}{displayName ? `, ${displayName}` : ''}
-              </h1>
-              {sections.length > 0 && (
-                <p className="text-xs pb-0.5 flex-shrink-0" style={{ color: tokens.textGhost }}>
-                  {sections.reduce((a, s) => a + (s.total_items - s.completed_items), 0)} remaining
-                </p>
-              )}
-            </div>
-
-            {/* Design mode hint */}
-            {designMode && (
-              <div
-                className="flex items-center gap-2 px-3 py-2 rounded-xl mb-4 animate-fade-in"
-                style={{
-                  backgroundColor: tokens.accentSubtle,
-                  border: `1px solid ${tokens.accent}40`,
-                }}
-              >
-                <Sliders className="w-3.5 h-3.5 flex-shrink-0" style={{ color: tokens.accent }} />
-                <p style={{ ...META, fontSize: '9px', color: tokens.accent }}>
-                  Design mode — drag modules to reorder · click tiles to resize
-                </p>
-              </div>
-            )}
+      {/* ── Canvas ───────────────────────────────────────────────────── */}
+      <main
+        className="relative"
+        style={{
+          minHeight: 'calc(100vh - 48px)',
+          ...canvasBg,
+          // Ambient gradient on top of grid
+          backgroundImage: [
+            canvasBg.backgroundImage as string,
+            tokens.glowIntensity > 0
+              ? `radial-gradient(ellipse 70% 50% at 15% 0%, ${tokens.ambientGlow1}, transparent)`
+              : null,
+            tokens.glowIntensity > 0
+              ? `radial-gradient(ellipse 55% 40% at 85% 100%, ${tokens.ambientGlow2}, transparent)`
+              : null,
+          ].filter(Boolean).join(', '),
+          transition: 'all 0.4s ease',
+        }}
+        onClick={() => designMode && selectedId && setSelectedId(null)}
+      >
+        {loading ? (
+          <div className="flex items-center justify-center" style={{ minHeight: 'calc(100vh - 48px)' }}>
+            <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.cardBorder }} />
           </div>
-
-          {/* ── Module grid ─────────────────────────────────────────── */}
+        ) : !hasModules ? (
+          <CanvasEmptyState
+            tokens={tokens}
+            presets={presets}
+            onOpenAdd={() => setAddPanelOpen(true)}
+            onApplyPreset={id => { applyPreset(id); setAddPanelOpen(false); }}
+          />
+        ) : (
           <div
-            className="grid gap-4"
-            style={{
-              gridTemplateColumns: 'repeat(12, 1fr)',
-              // Design mode: dim grid lines for visual guidance
-              backgroundImage: designMode
-                ? `linear-gradient(${tokens.cardBorder}20 1px, transparent 1px),
-                   linear-gradient(90deg, ${tokens.cardBorder}20 1px, transparent 1px)`
-                : 'none',
-              backgroundSize: designMode ? '8.33% 40px' : undefined,
-            }}
+            className="mx-auto px-6 md:px-10 py-8 pb-32"
+            style={{ maxWidth: '1200px' }}
           >
-            {enabledModules.map(m => {
-              const content = renderModule(m.id);
-              if (content === null) return null;
+            {/* Module grid — 12-column bento */}
+            <div
+              className="grid gap-5"
+              style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}
+            >
+              {enabledModules.map(m => {
+                const content = renderModuleContent(m.id);
+                if (content === null) return null;
 
-              // Responsive: on small screens everything is full width
-              const spanStyle: React.CSSProperties = {
-                gridColumn: SIZE_SPAN[m.size],
-              };
-              // Fallback: treat "third" as full on narrow layouts via min-width
-              const wrapperStyle: React.CSSProperties = {
-                ...spanStyle,
-                minWidth: 0,
-                transition: 'grid-column 0.3s ease, opacity 0.2s ease',
-              };
-
-              return (
-                <div key={m.id} style={wrapperStyle} className="min-w-0">
-                  <ModuleShell
-                    id={m.id}
-                    size={m.size}
-                    enabled={m.enabled}
-                    designMode={designMode}
-                    dragOver={dragOver === m.id}
-                    tokens={tokens}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                    onDragEnd={handleDragEnd}
-                    onToggle={toggleModule}
-                    onSetSize={setSize}
+                return (
+                  <div
+                    key={m.id}
+                    className="min-w-0"
+                    style={{
+                      gridColumn: SIZE_SPAN[m.size],
+                      // On small screens fall back to full-width via a min-width trick
+                    }}
                   >
-                    {content}
-                  </ModuleShell>
-                </div>
-              );
-            })}
+                    <WorkspaceModule
+                      id={m.id}
+                      size={m.size}
+                      designMode={designMode}
+                      selected={selectedId === m.id}
+                      dragOver={dragOver === m.id}
+                      tokens={tokens}
+                      onSelect={id => setSelectedId(id)}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                    >
+                      {content}
+                    </WorkspaceModule>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        )}
+      </main>
 
-          {/* Bottom spacer */}
-          <div className="h-16" />
+      {/* ── Floating toolbar ─────────────────────────────────────────── */}
+      <DesignToolbar
+        tokens={tokens}
+        designMode={designMode}
+        presets={presets}
+        onOpenAdd={() => setAddPanelOpen(true)}
+        onApplyPreset={applyPreset}
+        onReset={reset}
+      />
 
-        </div>
-      )}
+      {/* ── Module inspector (slides in from right when selected) ─────── */}
+      <ModuleInspector
+        selectedId={selectedId}
+        modules={modules}
+        tokens={tokens}
+        onClose={() => setSelectedId(null)}
+        onSetSize={(id, size: ModuleSize) => setSize(id, size)}
+        onMoveUp={handleMoveUp}
+        onMoveDown={handleMoveDown}
+        onRemove={toggleModule}
+      />
 
-      {/* ── Modals ──────────────────────────────────────────────────── */}
+      {/* ── Add module panel ─────────────────────────────────────────── */}
+      <AddModulePanel
+        open={addPanelOpen}
+        modules={modules}
+        tokens={tokens}
+        onToggle={toggleModule}
+        onClose={() => setAddPanelOpen(false)}
+      />
+
+      {/* ── Session modal ─────────────────────────────────────────────── */}
       {showSessionModal && (
         <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
       )}
 
-      <WorkspaceDesigner
-        open={designerOpen}
-        tokens={tokens}
-        atmosphereId={atmosphereId}
-        modules={modules}
-        presets={presets}
-        onSetAtmosphere={setAtmosphere}
-        onApplyPreset={id => { applyPreset(id); }}
-        onToggleModule={toggleModule}
-        onReset={reset}
-        onClose={() => setDesignerOpen(false)}
-      />
-
-    </Layout>
+    </div>
   );
 }
