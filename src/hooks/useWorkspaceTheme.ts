@@ -168,6 +168,20 @@ export const THEME_PRESETS: ThemePreset[] = [
              radiusStyle: 'ultra-round', density: 'spacious', glowIntensity: 'low',
              motionIntensity: 'smooth', typographyScale: 'large', gridVisible: false, ambientIntensity: 0.6 },
   },
+  {
+    id: 'personal-studio', name: 'Personal Studio', emoji: '🎨',
+    description: 'Warm, open, personal canvas',
+    theme: { accentPreset: 'amber', backgroundStyle: 'warm-study', surfaceStyle: 'soft-card',
+             radiusStyle: 'round', density: 'comfortable', glowIntensity: 'low',
+             motionIntensity: 'smooth', typographyScale: 'normal', gridVisible: false, ambientIntensity: 0.45 },
+  },
+  {
+    id: 'soft-light', name: 'Soft Light', emoji: '🌸',
+    description: 'Gentle rose, airy surfaces',
+    theme: { accentPreset: 'rose', backgroundStyle: 'soft-gradient', surfaceStyle: 'floating',
+             radiusStyle: 'ultra-round', density: 'spacious', glowIntensity: 'low',
+             motionIntensity: 'expressive', typographyScale: 'normal', gridVisible: false, ambientIntensity: 0.5 },
+  },
 ];
 
 // ── Computed design token shape ────────────────────────────────────────────────
@@ -197,16 +211,16 @@ export interface DesignTokens {
 export const DEFAULT_THEME: GlobalTheme = {
   accentPreset:     'amber',
   accentCustom:     '#f59e0b',
-  backgroundStyle:  'ambient-glow',
-  surfaceStyle:     'glass',
-  radiusStyle:      'soft',
+  backgroundStyle:  'warm-study',    // warmer, less harsh than deep-night
+  surfaceStyle:     'soft-card',     // softer than glass — more personal-studio feel
+  radiusStyle:      'round',         // rounder, more approachable
   density:          'comfortable',
-  glowIntensity:    'medium',
+  glowIntensity:    'low',           // subtle glow, not overwhelming
   motionIntensity:  'smooth',
   typographyScale:  'normal',
-  gridVisible:      true,
-  ambientIntensity: 0.6,
-  activePreset:     'neural-dark',
+  gridVisible:      false,           // cleaner default canvas
+  ambientIntensity: 0.45,
+  activePreset:     'personal-studio',
 };
 
 const GLOBAL_KEY  = 'fw_workspace_theme_v1';

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { ModuleConfig } from '../../hooks/useWorkspaceLayout';
 import { MODULE_REGISTRY } from '../../modules/registry';
+import { BLOCK_META, BlockType } from '../../hooks/useCustomBlocks';
 import { X, Check } from 'lucide-react';
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
   modules:        ModuleConfig[];
   tokens:         AtmosphereTokens;
   onToggle:       (id: string) => void;
+  onAddBlock:     (type: BlockType) => void;
   onClose:        () => void;
 }
 
@@ -19,7 +21,7 @@ const META: React.CSSProperties = {
   fontWeight: 600,
 };
 
-export function AddModulePanel({ open, modules, tokens, onToggle, onClose }: Props) {
+export function AddModulePanel({ open, modules, tokens, onToggle, onAddBlock, onClose }: Props) {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -208,6 +210,57 @@ export function AddModulePanel({ open, modules, tokens, onToggle, onClose }: Pro
             <p className="text-sm text-center py-8" style={{ color: tokens.textGhost }}>
               No modules match "{search}"
             </p>
+          )}
+
+          {/* ── Custom Blocks section ── */}
+          {(!search || 'custom block text quote image link checklist divider emoji note'.includes(search.toLowerCase())) && (
+            <>
+              <div
+                style={{
+                  borderTop:   `1px solid ${tokens.cardBorder}`,
+                  margin:      '16px -4px 12px',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <p style={{ ...META, fontSize: '9px', color: tokens.accent }}>
+                  Custom Blocks
+                </p>
+                <span style={{ fontSize: '9px', color: tokens.textGhost }}>
+                  Add a new block to your canvas
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(Object.entries(BLOCK_META) as [BlockType, typeof BLOCK_META[BlockType]][]).map(([type, meta]) => (
+                  <button
+                    key={type}
+                    onClick={() => { onAddBlock(type); onClose(); }}
+                    className="flex flex-col items-start gap-2 p-3 rounded-xl transition-all text-left group"
+                    style={{
+                      backgroundColor: tokens.pageBg,
+                      border:          `1px dashed ${tokens.accent}30`,
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.borderColor = tokens.accent + '70';
+                      (e.currentTarget as HTMLElement).style.backgroundColor = tokens.accentSubtle;
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.borderColor = tokens.accent + '30';
+                      (e.currentTarget as HTMLElement).style.backgroundColor = tokens.pageBg;
+                    }}
+                  >
+                    <span style={{ fontSize: '18px', lineHeight: 1 }}>{meta.icon}</span>
+                    <div>
+                      <p className="text-xs font-semibold" style={{ color: tokens.textSecondary }}>
+                        {meta.label}
+                      </p>
+                      <p className="text-[10px] mt-0.5 leading-snug" style={{ color: tokens.textGhost }}>
+                        {meta.description}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
 
         </div>

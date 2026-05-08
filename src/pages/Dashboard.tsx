@@ -6,6 +6,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useWorkspaceLayout, SIZE_SPAN, ModuleSize } from '../hooks/useWorkspaceLayout';
 import { useAtmosphere } from '../hooks/useAtmosphere';
 import { useWorkspaceTheme, mergeAccent, computeCanvasBg } from '../hooks/useWorkspaceTheme';
+import type { ModuleTheme } from '../hooks/useWorkspaceTheme';
+import { useCustomBlocks } from '../hooks/useCustomBlocks';
+import type { BlockType, BlockTheme } from '../hooks/useCustomBlocks';
 import { SessionModal } from '../components/SessionModal';
 
 // ── Canvas primitives ─────────────────────────────────────────────────────────
@@ -15,6 +18,8 @@ import { DesignToolbar }    from '../components/canvas/DesignToolbar';
 import { ModuleInspector }  from '../components/canvas/ModuleInspector';
 import { AddModulePanel }   from '../components/canvas/AddModulePanel';
 import { CanvasEmptyState } from '../components/canvas/CanvasEmptyState';
+import { BlockRenderer }    from '../components/canvas/BlockRenderer';
+import { QuickAddFab }      from '../components/canvas/QuickAddFab';
 
 // ── Workspace module content ──────────────────────────────────────────────────
 import { DailyIntention } from '../components/workspace/DailyIntention';
@@ -68,6 +73,18 @@ export function Dashboard() {
     resetModule,
   } = useWorkspaceTheme();
 
+  // ── Custom blocks ────────────────────────────────────────────────────────────
+  const {
+    blocks,
+    addBlock,
+    updateContent,
+    updateTheme:    updateBlockTheme,
+    setBlockSize,
+    deleteBlock,
+    duplicateBlock,
+    reorderBlocks,
+  } = useCustomBlocks();
+
   // Merge accent overrides from theme into atmosphere tokens
   const tokens = mergeAccent(atmTokens, design);
 
@@ -120,11 +137,17 @@ export function Dashboard() {
   const handleDrop = useCallback((e: React.DragEvent, toId: string) => {
     e.preventDefault();
     const fromId = dragIdRef.current;
-    if (fromId && fromId !== toId) reorder(fromId, toId);
+    if (fromId && fromId !== toId) {
+      const fromIsBlock = fromId.startsWith('block-');
+      const toIsBlock   = toId.startsWith('block-');
+      if (fromIsBlock && toIsBlock)    reorderBlocks(fromId, toId);
+      else if (!fromIsBlock && !toIsBlock) reorder(fromId, toId);
+      // cross-kind drops: ignore
+    }
     dragIdRef.current = null;
     setDraggingId(null);
     setDragOver(null);
-  }, [reorder]);
+  }, [reorder, reorderBlocks]);
   const handleDragEnd = useCallback(() => {
     dragIdRef.current = null;
     setDraggingId(null);
@@ -134,16 +157,26 @@ export function Dashboard() {
   // ── Inspector move helpers ────────────────────────────────────────────────────
 
   const handleMoveUp = useCallback((id: string) => {
-    const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
-    const idx = ordered.findIndex(m => m.id === id);
-    if (idx > 0) reorder(id, ordered[idx - 1].id);
-  }, [modules, reorder]);
+    if (id.startsWith('block-')) {
+      const idx = blocks.findIndex(b => b.id === id);
+      if (idx > 0) reorderBlocks(id, blocks[idx - 1].id);
+    } else {
+      const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
+      const idx = ordered.findIndex(m => m.id === id);
+      if (idx > 0) reorder(id, ordered[idx - 1].id);
+    }
+  }, [modules, blocks, reorder, reorderBlocks]);
 
   const handleMoveDown = useCallback((id: string) => {
-    const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
-    const idx = ordered.findIndex(m => m.id === id);
-    if (idx < ordered.length - 1) reorder(id, ordered[idx + 1].id);
-  }, [modules, reorder]);
+    if (id.startsWith('block-')) {
+      const idx = blocks.findIndex(b => b.id === id);
+      if (idx < blocks.length - 1) reorderBlocks(id, blocks[idx + 1].id);
+    } else {
+      const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
+      const idx = ordered.findIndex(m => m.id === id);
+      if (idx < ordered.length - 1) reorder(id, ordered[idx + 1].id);
+    }
+  }, [modules, blocks, reorder, reorderBlocks]);
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
@@ -341,6 +374,42 @@ export function Dashboard() {
     );
   }
 
+  // ── Unified inspector adapters ────────────────────────────────────────────
+  // Present custom blocks to the inspector as if they were modules
+  const allModuleConfigs = [
+    ...modules,
+    ...blocks.map(b => ({ id: b.id, enabled: true, size: b.size, order: b.order + 10000 })),
+  ];
+  const allThemes: Record<string, ModuleTheme> = {
+    ...moduleThemes,
+    ...Object.fromEntries(blocks.map(b => [b.id, b.theme ?? {}])),
+  };
+
+  const handleRemoveFromCanvas = useCallback((id: string) => {
+    if (id.startsWith('block-')) { deleteBlock(id); setSelectedId(null); }
+    else toggleModule(id);
+  }, [deleteBlock, toggleModule]);
+
+  const handleSetSizeCanvas = useCallback((id: string, size: ModuleSize) => {
+    if (id.startsWith('block-')) setBlockSize(id, size);
+    else setSize(id, size);
+  }, [setBlockSize, setSize]);
+
+  const handleDuplicateCanvas = useCallback((id: string) => {
+    if (id.startsWith('block-')) duplicateBlock(id);
+    else duplicateModule(id);
+  }, [duplicateBlock, duplicateModule]);
+
+  const handleUpdateTheme = useCallback((id: string, patch: Partial<ModuleTheme>) => {
+    if (id.startsWith('block-')) updateBlockTheme(id, patch as Partial<BlockTheme>);
+    else updateModule(id, patch);
+  }, [updateBlockTheme, updateModule]);
+
+  const handleResetTheme = useCallback((id: string) => {
+    if (id.startsWith('block-')) updateBlockTheme(id, {});
+    else resetModule(id);
+  }, [updateBlockTheme, resetModule]);
+
   // ── Canvas background ────────────────────────────────────────────────────
 
   const canvasStyle = computeCanvasBg(design, tokens, designMode);
@@ -350,7 +419,7 @@ export function Dashboard() {
   const enabledModules = modules
     .filter(m => m.enabled)
     .sort((a, b) => a.order - b.order);
-  const hasModules = enabledModules.length > 0;
+  const hasModules = enabledModules.length > 0 || blocks.length > 0;
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -438,6 +507,7 @@ export function Dashboard() {
                 transition:          `gap ${design.transition}`,
               }}
             >
+              {/* ── System modules ── */}
               {enabledModules.map(m => {
                 const content = renderModuleContent(m.id);
                 if (content === null) return null;
@@ -460,7 +530,7 @@ export function Dashboard() {
                       moduleTheme={moduleThemes[m.id]}
                       onSelect={id => {
                         setSelectedId(id);
-                        if (id) setInspectorOpen(false); // let selectedId drive open
+                        if (id) setInspectorOpen(false);
                       }}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
@@ -472,6 +542,64 @@ export function Dashboard() {
                   </div>
                 );
               })}
+
+              {/* ── Custom blocks ── */}
+              {blocks.map(b => (
+                <div
+                  key={b.id}
+                  className="min-w-0 block-appear"
+                  style={{ gridColumn: SIZE_SPAN[b.size] }}
+                >
+                  <WorkspaceModule
+                    id={b.id}
+                    size={b.size}
+                    designMode={designMode}
+                    selected={selectedId === b.id}
+                    dragOver={dragOver === b.id}
+                    isDragging={draggingId === b.id}
+                    tokens={tokens}
+                    design={design}
+                    moduleTheme={b.theme}
+                    onSelect={id => {
+                      setSelectedId(id);
+                      if (id) setInspectorOpen(false);
+                    }}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <BlockRenderer
+                      block={b}
+                      tokens={tokens}
+                      onChange={content => updateContent(b.id, content)}
+                    />
+                  </WorkspaceModule>
+                </div>
+              ))}
+
+              {/* ── Drop zone hint when blocks exist but design mode on ── */}
+              {designMode && blocks.length === 0 && enabledModules.length > 0 && (
+                <div
+                  className="min-w-0"
+                  style={{
+                    gridColumn:     'span 12',
+                    border:         `1.5px dashed ${tokens.accent}25`,
+                    borderRadius:   `${design.radius}px`,
+                    padding:        '20px',
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    gap:            '8px',
+                    color:          tokens.textGhost,
+                    fontSize:       '12px',
+                    marginTop:      `${design.gap}px`,
+                  }}
+                >
+                  <span style={{ opacity: 0.5 }}>✦</span>
+                  Use the <strong style={{ color: tokens.accent }}>+</strong> button below to add custom blocks
+                </div>
+              )}
             </div>
           </div>
           </>
@@ -493,26 +621,26 @@ export function Dashboard() {
       <ModuleInspector
         open={isInspectorOpen}
         selectedId={selectedId}
-        modules={modules}
+        modules={allModuleConfigs}
         tokens={tokens}
         design={design}
         global={globalTheme}
-        moduleThemes={moduleThemes}
+        moduleThemes={allThemes}
         presets={themePresets}
         userPresets={userPresets}
         defaultTab={inspectorTab}
         onClose={closeInspector}
-        onSetSize={(id, size: ModuleSize) => setSize(id, size)}
+        onSetSize={handleSetSizeCanvas}
         onMoveUp={handleMoveUp}
         onMoveDown={handleMoveDown}
-        onRemove={toggleModule}
-        onDuplicate={duplicateModule}
+        onRemove={handleRemoveFromCanvas}
+        onDuplicate={handleDuplicateCanvas}
         updateGlobal={updateGlobal}
         applyPreset={applyThemePreset}
         saveAsPreset={saveAsPreset}
         deleteUserPreset={deleteUserPreset}
-        updateModule={updateModule}
-        resetModule={resetModule}
+        updateModule={handleUpdateTheme}
+        resetModule={handleResetTheme}
       />
 
       {/* ── Add module panel ──────────────────────────────────── */}
@@ -521,7 +649,15 @@ export function Dashboard() {
         modules={modules}
         tokens={tokens}
         onToggle={toggleModule}
+        onAddBlock={(type: BlockType) => addBlock(type)}
         onClose={() => setAddPanelOpen(false)}
+      />
+
+      {/* ── Quick-add FAB ─────────────────────────────────────── */}
+      <QuickAddFab
+        tokens={tokens}
+        onAddBlock={(type: BlockType) => addBlock(type)}
+        onOpenModules={() => setAddPanelOpen(true)}
       />
 
       {/* ── Session modal ─────────────────────────────────────── */}
