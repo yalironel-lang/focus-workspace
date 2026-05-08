@@ -38,8 +38,9 @@ import { MyPortals }      from '../components/MyPortals';
 
 import { loadSession, sortSectionsByUrgency } from '../utils/sessionPlan';
 import { computeIntelligence, getGreeting, getDayContext } from '../utils/workspaceIntelligence';
-import { useDailyLoop }         from '../hooks/useDailyLoop';
-import { useContextualHints }   from '../hooks/useContextualHints';
+import { useDailyLoop }             from '../hooks/useDailyLoop';
+import { useContextualHints }       from '../hooks/useContextualHints';
+import { useSessionContinuity }     from '../hooks/useSessionContinuity';
 import { DailyEntryBanner }     from '../components/canvas/DailyEntryBanner';
 import { ContextualHint }       from '../components/canvas/ContextualHint';
 import { Loader2, Plus, X }     from 'lucide-react';
@@ -97,7 +98,17 @@ export function Dashboard() {
   const tokens = mergeAccent(atmTokens, design);
 
   // ── Intelligence + daily loop ────────────────────────────────────────────
-  const dailyLoop = useDailyLoop();
+  const dailyLoop    = useDailyLoop();
+  const continuity   = useSessionContinuity();
+
+  // On every mount: if there's a live sessionStorage session, mirror it to localStorage
+  // so the next app open can surface "continue where you left off".
+  React.useEffect(() => {
+    const live = loadSession();
+    if (live) continuity.recordSession(live);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // sections/deadlines may not be loaded yet — intelligence degrades gracefully
   const intel = React.useMemo(
     () => computeIntelligence(sections, deadlines),
@@ -324,9 +335,13 @@ export function Dashboard() {
       case 'focus-mode':
         return (
           <FocusMode
+            tokens={tokens}
             activeSession={activeSession}
             suggestedSection={suggestedSection}
+            lastSession={continuity.isRecent ? continuity.lastSession : null}
+            hasSections={sections.length > 0}
             onStartSession={() => setShowSessionModal(true)}
+            onClearContinuity={continuity.clearLastSession}
           />
         );
       case 'execute':
@@ -776,7 +791,9 @@ export function Dashboard() {
                     loop={dailyLoop}
                     greeting={getGreeting(displayName)}
                     dayContext={getDayContext()}
+                    lastSession={continuity.isRecent ? continuity.lastSession : null}
                     onStartSession={() => setShowSessionModal(true)}
+                    onDismissContinuity={continuity.clearLastSession}
                   />
                 )}
 
@@ -869,16 +886,18 @@ export function Dashboard() {
         )}
       </main>
 
-      {/* ── Floating toolbar ──────────────────────────────────── */}
-      <DesignToolbar
-        tokens={tokens}
-        designMode={designMode}
-        presets={presets}
-        onOpenAdd={() => setAddPanelOpen(true)}
-        onApplyPreset={applyLayoutPreset}
-        onReset={reset}
-        onOpenTheme={() => openInspectorAtTab('theme')}
-      />
+      {/* ── Floating toolbar — only in design mode ───────────── */}
+      {designMode && (
+        <DesignToolbar
+          tokens={tokens}
+          designMode={designMode}
+          presets={presets}
+          onOpenAdd={() => setAddPanelOpen(true)}
+          onApplyPreset={applyLayoutPreset}
+          onReset={reset}
+          onOpenTheme={() => openInspectorAtTab('theme')}
+        />
+      )}
 
       {/* ── Module inspector ──────────────────────────────────── */}
       <ModuleInspector

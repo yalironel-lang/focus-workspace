@@ -12,20 +12,24 @@
  *   NEVER show generic stats — always show an outcome directive.
  */
 
-import { ArrowRight, X, Flame, CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
+import { ArrowRight, X, Flame, CheckCircle, AlertCircle, AlertTriangle, RotateCcw } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { WorkspaceIntelligence } from '../../utils/workspaceIntelligence';
 import type { DailyLoopState } from '../../hooks/useDailyLoop';
+import type { ContinuityRecord } from '../../hooks/useSessionContinuity';
 
 interface Props {
-  tokens:    AtmosphereTokens;
-  intel:     WorkspaceIntelligence;
-  loop:      DailyLoopState;
-  greeting:  string;
-  dayContext: string;
+  tokens:       AtmosphereTokens;
+  intel:        WorkspaceIntelligence;
+  loop:         DailyLoopState;
+  greeting:     string;
+  dayContext:   string;
+  /** If set, shows a "continue [title]?" chip above the directive */
+  lastSession?: ContinuityRecord | null;
   /** Navigate to a section by ID */
-  onOpenSection?: (id: string) => void;
-  onStartSession?: () => void;
+  onOpenSection?:      (id: string) => void;
+  onStartSession?:     () => void;
+  onDismissContinuity?: () => void;
 }
 
 // Status → visual config
@@ -57,7 +61,8 @@ const STATUS_CONFIG = {
 } as const;
 
 export function DailyEntryBanner({
-  tokens, intel, loop, greeting, dayContext, onOpenSection, onStartSession,
+  tokens, intel, loop, greeting, dayContext,
+  lastSession, onOpenSection, onStartSession, onDismissContinuity,
 }: Props) {
   const { overallStatus, topItem, momentumScore, statusNarrative } = intel;
   const { streak, isBannerDismissed, dismissBanner } = loop;
@@ -125,6 +130,61 @@ export function DailyEntryBanner({
             </span>
           )}
         </p>
+
+        {/* Continuity chip — "↩ Resume: [workspace]" */}
+        {lastSession && (
+          <div style={{
+            display:     'flex',
+            alignItems:  'center',
+            gap:         '6px',
+            margin:      '4px 0 2px',
+          }}>
+            <div style={{
+              display:         'inline-flex',
+              alignItems:      'center',
+              gap:             '5px',
+              padding:         '3px 8px 3px 6px',
+              borderRadius:    '20px',
+              border:          `1px solid ${tokens.accent}30`,
+              backgroundColor: `${tokens.accent}08`,
+            }}>
+              <RotateCcw style={{ width: '9px', height: '9px', color: tokens.accent, opacity: 0.7 }} />
+              <span style={{
+                fontSize:   '10px',
+                fontWeight: 600,
+                color:      tokens.accent,
+                opacity:    0.85,
+                maxWidth:   '160px',
+                overflow:   'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                Resume: {lastSession.sectionTitle}
+              </span>
+            </div>
+            {onDismissContinuity && (
+              <button
+                onClick={onDismissContinuity}
+                title="Dismiss"
+                style={{
+                  background: 'none',
+                  border:     'none',
+                  cursor:     'pointer',
+                  padding:    '2px',
+                  color:      tokens.textGhost,
+                  display:    'flex',
+                  alignItems: 'center',
+                  lineHeight: 1,
+                  transition: 'color 0.12s ease',
+                }}
+                onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted)}
+                onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost)}
+              >
+                <X style={{ width: '9px', height: '9px' }} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Directive */}
         <p style={{
