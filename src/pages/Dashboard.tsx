@@ -5,6 +5,7 @@ import { useDeadlines } from '../hooks/useDeadlines';
 import { useAuth } from '../hooks/useAuth';
 import { useWorkspaceLayout, SIZE_SPAN, ModuleSize } from '../hooks/useWorkspaceLayout';
 import { useAtmosphere } from '../hooks/useAtmosphere';
+import { useWorkspaceTheme, mergeAccent, computeCanvasBg } from '../hooks/useWorkspaceTheme';
 import { SessionModal } from '../components/SessionModal';
 
 // ── Canvas primitives ─────────────────────────────────────────────────────────
@@ -38,6 +39,8 @@ function firstName(email: string): string {
   return local.charAt(0).toUpperCase() + local.slice(1).split(/[._-]/)[0];
 }
 
+type InspectorTab = 'module' | 'theme' | 'presets';
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export function Dashboard() {
@@ -46,19 +49,36 @@ export function Dashboard() {
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
   const { modules, toggleModule, reorder, setSize,
-          applyPreset, reset, presets }                          = useWorkspaceLayout();
-  const { tokens, atmosphereId, setAtmosphere }                 = useAtmosphere();
+          applyPreset: applyLayoutPreset, reset, presets }       = useWorkspaceLayout();
+  const { tokens: atmTokens, atmosphereId, setAtmosphere }      = useAtmosphere();
 
-  // ── UI state ────────────────────────────────────────────────────────────────
-  const [designMode,       setDesignMode]       = useState(false);
-  const [selectedId,       setSelectedId]       = useState<string | null>(null);
-  const [addPanelOpen,     setAddPanelOpen]     = useState(false);
-  const [showNewSection,   setShowNewSection]   = useState(false);
-  const [showSessionModal, setShowSessionModal] = useState(false);
-  const [newTitle,         setNewTitle]         = useState('');
-  const [creating,         setCreating]         = useState(false);
+  // ── Theme system ─────────────────────────────────────────────────────────────
+  const {
+    global: globalTheme,
+    design,
+    moduleThemes,
+    presets: themePresets,
+    updateGlobal,
+    applyPreset: applyThemePreset,
+    updateModule,
+    resetModule,
+  } = useWorkspaceTheme();
 
-  // ── Drag state ──────────────────────────────────────────────────────────────
+  // Merge accent overrides from theme into atmosphere tokens
+  const tokens = mergeAccent(atmTokens, design);
+
+  // ── UI state ─────────────────────────────────────────────────────────────────
+  const [designMode,        setDesignMode]        = useState(false);
+  const [selectedId,        setSelectedId]        = useState<string | null>(null);
+  const [addPanelOpen,      setAddPanelOpen]      = useState(false);
+  const [inspectorOpen,     setInspectorOpen]     = useState(false);
+  const [inspectorTab,      setInspectorTab]      = useState<InspectorTab>('module');
+  const [showNewSection,    setShowNewSection]    = useState(false);
+  const [showSessionModal,  setShowSessionModal]  = useState(false);
+  const [newTitle,          setNewTitle]          = useState('');
+  const [creating,          setCreating]          = useState(false);
+
+  // ── Drag state ───────────────────────────────────────────────────────────────
   const dragIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
 
@@ -69,7 +89,20 @@ export function Dashboard() {
   const suggestedSection = sortSectionsByUrgency(sections, deadlines)[0] ?? null;
   const displayName      = user?.email ? firstName(user.email) : '';
 
-  // ── Drag handlers ────────────────────────────────────────────────────────────
+  // Inspector is open when a module is selected OR we force-opened it (Theme button)
+  const isInspectorOpen = inspectorOpen || !!selectedId;
+
+  const openInspectorAtTab = useCallback((tab: InspectorTab) => {
+    setInspectorTab(tab);
+    setInspectorOpen(true);
+  }, []);
+
+  const closeInspector = useCallback(() => {
+    setInspectorOpen(false);
+    setSelectedId(null);
+  }, []);
+
+  // ── Drag handlers ─────────────────────────────────────────────────────────────
 
   const handleDragStart = useCallback((id: string) => { dragIdRef.current = id; }, []);
   const handleDragOver  = useCallback((e: React.DragEvent, id: string) => {
@@ -88,7 +121,7 @@ export function Dashboard() {
     setDragOver(null);
   }, []);
 
-  // ── Inspector helpers ────────────────────────────────────────────────────────
+  // ── Inspector move helpers ────────────────────────────────────────────────────
 
   const handleMoveUp = useCallback((id: string) => {
     const ordered = [...modules].sort((a, b) => a.order - b.order).filter(m => m.enabled);
@@ -102,7 +135,7 @@ export function Dashboard() {
     if (idx < ordered.length - 1) reorder(id, ordered[idx + 1].id);
   }, [modules, reorder]);
 
-  // ── Capture handler ──────────────────────────────────────────────────────────
+  // ── Capture ────────────────────────────────────────────────────────────────
 
   const handleCapture = async (text: string) => {
     const d = new Date();
@@ -118,13 +151,13 @@ export function Dashboard() {
       icon: '⚡',
       style: {
         background: tokens.cardBg,
-        border: `1px solid ${tokens.cardBorder}`,
-        color: tokens.textPrimary,
+        border:     `1px solid ${tokens.cardBorder}`,
+        color:      tokens.textPrimary,
       },
     });
   };
 
-  // ── Sign out ─────────────────────────────────────────────────────────────────
+  // ── Sign out ──────────────────────────────────────────────────────────────
 
   const handleSignOut = async () => {
     try {
@@ -136,7 +169,7 @@ export function Dashboard() {
     }
   };
 
-  // ── Workspace create ─────────────────────────────────────────────────────────
+  // ── Workspace create ──────────────────────────────────────────────────────
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,19 +189,16 @@ export function Dashboard() {
     }
   };
 
-  // ── Module renderer ──────────────────────────────────────────────────────────
+  // ── Module renderer ───────────────────────────────────────────────────────
 
   const renderModuleContent = (id: string): React.ReactNode | null => {
     switch (id) {
       case 'daily-intention':
         return <DailyIntention tokens={tokens} />;
-
       case 'capture':
         return <CapturePanel onCapture={handleCapture} />;
-
       case 'momentum':
         return <MomentumMeter sections={sections} />;
-
       case 'focus-mode':
         return (
           <FocusMode
@@ -177,35 +207,28 @@ export function Dashboard() {
             onStartSession={() => setShowSessionModal(true)}
           />
         );
-
       case 'execute':
         return sections.some(s => s.total_items > 0)
           ? <ExecutePanel sections={sections} />
           : null;
-
       case 'focus-queue':
         return sections.some(s => s.total_items - s.completed_items > 0)
           ? <FocusQueue sections={sections} deadlines={deadlines} />
           : null;
-
       case 'today':
         return <PressureRadar sections={sections} />;
-
       case 'workspaces':
         return <WorkspacesPanel />;
-
       case 'deep-work-timer':
         return <DeepWorkTimer tokens={tokens} />;
-
       case 'tools':
         return <MyPortals />;
-
       default:
         return null;
     }
   };
 
-  // ── Workspaces panel (inline sub-component) ──────────────────────────────────
+  // ── Workspaces inline panel ───────────────────────────────────────────────
 
   function WorkspacesPanel() {
     return (
@@ -213,12 +236,11 @@ export function Dashboard() {
         className="rounded-2xl overflow-hidden"
         style={{ backgroundColor: tokens.cardBg, border: `1px solid ${tokens.cardBorder}` }}
       >
-        {/* Header */}
         <div
           className="flex items-center justify-between px-5 py-3.5"
           style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}
         >
-          <span className="text-sm font-semibold" style={{ color: tokens.textPrimary }}>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: tokens.textPrimary }}>
             Workspaces
           </span>
           <button
@@ -238,7 +260,6 @@ export function Dashboard() {
           </button>
         </div>
 
-        {/* New workspace form */}
         {showNewSection && (
           <div className="px-4 py-3 animate-fade-in" style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}>
             <form onSubmit={handleCreate} className="flex gap-2">
@@ -263,7 +284,11 @@ export function Dashboard() {
               >
                 {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Create'}
               </button>
-              <button type="button" onClick={() => setShowNewSection(false)} className="p-2 rounded-xl transition-colors" style={{ color: tokens.textGhost }}
+              <button
+                type="button"
+                onClick={() => setShowNewSection(false)}
+                className="p-2 rounded-xl transition-colors"
+                style={{ color: tokens.textGhost }}
                 onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textSecondary)}
                 onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost)}
               >
@@ -273,11 +298,10 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* Content */}
         {sections.length === 0 && !showNewSection ? (
           <div className="px-5 py-8 text-center">
-            <p className="text-sm mb-1" style={{ color: tokens.textMuted }}>No workspaces yet</p>
-            <p className="text-xs mb-4" style={{ color: tokens.textGhost }}>
+            <p style={{ fontSize: '14px', color: tokens.textMuted, marginBottom: '4px' }}>No workspaces yet</p>
+            <p style={{ fontSize: '12px', color: tokens.textGhost, marginBottom: '16px' }}>
               Create a workspace for each course or project.
             </p>
             <button
@@ -306,34 +330,30 @@ export function Dashboard() {
     );
   }
 
-  // ── Canvas grid background ───────────────────────────────────────────────────
+  // ── Canvas background ────────────────────────────────────────────────────
 
-  const canvasBg: React.CSSProperties = {
-    backgroundImage: designMode
-      ? `radial-gradient(circle, ${tokens.cardBorder} 1px, transparent 1px)`
-      : `radial-gradient(circle, ${tokens.cardBorder}50 1px, transparent 1px)`,
-    backgroundSize: '32px 32px',
-    backgroundPosition: '16px 16px',
-  };
+  const canvasStyle = computeCanvasBg(design, tokens, designMode);
 
-  // ── Enabled modules ──────────────────────────────────────────────────────────
+  // ── Module list ─────────────────────────────────────────────────────────
 
-  const enabledModules = modules.filter(m => m.enabled);
-  const hasModules     = enabledModules.length > 0;
+  const enabledModules = modules
+    .filter(m => m.enabled)
+    .sort((a, b) => a.order - b.order);
+  const hasModules = enabledModules.length > 0;
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight:       '100vh',
         backgroundColor: tokens.pageBg,
-        color: tokens.textPrimary,
-        transition: 'background-color 0.4s ease',
+        color:           tokens.textPrimary,
+        transition:      `background-color ${design.transition}`,
       }}
     >
 
-      {/* ── Command Bar ──────────────────────────────────────────────── */}
+      {/* ── Command Bar ───────────────────────────────────────── */}
       <CommandBar
         tokens={tokens}
         atmosphereId={atmosphereId}
@@ -342,7 +362,7 @@ export function Dashboard() {
         onToggleDesign={() => {
           setDesignMode(d => {
             const next = !d;
-            if (!next) setSelectedId(null); // deselect on exit
+            if (!next) { setSelectedId(null); setInspectorOpen(false); }
             return next;
           });
         }}
@@ -351,25 +371,17 @@ export function Dashboard() {
         onSignOut={handleSignOut}
       />
 
-      {/* ── Canvas ───────────────────────────────────────────────────── */}
+      {/* ── Canvas ────────────────────────────────────────────── */}
       <main
         className="relative"
         style={{
-          minHeight: 'calc(100vh - 48px)',
-          ...canvasBg,
-          // Ambient gradient on top of grid
-          backgroundImage: [
-            canvasBg.backgroundImage as string,
-            tokens.glowIntensity > 0
-              ? `radial-gradient(ellipse 70% 50% at 15% 0%, ${tokens.ambientGlow1}, transparent)`
-              : null,
-            tokens.glowIntensity > 0
-              ? `radial-gradient(ellipse 55% 40% at 85% 100%, ${tokens.ambientGlow2}, transparent)`
-              : null,
-          ].filter(Boolean).join(', '),
-          transition: 'all 0.4s ease',
+          minHeight:  'calc(100vh - 48px)',
+          ...canvasStyle,
+          transition: `all ${design.transition}`,
         }}
-        onClick={() => designMode && selectedId && setSelectedId(null)}
+        onClick={() => {
+          if (designMode && selectedId) setSelectedId(null);
+        }}
       >
         {loading ? (
           <div className="flex items-center justify-center" style={{ minHeight: 'calc(100vh - 48px)' }}>
@@ -380,17 +392,25 @@ export function Dashboard() {
             tokens={tokens}
             presets={presets}
             onOpenAdd={() => setAddPanelOpen(true)}
-            onApplyPreset={id => { applyPreset(id); setAddPanelOpen(false); }}
+            onApplyPreset={id => { applyLayoutPreset(id); }}
           />
         ) : (
           <div
-            className="mx-auto px-6 md:px-10 py-8 pb-32"
-            style={{ maxWidth: '1200px' }}
+            className="mx-auto pb-32"
+            style={{
+              maxWidth: '1200px',
+              padding:  design.canvasPad,
+              paddingBottom: '128px',
+            }}
           >
-            {/* Module grid — 12-column bento */}
+            {/* 12-column bento grid */}
             <div
-              className="grid gap-5"
-              style={{ gridTemplateColumns: 'repeat(12, 1fr)' }}
+              className="grid"
+              style={{
+                gridTemplateColumns: 'repeat(12, 1fr)',
+                gap:                 `${design.gap}px`,
+                transition:          `gap ${design.transition}`,
+              }}
             >
               {enabledModules.map(m => {
                 const content = renderModuleContent(m.id);
@@ -400,10 +420,7 @@ export function Dashboard() {
                   <div
                     key={m.id}
                     className="min-w-0"
-                    style={{
-                      gridColumn: SIZE_SPAN[m.size],
-                      // On small screens fall back to full-width via a min-width trick
-                    }}
+                    style={{ gridColumn: SIZE_SPAN[m.size] }}
                   >
                     <WorkspaceModule
                       id={m.id}
@@ -412,7 +429,12 @@ export function Dashboard() {
                       selected={selectedId === m.id}
                       dragOver={dragOver === m.id}
                       tokens={tokens}
-                      onSelect={id => setSelectedId(id)}
+                      design={design}
+                      moduleTheme={moduleThemes[m.id]}
+                      onSelect={id => {
+                        setSelectedId(id);
+                        if (id) setInspectorOpen(false); // let selectedId drive open
+                      }}
                       onDragStart={handleDragStart}
                       onDragOver={handleDragOver}
                       onDrop={handleDrop}
@@ -428,29 +450,40 @@ export function Dashboard() {
         )}
       </main>
 
-      {/* ── Floating toolbar ─────────────────────────────────────────── */}
+      {/* ── Floating toolbar ──────────────────────────────────── */}
       <DesignToolbar
         tokens={tokens}
         designMode={designMode}
         presets={presets}
         onOpenAdd={() => setAddPanelOpen(true)}
-        onApplyPreset={applyPreset}
+        onApplyPreset={applyLayoutPreset}
         onReset={reset}
+        onOpenTheme={() => openInspectorAtTab('theme')}
       />
 
-      {/* ── Module inspector (slides in from right when selected) ─────── */}
+      {/* ── Module inspector ──────────────────────────────────── */}
       <ModuleInspector
+        open={isInspectorOpen}
         selectedId={selectedId}
         modules={modules}
         tokens={tokens}
-        onClose={() => setSelectedId(null)}
+        design={design}
+        global={globalTheme}
+        moduleThemes={moduleThemes}
+        presets={themePresets}
+        defaultTab={inspectorTab}
+        onClose={closeInspector}
         onSetSize={(id, size: ModuleSize) => setSize(id, size)}
         onMoveUp={handleMoveUp}
         onMoveDown={handleMoveDown}
         onRemove={toggleModule}
+        updateGlobal={updateGlobal}
+        applyPreset={applyThemePreset}
+        updateModule={updateModule}
+        resetModule={resetModule}
       />
 
-      {/* ── Add module panel ─────────────────────────────────────────── */}
+      {/* ── Add module panel ──────────────────────────────────── */}
       <AddModulePanel
         open={addPanelOpen}
         modules={modules}
@@ -459,7 +492,7 @@ export function Dashboard() {
         onClose={() => setAddPanelOpen(false)}
       />
 
-      {/* ── Session modal ─────────────────────────────────────────────── */}
+      {/* ── Session modal ─────────────────────────────────────── */}
       {showSessionModal && (
         <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
       )}
