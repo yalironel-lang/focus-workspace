@@ -312,62 +312,68 @@ export function computeSurface(
   const hasGlow  = (opts.glowEnabled ?? true) && gm > 0;
 
   const glowStr = hasGlow
-    ? `0 0 ${Math.round(20 * gm)}px ${scaleAlpha(glow, 0.55 * gm)}`
+    ? `0 0 ${Math.round(24 * gm)}px ${scaleAlpha(glow, 0.5 * gm)}`
     : null;
 
   const bdr = opts.borderStyle ?? 'default';
   const border =
     bdr === 'none'   ? '1px solid transparent' :
-    bdr === 'accent' ? `1px solid ${acc}70` :
+    bdr === 'accent' ? `1px solid ${acc}60` :
     bdr === 'glow'   ? `1px solid ${glow}` :
     `1px solid ${tokens.cardBorder}`;
 
-  const baseShadow = (s: string) =>
-    glowStr ? `${s}, ${glowStr}` : s;
+  // Inner top-edge highlight for depth
+  const innerHighlight = 'inset 0 1px 0 rgba(255,255,255,0.05)';
+
+  const baseShadow = (s: string) => {
+    const parts = [s, innerHighlight];
+    if (glowStr) parts.push(glowStr);
+    return parts.join(', ');
+  };
 
   switch (surfaceStyle) {
     case 'glass':
       return {
-        backgroundColor:      `${tokens.cardBg}cc`,
-        backdropFilter:       `blur(${blurPx}px)`,
-        WebkitBackdropFilter: `blur(${blurPx}px)`,
+        backgroundColor:      `${tokens.cardBg}d0`,
+        backdropFilter:       `blur(${Math.max(blurPx, 16)}px)`,
+        WebkitBackdropFilter: `blur(${Math.max(blurPx, 16)}px)`,
         border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 4px 24px rgba(0,0,0,0.4)'),
+        boxShadow: baseShadow('0 4px 24px rgba(0,0,0,0.45)'),
       };
     case 'solid':
       return {
         backgroundColor: tokens.cardBg,
         border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 2px 12px rgba(0,0,0,0.45)'),
+        boxShadow: baseShadow('0 2px 12px rgba(0,0,0,0.5)'),
       };
     case 'soft-card':
       return {
-        backgroundColor:      `${tokens.cardBg}e8`,
-        backdropFilter:       'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        backgroundColor:      tokens.cardBg,
         border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 6px 28px rgba(0,0,0,0.3)'),
+        // Soft elevation with inner highlight
+        boxShadow: baseShadow('0 4px 20px rgba(0,0,0,0.35)'),
       };
     case 'floating':
       return {
         backgroundColor:      tokens.cardBg,
-        backdropFilter:       `blur(${Math.max(blurPx, 16)}px)`,
-        WebkitBackdropFilter: `blur(${Math.max(blurPx, 16)}px)`,
+        backdropFilter:       `blur(${Math.max(blurPx, 20)}px)`,
+        WebkitBackdropFilter: `blur(${Math.max(blurPx, 20)}px)`,
         border:    bdr === 'default' ? `1px solid ${tokens.cardBorderHover}` : border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 16px 48px rgba(0,0,0,0.55)'),
+        // Strong lift with inner highlight
+        boxShadow: baseShadow('0 16px 48px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)'),
       };
     case 'borderless':
       return {
-        backgroundColor:      `${tokens.cardBg}aa`,
-        backdropFilter:       'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
+        backgroundColor:      `${tokens.cardBg}90`,
+        backdropFilter:       'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         border:       '1px solid transparent',
         borderRadius: `${r}px`,
-        boxShadow:    glowStr ?? 'none',
+        boxShadow:    glowStr ? `${glowStr}, ${innerHighlight}` : innerHighlight,
       };
     default:
       return {

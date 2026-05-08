@@ -25,20 +25,35 @@ export function QuoteBlock({ content, tokens, onChange }: Props) {
   return (
     <div
       style={{
-        padding:     '20px 24px',
-        borderLeft:  `3px solid ${tokens.accent}`,
-        marginLeft:  '4px',
+        padding:    '20px 22px 18px',
+        position:   'relative',
+        overflow:   'hidden',
       }}
     >
-      {/* Quote mark */}
+      {/* Accent left bar */}
       <div
         style={{
-          fontSize:    '36px',
-          lineHeight:  1,
-          color:       `${tokens.accent}50`,
-          fontFamily:  'Georgia, serif',
-          marginBottom: '6px',
-          userSelect:  'none',
+          position:        'absolute',
+          left:            0,
+          top:             0,
+          bottom:          0,
+          width:           '3px',
+          background:      `linear-gradient(180deg, ${tokens.accent}, ${tokens.accent}40)`,
+          boxShadow:       `2px 0 16px ${tokens.accentGlow}`,
+          borderRadius:    '0 2px 2px 0',
+        }}
+      />
+
+      {/* Opening quote mark — large, decorative */}
+      <div
+        style={{
+          fontSize:     '52px',
+          lineHeight:   0.8,
+          color:        `${tokens.accent}30`,
+          fontFamily:   'Georgia, "Times New Roman", serif',
+          marginBottom: '10px',
+          userSelect:   'none',
+          paddingLeft:  '8px',
         }}
       >
         "
@@ -49,7 +64,7 @@ export function QuoteBlock({ content, tokens, onChange }: Props) {
         ref={bodyRef}
         value={content.body}
         onChange={e => { onChange({ ...content, body: e.target.value }); autoResize(bodyRef.current); }}
-        placeholder="Enter quote…"
+        placeholder="Enter a quote…"
         rows={2}
         style={{
           width:      '100%',
@@ -57,19 +72,39 @@ export function QuoteBlock({ content, tokens, onChange }: Props) {
           border:     'none',
           outline:    'none',
           background: 'transparent',
-          fontSize:   '16px',
-          lineHeight: 1.65,
+          fontSize:   '15px',
+          lineHeight: 1.7,
           fontStyle:  'italic',
           color:      tokens.textPrimary,
-          fontFamily: 'Georgia, serif',
+          fontFamily: 'Georgia, "Times New Roman", serif',
           overflow:   'hidden',
           display:    'block',
+          paddingLeft: '8px',
+          caretColor: tokens.accent,
         }}
       />
 
-      {/* Author */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px' }}>
-        <span style={{ color: tokens.accent, fontSize: '12px', fontWeight: 600 }}>—</span>
+      {/* Author line */}
+      <div
+        style={{
+          display:     'flex',
+          alignItems:  'center',
+          gap:         '6px',
+          marginTop:   '12px',
+          paddingLeft: '8px',
+        }}
+      >
+        <span
+          style={{
+            color:      tokens.accent,
+            fontSize:   '14px',
+            fontWeight: 600,
+            lineHeight: 1,
+            flexShrink: 0,
+          }}
+        >
+          —
+        </span>
         <input
           ref={authorRef}
           type="text"
@@ -77,13 +112,16 @@ export function QuoteBlock({ content, tokens, onChange }: Props) {
           onChange={e => onChange({ ...content, author: e.target.value })}
           placeholder="Author (optional)"
           style={{
-            flex:       1,
-            border:     'none',
-            outline:    'none',
-            background: 'transparent',
-            fontSize:   '12px',
-            color:      tokens.textMuted,
-            fontFamily: 'inherit',
+            flex:        1,
+            border:      'none',
+            outline:     'none',
+            background:  'transparent',
+            fontSize:    '11px',
+            fontWeight:  500,
+            letterSpacing: '0.03em',
+            color:       tokens.textMuted,
+            fontFamily:  "'Space Grotesk', system-ui, sans-serif",
+            caretColor:  tokens.accent,
           }}
         />
       </div>

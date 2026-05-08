@@ -25,20 +25,20 @@ interface Props {
   onDragEnd:    () => void;
 }
 
-const META: React.CSSProperties = {
+const LABEL_STYLE: React.CSSProperties = {
   fontFamily:    "'Space Grotesk', sans-serif",
   fontSize:      '9px',
-  letterSpacing: '0.14em',
+  letterSpacing: '0.13em',
   textTransform: 'uppercase' as const,
-  fontWeight:    600,
+  fontWeight:    700,
 };
 
-// Corner handle positions
+// Four corner handle positions
 const CORNERS = [
-  { top: '-4px', left: '-4px' },
-  { top: '-4px', right: '-4px' },
-  { bottom: '-4px', left: '-4px' },
-  { bottom: '-4px', right: '-4px' },
+  { top: '-5px',    left: '-5px'  },
+  { top: '-5px',    right: '-5px' },
+  { bottom: '-5px', left: '-5px'  },
+  { bottom: '-5px', right: '-5px' },
 ] as const;
 
 export function WorkspaceModule({
@@ -82,15 +82,35 @@ export function WorkspaceModule({
 
   const displayLabel = moduleTheme?.customTitle ?? meta?.label ?? id;
 
-  // When being dragged, ghost it
+  // ── Drag visual states ───────────────────────────────────────────────────
   const dragSelf: React.CSSProperties = isDragging
-    ? { opacity: 0.35, transform: 'scale(0.97)' }
+    ? {
+        opacity:   0.3,
+        transform: 'scale(0.95) rotate(0.8deg)',
+        filter:    'saturate(0.4) blur(0.5px)',
+      }
     : {};
+
+  // ── Selection state — spatial lift instead of harsh outline ─────────────
+  const selectionStyle: React.CSSProperties = selected && designMode
+    ? {
+        outline:      'none',
+        // The CSS class handles the animated glow; add static transform
+        transform:    isDragging ? 'scale(0.95) rotate(0.8deg)' : 'translateY(-2px) scale(1.002)',
+        zIndex:       3,
+        position:     'relative' as const,
+      }
+    : { outline: 'none' };
+
+  // ── Hover in design mode (not selected) ──────────────────────────────────
+  // Applied via inline style on wrapper; CSS class handles transitions
 
   return (
     <div
       ref={ref}
-      className={`relative group ${selected && designMode ? 'module-selected-pulse' : ''}`}
+      className={`relative group transition-all ${
+        selected && designMode ? 'module-selected-pulse' : ''
+      }`}
       draggable={designMode}
       onDragStart={() => designMode && onDragStart(id)}
       onDragOver={e  => designMode && onDragOver(e, id)}
@@ -98,46 +118,66 @@ export function WorkspaceModule({
       onDragEnd={() => designMode && onDragEnd()}
       onClick={handleClick}
       style={{
-        cursor:          designMode ? (selected ? 'grabbing' : 'grab') : 'default',
-        transition:      `transform ${design.transition}, opacity 0.2s ease`,
-        opacity:         moduleTheme?.opacity ?? 1,
-        transform:       selected && designMode ? 'scale(1.004)' : 'scale(1)',
-        outline:         selected && designMode ? `2.5px solid ${selAccent}` : 'none',
-        outlineOffset:   selected && designMode ? '4px' : '0',
+        cursor:       designMode ? (selected ? 'grabbing' : 'grab') : 'default',
+        opacity:      moduleTheme?.opacity ?? 1,
+        transition:   `transform 0.25s cubic-bezier(0.32,0.72,0,1),
+                       opacity 0.2s ease,
+                       box-shadow 0.25s cubic-bezier(0.32,0.72,0,1)`,
         ...surfaceCSS,
+        ...selectionStyle,
         ...dragSelf,
       }}
+      onMouseEnter={e => {
+        if (designMode && !selected && !isDragging) {
+          (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-1px)';
+          (e.currentTarget as HTMLDivElement).style.boxShadow =
+            `${surfaceCSS.boxShadow ?? ''}, 0 8px 32px rgba(0,0,0,0.4)`;
+        }
+      }}
+      onMouseLeave={e => {
+        if (designMode && !selected && !isDragging) {
+          (e.currentTarget as HTMLDivElement).style.transform = '';
+          (e.currentTarget as HTMLDivElement).style.boxShadow = surfaceCSS.boxShadow as string ?? '';
+        }
+      }}
     >
-      {/* ── Drop-zone overlay when another module is dragged over this one ─── */}
+
+      {/* ── Drop-zone overlay ─────────────────────────────────────────────── */}
       {dragOver && designMode && (
         <div
-          className="drop-zone-pulse absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
+          className="drop-zone-pulse absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none"
           style={{
             borderRadius:    surfaceCSS.borderRadius as string ?? `${design.radius}px`,
-            border:         `2px dashed ${tokens.accent}`,
-            backgroundColor: `${tokens.accentSubtle}`,
+            border:         `1.5px dashed ${selAccent}`,
+            backgroundColor: `${selAccent}08`,
+            backdropFilter:  'blur(4px)',
           }}
         >
-          <span
+          <div
             style={{
-              ...META,
-              fontSize:        '10px',
-              color:           tokens.accent,
-              backgroundColor: tokens.pageBg,
-              padding:         '4px 10px',
-              borderRadius:    '8px',
-              border:         `1px solid ${tokens.accent}40`,
+              padding:         '5px 12px',
+              borderRadius:    '20px',
+              backgroundColor: tokens.cardBg,
+              border:         `1px solid ${selAccent}40`,
+              boxShadow:       `0 0 12px ${selGlow}`,
             }}
           >
-            Drop here
-          </span>
+            <span style={{
+              ...LABEL_STYLE,
+              fontSize: '9px',
+              color:    selAccent,
+            }}>
+              Drop here
+            </span>
+          </div>
         </div>
       )}
 
-      {/* ── Design-mode: drag handle + size badge (top-right) ─── */}
+      {/* ── Design mode: drag handle + size badge ─────────────────────────── */}
       {designMode && (
         <div
-          className={`absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5 transition-all duration-150 ${
+          className={`absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5
+            transition-all duration-150 ${
             selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
           style={{ pointerEvents: 'auto' }}
@@ -146,13 +186,16 @@ export function WorkspaceModule({
           {/* Size badge */}
           <span
             style={{
-              ...META,
+              ...LABEL_STYLE,
               padding:         '2px 7px',
-              borderRadius:    '5px',
-              backgroundColor: selected ? tokens.accentSubtle : `${tokens.cardBg}e0`,
-              color:           selected ? selAccent : tokens.textGhost,
-              border:         `1px solid ${selected ? selAccent + '50' : tokens.cardBorder}`,
-              backdropFilter:  'blur(8px)',
+              borderRadius:    '20px',
+              backgroundColor: selected
+                ? `${selAccent}18`
+                : `${tokens.cardBg}f0`,
+              color:           selected ? selAccent : tokens.textMuted,
+              border:         `1px solid ${selected ? selAccent + '40' : tokens.cardBorder}`,
+              backdropFilter:  'blur(12px)',
+              boxShadow:       '0 2px 8px rgba(0,0,0,0.3)',
             }}
           >
             {SIZE_LABEL[size]}
@@ -162,15 +205,16 @@ export function WorkspaceModule({
           <div
             title="Drag to reorder"
             style={{
-              padding:         '5px 4px',
-              borderRadius:    '7px',
-              backgroundColor: selected ? tokens.accentSubtle : `${tokens.cardBg}e0`,
-              border:         `1px solid ${selected ? selAccent + '50' : tokens.cardBorder}`,
-              backdropFilter:  'blur(8px)',
-              cursor:          'grab',
-              display:         'grid',
+              padding:             '5px 4px',
+              borderRadius:        '8px',
+              backgroundColor:     selected ? `${selAccent}18` : `${tokens.cardBg}f0`,
+              border:             `1px solid ${selected ? selAccent + '40' : tokens.cardBorder}`,
+              backdropFilter:      'blur(12px)',
+              boxShadow:           '0 2px 8px rgba(0,0,0,0.3)',
+              cursor:              'grab',
+              display:             'grid',
               gridTemplateColumns: 'repeat(2, 4px)',
-              gap:             '2.5px',
+              gap:                 '3px',
             }}
           >
             {Array.from({ length: 6 }).map((_, i) => (
@@ -180,7 +224,8 @@ export function WorkspaceModule({
                   width:           '3px',
                   height:          '3px',
                   borderRadius:    '50%',
-                  backgroundColor: selected ? selAccent : tokens.textGhost,
+                  backgroundColor: selected ? selAccent : tokens.textMuted,
+                  transition:      'background-color 0.15s',
                 }}
               />
             ))}
@@ -188,37 +233,43 @@ export function WorkspaceModule({
         </div>
       )}
 
-      {/* ── Corner handles when selected ──────────────────────────────────── */}
+      {/* ── Corner handles — circles with ambient glow ─────────────────────── */}
       {designMode && selected && CORNERS.map((pos, i) => (
         <div
           key={i}
           style={{
             position:        'absolute',
             zIndex:          20,
-            width:           '8px',
-            height:          '8px',
-            borderRadius:    '2px',
+            width:           '10px',
+            height:          '10px',
+            borderRadius:    '50%',
             backgroundColor: selAccent,
-            boxShadow:      `0 0 6px ${selGlow}`,
+            boxShadow:       `0 0 8px ${selGlow}, 0 0 16px ${selGlow}`,
+            border:          `1.5px solid rgba(255,255,255,0.3)`,
             pointerEvents:   'none',
+            transition:      'box-shadow 0.3s ease',
             ...pos,
           }}
         />
       ))}
 
-      {/* ── Module label (bottom-left) in design mode ──────────────────── */}
+      {/* ── Module label — bottom, with icon ──────────────────────────────── */}
       {designMode && (
         <div
           className="absolute bottom-2.5 left-3 z-10 flex items-center gap-1.5 pointer-events-none"
-          style={{ opacity: selected ? 1 : 0.45, transition: 'opacity 0.15s ease' }}
+          style={{
+            opacity:    selected ? 1 : 0.5,
+            transition: 'opacity 0.2s ease',
+          }}
         >
           {meta?.icon && (
-            <span style={{ fontSize: '11px', lineHeight: 1 }}>{meta.icon}</span>
+            <span style={{ fontSize: '10px', lineHeight: 1 }}>{meta.icon}</span>
           )}
-          <span style={{ ...META, color: selected ? selAccent : tokens.textGhost }}>
+          <span style={{ ...LABEL_STYLE, color: selected ? selAccent : tokens.textMuted }}>
             {displayLabel}
           </span>
-          {/* Per-module accent indicator */}
+
+          {/* Per-module accent dot */}
           {modAccent && (
             <span
               style={{
@@ -227,14 +278,14 @@ export function WorkspaceModule({
                 height:          '5px',
                 borderRadius:    '50%',
                 backgroundColor: modAccent,
-                boxShadow:       modGlow ? `0 0 4px ${modGlow}` : 'none',
+                boxShadow:       modGlow ? `0 0 6px ${modGlow}` : 'none',
               }}
             />
           )}
         </div>
       )}
 
-      {/* ── Module content ─────────────────────────────────────────────── */}
+      {/* ── Module content ────────────────────────────────────────────────── */}
       <div
         style={{
           pointerEvents: designMode ? 'none' : 'auto',

@@ -13,6 +13,9 @@ interface Props {
 export function NoteBlock({ content, tokens, onChange }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
+  // Line height kept in sync for the lined-paper grid
+  const LINE_H = 26; // px
+
   const autoResize = () => {
     const el = ref.current;
     if (!el) return;
@@ -22,26 +25,36 @@ export function NoteBlock({ content, tokens, onChange }: Props) {
 
   useEffect(() => { autoResize(); }, [content.body]);
 
-  // Subtle lined-paper rows behind textarea
-  const lineHeight = 24; // px
-
   return (
     <div
       style={{
-        padding:    '16px 18px',
-        position:   'relative',
+        padding:    '14px 18px',
         minHeight:  '100px',
-        // Lined-paper effect
+        position:   'relative',
+        // Lined-paper: lines start after first row
         backgroundImage: `repeating-linear-gradient(
           transparent,
-          transparent ${lineHeight - 1}px,
-          ${tokens.cardBorder}55 ${lineHeight - 1}px,
-          ${tokens.cardBorder}55 ${lineHeight}px
+          transparent ${LINE_H - 1}px,
+          ${tokens.cardBorder} ${LINE_H - 1}px,
+          ${tokens.cardBorder} ${LINE_H}px
         )`,
-        backgroundSize:     `100% ${lineHeight}px`,
-        backgroundPosition: `0 ${lineHeight + 4}px`,
+        backgroundSize:     `100% ${LINE_H}px`,
+        backgroundPosition: `0 ${LINE_H + 2}px`,
       }}
     >
+      {/* Faint top rule as a "header line" */}
+      <div
+        style={{
+          position:        'absolute',
+          top:             `${LINE_H + 14}px`,
+          left:            '18px',
+          right:           '18px',
+          height:          '1px',
+          backgroundColor: `${tokens.accent}18`,
+          pointerEvents:   'none',
+        }}
+      />
+
       <textarea
         ref={ref}
         value={content.body}
@@ -50,19 +63,20 @@ export function NoteBlock({ content, tokens, onChange }: Props) {
         placeholder="Your note…"
         rows={4}
         style={{
-          width:       '100%',
-          resize:      'none',
-          border:      'none',
-          outline:     'none',
-          background:  'transparent',
-          fontSize:    '13px',
-          lineHeight:  `${lineHeight}px`,
-          color:       tokens.textPrimary,
-          fontFamily:  "'Space Grotesk', inherit",
-          overflow:    'hidden',
-          display:     'block',
-          position:    'relative',
-          zIndex:      1,
+          width:      '100%',
+          resize:     'none',
+          border:     'none',
+          outline:    'none',
+          background: 'transparent',
+          fontSize:   '13px',
+          lineHeight: `${LINE_H}px`,
+          color:      tokens.textPrimary,
+          fontFamily: "'Space Grotesk', system-ui, sans-serif",
+          overflow:   'hidden',
+          display:    'block',
+          position:   'relative',
+          zIndex:     1,
+          caretColor: tokens.accent,
         }}
       />
     </div>
