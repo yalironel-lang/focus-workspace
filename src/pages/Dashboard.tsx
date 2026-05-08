@@ -17,7 +17,7 @@ import { CommandBar }       from '../components/canvas/CommandBar';
 import { WorkspaceModule }  from '../components/canvas/WorkspaceModule';
 import { DesignToolbar }    from '../components/canvas/DesignToolbar';
 import { ModuleInspector }  from '../components/canvas/ModuleInspector';
-import { AddModulePanel }   from '../components/canvas/AddModulePanel';
+import { AddWorkspacePanel } from '../components/canvas/AddWorkspacePanel';
 import { CanvasEmptyState } from '../components/canvas/CanvasEmptyState';
 import { BlockRenderer }    from '../components/canvas/BlockRenderer';
 import { QuickAddFab }      from '../components/canvas/QuickAddFab';
@@ -821,8 +821,8 @@ export function Dashboard() {
         resetModule={handleResetTheme}
       />
 
-      {/* ── Add module panel ──────────────────────────────────── */}
-      <AddModulePanel
+      {/* ── Add to workspace panel (unified) ─────────────────── */}
+      <AddWorkspacePanel
         open={addPanelOpen}
         modules={modules}
         tokens={tokens}
@@ -834,8 +834,9 @@ export function Dashboard() {
       {/* ── Quick-add FAB ─────────────────────────────────────── */}
       <QuickAddFab
         tokens={tokens}
+        panelOpen={addPanelOpen}
         onAddBlock={handleAddBlock}
-        onOpenModules={() => setAddPanelOpen(true)}
+        onOpenModules={() => setAddPanelOpen(o => !o)}
       />
 
       {/* ── Session modal ─────────────────────────────────────── */}

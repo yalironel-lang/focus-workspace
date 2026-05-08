@@ -47,17 +47,20 @@ export interface CustomBlock {
 
 // ── Metadata (icon, label, description, default size) ─────────────────────────
 
+export type BlockCategory = 'writing' | 'visual' | 'resources';
+
 export const BLOCK_META: Record<BlockType, {
-  label: string; icon: string; description: string; defaultSize: ModuleSize;
+  label: string; icon: string; description: string; tagline: string;
+  defaultSize: ModuleSize; category: BlockCategory;
 }> = {
-  text:      { label: 'Text Block',      icon: '✏️', description: 'Write anything, freely',         defaultSize: 'half'       },
-  quote:     { label: 'Quote',           icon: '❝',  description: 'Highlight an inspiring thought', defaultSize: 'two-thirds' },
-  image:     { label: 'Image',           icon: '🖼️', description: 'Display an image by URL',        defaultSize: 'half'       },
-  link:      { label: 'Link Card',       icon: '🔗', description: 'Bookmark a URL with preview',    defaultSize: 'third'      },
-  checklist: { label: 'Checklist',       icon: '✅', description: 'Personal quick checklist',       defaultSize: 'half'       },
-  divider:   { label: 'Divider',         icon: '—',  description: 'Visual section break',           defaultSize: 'full'       },
-  emoji:     { label: 'Emoji / Sticker', icon: '✨', description: 'Big emoji for personality',      defaultSize: 'third'      },
-  note:      { label: 'Note Card',       icon: '📝', description: 'Blank note — write anything',    defaultSize: 'half'       },
+  text:      { label: 'Text',          icon: '✏️', description: 'Write freely — body text, thoughts, summaries.',     tagline: 'A blank page, right here.',             defaultSize: 'half',       category: 'writing'   },
+  note:      { label: 'Note',          icon: '📝', description: 'Quick note on a lined card. Like a sticky, but clean.', tagline: 'Jot it down before it\'s gone.',        defaultSize: 'half',       category: 'writing'   },
+  quote:     { label: 'Quote',         icon: '❝',  description: 'Display an inspiring quote with accent styling.',    tagline: 'Let the right words anchor you.',        defaultSize: 'two-thirds', category: 'writing'   },
+  checklist: { label: 'Checklist',     icon: '☑',  description: 'Personal task list, progress tracked visually.',    tagline: 'Small wins add up.',                     defaultSize: 'half',       category: 'writing'   },
+  image:     { label: 'Image',         icon: '🖼', description: 'Display any image by URL.',                         tagline: 'A reference, a map, a face.',            defaultSize: 'half',       category: 'visual'    },
+  divider:   { label: 'Divider',       icon: '—',  description: 'Visual break between sections.',                    tagline: 'Breathe between ideas.',                 defaultSize: 'full',       category: 'visual'    },
+  emoji:     { label: 'Sticker',       icon: '✦',  description: 'A large emoji to express personality or mark a zone.', tagline: 'Set the vibe.',                         defaultSize: 'third',      category: 'visual'    },
+  link:      { label: 'Link',          icon: '⛓',  description: 'Bookmark any URL with title and description.',      tagline: 'Keep your references close.',            defaultSize: 'third',      category: 'resources' },
 };
 
 // ── Default content per type ──────────────────────────────────────────────────
