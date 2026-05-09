@@ -6,51 +6,87 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      // autoUpdate: new SW installs + activates silently.
+      // Combined with the controllerchange reload in main.tsx, the page
+      // refreshes automatically to pick up the new assets.
       registerType: 'autoUpdate',
 
-      // Service worker strategies
       workbox: {
-        // Precache the entire built app shell
+        // ── Precache ──────────────────────────────────────────────────────────
+        // All app-shell assets are content-hashed, so Workbox can track
+        // revisions and update them atomically across deploys.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
 
-        // Route strategies
+        // ── Critical update flags ─────────────────────────────────────────────
+        // skipWaiting: new SW jumps straight to active — no waiting for tabs to close.
+        // clientsClaim: new SW immediately controls all open tabs on activation.
+        // Together these ensure the page is always running under the latest SW.
+        skipWaiting:  true,
+        clientsClaim: true,
+
+        // ── Stale cache cleanup ───────────────────────────────────────────────
+        // Removes precache entries left by older SW versions (different Workbox
+        // cache-key format).  Prevents old hashed bundles accumulating forever.
+        cleanupOutdatedCaches: true,
+
+        // ── Navigation fallback ───────────────────────────────────────────────
+        // SPA: every navigation returns index.html from precache.
+        // Denylist guards non-SPA paths so they aren't served stale HTML.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [
+          /^\/api\//,         // future API routes
+          /^\/sw\.js$/,       // SW itself
+          /^\/workbox-/,      // Workbox chunks
+        ],
+
+        // ── Runtime caching ───────────────────────────────────────────────────
+        // IMPORTANT: App JS/CSS bundles are NOT listed here.
+        //   Content-hashed files (assets/index-HASH.js) belong only in the
+        //   Workbox precache where revision tracking is exact.  A separate
+        //   runtime cache would store old bundles for up to 7 days, serving
+        //   stale code to users even after a fresh deploy.
         runtimeCaching: [
-          // Supabase API — network first, fall back to cache
+          // Supabase API — network first, 10s timeout, 24h fallback
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'supabase-api',
+              cacheName: 'supabase-api-v1',
               expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
               networkTimeoutSeconds: 10,
             },
           },
-          // Google Fonts — cache first
+          // Google Fonts stylesheet — stale-while-revalidate (changes rarely)
           {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-          // Everything else — stale while revalidate
-          {
-            urlPattern: /\.(js|css|png|svg|jpg|jpeg|gif|webp)$/i,
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'static-resources',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 7 },
+              cacheName: 'google-fonts-stylesheets-v1',
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 7 },
+            },
+          },
+          // Google Fonts files — cache first (immutable, vary by URL)
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts-v1',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            },
+          },
+          // External images / media (CDN assets not in the app bundle)
+          {
+            urlPattern: /\.(?:png|jpg|jpeg|gif|webp|avif)$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'images-v1',
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
         ],
-
-        // Skip waiting — update immediately when new SW is available
-        skipWaiting: true,
-        clientsClaim: true,
       },
 
-      // Web app manifest
+      // ── Web app manifest ──────────────────────────────────────────────────
       manifest: {
         name: 'Focus Workspace',
         short_name: 'Focus',
@@ -95,13 +131,16 @@ export default defineConfig({
         ],
       },
 
-      // Dev options — show SW in development
+      // ── Dev ───────────────────────────────────────────────────────────────
+      // Keep SW disabled in dev — it would serve stale assets and make
+      // hot-reload confusing.  Use `npm run preview` to test SW locally.
       devOptions: {
-        enabled: false,       // disable in dev to avoid stale cache confusion
+        enabled: false,
         type: 'module',
       },
     }),
   ],
+
   server: {
     port: 5173,
     host: true,
