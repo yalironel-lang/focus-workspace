@@ -4,17 +4,16 @@ import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
-import { Layout } from '../components/Layout';
+import { useAuth } from '../hooks/useAuth';
 import { GroupComponent } from '../components/GroupComponent';
-import { ContinueButton } from '../components/ContinueButton';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
 import { DesignModeBar } from '../components/DesignModeBar';
 import type { GroupWithItems } from '../types';
 import {
-  Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar,
-  AlertTriangle, CheckSquare, Square, PlayCircle, ChevronDown, ChevronRight,
+  Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
+  AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders, BookOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -31,17 +30,7 @@ function getEffort(item: Item): string {
   return words >= 8 ? 'Long' : words >= 4 ? 'Medium' : 'Quick';
 }
 
-const EFFORT_COLOR: Record<string, string> = {
-  Quick:  'bg-emerald-500/20 text-emerald-300',
-  Medium: 'bg-amber-500/20   text-amber-300',
-  Long:   'bg-rose-500/20    text-rose-300',
-};
 
-function detectQuickType(val: string): { type: ItemType; groupName: string } {
-  if (/^https?:\/\//i.test(val.trim())) return { type: 'link', groupName: 'Links'     };
-  if (val.trim().length > 80)           return { type: 'note', groupName: 'Notes'     };
-  return                                       { type: 'task', groupName: 'Exercises' };
-}
 
 function formatExamDate(d: string): string {
   return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -56,10 +45,6 @@ function deadlineDiff(due: string): number {
   return Math.ceil((new Date(due + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
 
-const DEADLINE_TYPE_LABEL: Record<string, string> = {
-  assignment: 'Assignment', quiz: 'Quiz', exam: 'Exam',
-  project: 'Project', reading: 'Reading', custom: 'Custom',
-};
 const URGENCY_ORDER = { overdue: 0, urgent: 1, soon: 2, far: 3 } as const;
 type UrgencyLevel = keyof typeof URGENCY_ORDER;
 
@@ -98,29 +83,169 @@ function urgencyLabel(d: Deadline): { text: string; color: string } {
 
 const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
-// ── DeadlinesBlock ────────────────────────────────────────────────────────────
 
-interface DeadlinesBlockProps {
-  sectionId: string;
-  sectionTitle: string;
-  pendingTaskCount: number;
+// ── SpaceNav ──────────────────────────────────────────────────────────────────
+
+function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize, onSignOut }: {
+  title: string;
+  accent: string;
+  isCustomizing: boolean;
+  onBack: () => void;
+  onCustomize: () => void;
+  onExitCustomize: () => void;
+  onResetCustomize: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <nav style={{
+      height: '48px', backgroundColor: 'rgba(7,11,20,0.96)',
+      borderBottom: '1px solid rgba(255,255,255,0.05)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <button onClick={onBack} style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <div style={{ width: '1px', height: '16px', backgroundColor: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+          {title}
+        </span>
+        <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0 }} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+        {isCustomizing ? (
+          <>
+            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}>
+              Reset
+            </button>
+            <button onClick={onExitCustomize} style={{ fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', border: 'none', cursor: 'pointer', padding: '4px 12px', borderRadius: '8px' }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b')}>
+              Done
+            </button>
+          </>
+        ) : (
+          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.04)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}>
+            <Sliders className="w-3 h-3" />
+            Customize
+          </button>
+        )}
+        <div style={{ width: '1px', height: '14px', backgroundColor: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+        <button onClick={onSignOut} style={{ fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
+          Sign out
+        </button>
+      </div>
+    </nav>
+  );
 }
 
-function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: DeadlinesBlockProps) {
-  const { deadlines, addDeadline, toggleDeadline, deleteDeadline } = useDeadlines(sectionId);
+// ── WorkItem ──────────────────────────────────────────────────────────────────
+
+function WorkItem({ item, onToggle, onDelete }: {
+  item: Item;
+  onToggle: (id: string, completed: boolean) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: item.completed ? 0.45 : 1, transition: 'opacity 0.15s' }}
+    >
+      <button
+        onClick={() => onToggle(item.id, !item.completed).catch(() => toast.error('Failed'))}
+        style={{ flexShrink: 0, color: item.completed ? '#10b981' : '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
+        onMouseEnter={e => { if (!item.completed) (e.currentTarget as HTMLElement).style.color = '#374151'; }}
+        onMouseLeave={e => { if (!item.completed) (e.currentTarget as HTMLElement).style.color = '#263043'; }}
+      >
+        {item.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+      </button>
+      <span style={{ flex: 1, fontSize: '14px', fontWeight: 500, color: item.completed ? '#374151' : '#e2e8f0', textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {item.title}
+      </span>
+      {hovered && (
+        <button
+          onClick={() => onDelete(item.id).catch(() => toast.error('Failed'))}
+          style={{ flexShrink: 0, color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#ef4444')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── WorkCapture ───────────────────────────────────────────────────────────────
+
+function WorkCapture({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
+  const [value, setValue] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = value.trim();
+    if (!t) return;
+    setAdding(true);
+    try { await onAdd(t); setValue(''); }
+    catch { toast.error('Failed to add'); }
+    finally { setAdding(false); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0' }}>
+      <span style={{ flexShrink: 0, color: '#263043', display: 'flex', padding: '2px' }}>
+        {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+      </span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder="Add a task…"
+        style={{ flex: 1, fontSize: '14px', color: '#4b5563', backgroundColor: 'transparent', border: 'none', outline: 'none' }}
+        onFocus={e => { (e.currentTarget as HTMLInputElement).style.color = '#94a3b8'; }}
+        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#4b5563'; }}
+        onKeyDown={e => { if (e.key === 'Escape') { setValue(''); (e.currentTarget as HTMLInputElement).blur(); } }}
+      />
+      {value.trim() && (
+        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#374151', backgroundColor: 'rgba(255,255,255,0.04)', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
+          ↵
+        </button>
+      )}
+    </form>
+  );
+}
+
+// ── AmbientDates ──────────────────────────────────────────────────────────────
+
+function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionTitle: string }) {
+  const { deadlines, addDeadline, toggleDeadline } = useDeadlines(sectionId);
   const [showAdd, setShowAdd] = useState(false);
-  const [isOpen, setIsOpen]   = useState(true);
   const sectionForModal = [{ id: sectionId, title: sectionTitle } as SectionWithProgress];
 
-  const sorted = [...deadlines].sort((a, b) => {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    const au = URGENCY_ORDER[deadlineUrgencyLevel(a)];
-    const bu = URGENCY_ORDER[deadlineUrgencyLevel(b)];
-    if (au !== bu) return au - bu;
-    return a.due_date.localeCompare(b.due_date);
-  });
+  const pending = [...deadlines]
+    .filter(d => !d.completed)
+    .sort((a, b) => {
+      const au = URGENCY_ORDER[deadlineUrgencyLevel(a)];
+      const bu = URGENCY_ORDER[deadlineUrgencyLevel(b)];
+      return au !== bu ? au - bu : a.due_date.localeCompare(b.due_date);
+    })
+    .slice(0, 6);
 
-  const pending = deadlines.filter(d => !d.completed);
   const urgentCount = pending.filter(d => {
     const lvl = deadlineUrgencyLevel(d);
     return lvl === 'overdue' || lvl === 'urgent';
@@ -128,139 +253,59 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
 
   return (
     <>
-      <div className="rounded-xl overflow-hidden mb-4"
-           style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
-        {/* Header */}
-        <div
-          className="px-4 py-3 flex items-center justify-between cursor-pointer select-none transition-colors"
-          style={{ borderBottom: isOpen ? '1px solid #1a2230' : 'none' }}
-          onClick={() => setIsOpen(o => !o)}
-          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
-          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-        >
-          <div className="flex items-center gap-2">
-            <span className="flex-shrink-0" style={{ color: '#374151' }}>
-              {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            </span>
-            <Calendar className="w-3.5 h-3.5" style={{ color: '#ef4444' }} />
-            <span className="text-xs font-bold uppercase tracking-[0.12em]"
-                  style={{ color: '#f8fafc' }}>
-              Important Dates
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#263043' }}>
+              Dates
             </span>
             {urgentCount > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
-                {urgentCount} urgent
-              </span>
-            )}
-            {urgentCount === 0 && pending.length > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                    style={{ backgroundColor: '#111827', color: '#4b5563' }}>
-                {pending.length}
+              <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>
+                {urgentCount}
               </span>
             )}
           </div>
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowAdd(true); }}
-            className="text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors flex-shrink-0"
-            style={{ color: '#4b5563' }}
-            onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.1)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#4b5563'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-          >
-            + Add
+          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#f59e0b')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
+            +
           </button>
         </div>
 
-        {/* Body */}
-        {isOpen && (
-          <div className="p-3 space-y-1.5">
-            {sorted.length === 0 ? (
-              <div className="text-center py-6">
-                <Calendar className="w-5 h-5 mx-auto mb-2" style={{ color: '#263043' }} />
-                <p className="text-xs" style={{ color: '#374151' }}>No dates yet.</p>
-                <button
-                  onClick={() => setShowAdd(true)}
-                  className="mt-2 text-xs font-semibold transition-colors"
-                  style={{ color: '#f59e0b' }}
-                >
-                  + Add a date
-                </button>
-              </div>
-            ) : (
-              sorted.map((d: Deadline) => {
-                const lbl = urgencyLabel(d);
-                const dot = urgencyDot(d);
-                return (
-                  <div
-                    key={d.id}
-                    className="group flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all"
-                    style={{
-                      backgroundColor: '#080b12',
-                      border: '1px solid #1a2230',
-                      opacity: d.completed ? 0.5 : 1,
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#263043')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2230')}
-                  >
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />
-                    <button
-                      onClick={() => toggleDeadline(d.id, !d.completed).catch(() => toast.error('Failed'))}
-                      className="flex-shrink-0"
-                    >
-                      {d.completed
-                        ? <CheckSquare className="w-4 h-4" style={{ color: '#f59e0b' }} />
-                        : <Square      className="w-4 h-4" style={{ color: '#263043' }} />}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate"
-                         style={{ color: d.completed ? '#374151' : '#f8fafc',
-                                  textDecoration: d.completed ? 'line-through' : 'none' }}>
-                        {d.title}
-                      </p>
-                      <p className="text-[11px] mt-0.5"
-                         style={{ color: '#374151' }}>
-                        {DEADLINE_TYPE_LABEL[d.type] ?? d.type} · {formatDueDate(d.due_date)}
-                      </p>
-                      {!d.completed && pendingTaskCount > 0 && (
-                        <p className="text-[11px] font-medium mt-0.5" style={{ color: '#4b5563' }}>
-                          {pendingTaskCount} action{pendingTaskCount !== 1 ? 's' : ''} to prepare
-                        </p>
-                      )}
-                      {!d.completed && pendingTaskCount === 0 && (
-                        <p className="text-[11px] font-medium mt-0.5" style={{ color: '#10b981' }}>
-                          Ready ✓
-                        </p>
-                      )}
+        {pending.length === 0 ? (
+          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#1a2230', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#1a2230')}>
+            + Add a date
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {pending.map(d => {
+              const lbl = urgencyLabel(d);
+              const dot = urgencyDot(d);
+              return (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: dot, flexShrink: 0, marginTop: '4px' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: '11px', fontWeight: 600, color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+                      {d.title}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '1px' }}>
+                      <span style={{ fontSize: '10px', color: '#263043' }}>{formatDueDate(d.due_date)}</span>
+                      {lbl.text && <span style={{ fontSize: '10px', color: lbl.color, fontWeight: 600 }}>· {lbl.text}</span>}
                     </div>
-                    {!d.completed && lbl.text && (
-                      <span className="text-[11px] font-bold flex-shrink-0" style={{ color: lbl.color }}>
-                        {lbl.text}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => deleteDeadline(d.id).catch(() => toast.error('Failed'))}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-0.5 rounded"
-                      style={{ color: '#374151' }}
-                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
-                      onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
                   </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {!isOpen && sorted.length > 0 && (
-          <div className="px-4 py-2 text-xs" style={{ color: '#374151' }}>
-            {urgentCount > 0
-              ? `${urgentCount} urgent · ${pending.length - urgentCount} upcoming`
-              : pending.length > 0
-                ? `${pending.length} upcoming`
-                : 'All done ✓'
-            }
+                  <button
+                    onClick={() => toggleDeadline(d.id, !d.completed).catch(() => {})}
+                    style={{ flexShrink: 0, color: '#1a2230', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '1px' }}
+                    title="Mark done"
+                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#10b981')}
+                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#1a2230')}>
+                    <CheckCircle2 className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -282,6 +327,7 @@ function DeadlinesBlock({ sectionId, sectionTitle, pendingTaskCount }: Deadlines
 export function SectionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
   const {
     section, loading, fetchSection,
     addItem, pushItem, updateItem, deleteItem, toggleTask,
@@ -291,11 +337,14 @@ export function SectionPage() {
   const { links: globalLinks } = usePortalLinks('global');
   const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
 
+  const handleSignOut = async () => {
+    try { await signOut(); toast.success('Signed out'); navigate('/'); }
+    catch { toast.error('Failed to sign out'); }
+  };
+
   const [showAddLane,     setShowAddLane]     = useState(false);
   const [newLaneTitle,    setNewLaneTitle]     = useState('');
   const [addingLane,      setAddingLane]       = useState(false);
-  const [quickAdd,        setQuickAdd]         = useState('');
-  const [quickAdding,     setQuickAdding]      = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
 
@@ -394,24 +443,14 @@ export function SectionPage() {
     navigate('/session');
   };
 
-  const handleQuickAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = quickAdd.trim();
-    if (!val || !section) return;
-    setQuickAdding(true);
-    try {
-      const { type, groupName } = detectQuickType(val);
-      const target = section.groups.find(g => g.title === groupName);
-      if (!target) { toast.error('Target lane not found'); return; }
-      const url = type === 'link' ? val : undefined;
-      await addItem(target.id, type, val, url);
-      setQuickAdd('');
-      toast.success(`Added to ${groupName === 'Exercises' ? 'To Do' : groupName}`);
-    } catch {
-      toast.error('Failed to add item');
-    } finally {
-      setQuickAdding(false);
+  const handleWorkCapture = async (title: string) => {
+    if (!section) return;
+    const exercisesGrp = section.groups.find(g => g.title === 'Exercises');
+    let gid = exercisesGrp?.id;
+    if (!gid) {
+      gid = await addGroup('Exercises');
     }
+    await addItem(gid, 'task', title);
   };
 
   const handleAddLane = async (e: React.FormEvent) => {
@@ -432,26 +471,22 @@ export function SectionPage() {
 
   if (loading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#263043' }} />
-        </div>
-      </Layout>
+      <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#263043' }} />
+      </div>
     );
   }
 
   if (!section) {
     return (
-      <Layout>
-        <div className="text-center py-20">
-          <h2 className="text-lg font-semibold mb-3" style={{ color: '#f8fafc' }}>
-            Workspace not found
-          </h2>
-          <Link to="/dashboard" className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
-            ← Back to dashboard
-          </Link>
-        </div>
-      </Layout>
+      <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+        <h2 className="text-lg font-semibold" style={{ color: '#f8fafc' }}>
+          Workspace not found
+        </h2>
+        <Link to="/dashboard" className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
+          ← Back to dashboard
+        </Link>
+      </div>
     );
   }
 
@@ -475,11 +510,6 @@ export function SectionPage() {
   // Split: Exercises (primary) vs everything else (resources)
   const exercisesGroup = section.groups.find(g => g.title === 'Exercises');
   const resourceGroups = section.groups.filter(g => g.title !== 'Exercises');
-
-  const pendingTaskCount = section.groups
-    .flatMap(g => g.items)
-    .filter(i => i.type === 'task' && !i.completed)
-    .length;
 
   // Today's Plan — up to 3 recommended actions
   const todayPlan = (() => {
@@ -526,451 +556,348 @@ export function SectionPage() {
   };
 
   return (
-    <Layout>
-      {/* Back */}
-      <Link
-        to="/dashboard"
-        className="inline-flex items-center gap-1.5 text-sm mb-5 transition-colors font-medium"
-        style={{ color: '#374151' }}
-        onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
-        onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Dashboard
-      </Link>
+    <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
 
-      {/* ── 1. WORKSPACE HEADER ─────────────────────────────────────────────── */}
-      <div className="rounded-xl overflow-hidden mb-4"
-           style={{
-             backgroundColor: '#0d111a',
-             border: '1px solid #263043',
-             borderTop: `2px solid ${accentColor}`,
-             ...(customization.cover === 'focus' ? { borderLeft: `3px solid ${accentColor}` } : {}),
-             ...(customization.cover === 'urgent' ? { backgroundColor: 'rgba(239,68,68,0.04)' } : {}),
-           }}>
-        <div className="px-6 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2.5 mb-2">
-                {customization.icon && (
-                  <span className="text-xl leading-none flex-shrink-0" role="img">
-                    {customization.icon}
-                  </span>
-                )}
-                <h1 className="text-xl font-bold truncate leading-tight"
-                    style={{ color: '#f8fafc' }}>
-                  {section.title}
-                </h1>
+      {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
+      <SpaceNav
+        title={section.title}
+        accent={accentColor}
+        isCustomizing={designMode}
+        onBack={() => navigate('/dashboard')}
+        onCustomize={enterDesignMode}
+        onExitCustomize={exitDesignMode}
+        onResetCustomize={resetDesign}
+        onSignOut={handleSignOut}
+      />
+
+      {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
+      {designMode ? (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div style={{ maxWidth: '896px', margin: '0 auto', padding: '24px 24px 64px' }}>
+
+            <DesignModeBar
+              customization={customization}
+              onChange={setCustomization}
+              onDone={exitDesignMode}
+              onReset={resetDesign}
+            />
+
+            <div className="space-y-3 mb-4">
+              {orderedGroups.map(group => {
+                const isDragging = dragId     === group.id;
+                const isDragOver = dragOverId === group.id && dragId !== group.id;
+                return (
+                  <div
+                    key={group.id}
+                    draggable
+                    onDragStart={e => handleDragStart(e, group.id)}
+                    onDragOver={e  => handleDragOver(e,  group.id)}
+                    onDrop={e      => handleDrop(e,      group.id)}
+                    onDragEnd={handleDragEnd}
+                    style={{
+                      opacity: isDragging ? 0.35 : 1,
+                      outline: isDragOver ? '2px solid #f59e0b' : 'none',
+                      outlineOffset: '3px',
+                      borderRadius: '14px',
+                      transition: 'opacity 0.15s',
+                      cursor: 'grab',
+                    }}
+                  >
+                    <GroupComponent
+                      group={group}
+                      sectionId={section.id}
+                      {...groupCallbacks}
+                      designMode
+                      isHidden={(customization.hiddenLanes ?? []).includes(group.id)}
+                      onToggleHide={() => toggleHideLane(group.id)}
+                      density={customization.density || 'comfortable'}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add Lane */}
+            <div className="mt-2 mb-6">
+              {showAddLane ? (
+                <form
+                  onSubmit={handleAddLane}
+                  className="flex gap-2.5 rounded-xl p-3"
+                  style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}
+                >
+                  <input
+                    type="text"
+                    value={newLaneTitle}
+                    onChange={e => setNewLaneTitle(e.target.value)}
+                    placeholder="Lane name (e.g. Flashcards, Lab Reports, Vocabulary…)"
+                    className="flex-1 text-sm bg-transparent outline-none"
+                    style={{ color: '#f8fafc' }}
+                    autoFocus
+                    onKeyDown={e => { if (e.key === 'Escape') { setShowAddLane(false); setNewLaneTitle(''); } }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingLane || !newLaneTitle.trim()}
+                    className="px-3.5 py-1.5 rounded-lg font-semibold text-sm disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap"
+                    style={{ backgroundColor: '#f59e0b', color: '#000' }}
+                  >
+                    {addingLane ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddLane(false); setNewLaneTitle(''); }}
+                    className="p-1.5 rounded-lg"
+                    style={{ color: '#374151' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => setShowAddLane(true)}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
+                  style={{ border: '2px dashed #1a2230', color: '#374151' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.04)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2230'; e.currentTarget.style.color = '#374151'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <Plus className="w-4 h-4" strokeWidth={2} />
+                  Add lane
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+      ) : (
+
+        /* ── SPATIAL ENVIRONMENT ─────────────────────────────────────────── */
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0 }}>
+
+          {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
+          <aside
+            className="hidden lg:flex flex-col overflow-y-auto"
+            style={{ borderRight: '1px solid rgba(255,255,255,0.05)', padding: '20px 16px', gap: 0, backgroundColor: '#070b14' }}
+          >
+            <CourseHub sectionId={section.id} />
+
+            <div style={{ margin: '20px 0 12px', height: '1px', backgroundColor: 'rgba(255,255,255,0.04)' }} />
+
+            <AmbientDates sectionId={section.id} sectionTitle={section.title} />
+          </aside>
+
+          {/* ── RIGHT WORK SURFACE ───────────────────────────────────────── */}
+          <main style={{ overflowY: 'auto', position: 'relative', backgroundColor: 'rgba(255,255,255,0.012)' }}>
+
+            {/* Session aura */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: sessionIsThisCourse
+                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.045) 0%, transparent 60%)'
+                : 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.018) 0%, transparent 55%)',
+              pointerEvents: 'none', zIndex: 0, transition: 'background 0.8s ease',
+            }} />
+
+            <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 64px', maxWidth: '680px' }}>
+
+              {/* ── IDENTITY HEADER ──────────────────────────────────────── */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px', paddingLeft: '12px', borderLeft: `3px solid ${accentColor}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    {customization.icon && (
+                      <span style={{ fontSize: '16px', lineHeight: 1 }} role="img">{customization.icon}</span>
+                    )}
+                    <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em', margin: 0 }}>
+                      {section.title}
+                    </h1>
+                  </div>
+
+                  {totalItems > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      {allDone ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 600, color: '#10b981' }}>
+                          <CheckCircle2 className="w-3.5 h-3.5" /> All caught up
+                        </span>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: '12px', color: '#4b5563' }}>
+                            <span style={{ color: '#94a3b8', fontWeight: 600 }}>{remaining}</span> remaining
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#1a2230' }}>·</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ width: '80px', height: '3px', borderRadius: '2px', backgroundColor: '#111827', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${progress}%`, backgroundColor: progressColor, borderRadius: '2px', transition: 'width 0.7s ease' }} />
+                            </div>
+                            <span style={{ fontSize: '11px', color: '#374151', fontWeight: 600 }}>{progress}%</span>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Exam date inline */}
+                      {editingExamDate ? (
+                        <input
+                          type="date"
+                          defaultValue={section.exam_date ?? ''}
+                          autoFocus
+                          style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc', outline: 'none' }}
+                          onBlur={e => { setEditingExamDate(false); setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date')); }}
+                          onKeyDown={e => { if (e.key === 'Escape') setEditingExamDate(false); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                        />
+                      ) : section.exam_date ? (
+                        <button
+                          onClick={() => setEditingExamDate(true)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
+                          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+                        >
+                          <Calendar className="w-3 h-3" />
+                          {formatExamDate(section.exam_date)}
+                          {examDays !== null && (
+                            <span style={{ color: examDays <= 0 ? '#4b5563' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#4b5563', fontWeight: 600 }}>
+                              · {examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today!' : 'Past'}
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setEditingExamDate(true)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+                          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
+                        >
+                          <Calendar className="w-3 h-3" /> Set exam date
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: '12px', color: '#263043', margin: 0 }}>Add tasks to start tracking progress</p>
+                  )}
+                </div>
+
                 <button
                   onClick={() => setShowCustomize(true)}
-                  className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors"
-                  style={{ color: '#263043', border: '1px solid #1a2230' }}
-                  onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.borderColor = '#263043'; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = '#263043'; e.currentTarget.style.borderColor = '#1a2230'; }}
+                  style={{ flexShrink: 0, fontSize: '10px', fontWeight: 600, padding: '4px 8px', borderRadius: '6px', color: '#263043', border: '1px solid #1a2230', backgroundColor: 'transparent', cursor: 'pointer', marginTop: '2px' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; (e.currentTarget as HTMLElement).style.borderColor = '#263043'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; (e.currentTarget as HTMLElement).style.borderColor = '#1a2230'; }}
                   title="Customize workspace"
                 >
                   ✦
                 </button>
               </div>
 
-              {/* Stats row */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {totalItems === 0 ? (
-                  <span className="text-sm" style={{ color: '#374151' }}>Add content to the lanes below.</span>
-                ) : allDone ? (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
-                        style={{ color: '#10b981' }}>
-                    <CheckCircle2 className="w-4 h-4" /> All caught up
-                  </span>
-                ) : (
-                  <>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
-                          style={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                      <CheckCircle2 className="w-3.5 h-3.5" />{completedItems} done
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
-                          style={{ backgroundColor: '#111827', color: '#94a3b8' }}>
-                      <Circle className="w-3.5 h-3.5" />{remaining} remaining
-                    </span>
-                  </>
-                )}
-                {totalItems > 0 && !allDone && (
-                  <span className="text-xs font-medium ml-1" style={{ color: '#374151' }}>
-                    {progress}%
-                  </span>
-                )}
-              </div>
-
-              {/* Progress bar */}
-              {totalItems > 0 && (
-                <div className="mt-3 max-w-xs">
-                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: '#111827' }}>
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{ width: `${progress}%`, backgroundColor: progressColor }}
-                    />
-                  </div>
-                  {progress >= 70 && !allDone && (
-                    <p className="text-[11px] font-semibold mt-1" style={{ color: '#10b981' }}>
-                      You&apos;re close — keep going 🎯
-                    </p>
-                  )}
+              {/* ── PANIC BANNER ─────────────────────────────────────────── */}
+              {isPanic && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px 12px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)', marginBottom: '20px' }}>
+                  <AlertTriangle className="w-3.5 h-3.5" style={{ color: '#f59e0b', flexShrink: 0, marginTop: '1px' }} />
+                  <p style={{ fontSize: '12px', color: '#f59e0b', margin: 0 }}>
+                    Exam approaching — focus on high-impact items
+                  </p>
                 </div>
               )}
 
-              {/* Exam date */}
-              <div className="mt-2.5 flex items-center gap-2 flex-wrap">
-                {editingExamDate ? (
-                  <input
-                    type="date"
-                    defaultValue={section.exam_date ?? ''}
-                    autoFocus
-                    className="text-xs px-2.5 py-1 rounded-lg focus:outline-none"
-                    style={{
-                      backgroundColor: '#111827', border: '1px solid #f59e0b',
-                      color: '#f8fafc',
-                    }}
-                    onBlur={(e) => {
-                      setEditingExamDate(false);
-                      setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date'));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') setEditingExamDate(false);
-                      if (e.key === 'Enter')  (e.target as HTMLInputElement).blur();
-                    }}
-                  />
-                ) : section.exam_date ? (
+              {/* ── FOCUS NOW STRIP ──────────────────────────────────────── */}
+              {todayPlan.length > 0 && (
+                <div style={{ borderLeft: '2px solid #f59e0b', backgroundColor: 'rgba(245,158,11,0.025)', borderRadius: '0 8px 8px 0', marginBottom: '28px', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(245,158,11,0.08)' }}>
+                    <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f59e0b' }}>Focus Now</span>
+                    <span style={{ fontSize: '9px', color: '#374151' }}>{todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}</span>
+                  </div>
+
                   <button
-                    onClick={() => setEditingExamDate(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors"
-                    style={{ backgroundColor: '#111827', color: '#94a3b8' }}
-                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1a2230')}
-                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}
+                    onClick={() => scrollToItem(todayPlan[0].item.id)}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderBottom: todayPlan.length > 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
+                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.03)')}
+                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                   >
-                    <Calendar className="w-3 h-3 flex-shrink-0" />
-                    {formatExamDate(section.exam_date)}
-                    {examDays !== null && (
-                      <span style={{
-                        color: examDays <= 0  ? '#4b5563'
-                             : examDays <= 7  ? '#ef4444'
-                             : examDays <= 14 ? '#f59e0b'
-                             : '#4b5563',
-                        fontWeight: 600,
-                      }}>
-                        · {examDays > 0 ? `${examDays}d left` : examDays === 0 ? 'Today!' : 'Past'}
-                      </span>
+                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {todayPlan[0].item.title}
+                      </p>
+                      <p style={{ fontSize: '10px', color: '#374151', margin: '2px 0 0' }}>
+                        {todayPlan[0].lane} · {todayPlan[0].reason}
+                      </p>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5" style={{ color: '#374151', flexShrink: 0 }} />
+                  </button>
+
+                  {todayPlan.slice(1).map((rec, i) => (
+                    <button
+                      key={rec.item.id}
+                      onClick={() => scrollToItem(rec.item.id)}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.02)')}
+                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+                    >
+                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#374151', width: '14px', textAlign: 'center', flexShrink: 0 }}>{i + 2}</span>
+                      <p style={{ flex: 1, fontSize: '12px', color: '#94a3b8', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {rec.item.title}
+                      </p>
+                    </button>
+                  ))}
+
+                  <div style={{ padding: '10px 14px' }}>
+                    <button
+                      onClick={handleStartSession}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', padding: '8px 16px', borderRadius: '8px', backgroundColor: '#f59e0b', color: '#000', fontSize: '12px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24')}
+                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b')}
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      {sessionIsThisCourse ? 'Resume Session →' : 'Start Session'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── WORK SURFACE ─────────────────────────────────────────── */}
+              <div style={{ marginBottom: '36px' }}>
+                <p style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#263043', marginBottom: '4px', margin: '0 0 4px' }}>
+                  Work
+                </p>
+
+                {exercisesGroup ? (
+                  <>
+                    {exercisesGroup.items.map(item => (
+                      <div key={item.id} id={`item-${item.id}`}>
+                        <WorkItem item={item} onToggle={toggleTask} onDelete={deleteItem} />
+                      </div>
+                    ))}
+                    {exercisesGroup.items.length === 0 && (
+                      <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', fontStyle: 'italic', margin: 0 }}>
+                        Nothing here yet — add a task below.
+                      </p>
                     )}
-                  </button>
+                  </>
                 ) : (
-                  <button
-                    onClick={() => setEditingExamDate(true)}
-                    className="inline-flex items-center gap-1.5 text-xs transition-colors"
-                    style={{ color: '#263043' }}
-                    onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
-                    onMouseLeave={e => (e.currentTarget.style.color = '#263043')}
-                  >
-                    <Calendar className="w-3 h-3" />
-                    Set exam date
-                  </button>
+                  <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', margin: 0 }}>
+                    No work items yet.
+                  </p>
                 )}
+
+                <WorkCapture onAdd={handleWorkCapture} />
               </div>
-            </div>
 
-            <div className="flex-shrink-0 flex flex-col items-end gap-2">
-              <ContinueButton section={section} />
-              {!designMode && (
-                <button
-                  onClick={enterDesignMode}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-                  style={{ backgroundColor: '#f59e0b', color: '#000' }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#fbbf24')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
-                  title="Customize layout"
-                >
-                  <Sliders className="w-3.5 h-3.5" />
-                  Customize
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Panic mode (hidden in Design Mode) */}
-      {isPanic && !designMode && (
-        <div className="rounded-xl px-5 py-3.5 mb-4 flex items-start gap-3"
-             style={{ backgroundColor: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
-          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
-          <div>
-            <p className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
-              Exam approaching — focus on high-impact items
-            </p>
-            <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#4b5563' }}>
-              Start with <span style={{ color: '#94a3b8', fontWeight: 600 }}>Exams</span> and{' '}
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>To Do</span> — these move the needle most.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── 1b. DESIGN MODE BAR ─────────────────────────────────────────────── */}
-      {designMode && (
-        <DesignModeBar
-          customization={customization}
-          onChange={setCustomization}
-          onDone={exitDesignMode}
-          onReset={resetDesign}
-        />
-      )}
-
-      {/* ── 2. QUICK LINKS (hidden while customizing) ───────────────────────── */}
-      {!designMode && <CourseHub sectionId={section.id} />}
-
-      {/* ── 3. FOCUS NOW (hidden while customizing) ─────────────────────────── */}
-      {!designMode && todayPlan.length > 0 && (
-        <div className="rounded-xl mb-4 overflow-hidden"
-             style={{ backgroundColor: '#0d111a', border: '1px solid #263043', borderLeft: '2px solid #f59e0b' }}>
-          <div className="flex items-center justify-between px-5 py-2.5"
-               style={{ borderBottom: '1px solid #1a2230' }}>
-            <span className="text-[10px] font-bold uppercase tracking-widest"
-                  style={{ color: '#f59e0b' }}>
-              Focus Now
-            </span>
-            <span className="text-[10px] font-semibold" style={{ color: '#374151' }}>
-              {todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-
-          {/* First item */}
-          <button
-            onClick={() => scrollToItem(todayPlan[0].item.id)}
-            className="w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors"
-            style={{ borderBottom: '1px solid #1a2230' }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse mt-0.5"
-                  style={{ backgroundColor: '#f59e0b' }} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-bold uppercase tracking-widest"
-                      style={{ color: '#374151' }}>
-                  {todayPlan[0].lane} · {todayPlan[0].reason}
-                </span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${EFFORT_COLOR[todayPlan[0].effort]}`}>
-                  {todayPlan[0].effort}
-                </span>
-              </div>
-              <p className="text-sm font-semibold truncate leading-snug"
-                 style={{ color: '#f8fafc' }}>
-                {todayPlan[0].item.title}
-              </p>
-            </div>
-            <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: '#374151' }} />
-          </button>
-
-          {/* Items 2-3 */}
-          {todayPlan.slice(1).map((rec, i) => (
-            <button
-              key={rec.item.id}
-              onClick={() => scrollToItem(rec.item.id)}
-              className="w-full flex items-center gap-4 px-5 py-2.5 text-left transition-colors"
-              style={{ borderBottom: '1px solid #1a2230' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-            >
-              <span className="text-[10px] font-bold w-4 text-center flex-shrink-0"
-                    style={{ color: '#374151' }}>
-                {i + 2}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold truncate" style={{ color: '#94a3b8' }}>
-                  {rec.item.title}
-                </p>
-                <p className="text-[10px] mt-0.5" style={{ color: '#374151' }}>
-                  {rec.lane} · {rec.reason}
-                </p>
-              </div>
-            </button>
-          ))}
-
-          {/* Session CTA */}
-          <div className="px-5 py-3" style={{ borderTop: '1px solid #1a2230' }}>
-            <button
-              onClick={handleStartSession}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all"
-              style={{ backgroundColor: '#f59e0b', color: '#000' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#fbbf24')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#f59e0b')}
-            >
-              <PlayCircle className="w-4 h-4" />
-              {sessionIsThisCourse ? 'Resume Session →' : 'Start Session'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 4. QUICK ADD (hidden while customizing) ──────────────────────────── */}
-      {!designMode && <form onSubmit={handleQuickAdd} className="mb-4">
-        <div className="flex items-center gap-2 rounded-xl px-4 py-2.5"
-             style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
-          <Zap className="w-4 h-4 flex-shrink-0" style={{ color: '#374151' }} />
-          <input
-            type="text"
-            value={quickAdd}
-            onChange={(e) => setQuickAdd(e.target.value)}
-            placeholder="Quick add — type an action, paste a URL, or write a note…"
-            className="flex-1 text-sm bg-transparent outline-none"
-            style={{ color: '#f8fafc' }}
-          />
-          {quickAdd.trim() && (
-            <button
-              type="submit"
-              disabled={quickAdding}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 flex-shrink-0"
-              style={{ backgroundColor: '#f59e0b', color: '#000' }}
-            >
-              {quickAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (
-                <>
-                  <Plus className="w-3 h-3" strokeWidth={2.5} />
-                  {detectQuickType(quickAdd).type === 'link' ? 'Save link'
-                   : detectQuickType(quickAdd).type === 'note' ? 'Save note'
-                   : 'Add action'}
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      </form>}
-
-      {/* ── 5 / 7. GROUPS ────────────────────────────────────────────────────── */}
-      {designMode ? (
-        /* ─ Customize: flat draggable list of ALL groups ─ */
-        <div className="space-y-3 mb-4">
-          {orderedGroups.map(group => {
-            const isDragging  = dragId     === group.id;
-            const isDragOver  = dragOverId === group.id && dragId !== group.id;
-            return (
-              <div
-                key={group.id}
-                draggable
-                onDragStart={e => handleDragStart(e, group.id)}
-                onDragOver={e  => handleDragOver(e,  group.id)}
-                onDrop={e      => handleDrop(e,      group.id)}
-                onDragEnd={handleDragEnd}
-                style={{
-                  opacity:       isDragging ? 0.35 : 1,
-                  outline:       isDragOver ? '2px solid #f59e0b' : 'none',
-                  outlineOffset: '3px',
-                  borderRadius:  '14px',
-                  transition:    'opacity 0.15s',
-                  cursor:        'grab',
-                }}
-              >
-                <GroupComponent
-                  group={group}
+              {/* ── SHELF ────────────────────────────────────────────────── */}
+              <div style={{ paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                <ResourcesBlock
+                  groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
                   sectionId={section.id}
-                  {...groupCallbacks}
-                  designMode
-                  isHidden={(customization.hiddenLanes ?? []).includes(group.id)}
-                  onToggleHide={() => toggleHideLane(group.id)}
-                  density={customization.density || 'comfortable'}
+                  groupCallbacks={groupCallbacks}
+                  density={customization.density || ''}
                 />
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* ─ Normal mode: existing two-tier layout ─ */
-        <>
-          {/* Primary: Exercises (To Do) — full width, visible only if not hidden */}
-          {exercisesGroup && !(customization.hiddenLanes ?? []).includes(exercisesGroup.id) && (
-            <div className="mb-4">
-              <GroupComponent
-                group={exercisesGroup}
-                sectionId={section.id}
-                {...groupCallbacks}
-                density={customization.density || ''}
-              />
+
+              {/* Mobile: ambient dates below shelf */}
+              <div className="lg:hidden" style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                <AmbientDates sectionId={section.id} sectionTitle={section.title} />
+              </div>
+
             </div>
-          )}
-
-          {/* ── 6. IMPORTANT DATES ─────────────────────────────────────────── */}
-          <DeadlinesBlock
-            sectionId={section.id}
-            sectionTitle={section.title}
-            pendingTaskCount={pendingTaskCount}
-          />
-
-          {/* Resources: all other groups filtered by hiddenLanes.
-              Always rendered — empty state guides user to add resources. */}
-          <ResourcesBlock
-            groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
-            sectionId={section.id}
-            groupCallbacks={groupCallbacks}
-            density={customization.density || ''}
-          />
-        </>
+          </main>
+        </div>
       )}
-
-      {/* ── 8. ADD LANE ──────────────────────────────────────────────────────── */}
-      {!designMode && <div className="mt-2 mb-6">
-        {showAddLane ? (
-          <form
-            onSubmit={handleAddLane}
-            className="flex gap-2.5 rounded-xl p-3"
-            style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}
-          >
-            <input
-              type="text"
-              value={newLaneTitle}
-              onChange={(e) => setNewLaneTitle(e.target.value)}
-              placeholder="Lane name (e.g. Flashcards, Lab Reports, Vocabulary…)"
-              className="flex-1 text-sm bg-transparent outline-none"
-              style={{ color: '#f8fafc' }}
-              autoFocus
-              onKeyDown={(e) => { if (e.key === 'Escape') { setShowAddLane(false); setNewLaneTitle(''); } }}
-            />
-            <button
-              type="submit"
-              disabled={addingLane || !newLaneTitle.trim()}
-              className="px-3.5 py-1.5 rounded-lg font-semibold text-sm transition-colors disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap"
-              style={{ backgroundColor: '#f59e0b', color: '#000' }}
-            >
-              {addingLane ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Create'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowAddLane(false); setNewLaneTitle(''); }}
-              className="p-1.5 rounded-lg transition-colors"
-              style={{ color: '#374151' }}
-              onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
-              onMouseLeave={e => (e.currentTarget.style.color = '#374151')}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </form>
-        ) : (
-          <button
-            onClick={() => setShowAddLane(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all"
-            style={{ border: '2px dashed #1a2230', color: '#374151' }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = '#f59e0b';
-              e.currentTarget.style.color = '#f59e0b';
-              e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.04)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = '#1a2230';
-              e.currentTarget.style.color = '#374151';
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-          >
-            <Plus className="w-4 h-4" strokeWidth={2} />
-            Add lane
-          </button>
-        )}
-      </div>}
 
       {showCustomize && (
         <CustomizeModal
@@ -980,9 +907,10 @@ export function SectionPage() {
           onClose={() => setShowCustomize(false)}
         />
       )}
-    </Layout>
+    </div>
   );
 }
+
 
 // ── ResourcesBlock ────────────────────────────────────────────────────────────
 
