@@ -51,6 +51,7 @@ import { useDailyLoop }             from '../hooks/useDailyLoop';
 import { useContextualHints }       from '../hooks/useContextualHints';
 import { useSessionContinuity }     from '../hooks/useSessionContinuity';
 import { DailyEntryBanner }     from '../components/canvas/DailyEntryBanner';
+import { StartHerePanel }       from '../components/canvas/StartHerePanel';
 import { ContextualHint }       from '../components/canvas/ContextualHint';
 import { Loader2, Plus, X }     from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -881,7 +882,21 @@ export function Dashboard() {
                   transition:          `gap ${design.transition}`,
                 }}
               >
-                {/* ── Daily intelligence banner ── */}
+                {/* ── Start Here: daily guidance panel (primary entry point) ── */}
+                {!designMode && (
+                  <StartHerePanel
+                    tokens={tokens}
+                    intel={intel}
+                    greeting={getGreeting(displayName)}
+                    lastSession={continuity.isRecent ? continuity.lastSession : null}
+                    onCapture={handleCapture}
+                    onStartSession={() => setShowSessionModal(true)}
+                    onOpenSection={id => navigate(`/section/${id}`)}
+                    onDismissContinuity={continuity.clearLastSession}
+                  />
+                )}
+
+                {/* ── Daily intelligence banner (secondary — status strip) ── */}
                 {!designMode && (
                   <DailyEntryBanner
                     tokens={tokens}
@@ -889,7 +904,7 @@ export function Dashboard() {
                     loop={dailyLoop}
                     greeting={getGreeting(displayName)}
                     dayContext={getDayContext()}
-                    lastSession={continuity.isRecent ? continuity.lastSession : null}
+                    lastSession={null}
                     onStartSession={() => setShowSessionModal(true)}
                     onDismissContinuity={continuity.clearLastSession}
                   />

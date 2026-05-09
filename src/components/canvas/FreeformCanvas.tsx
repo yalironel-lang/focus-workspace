@@ -518,7 +518,7 @@ export function FreeformCanvas({
               <Move style={{ width: '20px', height: '20px', color: tokens.accent, opacity: 0.7 }} />
             </div>
             <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '14px', fontWeight: 600, color: tokens.textSecondary, margin: 0 }}>
-              Your Free Canvas is empty
+              Your Free Space is empty
             </p>
             <p style={{ fontSize: '12px', color: tokens.textMuted, margin: '6px 0 0', lineHeight: 1.5 }}>
               Press <kbd style={{ fontFamily: 'monospace', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${tokens.cardBorder}`, fontSize: '11px', color: tokens.textSecondary, backgroundColor: tokens.wellBg }}>⌘K</kbd> to add cards, tools, and modules
@@ -556,7 +556,7 @@ export function FreeformCanvas({
         userSelect: 'none',
       }}>
         <Move style={{ width: '9px', height: '9px' }} />
-        FREE CANVAS
+        FREE SPACE
       </div>
 
       {/* ── Move indicator (top-center badge) ─────────────────────── */}
@@ -631,7 +631,7 @@ export function FreeformCanvas({
                 fontSize: '11px', fontWeight: 700, color: tokens.textPrimary,
                 fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '0.01em',
               }}>
-                Free Canvas
+                Free Space
               </span>
             </div>
             <button

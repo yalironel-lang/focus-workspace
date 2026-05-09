@@ -1,7 +1,24 @@
+/**
+ * CommandBar — main navigation bar.
+ *
+ * UX Hierarchy (left→right, primary→secondary):
+ *   Logo  |  + Add  |  Customize ▾  |  ?  |  Schedule  |  Sign out
+ *
+ * "Customize" collapses three previously top-level controls:
+ *   - Atmosphere (theme)
+ *   - Layout mode (Guided Layout / Free Space)
+ *   - Edit layout toggle
+ *
+ * This keeps the default nav calm and focused on the ONE primary action: Add.
+ */
+
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AtmosphereTokens, ATMOSPHERES } from '../../hooks/useAtmosphere';
-import { BookOpenCheck, Sliders, Plus, ChevronDown, LogOut, LayoutDashboard, Move } from 'lucide-react';
+import {
+  BookOpenCheck, Plus, ChevronDown, LogOut,
+  LayoutDashboard, Move, Sliders, Settings2, X,
+} from 'lucide-react';
 import type { CanvasMode } from '../../hooks/useCanvasMode';
 
 interface Props {
@@ -17,7 +34,8 @@ interface Props {
   onSignOut:        () => void;
 }
 
-// Shared nav-button style helpers
+// ── Shared style helpers ──────────────────────────────────────────────────────
+
 const navBtn = (
   tokens: AtmosphereTokens,
   active = false,
@@ -32,17 +50,28 @@ const navBtn = (
   cursor:          'pointer',
   border:          active ? `1px solid ${tokens.accent}35` : '1px solid transparent',
   backgroundColor: active ? tokens.accentSubtle : 'transparent',
-  color:           active ? tokens.accent : tokens.textGhost,
+  color:           active ? tokens.accent : tokens.textSecondary,
   transition:      'all 0.15s ease',
   whiteSpace:      'nowrap' as const,
 });
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function Divider({ tokens }: { tokens: AtmosphereTokens }) {
+  return (
+    <div
+      style={{ width: '1px', height: '14px', backgroundColor: tokens.divider, margin: '0 3px', flexShrink: 0 }}
+    />
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function CommandBar({
   tokens, atmosphereId, designMode, canvasMode, userName,
   onToggleDesign, onToggleCanvas, onOpenAdd, onSetAtmosphere, onSignOut,
 }: Props) {
-  const [atmOpen, setAtmOpen] = useState(false);
-  const currentAtm = ATMOSPHERES.find(a => a.id === atmosphereId) ?? ATMOSPHERES[0];
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   return (
     <header
@@ -60,147 +89,142 @@ export function CommandBar({
         style={{ height: '48px', padding: '0 20px' }}
       >
 
-        {/* ── Left: Logo + breadcrumb ────────────────────────────────── */}
+        {/* ── Left: Logo ────────────────────────────────────────── */}
         <div className="flex items-center gap-2.5" style={{ flexShrink: 0 }}>
           <Link
             to="/dashboard"
             className="flex items-center gap-2"
             style={{ textDecoration: 'none' }}
           >
-            <div
-              style={{
-                width:           '26px',
-                height:          '26px',
-                borderRadius:    '7px',
-                backgroundColor: tokens.accent,
-                boxShadow:       `0 0 12px ${tokens.accentGlow}`,
-                display:         'flex',
-                alignItems:      'center',
-                justifyContent:  'center',
-                flexShrink:      0,
-              }}
-            >
-              <BookOpenCheck
-                style={{ width: '14px', height: '14px', color: '#000' }}
-                strokeWidth={2.5}
-              />
+            <div style={{
+              width:           '26px',
+              height:          '26px',
+              borderRadius:    '7px',
+              backgroundColor: tokens.accent,
+              boxShadow:       `0 0 12px ${tokens.accentGlow}`,
+              display:         'flex',
+              alignItems:      'center',
+              justifyContent:  'center',
+              flexShrink:      0,
+            }}>
+              <BookOpenCheck style={{ width: '14px', height: '14px', color: '#000' }} strokeWidth={2.5} />
             </div>
             <span
               className="hidden sm:block"
               style={{
-                fontFamily:   "'Plus Jakarta Sans', sans-serif",
-                fontSize:     '14px',
-                fontWeight:   700,
+                fontFamily:    "'Plus Jakarta Sans', sans-serif",
+                fontSize:      '14px',
+                fontWeight:    700,
                 letterSpacing: '-0.02em',
-                color:        tokens.textPrimary,
+                color:         tokens.textPrimary,
               }}
             >
               Focus
             </span>
           </Link>
 
-          <span
-            style={{
-              color:      tokens.cardBorderHover,
-              fontSize:   '16px',
-              fontWeight: 200,
-              lineHeight: 1,
-              userSelect: 'none',
-            }}
-          >
+          <span style={{
+            color:      tokens.cardBorderHover,
+            fontSize:   '16px',
+            fontWeight: 200,
+            lineHeight: 1,
+            userSelect: 'none',
+          }}>
             /
           </span>
 
-          <span
-            style={{
-              fontSize:  '13px',
-              fontWeight: 500,
-              color:     tokens.textSecondary,
-              maxWidth:  '160px',
-              overflow:  'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <span style={{
+            fontSize:     '13px',
+            fontWeight:   500,
+            color:        tokens.textSecondary,
+            maxWidth:     '160px',
+            overflow:     'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace:   'nowrap',
+          }}>
             {userName ? `${userName}'s workspace` : 'My workspace'}
           </span>
         </div>
 
-        {/* ── Right: Controls ────────────────────────────────────────── */}
+        {/* ── Right: Controls ───────────────────────────────────── */}
         <div className="flex items-center" style={{ gap: '2px' }}>
 
-          {/* Schedule link */}
-          <Link
-            to="/schedule"
-            className="hidden md:flex items-center"
-            style={navBtn(tokens)}
+          {/* PRIMARY: Add to workspace */}
+          <button
+            onClick={onOpenAdd}
+            title="Add to workspace  ⌘K"
+            style={{
+              ...navBtn(tokens),
+              backgroundColor: tokens.accentSubtle,
+              color:           tokens.accent,
+              border:          `1px solid ${tokens.accent}30`,
+              fontWeight:      600,
+            }}
             onMouseEnter={e => {
-              Object.assign((e.currentTarget as HTMLElement).style, {
-                backgroundColor: tokens.cardBorder,
-                color: tokens.textSecondary,
-                borderColor: tokens.cardBorder,
+              Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                backgroundColor: `${tokens.accent}25`,
+                borderColor:     `${tokens.accent}50`,
               });
             }}
             onMouseLeave={e => {
-              Object.assign((e.currentTarget as HTMLElement).style, {
-                backgroundColor: 'transparent',
-                color: tokens.textGhost,
-                borderColor: 'transparent',
+              Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                backgroundColor: tokens.accentSubtle,
+                borderColor:     `${tokens.accent}30`,
               });
             }}
           >
-            Schedule
-          </Link>
+            <Plus style={{ width: '13px', height: '13px' }} strokeWidth={2.5} />
+            <span>Add</span>
+          </button>
 
-          {/* Divider */}
-          <div
-            className="hidden md:block mx-1.5"
-            style={{ width: '1px', height: '14px', backgroundColor: tokens.divider }}
-          />
+          <Divider tokens={tokens} />
 
-          {/* Atmosphere picker */}
+          {/* CUSTOMIZE dropdown — theme + mode + edit */}
           <div style={{ position: 'relative' }}>
             <button
-              onClick={() => setAtmOpen(o => !o)}
-              style={navBtn(tokens, atmOpen)}
+              onClick={() => setCustomizeOpen(o => !o)}
+              title="Customize workspace"
+              style={{
+                ...navBtn(tokens, customizeOpen || designMode || canvasMode === 'freeform'),
+                ...(customizeOpen ? {
+                  backgroundColor: tokens.accentSubtle,
+                  color:           tokens.accent,
+                  borderColor:     `${tokens.accent}35`,
+                } : {}),
+              }}
               onMouseEnter={e => {
-                if (!atmOpen) Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                if (!customizeOpen) Object.assign((e.currentTarget as HTMLButtonElement).style, {
                   backgroundColor: tokens.cardBorder,
-                  color: tokens.textSecondary,
-                  borderColor: tokens.cardBorder,
+                  color:           tokens.textSecondary,
+                  borderColor:     tokens.cardBorder,
                 });
               }}
               onMouseLeave={e => {
-                if (!atmOpen) Object.assign((e.currentTarget as HTMLButtonElement).style, {
+                if (!customizeOpen) Object.assign((e.currentTarget as HTMLButtonElement).style, {
                   backgroundColor: 'transparent',
-                  color: tokens.textGhost,
-                  borderColor: 'transparent',
+                  color:           tokens.textSecondary,
+                  borderColor:     'transparent',
                 });
               }}
             >
-              <span style={{ fontSize: '13px', lineHeight: 1 }}>{currentAtm.emoji}</span>
-              <span className="hidden sm:inline">{currentAtm.name}</span>
-              <ChevronDown
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  transition: 'transform 0.2s ease',
-                  transform: atmOpen ? 'rotate(180deg)' : 'none',
-                }}
-              />
+              <Settings2 style={{ width: '12px', height: '12px' }} />
+              <span className="hidden sm:inline">Customize</span>
+              <ChevronDown style={{
+                width:     '11px',
+                height:    '11px',
+                transition: 'transform 0.2s ease',
+                transform: customizeOpen ? 'rotate(180deg)' : 'none',
+              }} />
             </button>
 
-            {atmOpen && (
+            {customizeOpen && (
               <>
+                <div className="fixed inset-0 z-40" onClick={() => setCustomizeOpen(false)} />
                 <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setAtmOpen(false)}
-                />
-                <div
-                  className="absolute right-0 top-full z-50 animate-scale-in"
+                  className="absolute right-0 top-full z-50"
                   style={{
                     marginTop:       '8px',
-                    width:           '252px',
+                    width:           '280px',
                     backgroundColor: tokens.cardBg,
                     border:          `1px solid ${tokens.cardBorder}`,
                     borderRadius:    `${Math.min(tokens.radius, 18)}px`,
@@ -210,227 +234,206 @@ export function CommandBar({
                     overflow:        'hidden',
                   }}
                 >
-                  {/* Header label */}
-                  <div
-                    style={{
-                      padding:      '10px 14px 6px',
-                      fontFamily:   "'Space Grotesk', sans-serif",
-                      fontSize:     '9px',
-                      fontWeight:   700,
+
+                  {/* ── Section: Layout mode ──────────────────────── */}
+                  <div style={{ padding: '10px 14px 8px', borderBottom: `1px solid ${tokens.divider}` }}>
+                    <p style={{
+                      fontFamily:    "'Space Grotesk', sans-serif",
+                      fontSize:      '9px',
+                      fontWeight:    700,
                       letterSpacing: '0.14em',
                       textTransform: 'uppercase',
-                      color:        tokens.textGhost,
-                      borderBottom: `1px solid ${tokens.divider}`,
-                    }}
-                  >
-                    Atmosphere
+                      color:         tokens.textGhost,
+                      margin:        '0 0 8px',
+                    }}>
+                      Layout
+                    </p>
+
+                    {/* Mode toggle */}
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {([
+                        { mode: 'grid',     label: 'Guided Layout', icon: LayoutDashboard, tip: 'Organized daily workflow' },
+                        { mode: 'freeform', label: 'Free Space',    icon: Move,           tip: 'Move anything anywhere' },
+                      ] as const).map(({ mode, label, icon: Icon, tip }) => {
+                        const isActive = canvasMode === mode;
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() => { if (!isActive) onToggleCanvas(); }}
+                            style={{
+                              flex:            1,
+                              display:         'flex',
+                              flexDirection:   'column',
+                              alignItems:      'flex-start',
+                              gap:             '3px',
+                              padding:         '8px 10px',
+                              borderRadius:    '10px',
+                              border:          `1px solid ${isActive ? tokens.accent + '40' : tokens.cardBorder}`,
+                              backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
+                              cursor:          isActive ? 'default' : 'pointer',
+                              textAlign:       'left' as const,
+                              transition:      'all 0.12s ease',
+                            }}
+                            onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
+                            onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <Icon style={{ width: '11px', height: '11px', color: isActive ? tokens.accent : tokens.textSecondary }} />
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: isActive ? tokens.accent : tokens.textPrimary }}>
+                                {label}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '9px', color: tokens.textMuted, lineHeight: 1.3 }}>
+                              {tip}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Edit layout toggle */}
+                    <button
+                      onClick={() => { onToggleDesign(); setCustomizeOpen(false); }}
+                      style={{
+                        marginTop:       '6px',
+                        width:           '100%',
+                        display:         'flex',
+                        alignItems:      'center',
+                        gap:             '7px',
+                        padding:         '7px 10px',
+                        borderRadius:    '8px',
+                        border:          `1px solid ${designMode ? tokens.accent + '40' : tokens.cardBorder}`,
+                        backgroundColor: designMode ? tokens.accentSubtle : 'transparent',
+                        cursor:          'pointer',
+                        textAlign:       'left' as const,
+                        transition:      'all 0.12s ease',
+                      }}
+                      onMouseEnter={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
+                      onMouseLeave={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
+                    >
+                      <Sliders style={{ width: '11px', height: '11px', color: designMode ? tokens.accent : tokens.textSecondary }} />
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: designMode ? tokens.accent : tokens.textPrimary }}>
+                        {designMode ? 'Exit edit mode' : 'Edit layout'}
+                      </span>
+                      {designMode && (
+                        <span style={{
+                          marginLeft: 'auto',
+                          fontSize: '9px', fontWeight: 700, letterSpacing: '0.08em',
+                          color: tokens.accent, opacity: 0.7,
+                        }}>
+                          ON
+                        </span>
+                      )}
+                    </button>
                   </div>
 
-                  <div style={{ padding: '6px' }}>
-                    {ATMOSPHERES.map(atm => {
-                      const isActive = atm.id === atmosphereId;
-                      return (
-                        <button
-                          key={atm.id}
-                          onClick={() => { onSetAtmosphere(atm.id); setAtmOpen(false); }}
-                          style={{
-                            width:           '100%',
-                            display:         'flex',
-                            alignItems:      'center',
-                            gap:             '10px',
-                            padding:         '8px 10px',
-                            borderRadius:    '10px',
-                            border:          `1px solid ${isActive ? tokens.accent + '30' : 'transparent'}`,
-                            backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
-                            cursor:          'pointer',
-                            textAlign:       'left' as const,
-                            transition:      'all 0.12s ease',
-                          }}
-                          onMouseEnter={e => {
-                            if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, {
-                              backgroundColor: tokens.cardBorder,
-                            });
-                          }}
-                          onMouseLeave={e => {
-                            if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, {
-                              backgroundColor: 'transparent',
-                            });
-                          }}
-                        >
-                          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }}>
-                            {atm.emoji}
-                          </span>
-                          <div style={{ minWidth: 0 }}>
-                            <p
-                              style={{
-                                fontSize:  '12px',
-                                fontWeight: 600,
-                                color:     isActive ? tokens.accent : tokens.textPrimary,
-                                margin:    0,
-                              }}
-                            >
-                              {atm.name}
-                            </p>
-                            <p
-                              style={{
-                                fontSize:  '10px',
-                                color:     tokens.textGhost,
-                                margin:    0,
-                                marginTop: '1px',
-                              }}
-                            >
-                              {atm.description}
-                            </p>
-                          </div>
-                          {isActive && (
-                            <div
-                              style={{
-                                width:           '6px',
-                                height:          '6px',
-                                borderRadius:    '50%',
+                  {/* ── Section: Atmosphere ───────────────────────── */}
+                  <div style={{ padding: '8px 14px 6px', borderBottom: `1px solid ${tokens.divider}` }}>
+                    <p style={{
+                      fontFamily:    "'Space Grotesk', sans-serif",
+                      fontSize:      '9px',
+                      fontWeight:    700,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color:         tokens.textGhost,
+                      margin:        '0 0 6px',
+                    }}>
+                      Atmosphere
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                      {ATMOSPHERES.map(atm => {
+                        const isActive = atm.id === atmosphereId;
+                        return (
+                          <button
+                            key={atm.id}
+                            onClick={() => { onSetAtmosphere(atm.id); }}
+                            style={{
+                              display:         'flex',
+                              alignItems:      'center',
+                              gap:             '7px',
+                              padding:         '6px 8px',
+                              borderRadius:    '8px',
+                              border:          `1px solid ${isActive ? tokens.accent + '35' : 'transparent'}`,
+                              backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
+                              cursor:          'pointer',
+                              textAlign:       'left' as const,
+                              transition:      'all 0.1s ease',
+                            }}
+                            onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
+                            onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
+                          >
+                            <span style={{ fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>{atm.emoji}</span>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <p style={{ fontSize: '11px', fontWeight: 600, color: isActive ? tokens.accent : tokens.textPrimary, margin: 0 }}>
+                                {atm.name}
+                              </p>
+                            </div>
+                            {isActive && (
+                              <div style={{
+                                width: '5px', height: '5px', borderRadius: '50%',
                                 backgroundColor: tokens.accent,
-                                boxShadow:       `0 0 6px ${tokens.accentGlow}`,
-                                marginLeft:      'auto',
-                                flexShrink:      0,
-                              }}
-                            />
-                          )}
-                        </button>
-                      );
-                    })}
+                                flexShrink: 0,
+                              }} />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Footer close */}
+                  <div style={{ padding: '6px 14px 10px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => setCustomizeOpen(false)}
+                      style={{
+                        display:         'flex',
+                        alignItems:      'center',
+                        gap:             '4px',
+                        padding:         '4px 10px',
+                        borderRadius:    '7px',
+                        border:          `1px solid ${tokens.cardBorder}`,
+                        backgroundColor: 'transparent',
+                        cursor:          'pointer',
+                        fontSize:        '11px',
+                        fontWeight:      500,
+                        color:           tokens.textGhost,
+                        transition:      'all 0.12s ease',
+                      }}
+                      onMouseEnter={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary })}
+                      onMouseLeave={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textGhost })}
+                    >
+                      <X style={{ width: '10px', height: '10px' }} />
+                      Close
+                    </button>
                   </div>
                 </div>
               </>
             )}
           </div>
 
-          {/* Add to workspace (⌘K) */}
-          <button
-            onClick={onOpenAdd}
-            title="Add to workspace  ⌘K"
+          <Divider tokens={tokens} />
+
+          {/* Schedule link */}
+          <Link
+            to="/schedule"
+            className="hidden md:flex items-center"
             style={navBtn(tokens)}
-            onMouseEnter={e => {
-              Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: tokens.accentSubtle,
-                color: tokens.accent,
-                borderColor: `${tokens.accent}30`,
-              });
-            }}
-            onMouseLeave={e => {
-              Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: 'transparent',
-                color: tokens.textGhost,
-                borderColor: 'transparent',
-              });
-            }}
+            onMouseEnter={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary, borderColor: tokens.cardBorder })}
+            onMouseLeave={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textSecondary, borderColor: 'transparent' })}
           >
-            <Plus style={{ width: '13px', height: '13px' }} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Add</span>
-          </button>
-
-          {/* Canvas mode toggle: Structured ↔ Free Canvas */}
-          <button
-            onClick={onToggleCanvas}
-            title={canvasMode === 'freeform'
-              ? 'Free Canvas — drag cards anywhere, scroll to zoom, drag background to pan. Click to switch to Structured layout.'
-              : 'Structured — fixed 12-column grid layout. Click to switch to Free Canvas where you can drag cards anywhere.'}
-            style={{
-              ...navBtn(tokens, canvasMode === 'freeform'),
-              ...(canvasMode === 'freeform' ? {
-                backgroundColor: `${tokens.accent}18`,
-                color:           tokens.accent,
-                border:          `1px solid ${tokens.accent}35`,
-              } : {}),
-            }}
-            onMouseEnter={e => {
-              if (canvasMode !== 'freeform') Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: tokens.cardBorder,
-                color: tokens.textSecondary,
-                borderColor: tokens.cardBorder,
-              });
-            }}
-            onMouseLeave={e => {
-              if (canvasMode !== 'freeform') Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: 'transparent',
-                color: tokens.textGhost,
-                borderColor: 'transparent',
-              });
-            }}
-          >
-            {canvasMode === 'freeform'
-              ? <Move style={{ width: '12px', height: '12px' }} />
-              : <LayoutDashboard style={{ width: '12px', height: '12px' }} />
-            }
-            <span className="hidden sm:inline">
-              {canvasMode === 'freeform' ? 'Free Canvas' : 'Structured'}
-            </span>
-          </button>
-
-          {/* Edit layout toggle */}
-          <button
-            onClick={onToggleDesign}
-            title={designMode ? 'Exit edit mode' : 'Edit layout'}
-            style={{
-              ...navBtn(tokens, designMode),
-              ...(designMode ? {
-                backgroundColor: tokens.accent,
-                color:           '#000',
-                fontWeight:      700,
-                border:          'none',
-                boxShadow:       `0 0 14px ${tokens.accentGlow}`,
-              } : {}),
-            }}
-            onMouseEnter={e => {
-              if (!designMode) Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: tokens.cardBorder,
-                color: tokens.textSecondary,
-                borderColor: tokens.cardBorder,
-              });
-            }}
-            onMouseLeave={e => {
-              if (!designMode) Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: 'transparent',
-                color: tokens.textGhost,
-                borderColor: 'transparent',
-              });
-            }}
-          >
-            <Sliders style={{ width: '12px', height: '12px' }} />
-            <span>{designMode ? 'Editing' : 'Edit'}</span>
-          </button>
-
-          {/* Divider */}
-          <div
-            className="mx-1"
-            style={{ width: '1px', height: '14px', backgroundColor: tokens.divider }}
-          />
+            Schedule
+          </Link>
 
           {/* Sign out */}
           <button
             onClick={onSignOut}
             title="Sign out"
-            style={{
-              ...navBtn(tokens),
-              padding: '5px 7px',
-            }}
-            onMouseEnter={e => {
-              Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: tokens.cardBorder,
-                color: tokens.textMuted,
-                borderColor: tokens.cardBorder,
-              });
-            }}
-            onMouseLeave={e => {
-              Object.assign((e.currentTarget as HTMLButtonElement).style, {
-                backgroundColor: 'transparent',
-                color: tokens.textGhost,
-                borderColor: 'transparent',
-              });
-            }}
+            style={{ ...navBtn(tokens), padding: '5px 7px' }}
+            onMouseEnter={e => Object.assign((e.currentTarget as HTMLButtonElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary, borderColor: tokens.cardBorder })}
+            onMouseLeave={e => Object.assign((e.currentTarget as HTMLButtonElement).style, { backgroundColor: 'transparent', color: tokens.textSecondary, borderColor: 'transparent' })}
           >
             <LogOut style={{ width: '13px', height: '13px' }} />
           </button>
-
         </div>
       </div>
     </header>

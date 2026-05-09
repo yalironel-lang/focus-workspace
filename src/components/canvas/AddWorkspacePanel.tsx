@@ -217,9 +217,22 @@ function ItemPreview({ item, tokens }: { item: CatalogItem; tokens: AtmosphereTo
 
 // ── Main panel ────────────────────────────────────────────────────────────────
 
+// ── Core 4 items (always shown first, no search, all tab) ────────────────────
+
+const CORE_IDS = ['capture', 'deep-work-timer', 'text', 'checklist'] as const;
+
+// Value-first descriptions for core items (override catalog descriptions)
+const CORE_COPY: Record<string, { headline: string; body: string }> = {
+  'capture':         { headline: 'Capture thoughts',    body: 'Write anything — tasks, worries, ideas. Clear your head first.' },
+  'deep-work-timer': { headline: 'Focus timer',         body: 'Block time to work on one thing. No distractions.' },
+  'text':            { headline: 'Write a note',        body: 'Freeform writing, journaling, or thinking on paper.' },
+  'checklist':       { headline: 'Create a checklist',  body: 'Break a goal into small, checkable steps.' },
+};
+
 export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock, onOpenCreateTool, onClose }: Props) {
-  const [search,  setSearch]  = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>('all');
+  const [search,     setSearch]     = useState('');
+  const [activeTab,  setActiveTab]  = useState<TabId>('all');
+  const [moreOpen,   setMoreOpen]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -718,10 +731,130 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
               <p style={{ fontSize: '13px', marginBottom: '4px', color: tokens.textMuted }}>
                 Nothing matches "{search}"
               </p>
-              <p style={{ fontSize: '11px' }}>Try "timer", "notes", "capture", or "links"</p>
+              <p style={{ fontSize: '11px' }}>Try "timer", "notes", "capture", or "checklist"</p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              {/* ── Core 4: shown when on All tab with no search ── */}
+              {activeTab === 'all' && !search && (() => {
+                const coreItems = CORE_IDS.map(cid => CATALOG.find(c =>
+                  (c.kind === 'module' && c.id === cid) ||
+                  (c.kind === 'block'  && c.blockType === cid)
+                )).filter(Boolean) as CatalogItem[];
+
+                return (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ ...CAP, color: tokens.textGhost }}>Get started</span>
+                        <span style={{
+                          fontSize: '9px', fontWeight: 700,
+                          padding: '1px 5px', borderRadius: '4px',
+                          backgroundColor: `${tokens.accent}15`,
+                          color: tokens.accent,
+                        }}>Recommended</span>
+                      </div>
+                    </div>
+                    <div style={{
+                      display:             'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap:                 '6px',
+                    }}>
+                      {coreItems.map(item => {
+                        const cid = item.kind === 'module' ? item.id : item.blockType;
+                        const copy = CORE_COPY[cid as string] ?? { headline: item.label, body: item.tagline };
+                        const active = isOnCanvas(item);
+                        return (
+                          <button
+                            key={cid}
+                            onClick={() => handleAdd(item)}
+                            style={{
+                              display:         'flex',
+                              alignItems:      'flex-start',
+                              gap:             '10px',
+                              padding:         '12px 14px',
+                              borderRadius:    '12px',
+                              border:          `1px solid ${active ? tokens.accent + '35' : tokens.cardBorder}`,
+                              backgroundColor: active ? tokens.accentSubtle : tokens.pageBg,
+                              cursor:          'pointer',
+                              textAlign:       'left' as const,
+                              transition:      'all 0.15s ease',
+                            }}
+                            onMouseEnter={e => {
+                              if (active) return;
+                              const el = e.currentTarget as HTMLElement;
+                              el.style.borderColor = `${tokens.accent}50`;
+                              el.style.backgroundColor = tokens.accentSubtle;
+                            }}
+                            onMouseLeave={e => {
+                              if (active) return;
+                              const el = e.currentTarget as HTMLElement;
+                              el.style.borderColor = tokens.cardBorder;
+                              el.style.backgroundColor = tokens.pageBg;
+                            }}
+                          >
+                            <span style={{
+                              fontSize:        '20px',
+                              lineHeight:      1,
+                              flexShrink:      0,
+                              marginTop:       '1px',
+                            }}>
+                              {item.icon}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '12px', fontWeight: 700, color: active ? tokens.accent : tokens.textPrimary, margin: 0 }}>
+                                {copy.headline}
+                                {active && <span style={{ marginLeft: '6px', fontSize: '9px', opacity: 0.7 }}>✓ on canvas</span>}
+                              </p>
+                              <p style={{ fontSize: '10px', color: tokens.textMuted, margin: '2px 0 0', lineHeight: 1.4 }}>
+                                {copy.body}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* More tools toggle */}
+                    <button
+                      onClick={() => setMoreOpen(o => !o)}
+                      style={{
+                        marginTop:       '12px',
+                        width:           '100%',
+                        display:         'flex',
+                        alignItems:      'center',
+                        justifyContent:  'center',
+                        gap:             '5px',
+                        padding:         '7px 0',
+                        borderRadius:    '8px',
+                        border:          `1px solid ${tokens.cardBorder}`,
+                        backgroundColor: 'transparent',
+                        cursor:          'pointer',
+                        fontSize:        '11px',
+                        fontWeight:      600,
+                        color:           tokens.textGhost,
+                        transition:      'all 0.15s ease',
+                        fontFamily:      "'Space Grotesk', sans-serif",
+                      }}
+                      onMouseEnter={e => {
+                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder;
+                        (e.currentTarget as HTMLButtonElement).style.color = tokens.textSecondary;
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                        (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost;
+                      }}
+                    >
+                      {moreOpen ? '↑ Less' : '↓ More tools'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* ── Full catalog (shown when: not all-tab default, or more is open) ── */}
+              {(activeTab !== 'all' || search || moreOpen) && (
+                <>
 
               {/* Large cards — Focus tools */}
               {large.length > 0 && (
@@ -779,7 +912,7 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
               )}
 
               {/* Custom Tools section */}
-              {onOpenCreateTool && (activeTab === 'all' || activeTab === 'focus') && !search && (
+              {onOpenCreateTool && (activeTab === 'all' || activeTab === 'focus') && (
                 <div>
                   <SectionLabel label="Custom Tools" />
                   <button
@@ -834,6 +967,10 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
                   </button>
                 </div>
               )}
+
+                </>
+              )}
+              {/* end full catalog */}
 
             </div>
           )}
