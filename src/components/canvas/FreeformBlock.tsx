@@ -8,7 +8,7 @@
  * Resize: a small handle at the bottom-right corner.
  */
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { GripHorizontal, X, Copy } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
@@ -32,7 +32,8 @@ export function FreeformBlock({
   id, pos, label, tokens, selected, designMode, isDragging,
   children, onBlockMouseDown, onSelect, onRemove, onDuplicate,
 }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref     = useRef<HTMLDivElement>(null);
+  const [hovered, setHovered] = useState(false);
 
   const w = pos.w > 0 ? pos.w : undefined;   // undefined = let content size it
   const h = pos.h > 0 ? pos.h : undefined;
@@ -42,6 +43,8 @@ export function FreeformBlock({
       ref={ref}
       data-freeform-block={id}
       onClick={e => { e.stopPropagation(); onSelect(id); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position:        'absolute',
         left:            pos.x,
@@ -52,47 +55,55 @@ export function FreeformBlock({
         maxWidth:        '720px',
         borderRadius:    '14px',
         backgroundColor: tokens.cardBg,
-        border:          `1px solid ${selected ? tokens.accent + '60' : tokens.cardBorder}`,
+        border:          `1px solid ${selected ? tokens.accent + '50' : hovered ? tokens.cardBorderHover : tokens.cardBorder}`,
         boxShadow:       selected
-          ? `0 0 0 1px ${tokens.accent}30, 0 8px 32px rgba(0,0,0,0.3), 0 0 20px ${tokens.accentGlow}`
-          : `0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04)`,
-        transition:      isDragging ? 'none' : 'border-color 0.15s ease, box-shadow 0.15s ease',
+          ? `0 0 0 1px ${tokens.accent}25, 0 12px 40px rgba(0,0,0,0.35), 0 0 24px ${tokens.accentGlow}`
+          : hovered
+            ? `0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`
+            : `0 2px 12px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.03)`,
+        transform:       selected && !isDragging ? 'translateY(-2px)' : 'none',
+        transition:      isDragging
+          ? 'none'
+          : 'border-color 0.2s ease, box-shadow 0.25s ease, transform 0.25s cubic-bezier(0.32,0.72,0,1)',
         overflow:        'hidden',
         cursor:          isDragging ? 'grabbing' : 'default',
         userSelect:      isDragging ? 'none' : undefined,
-        zIndex:          selected ? 3 : 1,
+        zIndex:          selected ? 3 : hovered ? 2 : 1,
         willChange:      isDragging ? 'transform' : 'auto',
       }}
     >
-      {/* ── Drag handle bar ──────────────────────────────────────── */}
+      {/* ── Drag handle bar — ghost until hover/select ─────────────── */}
       <div
         onMouseDown={e => { e.stopPropagation(); onBlockMouseDown(id, e, 'move'); }}
         style={{
-          height:          '26px',
+          height:          '20px',
           display:         'flex',
           alignItems:      'center',
           justifyContent:  'space-between',
-          padding:         '0 10px',
+          padding:         '0 8px',
           cursor:          'grab',
           backgroundColor: selected
-            ? `${tokens.accent}10`
-            : `${tokens.cardBg}`,
-          borderBottom:    `1px solid ${selected ? tokens.accent + '20' : tokens.divider}`,
+            ? `${tokens.accent}08`
+            : 'transparent',
+          borderBottom:    (selected || hovered)
+            ? `1px solid ${selected ? tokens.accent + '15' : tokens.divider}`
+            : '1px solid transparent',
           flexShrink:      0,
           gap:             '6px',
           userSelect:      'none',
-          transition:      'background-color 0.15s ease',
-        }}
-        onMouseEnter={e => {
-          if (!selected) (e.currentTarget as HTMLElement).style.backgroundColor = tokens.cardBorder + '80';
-        }}
-        onMouseLeave={e => {
-          if (!selected) (e.currentTarget as HTMLElement).style.backgroundColor = tokens.cardBg;
+          transition:      'background-color 0.2s ease, border-color 0.2s ease',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <GripHorizontal
-            style={{ width: '12px', height: '12px', color: tokens.textGhost, flexShrink: 0 }}
+            style={{
+              width:      '11px',
+              height:     '11px',
+              color:      selected ? tokens.accent : tokens.textGhost,
+              flexShrink: 0,
+              opacity:    (selected || hovered || isDragging) ? 0.5 : 0,
+              transition: 'opacity 0.2s ease',
+            }}
           />
           {label && (
             <span style={{
@@ -106,6 +117,8 @@ export function FreeformBlock({
               overflow:      'hidden',
               textOverflow:  'ellipsis',
               whiteSpace:    'nowrap',
+              opacity:       (selected || hovered) ? 0.7 : 0,
+              transition:    'opacity 0.2s ease',
             }}>
               {label}
             </span>

@@ -637,6 +637,30 @@ export function Dashboard() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // ── Scroll position memory — the space remembers where you were ──────────
+  // Save on scroll (sessionStorage: survives page refresh, not new tab opens)
+  useEffect(() => {
+    const save = () => {
+      try { sessionStorage.setItem('fw_scroll_v1', String(Math.round(window.scrollY))); } catch {}
+    };
+    window.addEventListener('scroll', save, { passive: true });
+    return () => window.removeEventListener('scroll', save);
+  }, []);
+
+  // Restore on mount — only in grid mode and only when not loading
+  useEffect(() => {
+    if (loading || canvasMode.mode === 'freeform') return;
+    try {
+      const saved = sessionStorage.getItem('fw_scroll_v1');
+      if (saved) {
+        const top = parseInt(saved, 10);
+        // Use a small delay so the grid has rendered before we scroll
+        const id = setTimeout(() => window.scrollTo({ top, behavior: 'instant' as ScrollBehavior }), 80);
+        return () => clearTimeout(id);
+      }
+    } catch {}
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -703,10 +727,14 @@ export function Dashboard() {
       <main
         className="relative"
         style={{
-          display:    canvasMode.mode === 'freeform' ? 'none' : undefined,
-          minHeight:  'calc(100vh - 48px)',
+          // Fade out gracefully when freeform takes over
+          // visibility:hidden prevents scroll/interaction when invisible
+          visibility:    canvasMode.mode === 'freeform' ? 'hidden' : 'visible',
+          opacity:       canvasMode.mode === 'freeform' ? 0 : 1,
+          pointerEvents: canvasMode.mode === 'freeform' ? 'none' : 'auto',
+          minHeight:     'calc(100vh - 48px)',
           ...canvasStyle,
-          transition: `all ${design.transition}`,
+          transition:  `opacity 0.25s ease, ${design.transition}`,
         }}
         onClick={() => {
           if (designMode && selectedId) setSelectedId(null);
@@ -757,7 +785,7 @@ export function Dashboard() {
                 className="grid"
                 style={{
                   gridTemplateColumns: 'repeat(12, 1fr)',
-                  gap:                 `${Math.max(design.gap, 20)}px`,
+                  gap:                 `${Math.max(design.gap, 24)}px`,
                   transition:          `gap ${design.transition}`,
                 }}
               >
@@ -776,7 +804,7 @@ export function Dashboard() {
                 )}
 
                 {/* ── System modules ── */}
-                {enabledModules.map((m) => {
+                {enabledModules.map((m, idx) => {
                   const content = renderModuleContent(m.id);
                   if (content === null) return null;
 
@@ -785,7 +813,11 @@ export function Dashboard() {
                       <div
                         className="min-w-0"
                         data-module-id={m.id}
-                        style={{ gridColumn: SIZE_SPAN[m.size] }}
+                        style={{
+                          gridColumn:      SIZE_SPAN[m.size],
+                          animation:       'slideUp 0.4s cubic-bezier(0.32,0.72,0,1) both',
+                          animationDelay:  `${50 + idx * 40}ms`,
+                        }}
                       >
                         <WorkspaceModule
                           id={m.id}

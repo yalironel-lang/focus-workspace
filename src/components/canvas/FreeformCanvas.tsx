@@ -47,6 +47,10 @@ interface DragState {
   startBlockY?: number;
   startBlockW?: number;
   startBlockH?: number;
+  // velocity tracking (canvas pan only)
+  lastX?:     number;
+  lastY?:     number;
+  lastT?:     number;
 }
 
 interface Props {
@@ -186,16 +190,13 @@ function CanvasControls({
       {divider}
 
       <button
-        style={{ ...btn, width: 'auto', padding: '0 8px', gap: '4px',
-          fontFamily: "'Space Grotesk', sans-serif", fontSize: '10px', fontWeight: 600,
-          color: tokens.textGhost, whiteSpace: 'nowrap' as const }}
-        title="Auto-organize blocks"
+        style={btn}
+        title="Auto-organize"
         onClick={onAutoOrganize}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentSubtle; (e.currentTarget as HTMLButtonElement).style.color = tokens.accent; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}
       >
-        <Wand2 style={{ width: '11px', height: '11px' }} />
-        Organize
+        <Wand2 style={{ width: '13px', height: '13px' }} />
       </button>
     </div>
   );
@@ -213,6 +214,11 @@ export function FreeformCanvas({
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  // ── Momentum / inertia refs ───────────────────────────────────────────────
+  const velRef  = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
+  const rafRef  = useRef(0);                   // animation frame handle
+
   const [showGuide, setShowGuide] = useState<boolean>(() => {
     try { return !localStorage.getItem(GUIDE_KEY); } catch { return false; }
   });
@@ -223,6 +229,11 @@ export function FreeformCanvas({
   }, []);
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
+
+  // Live pan values — updated each render so the RAF momentum loop can read
+  // current values without stale closures
+  const liveViewRef = useRef({ panX, panY });
+  liveViewRef.current = { panX, panY };
 
   // ── All renderable items ───────────────────────────────────────────────────
 
@@ -307,6 +318,9 @@ export function FreeformCanvas({
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-freeform-block]')) return;
+    // Cancel any running momentum so the new drag starts fresh
+    cancelAnimationFrame(rafRef.current);
+    velRef.current = { vx: 0, vy: 0 };
     onSelect(null);
     dragRef.current = {
       type:        'canvas',
@@ -328,6 +342,18 @@ export function FreeformCanvas({
 
       if (drag.type === 'canvas') {
         setPan((drag.startPanX ?? 0) + dx, (drag.startPanY ?? 0) + dy);
+        // Track instantaneous velocity for momentum
+        const now = performance.now();
+        if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
+          const dt = now - drag.lastT;
+          if (dt > 0 && dt < 40) { // ignore large gaps (e.g. tab switch)
+            velRef.current.vx = (e.clientX - drag.lastX) / dt;
+            velRef.current.vy = (e.clientY - drag.lastY) / dt;
+          }
+        }
+        drag.lastX = e.clientX;
+        drag.lastY = e.clientY;
+        drag.lastT = now;
       } else if (drag.type === 'block-move' && drag.blockId != null) {
         const newX = snap((drag.startBlockX ?? 0) + dx / zoom);
         const newY = snap((drag.startBlockY ?? 0) + dy / zoom);
@@ -340,8 +366,37 @@ export function FreeformCanvas({
     };
 
     const onUp = () => {
+      const drag = dragRef.current;
       dragRef.current = null;
       setDraggingId(null);
+
+      // Launch momentum only for canvas pan, not for block moves
+      if (drag?.type === 'canvas') {
+        const { vx, vy } = velRef.current;
+        // Only bother if there's meaningful velocity (> 0.3 px/ms)
+        if (Math.abs(vx) > 0.3 || Math.abs(vy) > 0.3) {
+          let px = liveViewRef.current.panX;
+          let py = liveViewRef.current.panY;
+          // Scale velocity: px/ms → ~px/frame assuming 60fps
+          let fx = vx * 14;
+          let fy = vy * 14;
+          const DECAY = 0.88;
+          const STOP  = 0.35;
+
+          cancelAnimationFrame(rafRef.current);
+          const step = () => {
+            fx *= DECAY;
+            fy *= DECAY;
+            if (Math.abs(fx) < STOP && Math.abs(fy) < STOP) return;
+            px += fx;
+            py += fy;
+            setPan(px, py);
+            rafRef.current = requestAnimationFrame(step);
+          };
+          rafRef.current = requestAnimationFrame(step);
+        }
+        velRef.current = { vx: 0, vy: 0 };
+      }
     };
 
     window.addEventListener('mousemove', onMove);
@@ -469,8 +524,6 @@ export function FreeformCanvas({
           const content = (() => {
             if (item.kind === 'module') return renderModuleContent(item.id);
             if (item.kind === 'block') {
-              // BlockRenderer is rendered by parent; we just need a placeholder here.
-              // The parent passes renderModuleContent which handles both modules and blocks.
               return renderModuleContent(item.id);
             }
             if (item.kind === 'tool') {
@@ -483,81 +536,109 @@ export function FreeformCanvas({
 
           if (content === null) return null;
 
+          // When another block is being dragged, non-dragging blocks fade back
+          // — creates a "spotlight" effect and a sense of spatial depth
+          const isOtherDragging = !!(draggingId && draggingId !== item.id);
+
           return (
-            <FreeformBlock
+            <div
               key={item.id}
-              id={item.id}
-              pos={pos}
-              label={getLabel(item.id)}
-              tokens={tokens}
-              selected={selectedId === item.id}
-              designMode={designMode}
-              isDragging={draggingId === item.id}
-              onBlockMouseDown={onBlockMouseDown}
-              onSelect={onSelect}
-              onRemove={handleRemove}
-              onDuplicate={handleDuplicate}
+              style={{
+                opacity:    isOtherDragging ? 0.45 : 1,
+                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 0.3s ease',
+              }}
             >
-              {content}
-            </FreeformBlock>
+              <FreeformBlock
+                id={item.id}
+                pos={pos}
+                label={getLabel(item.id)}
+                tokens={tokens}
+                selected={selectedId === item.id}
+                designMode={designMode}
+                isDragging={draggingId === item.id}
+                onBlockMouseDown={onBlockMouseDown}
+                onSelect={onSelect}
+                onRemove={handleRemove}
+                onDuplicate={handleDuplicate}
+              >
+                {content}
+              </FreeformBlock>
+            </div>
           );
         })}
 
-        {/* ── Empty state ────────────────────────────────────── */}
+        {/* ── Empty state — alive, breathing, spatial ──────────── */}
         {allItems.length === 0 && (
           <div style={{
-            position: 'absolute', left: '50%', top: '38%',
-            transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
+            position:      'absolute',
+            left:          '50%',
+            top:           '42%',
+            transform:     'translate(-50%, -50%)',
+            textAlign:     'center',
+            pointerEvents: 'none',
+            userSelect:    'none',
           }}>
+            {/* Ambient glow orb behind text */}
+            <div style={{
+              position:        'absolute',
+              left:            '50%',
+              top:             '50%',
+              transform:       'translate(-50%, -50%)',
+              width:           '180px',
+              height:          '80px',
+              borderRadius:    '50%',
+              backgroundColor: tokens.accent,
+              opacity:         0.04,
+              filter:          'blur(32px)',
+              animation:       'canvasBreath 5s ease-in-out infinite',
+            }} />
             <p style={{
               fontFamily:    "'Plus Jakarta Sans', sans-serif",
-              fontSize:      '18px',
+              fontSize:      '20px',
               fontWeight:    700,
               color:         tokens.textSecondary,
               margin:        0,
               letterSpacing: '-0.02em',
+              animation:     'fadeIn 0.8s ease both',
             }}>
               Your thinking space.
             </p>
             <p style={{
               fontSize:   '13px',
               color:      tokens.textGhost,
-              margin:     '8px 0 0',
+              margin:     '10px 0 0',
               lineHeight: 1.5,
+              animation:  'fadeIn 0.8s 0.3s ease both',
             }}>
-              Press <kbd style={{ fontFamily: 'monospace', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${tokens.cardBorder}`, fontSize: '11px', color: tokens.textMuted, backgroundColor: tokens.wellBg }}>⌘K</kbd> to add something.
+              Press{' '}
+              <kbd style={{
+                fontFamily:      'monospace',
+                padding:         '1px 6px',
+                borderRadius:    '5px',
+                border:          `1px solid ${tokens.cardBorder}`,
+                fontSize:        '12px',
+                color:           tokens.textMuted,
+                backgroundColor: tokens.wellBg,
+              }}>⌘K</kbd>
+              {' '}to add something.
             </p>
           </div>
         )}
 
       </div>
 
-      {/* ── Move indicator (top-center badge) ─────────────────────── */}
-      {draggingId && (
-        <div style={{
-          position:        'absolute',
-          top:             '12px',
-          left:            '50%',
-          transform:       'translateX(-50%)',
-          display:         'flex',
-          alignItems:      'center',
-          gap:             '5px',
-          padding:         '4px 10px',
-          borderRadius:    '8px',
-          backgroundColor: `${tokens.accent}18`,
-          border:          `1px solid ${tokens.accent}30`,
-          color:           tokens.accent,
-          fontSize:        '10px',
-          fontWeight:      700,
-          fontFamily:      "'Space Grotesk', sans-serif",
-          letterSpacing:   '0.06em',
-          pointerEvents:   'none',
-          zIndex:          50,
-        }}>
-          <Move style={{ width: '10px', height: '10px' }} />
-          Moving
-        </div>
-      )}
+      {/* ── Atmospheric vignette — depth at the periphery ────────────── */}
+      <div
+        aria-hidden="true"
+        style={{
+          position:    'absolute',
+          inset:       0,
+          pointerEvents: 'none',
+          zIndex:      1,
+          background:  `radial-gradient(ellipse at 50% 40%, transparent 55%, ${tokens.pageBg}60 100%)`,
+          transition:  'background 0.4s ease',
+        }}
+      />
 
       {/* ── Canvas controls ────────────────────────────────────── */}
       <CanvasControls
@@ -604,7 +685,7 @@ export function FreeformCanvas({
                 fontSize: '11px', fontWeight: 700, color: tokens.textPrimary,
                 fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '0.01em',
               }}>
-                Free Space
+                Thinking space
               </span>
             </div>
             <button

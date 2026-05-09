@@ -296,6 +296,12 @@
     to   { transform: scaleX(1); }
   }
 
+  /* ── Freeform canvas empty state breath ── */
+  @keyframes canvasBreath {
+    0%, 100% { opacity: 0.04; transform: translate(-50%, -50%) scale(1);    }
+    50%       { opacity: 0.09; transform: translate(-50%, -50%) scale(1.15); }
+  }
+
   /* ── Shimmer (loading skeleton) ── */
   @keyframes shimmer {
     0%   { background-position: -200% 0; }

@@ -114,8 +114,14 @@ export function WorkspaceModule({
         opacity:      moduleTheme?.opacity ?? 1,
         transition:   `transform 0.25s cubic-bezier(0.32,0.72,0,1),
                        opacity 0.2s ease,
+                       border-color 0.3s ease,
                        box-shadow 0.25s cubic-bezier(0.32,0.72,0,1)`,
         ...surfaceCSS,
+        // In view mode, borders whisper — modules become surfaces, not cards
+        ...(!designMode && !selected && {
+          borderColor: `${tokens.cardBorder}70`,
+          boxShadow:   'none',
+        }),
         ...selectionStyle,
         ...dragSelf,
       }}
