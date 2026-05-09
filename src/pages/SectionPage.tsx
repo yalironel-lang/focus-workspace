@@ -13,7 +13,7 @@ import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
-  Sliders, BookOpen,
+  Sliders,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -115,7 +115,7 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
       padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <button onClick={onBack} style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
+        <button onClick={onBack} style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
           onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
           onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -196,11 +196,11 @@ function WorkItem({ item, onToggle, onDelete }: {
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: itemOpacity, transition: 'opacity 0.3s ease' }}
+      style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '11px 0 9px', borderBottom: '1px solid rgba(255,255,255,0.022)', opacity: itemOpacity, transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1)' }}
     >
       <button
         onClick={() => onToggle(item.id, !item.completed).catch(() => toast.error('Failed'))}
-        style={{ flexShrink: 0, color: toggleColor, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px', transition: 'color 0.2s ease' }}
+        style={{ flexShrink: 0, color: toggleColor, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}
         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = toggleHoverColor; }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = toggleColor; }}
       >
@@ -240,24 +240,24 @@ function WorkCapture({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0' }}>
-      <span style={{ flexShrink: 0, color: '#263043', display: 'flex', padding: '2px' }}>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '13px 0 6px', marginTop: '2px' }}>
+      <span style={{ flexShrink: 0, color: '#1e2a38', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
       </span>
       <input
         type="text"
         value={value}
         onChange={e => setValue(e.target.value)}
-        placeholder="Add a task…"
-        style={{ flex: 1, fontSize: '14px', color: '#4b5563', backgroundColor: 'transparent', border: 'none', outline: 'none' }}
-        onFocus={e => { (e.currentTarget as HTMLInputElement).style.color = '#94a3b8'; }}
-        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#4b5563'; }}
+        placeholder="capture a task…"
+        style={{ flex: 1, fontSize: '13px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', outline: 'none', fontStyle: 'italic' }}
+        onFocus={e => { (e.currentTarget as HTMLInputElement).style.color = '#64748b'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'normal'; }}
+        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#2a3a50'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'italic'; }}
         onKeyDown={e => { if (e.key === 'Escape') { setValue(''); (e.currentTarget as HTMLInputElement).blur(); } }}
       />
       {value.trim() && (
-        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#374151', backgroundColor: 'rgba(255,255,255,0.04)', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
+        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 6px', borderRadius: '4px', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#2a3a50')}>
           ↵
         </button>
       )}
@@ -314,12 +314,12 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
             + Add a date
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {pending.map(d => {
               const lbl = urgencyLabel(d);
               const dot = urgencyDot(d);
               return (
-                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
+                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                   <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: dot, flexShrink: 0, marginTop: '4px' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '11px', fontWeight: 600, color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
@@ -708,7 +708,7 @@ export function SectionPage() {
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
           <aside
             className="hidden lg:flex flex-col overflow-y-auto"
-            style={{ borderRight: '1px solid rgba(255,255,255,0.05)', padding: '20px 16px', gap: 0, backgroundColor: '#070b14' }}
+            style={{ borderRight: '1px solid rgba(255,255,255,0.04)', padding: '32px 14px 24px 18px', gap: 0, backgroundColor: '#070b14' }}
           >
             <CourseHub sectionId={section.id} />
 
@@ -724,15 +724,15 @@ export function SectionPage() {
             <div style={{
               position: 'absolute', inset: 0,
               background: sessionIsThisCourse
-                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.045) 0%, transparent 60%)'
-                : 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.018) 0%, transparent 55%)',
-              pointerEvents: 'none', zIndex: 0, transition: 'background 0.8s ease',
+                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.055) 0%, transparent 65%)'
+                : 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.016) 0%, transparent 55%)',
+              pointerEvents: 'none', zIndex: 0, transition: 'background 1.4s cubic-bezier(0.4,0,0.2,1)',
             }} />
 
-            <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 64px', maxWidth: '680px' }}>
+            <div style={{ position: 'relative', zIndex: 1, padding: '42px 46px 88px', maxWidth: '680px' }}>
 
               {/* ── IDENTITY HEADER ──────────────────────────────────────── */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px', paddingLeft: '12px', borderLeft: `3px solid ${accentColor}` }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '34px', paddingLeft: '15px', borderLeft: `2px solid ${accentColor}70` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                     {customization.icon && (
@@ -812,9 +812,9 @@ export function SectionPage() {
 
                 <button
                   onClick={() => setShowCustomize(true)}
-                  style={{ flexShrink: 0, fontSize: '10px', fontWeight: 600, padding: '4px 8px', borderRadius: '6px', color: '#263043', border: '1px solid #1a2230', backgroundColor: 'transparent', cursor: 'pointer', marginTop: '2px' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; (e.currentTarget as HTMLElement).style.borderColor = '#263043'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; (e.currentTarget as HTMLElement).style.borderColor = '#1a2230'; }}
+                  style={{ flexShrink: 0, fontSize: '10px', padding: '4px 6px', borderRadius: '4px', color: '#1e2a38', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', marginTop: '2px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#374151'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#1e2a38'; }}
                   title="Customize workspace"
                 >
                   ✦
@@ -833,64 +833,60 @@ export function SectionPage() {
 
               {/* ── FOCUS NOW STRIP ──────────────────────────────────────── */}
               {todayPlan.length > 0 && (
-                <div style={{ borderLeft: '2px solid #f59e0b', backgroundColor: 'rgba(245,158,11,0.025)', borderRadius: '0 8px 8px 0', marginBottom: '28px', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(245,158,11,0.08)' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f59e0b' }}>Focus Now</span>
-                    <span style={{ fontSize: '9px', color: '#374151' }}>{todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}</span>
+                <div style={{ borderLeft: '1.5px solid rgba(245,158,11,0.45)', backgroundColor: 'rgba(245,158,11,0.014)', borderRadius: '0 3px 3px 0', marginBottom: '36px' }}>
+                  <div style={{ padding: '6px 16px 0', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '9px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.5)', fontWeight: 600 }}>now</span>
                   </div>
 
                   <button
                     onClick={() => scrollToItem(todayPlan[0].item.id)}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderBottom: todayPlan.length > 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}
-                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.03)')}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '8px 16px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.025)')}
                     onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                   >
-                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0 }} />
+                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0, opacity: 0.7 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {todayPlan[0].item.title}
                       </p>
                       <p style={{ fontSize: '10px', color: '#374151', margin: '2px 0 0' }}>
-                        {todayPlan[0].lane} · {todayPlan[0].reason}
+                        {todayPlan[0].lane}
                       </p>
                     </div>
-                    <ArrowRight className="w-3.5 h-3.5" style={{ color: '#374151', flexShrink: 0 }} />
+                    <ArrowRight className="w-3 h-3" style={{ color: '#2a3040', flexShrink: 0 }} />
                   </button>
 
-                  {todayPlan.slice(1).map((rec, i) => (
+                  {todayPlan.slice(1).map((rec) => (
                     <button
                       key={rec.item.id}
                       onClick={() => scrollToItem(rec.item.id)}
-                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.02)')}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '6px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.015)')}
                       onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                     >
-                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#374151', width: '14px', textAlign: 'center', flexShrink: 0 }}>{i + 2}</span>
-                      <p style={{ flex: 1, fontSize: '12px', color: '#94a3b8', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#374151', flexShrink: 0, opacity: 0.5 }} />
+                      <p style={{ flex: 1, fontSize: '12px', color: '#4b5563', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {rec.item.title}
                       </p>
                     </button>
                   ))}
 
-                  <div style={{ padding: '10px 14px' }}>
+                  <div style={{ padding: '10px 16px 12px' }}>
                     <button
                       onClick={handleStartSession}
-                      style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', padding: '8px 16px', borderRadius: '8px', backgroundColor: '#f59e0b', color: '#000', fontSize: '12px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
-                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24')}
-                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '6px', backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: '11px', fontWeight: 600, border: '1px solid rgba(245,158,11,0.2)', cursor: 'pointer', transition: 'background-color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.2)')}
+                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.12)')}
                     >
-                      <PlayCircle className="w-3.5 h-3.5" />
-                      {sessionIsThisCourse ? 'Resume Session →' : 'Start Session'}
+                      <PlayCircle className="w-3 h-3" />
+                      {sessionIsThisCourse ? 'Resume' : 'Begin session'}
                     </button>
                   </div>
                 </div>
               )}
 
               {/* ── WORK SURFACE ─────────────────────────────────────────── */}
-              <div style={{ marginBottom: '36px' }}>
-                <p style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#263043', marginBottom: '4px', margin: '0 0 4px' }}>
-                  Work
-                </p>
+              <div style={{ marginBottom: '40px' }}>
 
                 {exercisesGroup ? (
                   <>
@@ -915,7 +911,7 @@ export function SectionPage() {
               </div>
 
               {/* ── SHELF ────────────────────────────────────────────────── */}
-              <div style={{ paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+              <div style={{ paddingTop: '32px', borderTop: '1px solid rgba(255,255,255,0.035)' }}>
                 <ResourcesBlock
                   groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
                   sectionId={section.id}
@@ -1002,8 +998,8 @@ function ShelfAddForm({ type, groupId, onAddGroup, onAddItem, onDone }: ShelfFor
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl p-3 flex flex-col gap-2.5"
-      style={{ backgroundColor: '#070b14', border: '1px solid #1a2236' }}
+      className="rounded-lg p-3 flex flex-col gap-2.5"
+      style={{ backgroundColor: 'rgba(7,11,20,0.6)', border: '1px solid rgba(255,255,255,0.055)' }}
     >
       {/* Type badge */}
       <div className="flex items-center justify-between">
@@ -1174,30 +1170,28 @@ function ResourcesBlock({
   );
 
   return (
-    <div className="rounded-xl overflow-hidden mb-4"
-         style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
+    <div className="mb-4">
 
       {/* ── Header ── */}
       <div
-        className="px-4 py-2.5 flex items-center justify-between cursor-pointer select-none transition-colors"
-        style={{ borderBottom: isOpen ? '1px solid #1a2230' : 'none' }}
+        className="flex items-center justify-between mb-3 cursor-pointer select-none"
         onClick={() => setIsOpen(o => !o)}
-        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
-        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         <div className="flex items-center gap-2">
-          <span className="flex-shrink-0" style={{ color: '#374151' }}>
+          <span className="flex-shrink-0" style={{ color: '#263043', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
             {isOpen
-              ? <ChevronDown  className="w-3.5 h-3.5" />
-              : <ChevronRight className="w-3.5 h-3.5" />}
+              ? <ChevronDown  className="w-3 h-3" />
+              : <ChevronRight className="w-3 h-3" />}
           </span>
-          <span className="text-xs font-bold uppercase tracking-[0.12em]"
-                style={{ color: '#f8fafc' }}>
-            Shelf
+          <span className="text-[10px] font-semibold"
+                style={{ color: '#374151', letterSpacing: '0.04em' }}>
+            shelf
           </span>
           {totalItems > 0 && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                  style={{ backgroundColor: '#111827', color: '#4b5563' }}>
+            <span className="text-[9px]"
+                  style={{ color: '#263043' }}>
               {totalItems}
             </span>
           )}
@@ -1208,7 +1202,7 @@ function ResourcesBlock({
 
       {/* ── Body ── */}
       {isOpen && (
-        <div className="p-3 flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
 
           {/* Inline add form — appears when a type chip is selected */}
           {addingType && (
@@ -1223,7 +1217,7 @@ function ResourcesBlock({
 
           {/* Groups / items */}
           {groups.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {groups.map(group => (
                 <GroupComponent
                   key={group.id}
@@ -1243,20 +1237,10 @@ function ResourcesBlock({
             </div>
           ) : !addingType ? (
             /* ── Empty state ── */
-            <div className="flex flex-col items-center justify-center py-8 gap-4"
-                 style={{ borderRadius: '10px', backgroundColor: '#070b14', border: '1px dashed #1a2236' }}>
-              <div className="flex items-center justify-center w-9 h-9 rounded-xl"
-                   style={{ backgroundColor: '#111827' }}>
-                <BookOpen className="w-4 h-4" style={{ color: '#374151' }} />
-              </div>
-              <div className="text-center px-4">
-                <p className="text-sm font-semibold mb-1" style={{ color: '#94a3b8' }}>
-                  Keep useful things here
-                </p>
-                <p className="text-xs leading-relaxed" style={{ color: '#374151' }}>
-                  Notes, links, references, and files for this space
-                </p>
-              </div>
+            <div className="flex flex-col py-6 gap-3" style={{ paddingLeft: '2px' }}>
+              <p className="text-xs" style={{ color: '#263043', fontStyle: 'italic' }}>
+                A place for notes, links, and references.
+              </p>
               {/* Primary CTAs — one per type */}
               <div className="flex items-center gap-2">
                 {TYPE_CHIPS.map(({ type, label }) => (
