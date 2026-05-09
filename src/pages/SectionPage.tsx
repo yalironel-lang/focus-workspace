@@ -688,7 +688,7 @@ export function SectionPage() {
                   title="Customize layout"
                 >
                   <Sliders className="w-3.5 h-3.5" />
-                  Design Mode
+                  Customize
                 </button>
               )}
             </div>
@@ -723,10 +723,10 @@ export function SectionPage() {
         />
       )}
 
-      {/* ── 2. COURSE HUB (hidden in Design Mode for focus) ─────────────────── */}
+      {/* ── 2. QUICK LINKS (hidden while customizing) ───────────────────────── */}
       {!designMode && <CourseHub sectionId={section.id} />}
 
-      {/* ── 3. TODAY'S PLAN (hidden in Design Mode) ──────────────────────────── */}
+      {/* ── 3. FOCUS NOW (hidden while customizing) ─────────────────────────── */}
       {!designMode && todayPlan.length > 0 && (
         <div className="rounded-xl mb-4 overflow-hidden"
              style={{ backgroundColor: '#0d111a', border: '1px solid #263043', borderLeft: '2px solid #f59e0b' }}>
@@ -734,7 +734,7 @@ export function SectionPage() {
                style={{ borderBottom: '1px solid #1a2230' }}>
             <span className="text-[10px] font-bold uppercase tracking-widest"
                   style={{ color: '#f59e0b' }}>
-              Today&apos;s Plan
+              Focus Now
             </span>
             <span className="text-[10px] font-semibold" style={{ color: '#374151' }}>
               {todayPlan.length} action{todayPlan.length !== 1 ? 's' : ''}
@@ -810,7 +810,7 @@ export function SectionPage() {
         </div>
       )}
 
-      {/* ── 4. QUICK ADD (hidden in Design Mode) ─────────────────────────────── */}
+      {/* ── 4. QUICK ADD (hidden while customizing) ──────────────────────────── */}
       {!designMode && <form onSubmit={handleQuickAdd} className="mb-4">
         <div className="flex items-center gap-2 rounded-xl px-4 py-2.5"
              style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
@@ -845,7 +845,7 @@ export function SectionPage() {
 
       {/* ── 5 / 7. GROUPS ────────────────────────────────────────────────────── */}
       {designMode ? (
-        /* ─ Design Mode: flat draggable list of ALL groups ─ */
+        /* ─ Customize: flat draggable list of ALL groups ─ */
         <div className="space-y-3 mb-4">
           {orderedGroups.map(group => {
             const isDragging  = dragId     === group.id;

@@ -359,7 +359,7 @@ export function CourseHub({ sectionId }: Props) {
       >
         <div className="flex items-center gap-2">
           <Link2 className="w-4 h-4" style={{ color: '#f59e0b' }} />
-          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>Course Hub</span>
+          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>Quick Links</span>
           {hasLinks && (
             <span
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
@@ -397,7 +397,7 @@ export function CourseHub({ sectionId }: Props) {
         {!hasLinks && !showingForm && (
           <div>
             <p className="text-xs mb-3" style={{ color: '#334155' }}>
-              Save links specific to this course — Moodle page, shared Drive, professor email, etc.
+              Save links for this space — Moodle, shared Drive, professor email, and more.
             </p>
             <div className="flex flex-wrap gap-2">
               {COURSE_STARTERS.map(s => {
