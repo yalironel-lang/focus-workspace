@@ -61,10 +61,16 @@ export function FreeformBlock({
           : hovered
             ? `0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)`
             : `0 2px 12px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.03)`,
-        transform:       selected && !isDragging ? 'translateY(-2px)' : 'none',
+        // Drag tilt: picking up a block tilts it slightly — a physical weight signal.
+        // On release the spring easing settles it back, creating the landing feel.
+        transform:       isDragging
+          ? 'rotate(0.55deg) scale(1.012)'
+          : selected
+            ? 'translateY(-1px)'
+            : 'none',
         transition:      isDragging
           ? 'none'
-          : 'border-color 0.2s ease, box-shadow 0.25s ease, transform 0.25s cubic-bezier(0.32,0.72,0,1)',
+          : 'border-color 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.3s cubic-bezier(0.4,0,0.2,1), transform 0.45s cubic-bezier(0.22,1.4,0.36,1)',
         overflow:        'hidden',
         cursor:          isDragging ? 'grabbing' : 'default',
         userSelect:      isDragging ? 'none' : undefined,
@@ -91,7 +97,7 @@ export function FreeformBlock({
           flexShrink:      0,
           gap:             '6px',
           userSelect:      'none',
-          transition:      'background-color 0.2s ease, border-color 0.2s ease',
+          transition:      'background-color 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>

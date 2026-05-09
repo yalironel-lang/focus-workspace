@@ -165,7 +165,7 @@ function CanvasControls({
         boxShadow:            '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
         opacity:              visible ? 1 : 0,
         pointerEvents:        visible ? 'auto' : 'none',
-        transition:           'opacity 0.25s ease, transform 0.25s ease',
+        transition:           'opacity 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1)',
       }}
     >
       <button style={btn} title="Zoom out" onClick={onZoomOut}
@@ -256,8 +256,13 @@ export function FreeformCanvas({
   const [controlsNear,   setControlsNear]    = useState(false);
 
   // ── Momentum / inertia refs ───────────────────────────────────────────────
-  const velRef  = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
-  const rafRef  = useRef(0);                   // animation frame handle
+  const velRef     = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
+  const rafRef     = useRef(0);                   // pan momentum RAF handle
+  const zoomRafRef = useRef(0);                   // zoom lerp RAF handle
+
+  // Smooth zoom target — wheel events write here; a RAF loop lerps toward it
+  // This gives the cinematic "camera settling" feel instead of instant snaps.
+  const targetViewRef = useRef({ zoom: 0, panX: 0, panY: 0 });
 
   // ── Object aging ─────────────────────────────────────────────────────────
   // Loaded synchronously so return ritual can run on first render.
@@ -357,10 +362,15 @@ export function FreeformCanvas({
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
 
-  // Live pan values — updated each render so the RAF momentum loop can read
-  // current values without stale closures
-  const liveViewRef = useRef({ panX, panY });
-  liveViewRef.current = { panX, panY };
+  // Live viewport — updated each render so RAF loops can read current values
+  // without stale closures. Tracks zoom too for the zoom lerp loop.
+  const liveViewRef = useRef({ panX, panY, zoom });
+  liveViewRef.current = { panX, panY, zoom };
+
+  // Initialize targetView to current viewport on first render
+  if (targetViewRef.current.zoom === 0) {
+    targetViewRef.current = { zoom, panX, panY };
+  }
 
   // ── All renderable items ───────────────────────────────────────────────────
 
@@ -483,8 +493,10 @@ export function FreeformCanvas({
   const onBlockMouseDown = useCallback((blockId: string, e: React.MouseEvent, type: 'move' | 'resize') => {
     e.preventDefault();
     e.stopPropagation();
-    // Cancel any running momentum (canvas or block) so a fresh drag starts clean
+    // Cancel any running momentum or zoom lerp so a fresh drag starts clean
     cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(zoomRafRef.current);
+    zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
     // Detect revisit: was this thought dormant/fading? If so, surface it.
     const prevLifecycle = computeLifecycle(activityRef.current[blockId]);
@@ -515,8 +527,10 @@ export function FreeformCanvas({
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-freeform-block]')) return;
-    // Cancel any running momentum so the new drag starts fresh
+    // Cancel any running momentum or zoom lerp so the new drag starts fresh
     cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(zoomRafRef.current);
+    zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
     onSelect(null);
     dragRef.current = {
@@ -584,17 +598,20 @@ export function FreeformCanvas({
       // Launch momentum only for canvas pan, not for block moves
       if (drag?.type === 'canvas') {
         const { vx, vy } = velRef.current;
-        // Only bother if there's meaningful velocity (> 0.3 px/ms)
-        if (Math.abs(vx) > 0.3 || Math.abs(vy) > 0.3) {
+        // Threshold: 0.22 px/ms — gentle flicks still get momentum
+        if (Math.abs(vx) > 0.22 || Math.abs(vy) > 0.22) {
           let px = liveViewRef.current.panX;
           let py = liveViewRef.current.panY;
-          // Scale velocity: px/ms → ~px/frame assuming 60fps
-          let fx = vx * 14;
-          let fy = vy * 14;
-          const DECAY = 0.88;
-          const STOP  = 0.35;
+          // Higher initial throw (22 vs 14) + slower decay (0.94 vs 0.88)
+          // creates the heavy, cinematic glide of Figma/Linear
+          let fx = vx * 22;
+          let fy = vy * 22;
+          const DECAY = 0.94;  // longer coast — feels like a weighted camera
+          const STOP  = 0.12;  // nearly silent before it stops
 
           cancelAnimationFrame(rafRef.current);
+          cancelAnimationFrame(zoomRafRef.current);
+          zoomRafRef.current = 0;
           const step = () => {
             fx *= DECAY;
             fy *= DECAY;
@@ -609,17 +626,16 @@ export function FreeformCanvas({
         velRef.current = { vx: 0, vy: 0 };
       } else if (drag?.type === 'block-move' && drag.blockId) {
         const { vx, vy } = velRef.current;
-        // Block inertia: threshold lower than canvas — even small flicks feel responsive
-        if (Math.abs(vx) > 0.12 || Math.abs(vy) > 0.12) {
-          const blockId   = drag.blockId;
+        // Block inertia: slightly heavier settle than before
+        if (Math.abs(vx) > 0.1 || Math.abs(vy) > 0.1) {
+          const blockId = drag.blockId;
           let bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
           let by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
-          // Convert screen velocity (px/ms) to world velocity (px/frame)
-          // Divide by zoom: fast pan at 50% zoom should move block same screen distance
-          let fx = (vx * 10) / zoom;
-          let fy = (vy * 10) / zoom;
-          const DECAY = 0.72;   // blocks decelerate faster than canvas — heavier feel
-          const STOP  = 0.15;
+          // World velocity — scale down by zoom so feel is consistent at any scale
+          let fx = (vx * 11) / zoom;
+          let fy = (vy * 11) / zoom;
+          const DECAY = 0.78;  // blocks decelerate faster — heavy, planted feel
+          const STOP  = 0.10;
 
           cancelAnimationFrame(rafRef.current);
           const step = () => {
@@ -645,7 +661,10 @@ export function FreeformCanvas({
     };
   }, [zoom, snap, setPan, onSetPos]);
 
-  // ── Wheel zoom ────────────────────────────────────────────────────────────
+  // ── Smooth zoom interpolation ─────────────────────────────────────────────
+  // Wheel events write to targetViewRef; a separate RAF loop smoothly lerps
+  // the actual viewport toward the target. This creates the cinematic zoom
+  // deceleration of Figma/Linear rather than discrete snapping steps.
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -653,19 +672,66 @@ export function FreeformCanvas({
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect   = el.getBoundingClientRect();
-      const curX   = e.clientX - rect.left;
-      const curY   = e.clientY - rect.top;
-      const factor = e.deltaY < 0 ? (1 + ZOOM_STEP) : (1 - ZOOM_STEP);
-      const newZ   = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-      const newPX  = curX - (curX - panX) * (newZ / zoom);
-      const newPY  = curY - (curY - panY) * (newZ / zoom);
-      setViewport(newZ, newPX, newPY);
+
+      // Cancel pan momentum — zoom and momentum shouldn't fight
+      cancelAnimationFrame(rafRef.current);
+
+      const rect = el.getBoundingClientRect();
+      const curX = e.clientX - rect.left;
+      const curY = e.clientY - rect.top;
+
+      // Each wheel tick refines the TARGET (not the live view).
+      // Accumulating toward the target means rapid scroll wheel spins
+      // compound correctly into smooth continuous zoom.
+      const WHEEL_FACTOR = 0.09;  // slightly smaller step than ZOOM_STEP for smooth feel
+      const factor = e.deltaY < 0 ? (1 + WHEEL_FACTOR) : (1 - WHEEL_FACTOR);
+      const prevZ  = targetViewRef.current.zoom;
+      const newZ   = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
+
+      // Adjust target pan to keep cursor point fixed in world space
+      const prevPX = targetViewRef.current.panX;
+      const prevPY = targetViewRef.current.panY;
+      const newPX  = curX - (curX - prevPX) * (newZ / prevZ);
+      const newPY  = curY - (curY - prevPY) * (newZ / prevZ);
+      targetViewRef.current = { zoom: newZ, panX: newPX, panY: newPY };
+
+      // Kick off lerp loop if not already running
+      if (!zoomRafRef.current) {
+        const LERP  = 0.145;  // 14.5% per frame ≈ smooth 350ms settle at 60fps
+        const lerpStep = () => {
+          const tgt = targetViewRef.current;
+          const cur = liveViewRef.current;
+          const dz  = tgt.zoom - cur.zoom;
+          const dpx = tgt.panX - cur.panX;
+          const dpy = tgt.panY - cur.panY;
+
+          // Stop when close enough — imperceptible difference
+          if (Math.abs(dz) < 0.0008 && Math.abs(dpx) < 0.15 && Math.abs(dpy) < 0.15) {
+            setViewport(tgt.zoom, tgt.panX, tgt.panY);
+            zoomRafRef.current = 0;
+            return;
+          }
+
+          setViewport(
+            cur.zoom + dz  * LERP,
+            cur.panX + dpx * LERP,
+            cur.panY + dpy * LERP,
+          );
+          zoomRafRef.current = requestAnimationFrame(lerpStep);
+        };
+        zoomRafRef.current = requestAnimationFrame(lerpStep);
+      }
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [zoom, panX, panY, setViewport]);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(zoomRafRef.current);
+      zoomRafRef.current = 0;
+    };
+    // Stable dependencies only — the lerp loop reads liveViewRef/targetViewRef
+    // via refs to avoid stale closures, so zoom/panX/panY are NOT needed here
+  }, [setViewport]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -705,7 +771,7 @@ export function FreeformCanvas({
         right:      0,
         bottom:     0,
         overflow:   'hidden',
-        cursor:     draggingId ? 'grabbing' : 'default',
+        cursor:     draggingId ? 'grabbing' : 'grab',
         userSelect: draggingId ? 'none' : undefined,
         backgroundColor: tokens.pageBg,
       }}
@@ -733,8 +799,8 @@ export function FreeformCanvas({
             <circle
               cx={dotSpacing / 2}
               cy={dotSpacing / 2}
-              r={zoom > 0.5 ? 1 : 0.5}
-              fill={`${tokens.accent}20`}
+              r={zoom > 0.5 ? 0.8 : 0.4}
+              fill={`${tokens.accent}0c`}
             />
           </pattern>
         </defs>
@@ -911,32 +977,38 @@ export function FreeformCanvas({
           // Revisit — a dormant thought just woken up gets a warm amber signal
           const isRevisiting = revisitId  === item.id;
 
-          const baseOpacity = isOtherDragging ? 0.45
-            : sessionDim    ? Math.min(lifecycle.opacity, 0.5)
+          const baseOpacity = isOtherDragging ? 0.42
+            : sessionDim    ? Math.min(lifecycle.opacity, 0.38)
             : lifecycle.opacity;
 
           // Asymmetric opacity transition:
           // — Coming alive (active) snaps quickly so freshly-touched thoughts
           //   feel immediately responsive.
           // — Settling back (warm/dormant/fading/deep) is slow and graceful.
-          const opacityTransition = isOtherDragging      ? 'opacity 0.15s ease'
-            : lifecycle.state === 'active'               ? 'opacity 0.35s ease'
-            : (isRevisiting || isReturning)              ? 'opacity 1.2s ease, filter 1.8s ease'
-            : 'opacity 1.5s ease';
+          const opacityTransition = isOtherDragging      ? 'opacity 0.18s cubic-bezier(0.4,0,0.2,1)'
+            : lifecycle.state === 'active'               ? 'opacity 0.4s cubic-bezier(0.4,0,0.2,1)'
+            : (isRevisiting || isReturning)              ? 'opacity 1.4s cubic-bezier(0.4,0,0.2,1), filter 2s cubic-bezier(0.4,0,0.2,1)'
+            : 'opacity 1.8s cubic-bezier(0.4,0,0.2,1)';
+
+          // Session focus: non-focus objects also desaturate — they recede tonally
+          // not just in opacity, making the focus region feel genuinely isolated
+          const sessionFilter = sessionDim ? 'saturate(0.35) brightness(0.7)' : 'none';
 
           return (
             <div
               key={item.id}
               style={{
                 opacity:    baseOpacity,
-                transition: opacityTransition,
+                transition: opacityTransition + (sessionDim ? ', filter 1.8s cubic-bezier(0.4,0,0.2,1)' : ''),
                 // Revisit — a dormant thought returning to life: warm amber flash
                 // Return ritual — most recent block on open: soft accent pulse
                 filter: isRevisiting
-                  ? `drop-shadow(0 0 18px rgba(245,158,11,0.45))`
+                  ? `drop-shadow(0 0 18px rgba(245,158,11,0.4))`
                   : isReturning
-                    ? `drop-shadow(0 0 22px ${tokens.accent}35)`
-                    : 'none',
+                    ? `drop-shadow(0 0 22px ${tokens.accent}30)`
+                    : sessionDim
+                      ? sessionFilter
+                      : 'none',
               }}
               onClickCapture={() => {
                 // Pure clicks (no drag) must also record activity + trigger revisit.
@@ -1030,16 +1102,45 @@ export function FreeformCanvas({
 
       </div>
 
-      {/* ── Atmospheric vignette — depth at the periphery ────────────── */}
+      {/* ── Atmospheric depth system ───────────────────────────────────── */}
+      {/* Layer 1: radial vignette — the world fades into darkness at the edges */}
       <div
         aria-hidden="true"
         style={{
-          position:    'absolute',
-          inset:       0,
+          position:      'absolute',
+          inset:         0,
           pointerEvents: 'none',
-          zIndex:      1,
-          background:  `radial-gradient(ellipse at 50% 40%, transparent 55%, ${tokens.pageBg}60 100%)`,
-          transition:  'background 0.4s ease',
+          zIndex:        1,
+          background: activeSession && !designMode
+            ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
+            : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
+          transition:  'background 1.8s cubic-bezier(0.4,0,0.2,1)',
+        }}
+      />
+      {/* Layer 2: edge continuation — linear gradients on all four sides */}
+      {/* These make the viewport feel like a window into a larger world */}
+      <div
+        aria-hidden="true"
+        style={{
+          position:      'absolute',
+          inset:         0,
+          pointerEvents: 'none',
+          zIndex:        1,
+          background: `
+            linear-gradient(180deg, ${tokens.pageBg}28 0%, transparent 5%, transparent 93%, ${tokens.pageBg}28 100%),
+            linear-gradient(90deg,  ${tokens.pageBg}20 0%, transparent 4%, transparent 96%, ${tokens.pageBg}20 100%)
+          `,
+        }}
+      />
+      {/* Layer 3: inset shadow ring — gives depth-of-window feeling */}
+      <div
+        aria-hidden="true"
+        style={{
+          position:      'absolute',
+          inset:         0,
+          pointerEvents: 'none',
+          zIndex:        1,
+          boxShadow:     `inset 0 0 80px rgba(7,11,20,0.5)`,
         }}
       />
 
@@ -1172,13 +1273,13 @@ export function FreeformCanvas({
           alignItems:      'center',
           justifyContent:  'center',
           boxShadow:       `0 4px 20px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`,
-          transition:      'all 0.15s ease',
+          transition:      'all 0.3s cubic-bezier(0.34,1.2,0.64,1)',
           fontWeight:      300,
           lineHeight:      1,
         }}
         onMouseEnter={e => {
           (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover;
-          (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.08)';
+          (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.06)';
         }}
         onMouseLeave={e => {
           (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent;
