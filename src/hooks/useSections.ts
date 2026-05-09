@@ -276,8 +276,8 @@ export function useSectionDetail(sectionId: string | undefined) {
 
   // ── Group operations ────────────────────────────────────────────────────────
 
-  const addGroup = useCallback(async (title: string) => {
-    if (!sectionId) return;
+  const addGroup = useCallback(async (title: string): Promise<string> => {
+    if (!sectionId) throw new Error('No section');
     const maxOrder = section
       ? section.groups.reduce((m, g) => Math.max(m, g.order_index), -1)
       : -1;
@@ -294,6 +294,8 @@ export function useSectionDetail(sectionId: string | undefined) {
       ...prev,
       groups: [...prev.groups, { ...newGroup, items: [] }],
     }));
+
+    return newGroup.id as string;
   }, [sectionId, section, optimisticUpdateItems]);
 
   const updateGroup = useCallback(async (groupId: string, title: string) => {

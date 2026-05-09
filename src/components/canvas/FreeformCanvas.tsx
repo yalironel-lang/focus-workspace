@@ -915,12 +915,21 @@ export function FreeformCanvas({
             : sessionDim    ? Math.min(lifecycle.opacity, 0.5)
             : lifecycle.opacity;
 
+          // Asymmetric opacity transition:
+          // — Coming alive (active) snaps quickly so freshly-touched thoughts
+          //   feel immediately responsive.
+          // — Settling back (warm/dormant/fading/deep) is slow and graceful.
+          const opacityTransition = isOtherDragging      ? 'opacity 0.15s ease'
+            : lifecycle.state === 'active'               ? 'opacity 0.35s ease'
+            : (isRevisiting || isReturning)              ? 'opacity 1.2s ease, filter 1.8s ease'
+            : 'opacity 1.5s ease';
+
           return (
             <div
               key={item.id}
               style={{
                 opacity:    baseOpacity,
-                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 1.2s ease',
+                transition: opacityTransition,
                 // Revisit — a dormant thought returning to life: warm amber flash
                 // Return ritual — most recent block on open: soft accent pulse
                 filter: isRevisiting
@@ -928,10 +937,18 @@ export function FreeformCanvas({
                   : isReturning
                     ? `drop-shadow(0 0 22px ${tokens.accent}35)`
                     : 'none',
-                // Slow the filter transition so the glow fades gracefully
-                ...(isRevisiting || isReturning
-                  ? { transition: 'opacity 1.2s ease, filter 1.8s ease' }
-                  : {}),
+              }}
+              onClickCapture={() => {
+                // Pure clicks (no drag) must also record activity + trigger revisit.
+                // onBlockMouseDown handles drags; this covers taps and single-clicks
+                // that never fire a mousemove threshold.
+                const prev = computeLifecycle(activityRef.current[item.id]);
+                if (prev.state === 'dormant' || prev.state === 'fading' || prev.state === 'deep') {
+                  setRevisitId(item.id);
+                  setTimeout(() => setRevisitId(r => r === item.id ? null : r), 2500);
+                }
+                activityRef.current[item.id] = Date.now();
+                try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
               }}
             >
               <FreeformBlock

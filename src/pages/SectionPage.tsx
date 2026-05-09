@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -15,7 +15,7 @@ import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Zap, Calendar,
   AlertTriangle, CheckSquare, Square, PlayCircle, ChevronDown, ChevronRight,
-  Sliders,
+  Sliders, BookOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -512,7 +512,7 @@ export function SectionPage() {
   const scrollToItem = (itemId: string) =>
     document.getElementById(`item-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-  // Common props passed to every GroupComponent
+  // Common props passed to every GroupComponent and ResourcesBlock
   const groupCallbacks = {
     onAddItem:    addItem,
     onPushItem:   pushItem,
@@ -521,6 +521,7 @@ export function SectionPage() {
     onUpdateItem: updateItem,
     onRenameGroup: updateGroup,
     onDeleteGroup: deleteGroup,
+    onAddGroup:   addGroup,
     onRefresh:     fetchSection,
   };
 
@@ -901,15 +902,14 @@ export function SectionPage() {
             pendingTaskCount={pendingTaskCount}
           />
 
-          {/* Resources: all other groups filtered by hiddenLanes */}
-          {resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id)).length > 0 && (
-            <ResourcesBlock
-              groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
-              sectionId={section.id}
-              groupCallbacks={groupCallbacks}
-              density={customization.density || ''}
-            />
-          )}
+          {/* Resources: all other groups filtered by hiddenLanes.
+              Always rendered — empty state guides user to add resources. */}
+          <ResourcesBlock
+            groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
+            sectionId={section.id}
+            groupCallbacks={groupCallbacks}
+            density={customization.density || ''}
+          />
         </>
       )}
 
@@ -986,6 +986,154 @@ export function SectionPage() {
 
 // ── ResourcesBlock ────────────────────────────────────────────────────────────
 
+// ── ShelfAddForm — inline creation for a single item ─────────────────────────
+// Appears in-place when the user picks a type. Auto-creates "Shelf" group if
+// none exists so users never have to think about group structure.
+
+type ShelfItemType = 'note' | 'link' | 'task';
+
+interface ShelfFormProps {
+  type:        ShelfItemType;
+  groupId:     string | null;   // null → auto-create "Shelf" group
+  onAddGroup:  (title: string) => Promise<string>;
+  onAddItem:   (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
+  onDone:      () => void;
+}
+
+function ShelfAddForm({ type, groupId, onAddGroup, onAddItem, onDone }: ShelfFormProps) {
+  const [title,   setTitle]   = useState('');
+  const [content, setContent] = useState('');
+  const [url,     setUrl]     = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { titleRef.current?.focus(); }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // For links, url is the key field; title is optional (falls back to url)
+    const finalTitle   = type === 'link'
+      ? (title.trim() || url.trim())
+      : title.trim();
+    const finalContent = type === 'link'
+      ? url.trim()
+      : content.trim() || undefined;
+    if (!finalTitle) return;
+
+    setSaving(true);
+    try {
+      let targetId = groupId;
+      if (!targetId) {
+        // Auto-create a default shelf — groups are an implementation detail
+        targetId = await onAddGroup('Shelf');
+      }
+      await onAddItem(targetId, type, finalTitle, finalContent);
+      onDone();
+    } catch {
+      setSaving(false);
+    }
+  };
+
+  const cancel = () => { if (!saving) onDone(); };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-xl p-3 flex flex-col gap-2.5"
+      style={{ backgroundColor: '#070b14', border: '1px solid #1a2236' }}
+    >
+      {/* Type badge */}
+      <div className="flex items-center justify-between">
+        <span
+          className="text-[9px] font-bold uppercase tracking-[0.14em] px-1.5 py-0.5 rounded"
+          style={{ backgroundColor: '#1a2236', color: '#4b5563' }}
+        >
+          {type === 'task' ? 'Checklist item' : type}
+        </span>
+        <button
+          type="button"
+          onClick={cancel}
+          style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#374151'; }}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Link URL — shown first for links since it's the primary field */}
+      {type === 'link' && (
+        <input
+          ref={titleRef as React.RefObject<HTMLInputElement>}
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          placeholder="https://…"
+          className="w-full text-sm bg-transparent outline-none"
+          style={{ color: '#f1f5f9' }}
+          onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
+        />
+      )}
+
+      {/* Title / label */}
+      <input
+        ref={type !== 'link' ? titleRef : undefined}
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        placeholder={
+          type === 'note' ? 'Title (e.g. "Chapter 3 notes")' :
+          type === 'link' ? 'Label (optional)' :
+          'What needs doing?'
+        }
+        className="w-full text-sm bg-transparent outline-none"
+        style={{ color: '#f1f5f9' }}
+        onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
+      />
+
+      {/* Content body — only for notes */}
+      {type === 'note' && (
+        <textarea
+          value={content}
+          onChange={e => setContent(e.target.value)}
+          placeholder="Add details (optional)"
+          rows={3}
+          className="w-full text-xs bg-transparent outline-none resize-none"
+          style={{ color: '#94a3b8' }}
+          onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
+        />
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-2 pt-0.5">
+        <button
+          type="button"
+          onClick={cancel}
+          className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+          style={{ color: '#4b5563' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={saving || (type === 'link' ? !url.trim() : !title.trim())}
+          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40"
+          style={{ backgroundColor: '#1a2236', color: '#94a3b8', border: '1px solid #263043' }}
+          onMouseEnter={e => { if (!saving) (e.currentTarget as HTMLElement).style.backgroundColor = '#263043'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#1a2236'; }}
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+          Save
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ── ResourcesBlock ────────────────────────────────────────────────────────────
+// A lightweight shelf for keeping useful things close to the work.
+// Groups (now "sections") are an optional organising layer — never required.
+
 function ResourcesBlock({
   groups, sectionId, groupCallbacks, density = '',
 }: {
@@ -993,25 +1141,82 @@ function ResourcesBlock({
   sectionId: string;
   density?: 'compact' | 'comfortable' | 'spacious' | '';
   groupCallbacks: {
-    onAddItem: (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
-    onPushItem: (groupId: string, item: Item) => void;
+    onAddItem:    (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
+    onPushItem:   (groupId: string, item: Item) => void;
     onToggleItem: (itemId: string, completed: boolean) => Promise<void>;
     onDeleteItem: (itemId: string) => Promise<void>;
     onUpdateItem: (itemId: string, updates: { title?: string; content?: string | null }) => Promise<void>;
     onRenameGroup: (groupId: string, title: string) => Promise<void>;
     onDeleteGroup: (groupId: string) => Promise<void>;
-    onRefresh: () => void;
+    onAddGroup:   (title: string) => Promise<string>;
+    onRefresh:    () => void;
   };
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
+  // Open by default — this shelf is part of the space, not a collapsed extra.
+  const [isOpen,      setIsOpen]      = useState(true);
+  const [addingType,  setAddingType]  = useState<ShelfItemType | null>(null);
+  const [showSection, setShowSection] = useState(false);
+  const [sectionName, setSectionName] = useState('');
+
+  const totalItems  = groups.reduce((s, g) => s + g.items.length, 0);
+  // The default landing group — first available, or null (auto-create "Shelf")
+  const defaultGroupId = groups[0]?.id ?? null;
+
+  const handleAddSection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = sectionName.trim();
+    if (!t) return;
+    try { await groupCallbacks.onAddGroup(t); } catch { /* handled upstream */ }
+    setSectionName('');
+    setShowSection(false);
+  };
+
+  // Quick-add chips shown in header and inside the body
+  const TYPE_CHIPS: Array<{ type: ShelfItemType; label: string }> = [
+    { type: 'note', label: 'Note'      },
+    { type: 'link', label: 'Link'      },
+    { type: 'task', label: 'Checklist' },
+  ];
+
+  const QuickChips = ({ compact = false }: { compact?: boolean }) => (
+    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      {TYPE_CHIPS.map(({ type, label }) => (
+        <button
+          key={type}
+          onClick={() => { setAddingType(type); setIsOpen(true); }}
+          className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
+          style={{
+            backgroundColor: addingType === type ? '#1a2236' : 'transparent',
+            color:           addingType === type ? '#94a3b8' : '#4b5563',
+            border:          `1px solid ${addingType === type ? '#263043' : 'transparent'}`,
+          }}
+          onMouseEnter={e => {
+            if (addingType !== type) {
+              (e.currentTarget as HTMLElement).style.backgroundColor = '#111827';
+              (e.currentTarget as HTMLElement).style.color = '#94a3b8';
+            }
+          }}
+          onMouseLeave={e => {
+            if (addingType !== type) {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+              (e.currentTarget as HTMLElement).style.color = '#4b5563';
+            }
+          }}
+        >
+          <Plus className="w-2.5 h-2.5" />
+          {compact ? null : label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="rounded-xl overflow-hidden mb-4"
          style={{ backgroundColor: '#0d111a', border: '1px solid #263043' }}>
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div
-        className="px-4 py-3 flex items-center justify-between cursor-pointer select-none transition-colors"
+        className="px-4 py-2.5 flex items-center justify-between cursor-pointer select-none transition-colors"
         style={{ borderBottom: isOpen ? '1px solid #1a2230' : 'none' }}
         onClick={() => setIsOpen(o => !o)}
         onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#111827')}
@@ -1025,7 +1230,7 @@ function ResourcesBlock({
           </span>
           <span className="text-xs font-bold uppercase tracking-[0.12em]"
                 style={{ color: '#f8fafc' }}>
-            Resources
+            Shelf
           </span>
           {totalItems > 0 && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
@@ -1034,25 +1239,125 @@ function ResourcesBlock({
             </span>
           )}
         </div>
-        <span className="text-[10px]" style={{ color: '#374151' }}>
-          {groups.map(g => g.title === 'Exercises' ? 'To Do' : g.title).join(' · ')}
-        </span>
+        {/* Quick-add chips — stop propagation so they don't toggle collapse */}
+        <QuickChips />
       </div>
 
-      {/* Body */}
+      {/* ── Body ── */}
       {isOpen && (
-        <div className="p-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {groups.map((group) => (
-              <GroupComponent
-                key={group.id}
-                group={group}
-                sectionId={sectionId}
-                {...groupCallbacks}
-                density={density}
-              />
-            ))}
-          </div>
+        <div className="p-3 flex flex-col gap-3">
+
+          {/* Inline add form — appears when a type chip is selected */}
+          {addingType && (
+            <ShelfAddForm
+              type={addingType}
+              groupId={defaultGroupId}
+              onAddGroup={groupCallbacks.onAddGroup}
+              onAddItem={groupCallbacks.onAddItem}
+              onDone={() => setAddingType(null)}
+            />
+          )}
+
+          {/* Groups / items */}
+          {groups.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {groups.map(group => (
+                <GroupComponent
+                  key={group.id}
+                  group={group}
+                  sectionId={sectionId}
+                  onAddItem={groupCallbacks.onAddItem}
+                  onPushItem={groupCallbacks.onPushItem}
+                  onToggleItem={groupCallbacks.onToggleItem}
+                  onDeleteItem={groupCallbacks.onDeleteItem}
+                  onUpdateItem={groupCallbacks.onUpdateItem}
+                  onRenameGroup={groupCallbacks.onRenameGroup}
+                  onDeleteGroup={groupCallbacks.onDeleteGroup}
+                  onRefresh={groupCallbacks.onRefresh}
+                  density={density}
+                />
+              ))}
+            </div>
+          ) : !addingType ? (
+            /* ── Empty state ── */
+            <div className="flex flex-col items-center justify-center py-8 gap-4"
+                 style={{ borderRadius: '10px', backgroundColor: '#070b14', border: '1px dashed #1a2236' }}>
+              <div className="flex items-center justify-center w-9 h-9 rounded-xl"
+                   style={{ backgroundColor: '#111827' }}>
+                <BookOpen className="w-4 h-4" style={{ color: '#374151' }} />
+              </div>
+              <div className="text-center px-4">
+                <p className="text-sm font-semibold mb-1" style={{ color: '#94a3b8' }}>
+                  Keep useful things here
+                </p>
+                <p className="text-xs leading-relaxed" style={{ color: '#374151' }}>
+                  Notes, links, references, and files for this space
+                </p>
+              </div>
+              {/* Primary CTAs — one per type */}
+              <div className="flex items-center gap-2">
+                {TYPE_CHIPS.map(({ type, label }) => (
+                  <button
+                    key={type}
+                    onClick={() => setAddingType(type)}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                    style={{ backgroundColor: '#1a2236', color: '#94a3b8', border: '1px solid #263043' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#263043'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#1a2236'; }}
+                  >
+                    <Plus className="w-3 h-3" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── Add section (power-user feature — sits quietly at the bottom) ── */}
+          {groups.length > 0 && (
+            showSection ? (
+              <form
+                onSubmit={handleAddSection}
+                className="flex items-center gap-2 px-2 py-2 rounded-lg"
+                style={{ backgroundColor: '#070b14', border: '1px solid #1a2236' }}
+              >
+                <input
+                  autoFocus
+                  value={sectionName}
+                  onChange={e => setSectionName(e.target.value)}
+                  placeholder="Section name (e.g. Notes, Links, References)"
+                  className="flex-1 text-xs bg-transparent outline-none"
+                  style={{ color: '#f1f5f9' }}
+                  onKeyDown={e => { if (e.key === 'Escape') { setShowSection(false); setSectionName(''); } }}
+                />
+                <button
+                  type="submit"
+                  disabled={!sectionName.trim()}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg disabled:opacity-40 transition-colors"
+                  style={{ backgroundColor: '#1a2236', color: '#94a3b8' }}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowSection(false); setSectionName(''); }}
+                  style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowSection(true)}
+                className="self-start text-[10px] transition-colors"
+                style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; }}
+              >
+                + Add section
+              </button>
+            )
+          )}
         </div>
       )}
     </div>
