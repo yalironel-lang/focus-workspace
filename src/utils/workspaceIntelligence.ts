@@ -84,9 +84,9 @@ function timeLabel(days: number): string {
 function buildDirective(item: { title: string; type: string; timeLabel: string; urgency: UrgencyLevel }): string {
   const typeWord = item.type === 'exam' ? 'exam' : item.type === 'assignment' ? 'assignment' : 'deadline';
 
-  if (item.urgency === 'overdue')  return `Your ${item.title} is ${item.timeLabel}. Address this now.`;
-  if (item.urgency === 'critical') return `${item.title} is due ${item.timeLabel}. Make it your #1 priority.`;
-  if (item.urgency === 'soon')     return `${item.title} ${typeWord} is ${item.timeLabel} — focus on it today.`;
+  if (item.urgency === 'overdue')  return `Your ${item.title} is ${item.timeLabel}. Worth addressing today.`;
+  if (item.urgency === 'critical') return `${item.title} is due ${item.timeLabel}. Give it your full attention.`;
+  if (item.urgency === 'soon')     return `${item.title} ${typeWord} is ${item.timeLabel} — a good session today goes a long way.`;
   return `${item.title} is ${item.timeLabel}.`;
 }
 
@@ -176,11 +176,13 @@ export function computeIntelligence(
   if (topItem) {
     statusNarrative = topItem.directive;
   } else if (overallStatus === 'ahead') {
-    statusNarrative = 'Everything is on track. Great time for deep work.';
+    statusNarrative = 'Everything is on track. A good time to think ahead.';
   } else if (totalItems === 0) {
-    statusNarrative = 'Add your workspaces to start tracking progress.';
+    statusNarrative = 'Add a workspace to begin.';
   } else {
-    statusNarrative = `Momentum at ${momentumScore}% — ${momentumLabel.toLowerCase()}.`;
+    statusNarrative = sections.length > 0
+      ? `You have ${sections.length} active workspace${sections.length !== 1 ? 's' : ''}. Keep going.`
+      : 'Start by adding a workspace.';
   }
 
   return {
@@ -213,9 +215,5 @@ export function getGreeting(name: string): string {
 // ── Day-of-week context ───────────────────────────────────────────────────────
 
 export function getDayContext(): string {
-  const day = new Date().getDay(); // 0=Sun
-  if (day === 0) return 'Rest day or catch-up — your call.';
-  if (day === 5) return 'Last full day of the week — make it count.';
-  if (day === 6) return 'Weekend — use this for deep review.';
   return '';
 }

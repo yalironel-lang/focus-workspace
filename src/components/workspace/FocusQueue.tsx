@@ -53,17 +53,12 @@ export function FocusQueue({ sections, deadlines }: Props) {
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-5 py-3.5"
+        className="flex items-center gap-2 px-5 py-3.5"
         style={{ borderBottom: '1px solid #1a2638' }}
       >
-        <div className="flex items-center gap-2">
-          <Target className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
-          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
-            Focus Queue
-          </span>
-        </div>
-        <span style={{ ...META, color: '#334155' }}>
-          {queue.length} active
+        <Target className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#f59e0b' }} />
+        <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>
+          What's next
         </span>
       </div>
 

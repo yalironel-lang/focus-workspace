@@ -46,14 +46,10 @@ import { PressureRadar }  from '../components/PressureRadar';
 import { MyPortals }      from '../components/MyPortals';
 
 import { loadSession, sortSectionsByUrgency } from '../utils/sessionPlan';
-import { computeIntelligence, getGreeting, getDayContext } from '../utils/workspaceIntelligence';
-import { useDailyLoop }             from '../hooks/useDailyLoop';
-import { useContextualHints }       from '../hooks/useContextualHints';
+import { computeIntelligence, getGreeting } from '../utils/workspaceIntelligence';
 import { useSessionContinuity }     from '../hooks/useSessionContinuity';
-import { DailyEntryBanner }     from '../components/canvas/DailyEntryBanner';
 import { StartHerePanel }       from '../components/canvas/StartHerePanel';
 import { CommandLauncher }      from '../components/launcher/CommandLauncher';
-import { ContextualHint }       from '../components/canvas/ContextualHint';
 import { Loader2, Plus, X }     from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -70,15 +66,6 @@ type InspectorTab = 'module' | 'theme' | 'presets';
 const LAYOUT_STORAGE_KEY = 'fw_workspace_layout_v3';
 /** Marks that the user has seen the guided onboarding intro */
 const ONBOARDING_KEY = 'fw_onboarding_v1';
-
-// ── Canvas zone definitions ───────────────────────────────────────────────────
-
-const CANVAS_ZONES = [
-  { id: 'focus',     label: 'Focus Area',    icon: '◎', afterModuleIndex: -1 },
-  { id: 'capture',   label: 'Capture',       icon: '⊕', afterModuleIndex: 2  },
-  { id: 'personal',  label: 'Personal',      icon: '◇', afterModuleIndex: 5  },
-  { id: 'resources', label: 'Resources',     icon: '⊞', afterModuleIndex: 8  },
-] as const;
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
@@ -114,8 +101,7 @@ export function Dashboard() {
   const customTools  = useCustomTools();
   const [createToolOpen, setCreateToolOpen] = useState(false);
 
-  // ── Intelligence + daily loop ────────────────────────────────────────────
-  const dailyLoop    = useDailyLoop();
+  // ── Session continuity ───────────────────────────────────────────────────
   const continuity   = useSessionContinuity();
 
   // On every mount: if there's a live sessionStorage session, mirror it to localStorage
@@ -569,63 +555,6 @@ export function Dashboard() {
   const enabledModulesForFreeform = enabledModules;
   const hasContent = enabledModules.length > 0 || blocks.length > 0 || customTools.tools.length > 0;
 
-  // ── Contextual hints ──────────────────────────────────────────────────────
-  const hintCtx = React.useMemo(() => ({
-    hasContent,
-    designMode,
-    blocksCount:       blocks.length,
-    enabledModuleIds:  enabledModules.map(m => m.id),
-    sectionsCount:     sections.length,
-    sessionCount:      dailyLoop.sessionCount,
-  }), [hasContent, designMode, blocks.length, enabledModules, sections.length, dailyLoop.sessionCount]);
-
-  const hints = useContextualHints(
-    hintCtx,
-    () => setAddPanelOpen(true),                          // onCmdK
-    () => { toggleModule('capture'); },                   // onAddCapture
-  );
-
-  // ── Canvas zone helper ────────────────────────────────────────────────────
-
-  function ZoneLabel({ label, icon }: { label: string; icon: string }) {
-    return (
-      <div
-        style={{
-          gridColumn:   'span 12',
-          display:      'flex',
-          alignItems:   'center',
-          gap:          '8px',
-          padding:      '4px 2px',
-          pointerEvents: 'none',
-          userSelect:   'none',
-        }}
-      >
-        <span style={{ fontSize: '10px', color: tokens.accent, opacity: 0.6 }}>{icon}</span>
-        <div
-          style={{
-            fontFamily:    "'Space Grotesk', sans-serif",
-            fontSize:      '9px',
-            fontWeight:    700,
-            letterSpacing: '0.16em',
-            textTransform: 'uppercase',
-            color:         tokens.textGhost,
-            opacity:       0.7,
-          }}
-        >
-          {label}
-        </div>
-        <div
-          style={{
-            flex:            1,
-            height:          '1px',
-            backgroundColor: tokens.divider,
-            opacity:         0.4,
-          }}
-        />
-      </div>
-    );
-  }
-
   // ── Inline "Add anything" zone ────────────────────────────────────────────
 
   function InlineAddZone() {
@@ -695,17 +624,6 @@ export function Dashboard() {
       </div>
     );
   }
-
-  // ── Design mode hint banner (first time only) ─────────────────────────────
-
-  const [showDesignHint, setShowDesignHint] = useState(() =>
-    !localStorage.getItem(LAYOUT_STORAGE_KEY)
-  );
-
-  // Dismiss hint once they interact with the canvas
-  useEffect(() => {
-    if (hasContent) setShowDesignHint(false);
-  }, [hasContent]);
 
   // ── CMD+K / CTRL+K → open command launcher ───────────────────────────────
   useEffect(() => {
@@ -826,47 +744,6 @@ export function Dashboard() {
               />
             )}
 
-            {/* ── First-time design mode banner ── */}
-            {designMode && showDesignHint && (
-              <div
-                className="animate-slide-up"
-                style={{
-                  position:        'sticky',
-                  top:             '48px',
-                  zIndex:          35,
-                  margin:          '0',
-                  padding:         '10px 20px',
-                  backgroundColor: `${tokens.accent}12`,
-                  borderBottom:    `1px solid ${tokens.accent}25`,
-                  display:         'flex',
-                  alignItems:      'center',
-                  justifyContent:  'space-between',
-                  gap:             '12px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '14px' }}>✦</span>
-                  <span style={{
-                    fontFamily:    "'Space Grotesk', sans-serif",
-                    fontSize:      '12px',
-                    fontWeight:    600,
-                    color:         tokens.accent,
-                  }}>
-                    Editing layout
-                  </span>
-                  <span style={{ fontSize: '12px', color: tokens.textMuted }}>
-                    — drag to reorder, resize cards, or press ⌘K to add anything.
-                  </span>
-                </div>
-                <button
-                  onClick={() => setShowDesignHint(false)}
-                  style={{ color: tokens.textGhost, background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
-                >
-                  <X style={{ width: '14px', height: '14px' }} />
-                </button>
-              </div>
-            )}
-
             <div
               className="mx-auto relative z-10"
               style={{
@@ -898,33 +775,13 @@ export function Dashboard() {
                   />
                 )}
 
-                {/* ── Daily intelligence banner (secondary — status strip) ── */}
-                {!designMode && (
-                  <DailyEntryBanner
-                    tokens={tokens}
-                    intel={intel}
-                    loop={dailyLoop}
-                    greeting={getGreeting(displayName)}
-                    dayContext={getDayContext()}
-                    lastSession={null}
-                    onStartSession={() => setShowSessionModal(true)}
-                    onDismissContinuity={continuity.clearLastSession}
-                  />
-                )}
-
-                {/* ── System modules with zone labels ── */}
-                {enabledModules.map((m, idx) => {
+                {/* ── System modules ── */}
+                {enabledModules.map((m) => {
                   const content = renderModuleContent(m.id);
                   if (content === null) return null;
 
-                  // Inject zone label before this module if zone threshold matches
-                  const zoneHere = designMode
-                    ? CANVAS_ZONES.find(z => z.afterModuleIndex === idx - 1)
-                    : undefined;
-
                   return (
                     <React.Fragment key={m.id}>
-                      {zoneHere && <ZoneLabel label={zoneHere.label} icon={zoneHere.icon} />}
                       <div
                         className="min-w-0"
                         data-module-id={m.id}
@@ -1079,14 +936,6 @@ export function Dashboard() {
         panelOpen={addPanelOpen}
         onAddBlock={handleAddBlock}
         onOpenModules={() => setAddPanelOpen(o => !o)}
-      />
-
-      {/* ── Contextual hint (progressive disclosure) ─────────── */}
-      <ContextualHint
-        hint={hints.activeHint}
-        tokens={tokens}
-        onDismiss={hints.dismissHint}
-        onAction={hints.triggerAction}
       />
 
       {/* ── Command Launcher ⌘K ──────────────────────────────── */}

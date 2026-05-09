@@ -223,8 +223,8 @@ const CORE_IDS = ['capture', 'deep-work-timer', 'text', 'checklist'] as const;
 
 // Value-first descriptions for core items (override catalog descriptions)
 const CORE_COPY: Record<string, { headline: string; body: string }> = {
-  'capture':         { headline: 'Capture thoughts',    body: 'Write anything — tasks, worries, ideas. Clear your head first.' },
-  'deep-work-timer': { headline: 'Focus timer',         body: 'Block time to work on one thing. No distractions.' },
+  'capture':         { headline: 'Capture',              body: 'Write anything — tasks, worries, ideas. Clear your head first.' },
+  'deep-work-timer': { headline: 'Timer',               body: 'Block time to work on one thing. No distractions.' },
   'text':            { headline: 'Write a note',        body: 'Freeform writing, journaling, or thinking on paper.' },
   'checklist':       { headline: 'Create a checklist',  body: 'Break a goal into small, checkable steps.' },
 };

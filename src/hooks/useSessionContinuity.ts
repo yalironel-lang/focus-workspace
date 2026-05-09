@@ -18,7 +18,7 @@
  * Design:
  *   - Zero dependencies beyond localStorage.
  *   - Never modifies sessionStorage — pure observer / parallel write.
- *   - `isRecent` = saved within RECENT_HOURS (12h).
+ *   - `isRecent` = saved within RECENT_HOURS (48h).
  */
 
 import { useState, useCallback } from 'react';
@@ -26,7 +26,7 @@ import { useState, useCallback } from 'react';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY   = 'fw_last_session_v1';
-const RECENT_HOURS  = 12;
+const RECENT_HOURS  = 48;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

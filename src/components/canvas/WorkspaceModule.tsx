@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import { ModuleSize, SIZE_LABEL } from '../../hooks/useWorkspaceLayout';
+import { ModuleSize } from '../../hooks/useWorkspaceLayout';
 import { getMeta } from '../../modules/registry';
 import {
   DesignTokens, ModuleTheme, SurfaceStyle,
@@ -33,16 +33,8 @@ const LABEL_STYLE: React.CSSProperties = {
   fontWeight:    700,
 };
 
-// Four corner handle positions
-const CORNERS = [
-  { top: '-5px',    left: '-5px'  },
-  { top: '-5px',    right: '-5px' },
-  { bottom: '-5px', left: '-5px'  },
-  { bottom: '-5px', right: '-5px' },
-] as const;
-
 export function WorkspaceModule({
-  id, size, designMode, selected, dragOver, isDragging,
+  id, size: _size, designMode, selected, dragOver, isDragging,
   tokens, design, moduleTheme,
   children, onSelect, onDragStart, onDragOver, onDrop, onDragEnd,
 }: Props) {
@@ -173,7 +165,7 @@ export function WorkspaceModule({
         </div>
       )}
 
-      {/* ── Design mode: drag handle + size badge ─────────────────────────── */}
+      {/* ── Design mode: drag handle ──────────────────────────────────────── */}
       {designMode && (
         <div
           className={`absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5
@@ -183,34 +175,15 @@ export function WorkspaceModule({
           style={{ pointerEvents: 'auto' }}
           onClick={e => e.stopPropagation()}
         >
-          {/* Size badge */}
-          <span
-            style={{
-              ...LABEL_STYLE,
-              padding:         '2px 7px',
-              borderRadius:    '20px',
-              backgroundColor: selected
-                ? `${selAccent}18`
-                : `${tokens.cardBg}f0`,
-              color:           selected ? selAccent : tokens.textMuted,
-              border:         `1px solid ${selected ? selAccent + '40' : tokens.cardBorder}`,
-              backdropFilter:  'blur(12px)',
-              boxShadow:       '0 2px 8px rgba(0,0,0,0.3)',
-            }}
-          >
-            {SIZE_LABEL[size]}
-          </span>
-
           {/* Drag handle — 3×2 dot grid */}
           <div
             title="Drag to reorder"
             style={{
               padding:             '5px 4px',
               borderRadius:        '8px',
-              backgroundColor:     selected ? `${selAccent}18` : `${tokens.cardBg}f0`,
-              border:             `1px solid ${selected ? selAccent + '40' : tokens.cardBorder}`,
+              backgroundColor:     `${tokens.cardBg}f0`,
+              border:              `1px solid ${tokens.cardBorder}`,
               backdropFilter:      'blur(12px)',
-              boxShadow:           '0 2px 8px rgba(0,0,0,0.3)',
               cursor:              'grab',
               display:             'grid',
               gridTemplateColumns: 'repeat(2, 4px)',
@@ -224,34 +197,14 @@ export function WorkspaceModule({
                   width:           '3px',
                   height:          '3px',
                   borderRadius:    '50%',
-                  backgroundColor: selected ? selAccent : tokens.textMuted,
-                  transition:      'background-color 0.15s',
+                  backgroundColor: tokens.textMuted,
+                  opacity:         0.5,
                 }}
               />
             ))}
           </div>
         </div>
       )}
-
-      {/* ── Corner handles — circles with ambient glow ─────────────────────── */}
-      {designMode && selected && CORNERS.map((pos, i) => (
-        <div
-          key={i}
-          style={{
-            position:        'absolute',
-            zIndex:          20,
-            width:           '10px',
-            height:          '10px',
-            borderRadius:    '50%',
-            backgroundColor: selAccent,
-            boxShadow:       `0 0 8px ${selGlow}, 0 0 16px ${selGlow}`,
-            border:          `1.5px solid rgba(255,255,255,0.3)`,
-            pointerEvents:   'none',
-            transition:      'box-shadow 0.3s ease',
-            ...pos,
-          }}
-        />
-      ))}
 
       {/* ── Module label — bottom, with icon ──────────────────────────────── */}
       {designMode && (

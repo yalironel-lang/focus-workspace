@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom';
 import { AtmosphereTokens, ATMOSPHERES } from '../../hooks/useAtmosphere';
 import {
   BookOpenCheck, Plus, ChevronDown, LogOut,
-  LayoutDashboard, Move, Sliders, Settings2, X,
+  LayoutDashboard, Move, Sliders, Settings2,
 } from 'lucide-react';
 import type { CanvasMode } from '../../hooks/useCanvasMode';
 
@@ -93,7 +93,7 @@ export function CommandBar({
         <div className="flex items-center gap-2.5" style={{ flexShrink: 0 }}>
           <Link
             to="/dashboard"
-            className="flex items-center gap-2"
+            className="flex items-center gap-2.5"
             style={{ textDecoration: 'none' }}
           >
             <div style={{
@@ -101,7 +101,6 @@ export function CommandBar({
               height:          '26px',
               borderRadius:    '7px',
               backgroundColor: tokens.accent,
-              boxShadow:       `0 0 12px ${tokens.accentGlow}`,
               display:         'flex',
               alignItems:      'center',
               justifyContent:  'center',
@@ -110,49 +109,65 @@ export function CommandBar({
               <BookOpenCheck style={{ width: '14px', height: '14px', color: '#000' }} strokeWidth={2.5} />
             </div>
             <span
-              className="hidden sm:block"
               style={{
                 fontFamily:    "'Plus Jakarta Sans', sans-serif",
-                fontSize:      '14px',
-                fontWeight:    700,
-                letterSpacing: '-0.02em',
-                color:         tokens.textPrimary,
+                fontSize:      '13px',
+                fontWeight:    600,
+                color:         tokens.textSecondary,
+                maxWidth:      '140px',
+                overflow:      'hidden',
+                textOverflow:  'ellipsis',
+                whiteSpace:    'nowrap',
               }}
             >
-              Focus
+              {userName ? `${userName}'s space` : 'My space'}
             </span>
           </Link>
-
-          <span style={{
-            color:      tokens.cardBorderHover,
-            fontSize:   '16px',
-            fontWeight: 200,
-            lineHeight: 1,
-            userSelect: 'none',
-          }}>
-            /
-          </span>
-
-          <span style={{
-            fontSize:     '13px',
-            fontWeight:   500,
-            color:        tokens.textSecondary,
-            maxWidth:     '160px',
-            overflow:     'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace:   'nowrap',
-          }}>
-            {userName ? `${userName}'s workspace` : 'My workspace'}
-          </span>
         </div>
 
         {/* ── Right: Controls ───────────────────────────────────── */}
         <div className="flex items-center" style={{ gap: '2px' }}>
 
-          {/* PRIMARY: Add to workspace */}
+          {/* Space mode toggle — icon pair, one click to switch */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
+            {([
+              { mode: 'grid',     icon: LayoutDashboard, title: 'Guided layout' },
+              { mode: 'freeform', icon: Move,            title: 'Thinking space' },
+            ] as const).map(({ mode, icon: Icon, title }) => {
+              const isActive = canvasMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => { if (!isActive) onToggleCanvas(); }}
+                  title={title}
+                  style={{
+                    width:           '30px',
+                    height:          '30px',
+                    display:         'flex',
+                    alignItems:      'center',
+                    justifyContent:  'center',
+                    borderRadius:    '8px',
+                    border:          isActive ? `1px solid ${tokens.accent}30` : '1px solid transparent',
+                    backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
+                    color:           isActive ? tokens.accent : tokens.textMuted,
+                    cursor:          isActive ? 'default' : 'pointer',
+                    transition:      'all 0.15s ease',
+                  }}
+                  onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary }); }}
+                  onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textMuted }); }}
+                >
+                  <Icon style={{ width: '13px', height: '13px' }} />
+                </button>
+              );
+            })}
+          </div>
+
+          <Divider tokens={tokens} />
+
+          {/* PRIMARY: Add to space */}
           <button
             onClick={onOpenAdd}
-            title="Add to workspace  ⌘K"
+            title="Add to your space  ⌘K"
             style={{
               ...navBtn(tokens),
               backgroundColor: tokens.accentSubtle,
@@ -174,18 +189,18 @@ export function CommandBar({
             }}
           >
             <Plus style={{ width: '13px', height: '13px' }} strokeWidth={2.5} />
-            <span>Add</span>
+            <span className="hidden sm:inline">Add</span>
           </button>
 
           <Divider tokens={tokens} />
 
-          {/* CUSTOMIZE dropdown — theme + mode + edit */}
+          {/* CUSTOMIZE dropdown — atmosphere + edit layout only */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => setCustomizeOpen(o => !o)}
-              title="Customize workspace"
+              title="Atmosphere"
               style={{
-                ...navBtn(tokens, customizeOpen || designMode || canvasMode === 'freeform'),
+                ...navBtn(tokens, customizeOpen || designMode),
                 ...(customizeOpen ? {
                   backgroundColor: tokens.accentSubtle,
                   color:           tokens.accent,
@@ -208,12 +223,11 @@ export function CommandBar({
               }}
             >
               <Settings2 style={{ width: '12px', height: '12px' }} />
-              <span className="hidden sm:inline">Customize</span>
               <ChevronDown style={{
-                width:     '11px',
-                height:    '11px',
+                width:      '11px',
+                height:     '11px',
                 transition: 'transform 0.2s ease',
-                transform: customizeOpen ? 'rotate(180deg)' : 'none',
+                transform:  customizeOpen ? 'rotate(180deg)' : 'none',
               }} />
             </button>
 
@@ -224,7 +238,7 @@ export function CommandBar({
                   className="absolute right-0 top-full z-50"
                   style={{
                     marginTop:       '8px',
-                    width:           '280px',
+                    width:           '260px',
                     backgroundColor: tokens.cardBg,
                     border:          `1px solid ${tokens.cardBorder}`,
                     borderRadius:    `${Math.min(tokens.radius, 18)}px`,
@@ -234,8 +248,7 @@ export function CommandBar({
                     overflow:        'hidden',
                   }}
                 >
-
-                  {/* ── Section: Layout mode ──────────────────────── */}
+                  {/* ── Atmosphere ────────────────────────────────── */}
                   <div style={{ padding: '10px 14px 8px', borderBottom: `1px solid ${tokens.divider}` }}>
                     <p style={{
                       fontFamily:    "'Space Grotesk', sans-serif",
@@ -244,99 +257,7 @@ export function CommandBar({
                       letterSpacing: '0.14em',
                       textTransform: 'uppercase',
                       color:         tokens.textGhost,
-                      margin:        '0 0 8px',
-                    }}>
-                      Layout
-                    </p>
-
-                    {/* Mode toggle */}
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      {([
-                        { mode: 'grid',     label: 'Guided Layout', icon: LayoutDashboard, tip: 'Organized daily workflow' },
-                        { mode: 'freeform', label: 'Free Space',    icon: Move,           tip: 'Move anything anywhere' },
-                      ] as const).map(({ mode, label, icon: Icon, tip }) => {
-                        const isActive = canvasMode === mode;
-                        return (
-                          <button
-                            key={mode}
-                            onClick={() => { if (!isActive) onToggleCanvas(); }}
-                            style={{
-                              flex:            1,
-                              display:         'flex',
-                              flexDirection:   'column',
-                              alignItems:      'flex-start',
-                              gap:             '3px',
-                              padding:         '8px 10px',
-                              borderRadius:    '10px',
-                              border:          `1px solid ${isActive ? tokens.accent + '40' : tokens.cardBorder}`,
-                              backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
-                              cursor:          isActive ? 'default' : 'pointer',
-                              textAlign:       'left' as const,
-                              transition:      'all 0.12s ease',
-                            }}
-                            onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
-                            onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              <Icon style={{ width: '11px', height: '11px', color: isActive ? tokens.accent : tokens.textSecondary }} />
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: isActive ? tokens.accent : tokens.textPrimary }}>
-                                {label}
-                              </span>
-                            </div>
-                            <span style={{ fontSize: '9px', color: tokens.textMuted, lineHeight: 1.3 }}>
-                              {tip}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Edit layout toggle */}
-                    <button
-                      onClick={() => { onToggleDesign(); setCustomizeOpen(false); }}
-                      style={{
-                        marginTop:       '6px',
-                        width:           '100%',
-                        display:         'flex',
-                        alignItems:      'center',
-                        gap:             '7px',
-                        padding:         '7px 10px',
-                        borderRadius:    '8px',
-                        border:          `1px solid ${designMode ? tokens.accent + '40' : tokens.cardBorder}`,
-                        backgroundColor: designMode ? tokens.accentSubtle : 'transparent',
-                        cursor:          'pointer',
-                        textAlign:       'left' as const,
-                        transition:      'all 0.12s ease',
-                      }}
-                      onMouseEnter={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
-                      onMouseLeave={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
-                    >
-                      <Sliders style={{ width: '11px', height: '11px', color: designMode ? tokens.accent : tokens.textSecondary }} />
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: designMode ? tokens.accent : tokens.textPrimary }}>
-                        {designMode ? 'Exit edit mode' : 'Edit layout'}
-                      </span>
-                      {designMode && (
-                        <span style={{
-                          marginLeft: 'auto',
-                          fontSize: '9px', fontWeight: 700, letterSpacing: '0.08em',
-                          color: tokens.accent, opacity: 0.7,
-                        }}>
-                          ON
-                        </span>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* ── Section: Atmosphere ───────────────────────── */}
-                  <div style={{ padding: '8px 14px 6px', borderBottom: `1px solid ${tokens.divider}` }}>
-                    <p style={{
-                      fontFamily:    "'Space Grotesk', sans-serif",
-                      fontSize:      '9px',
-                      fontWeight:    700,
-                      letterSpacing: '0.14em',
-                      textTransform: 'uppercase',
-                      color:         tokens.textGhost,
-                      margin:        '0 0 6px',
+                      margin:        '0 0 7px',
                     }}>
                       Atmosphere
                     </p>
@@ -363,17 +284,11 @@ export function CommandBar({
                             onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
                           >
                             <span style={{ fontSize: '13px', lineHeight: 1, flexShrink: 0 }}>{atm.emoji}</span>
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <p style={{ fontSize: '11px', fontWeight: 600, color: isActive ? tokens.accent : tokens.textPrimary, margin: 0 }}>
-                                {atm.name}
-                              </p>
-                            </div>
+                            <p style={{ fontSize: '11px', fontWeight: 600, color: isActive ? tokens.accent : tokens.textPrimary, margin: 0, flex: 1 }}>
+                              {atm.name}
+                            </p>
                             {isActive && (
-                              <div style={{
-                                width: '5px', height: '5px', borderRadius: '50%',
-                                backgroundColor: tokens.accent,
-                                flexShrink: 0,
-                              }} />
+                              <div style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: tokens.accent, flexShrink: 0 }} />
                             )}
                           </button>
                         );
@@ -381,29 +296,33 @@ export function CommandBar({
                     </div>
                   </div>
 
-                  {/* Footer close */}
-                  <div style={{ padding: '6px 14px 10px', display: 'flex', justifyContent: 'flex-end' }}>
+                  {/* ── Edit layout ───────────────────────────────── */}
+                  <div style={{ padding: '8px 14px 10px' }}>
                     <button
-                      onClick={() => setCustomizeOpen(false)}
+                      onClick={() => { onToggleDesign(); setCustomizeOpen(false); }}
                       style={{
+                        width:           '100%',
                         display:         'flex',
                         alignItems:      'center',
-                        gap:             '4px',
-                        padding:         '4px 10px',
-                        borderRadius:    '7px',
-                        border:          `1px solid ${tokens.cardBorder}`,
-                        backgroundColor: 'transparent',
+                        gap:             '7px',
+                        padding:         '7px 10px',
+                        borderRadius:    '8px',
+                        border:          `1px solid ${designMode ? tokens.accent + '40' : tokens.cardBorder}`,
+                        backgroundColor: designMode ? tokens.accentSubtle : 'transparent',
                         cursor:          'pointer',
-                        fontSize:        '11px',
-                        fontWeight:      500,
-                        color:           tokens.textGhost,
+                        textAlign:       'left' as const,
                         transition:      'all 0.12s ease',
                       }}
-                      onMouseEnter={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary })}
-                      onMouseLeave={e => Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textGhost })}
+                      onMouseEnter={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder }); }}
+                      onMouseLeave={e => { if (!designMode) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent' }); }}
                     >
-                      <X style={{ width: '10px', height: '10px' }} />
-                      Close
+                      <Sliders style={{ width: '11px', height: '11px', color: designMode ? tokens.accent : tokens.textSecondary }} />
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: designMode ? tokens.accent : tokens.textPrimary }}>
+                        {designMode ? 'Done editing' : 'Edit layout'}
+                      </span>
+                      {designMode && (
+                        <div style={{ marginLeft: 'auto', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: tokens.accent }} />
+                      )}
                     </button>
                   </div>
                 </div>

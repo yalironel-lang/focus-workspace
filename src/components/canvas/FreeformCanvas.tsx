@@ -509,54 +509,27 @@ export function FreeformCanvas({
             position: 'absolute', left: '50%', top: '38%',
             transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
           }}>
-            <div style={{
-              width: '48px', height: '48px', borderRadius: '14px', margin: '0 auto 12px',
-              backgroundColor: tokens.accentSubtle,
-              border: `1px solid ${tokens.accent}25`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            <p style={{
+              fontFamily:    "'Plus Jakarta Sans', sans-serif",
+              fontSize:      '18px',
+              fontWeight:    700,
+              color:         tokens.textSecondary,
+              margin:        0,
+              letterSpacing: '-0.02em',
             }}>
-              <Move style={{ width: '20px', height: '20px', color: tokens.accent, opacity: 0.7 }} />
-            </div>
-            <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '14px', fontWeight: 600, color: tokens.textSecondary, margin: 0 }}>
-              Your Free Space is empty
+              Your thinking space.
             </p>
-            <p style={{ fontSize: '12px', color: tokens.textMuted, margin: '6px 0 0', lineHeight: 1.5 }}>
-              Press <kbd style={{ fontFamily: 'monospace', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${tokens.cardBorder}`, fontSize: '11px', color: tokens.textSecondary, backgroundColor: tokens.wellBg }}>⌘K</kbd> to add cards, tools, and modules
+            <p style={{
+              fontSize:   '13px',
+              color:      tokens.textGhost,
+              margin:     '8px 0 0',
+              lineHeight: 1.5,
+            }}>
+              Press <kbd style={{ fontFamily: 'monospace', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${tokens.cardBorder}`, fontSize: '11px', color: tokens.textMuted, backgroundColor: tokens.wellBg }}>⌘K</kbd> to add something.
             </p>
           </div>
         )}
 
-        {/* ── Selection hint (nothing selected, has items) ──── */}
-        {allItems.length > 0 && !selectedId && !draggingId && (
-          <div style={{
-            position: 'absolute', left: '50%', bottom: '80px',
-            transform: 'translateX(-50%)', textAlign: 'center', pointerEvents: 'none',
-            opacity: 0.5, transition: 'opacity 0.3s ease',
-          }}>
-            <p style={{ fontSize: '11px', color: tokens.textMuted, margin: 0, whiteSpace: 'nowrap' }}>
-              Click a card to select it · Drag its header to move
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* ── Mode badge (top-left) ─────────────────────────────────── */}
-      <div style={{
-        position: 'absolute', top: '12px', left: '16px', zIndex: 20,
-        display: 'flex', alignItems: 'center', gap: '5px',
-        padding: '3px 8px 3px 6px',
-        borderRadius: '8px',
-        backgroundColor: `${tokens.accent}14`,
-        border: `1px solid ${tokens.accent}28`,
-        color: tokens.accent,
-        fontSize: '10px', fontWeight: 700,
-        fontFamily: "'Space Grotesk', sans-serif",
-        letterSpacing: '0.06em',
-        pointerEvents: 'none',
-        userSelect: 'none',
-      }}>
-        <Move style={{ width: '9px', height: '9px' }} />
-        FREE SPACE
       </div>
 
       {/* ── Move indicator (top-center badge) ─────────────────────── */}

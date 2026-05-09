@@ -77,7 +77,7 @@ export function DeepWorkTimer({ tokens }: Props) {
     >
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span style={{ ...META, color: tokens.textGhost }}>Deep Work</span>
+        <span style={{ ...META, color: tokens.textGhost }}>Timer</span>
         <div className="flex gap-1">
           {PRESETS.map((p, i) => (
             <button
@@ -135,8 +135,8 @@ export function DeepWorkTimer({ tokens }: Props) {
             >
               {mins}:{secs}
             </span>
-            <span style={{ ...META, color: phase === 'focus' ? tokens.accent : tokens.textMuted, fontSize: '9px' }}>
-              {phase === 'focus' ? 'FOCUS' : 'BREAK'}
+            <span style={{ ...META, color: phase === 'focus' ? tokens.accent : tokens.textMuted, fontSize: '9px', textTransform: 'none', letterSpacing: '0.04em' }}>
+              {phase === 'focus' ? 'focus' : 'rest'}
             </span>
           </div>
         </div>
