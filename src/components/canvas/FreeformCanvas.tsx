@@ -18,10 +18,20 @@
  * Normal (view) mode hides controls and allows content interaction.
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2, Move, X } from 'lucide-react';
 
-const GUIDE_KEY = 'fw_free_canvas_guide_seen_v1';
+const GUIDE_KEY     = 'fw_free_canvas_guide_seen_v1';
+const ACTIVITY_KEY  = 'fw_obj_activity_v2';
+
+// Freshness: 1.0 when recently used, fades to 0.72 after 3+ days of no touch
+function computeFreshness(lastActive: number): number {
+  const hoursAgo = (Date.now() - lastActive) / 3_600_000;
+  if (hoursAgo < 1)   return 1.0;
+  if (hoursAgo < 24)  return 1.0 - (hoursAgo / 24) * 0.12;   // 1.0 → 0.88
+  if (hoursAgo < 72)  return 0.88 - ((hoursAgo - 24) / 48) * 0.16; // 0.88 → 0.72
+  return 0.72;
+}
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ModuleConfig } from '../../hooks/useWorkspaceLayout';
 import type { CustomBlock } from '../../hooks/useCustomBlocks';
@@ -47,10 +57,13 @@ interface DragState {
   startBlockY?: number;
   startBlockW?: number;
   startBlockH?: number;
-  // velocity tracking (canvas pan only)
+  // velocity tracking (canvas pan and block move)
   lastX?:     number;
   lastY?:     number;
   lastT?:     number;
+  // last applied block world position — starting point for block inertia
+  currentBlockX?: number;
+  currentBlockY?: number;
 }
 
 interface Props {
@@ -78,12 +91,13 @@ interface Props {
 // ── Canvas controls ───────────────────────────────────────────────────────────
 
 function CanvasControls({
-  tokens, zoom, snapToGrid,
+  tokens, zoom, snapToGrid, visible,
   onZoomIn, onZoomOut, onReset, onCenter, onToggleSnap, onAutoOrganize,
 }: {
   tokens: AtmosphereTokens;
   zoom: number;
   snapToGrid: boolean;
+  visible: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
@@ -116,7 +130,7 @@ function CanvasControls({
         position:             'absolute',
         bottom:               '20px',
         left:                 '50%',
-        transform:            'translateX(-50%)',
+        transform:            `translateX(-50%) translateY(${visible ? '0' : '6px'})`,
         zIndex:               30,
         display:              'flex',
         alignItems:           'center',
@@ -128,6 +142,9 @@ function CanvasControls({
         backdropFilter:       'blur(24px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
         boxShadow:            '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
+        opacity:              visible ? 1 : 0,
+        pointerEvents:        visible ? 'auto' : 'none',
+        transition:           'opacity 0.25s ease, transform 0.25s ease',
       }}
     >
       <button style={btn} title="Zoom out" onClick={onZoomOut}
@@ -213,11 +230,23 @@ export function FreeformCanvas({
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingId,      setDraggingId]      = useState<string | null>(null);
+  // Controls bar is ambient — only surfaces near the bottom edge
+  const [controlsNear,   setControlsNear]    = useState(false);
 
   // ── Momentum / inertia refs ───────────────────────────────────────────────
   const velRef  = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
   const rafRef  = useRef(0);                   // animation frame handle
+
+  // ── Object aging ─────────────────────────────────────────────────────────
+  // Maps blockId → last-interaction timestamp (ms). Loaded once, updated on touch.
+  const activityRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ACTIVITY_KEY);
+      if (raw) activityRef.current = JSON.parse(raw) as Record<string, number>;
+    } catch { /* quota / corrupt */ }
+  }, []);
 
   const [showGuide, setShowGuide] = useState<boolean>(() => {
     try { return !localStorage.getItem(GUIDE_KEY); } catch { return false; }
@@ -250,6 +279,64 @@ export function FreeformCanvas({
     ...blocks.map(b => ({ kind: 'block' as const, id: b.id })),
     ...tools.map(t => ({ kind: 'tool' as const, id: t.id })),
   ];
+
+  // ── Proximity clustering ──────────────────────────────────────────────────
+  // Detect groups of objects that live close together and render a shared
+  // ghost backdrop — a visual signal that these things belong in the same region.
+
+  const PROXIMITY = 80; // world-space px — how close centers must be to cluster
+
+  interface ClusterBox { x: number; y: number; w: number; h: number }
+
+  const clusters = useMemo((): ClusterBox[] => {
+    if (allItems.length < 2) return [];
+
+    // Compute bounding box center for each item
+    const centers = allItems.map(({ id }) => {
+      const p = positions[id];
+      if (!p) return null;
+      const bw = p.w > 0 ? p.w : 340;
+      const bh = p.h > 0 ? p.h : 220;
+      return { id, cx: p.x + bw / 2, cy: p.y + bh / 2, x: p.x, y: p.y, bw, bh };
+    }).filter(Boolean) as Array<{ id: string; cx: number; cy: number; x: number; y: number; bw: number; bh: number }>;
+
+    // Union-Find grouping by proximity
+    const parent: Record<string, string> = {};
+    centers.forEach(c => { parent[c.id] = c.id; });
+    const find = (id: string): string => {
+      if (parent[id] !== id) parent[id] = find(parent[id]);
+      return parent[id];
+    };
+    const union = (a: string, b: string) => { parent[find(a)] = find(b); };
+
+    for (let i = 0; i < centers.length; i++) {
+      for (let j = i + 1; j < centers.length; j++) {
+        const a = centers[i], b = centers[j];
+        const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
+        if (dist < PROXIMITY + (a.bw + b.bw) / 2) union(a.id, b.id);
+      }
+    }
+
+    // Collect groups with 2+ members
+    const groups: Record<string, typeof centers> = {};
+    centers.forEach(c => {
+      const root = find(c.id);
+      if (!groups[root]) groups[root] = [];
+      groups[root].push(c);
+    });
+
+    // Build bounding boxes with padding
+    return Object.values(groups)
+      .filter(g => g.length >= 2)
+      .map(g => {
+        const PAD = 28;
+        const minX = Math.min(...g.map(c => c.x)) - PAD;
+        const minY = Math.min(...g.map(c => c.y)) - PAD;
+        const maxX = Math.max(...g.map(c => c.x + c.bw)) + PAD;
+        const maxY = Math.max(...g.map(c => c.y + c.bh)) + PAD;
+        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      });
+  }, [allItems, positions]);
 
   // ── Auto-organize ─────────────────────────────────────────────────────────
 
@@ -298,6 +385,12 @@ export function FreeformCanvas({
   const onBlockMouseDown = useCallback((blockId: string, e: React.MouseEvent, type: 'move' | 'resize') => {
     e.preventDefault();
     e.stopPropagation();
+    // Cancel any running momentum (canvas or block) so a fresh drag starts clean
+    cancelAnimationFrame(rafRef.current);
+    velRef.current = { vx: 0, vy: 0 };
+    // Record touch for object aging — this block is live now
+    activityRef.current[blockId] = Date.now();
+    try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
     onSelect(blockId);
     const pos = positions[blockId] ?? { x: 0, y: 0, w: 340, h: 0 };
     dragRef.current = {
@@ -358,6 +451,20 @@ export function FreeformCanvas({
         const newX = snap((drag.startBlockX ?? 0) + dx / zoom);
         const newY = snap((drag.startBlockY ?? 0) + dy / zoom);
         onSetPos(drag.blockId, { x: newX, y: newY });
+        // Track position + velocity for block inertia
+        const now = performance.now();
+        if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
+          const dt = now - drag.lastT;
+          if (dt > 0 && dt < 40) {
+            velRef.current.vx = (e.clientX - drag.lastX) / dt;
+            velRef.current.vy = (e.clientY - drag.lastY) / dt;
+          }
+        }
+        drag.lastX = e.clientX;
+        drag.lastY = e.clientY;
+        drag.lastT = now;
+        drag.currentBlockX = newX;
+        drag.currentBlockY = newY;
       } else if (drag.type === 'block-resize' && drag.blockId != null) {
         const newW = Math.max(200, snap((drag.startBlockW ?? 340) + dx / zoom));
         const newH = Math.max(80,  snap((drag.startBlockH ?? 200) + dy / zoom));
@@ -391,6 +498,33 @@ export function FreeformCanvas({
             px += fx;
             py += fy;
             setPan(px, py);
+            rafRef.current = requestAnimationFrame(step);
+          };
+          rafRef.current = requestAnimationFrame(step);
+        }
+        velRef.current = { vx: 0, vy: 0 };
+      } else if (drag?.type === 'block-move' && drag.blockId) {
+        const { vx, vy } = velRef.current;
+        // Block inertia: threshold lower than canvas — even small flicks feel responsive
+        if (Math.abs(vx) > 0.12 || Math.abs(vy) > 0.12) {
+          const blockId   = drag.blockId;
+          let bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
+          let by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
+          // Convert screen velocity (px/ms) to world velocity (px/frame)
+          // Divide by zoom: fast pan at 50% zoom should move block same screen distance
+          let fx = (vx * 10) / zoom;
+          let fy = (vy * 10) / zoom;
+          const DECAY = 0.72;   // blocks decelerate faster than canvas — heavier feel
+          const STOP  = 0.15;
+
+          cancelAnimationFrame(rafRef.current);
+          const step = () => {
+            fx *= DECAY;
+            fy *= DECAY;
+            if (Math.abs(fx) < STOP && Math.abs(fy) < STOP) return;
+            bx = snap(bx + fx);
+            by = snap(by + fy);
+            onSetPos(blockId, { x: bx, y: by });
             rafRef.current = requestAnimationFrame(step);
           };
           rafRef.current = requestAnimationFrame(step);
@@ -472,6 +606,11 @@ export function FreeformCanvas({
         backgroundColor: tokens.pageBg,
       }}
       onMouseDown={onCanvasMouseDown}
+      onMouseMove={e => {
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        setControlsNear(rect.height - (e.clientY - rect.top) < 96);
+      }}
+      onMouseLeave={() => setControlsNear(false)}
     >
       {/* ── Dot grid ───────────────────────────────────────────── */}
       <svg
@@ -508,6 +647,27 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
+        {/* ── Proximity cluster backdrops ─────────────────────── */}
+        {clusters.map((box, i) => (
+          <div
+            key={`cluster-${i}`}
+            aria-hidden="true"
+            style={{
+              position:        'absolute',
+              left:             box.x,
+              top:              box.y,
+              width:            box.w,
+              height:           box.h,
+              borderRadius:    '22px',
+              backgroundColor: `${tokens.accent}05`,
+              border:          `1px solid ${tokens.accent}0a`,
+              pointerEvents:   'none',
+              zIndex:          0,
+              transition:      'all 0.6s cubic-bezier(0.32,0.72,0,1)',
+            }}
+          />
+        ))}
+
         {allItems.map(item => {
           const pos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
 
@@ -540,12 +700,18 @@ export function FreeformCanvas({
           // — creates a "spotlight" effect and a sense of spatial depth
           const isOtherDragging = !!(draggingId && draggingId !== item.id);
 
+          // Object aging — freshness fades blocks that haven't been touched in days
+          const lastActive = activityRef.current[item.id];
+          const freshness = lastActive ? computeFreshness(lastActive) : 1.0;
+
+          const baseOpacity = isOtherDragging ? 0.45 : freshness;
+
           return (
             <div
               key={item.id}
               style={{
-                opacity:    isOtherDragging ? 0.45 : 1,
-                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 0.3s ease',
+                opacity:    baseOpacity,
+                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 0.8s ease',
               }}
             >
               <FreeformBlock
@@ -645,6 +811,7 @@ export function FreeformCanvas({
         tokens={tokens}
         zoom={zoom}
         snapToGrid={snapToGrid}
+        visible={controlsNear || draggingId !== null}
         onZoomIn={() => setViewport(Math.min(ZOOM_MAX, zoom + ZOOM_STEP), panX, panY)}
         onZoomOut={() => setViewport(Math.max(ZOOM_MIN, zoom - ZOOM_STEP), panX, panY)}
         onReset={resetView}

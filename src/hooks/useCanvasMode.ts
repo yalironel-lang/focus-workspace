@@ -5,14 +5,16 @@
  * Freeform mode: infinite canvas with pan / zoom / snap-to-grid.
  *
  * Persists mode + snap config in localStorage.
- * Viewport (zoom/pan) is session-only (intentional: fresh view each open).
+ * Viewport (zoom/pan) persists for object permanence — the environment
+ * stays where you left it, so objects have stable spatial identity.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MODE_KEY = 'fw_canvas_mode_v1';
+const VIEW_KEY = 'fw_viewport_v1';
 
 export const ZOOM_MIN = 0.2;
 export const ZOOM_MAX = 2.0;
@@ -35,6 +37,14 @@ const DEFAULTS: PersistedConfig = {
   gridSize:   DEFAULT_GRID_SIZE,
 };
 
+interface PersistedViewport {
+  zoom:  number;
+  panX:  number;
+  panY:  number;
+}
+
+const VIEWPORT_DEFAULTS: PersistedViewport = { zoom: 1, panX: 40, panY: 40 };
+
 // ── Storage helpers ───────────────────────────────────────────────────────────
 
 function loadConfig(): PersistedConfig {
@@ -49,6 +59,25 @@ function loadConfig(): PersistedConfig {
 
 function saveConfig(c: PersistedConfig): void {
   try { localStorage.setItem(MODE_KEY, JSON.stringify(c)); } catch { /* quota */ }
+}
+
+function loadViewport(): PersistedViewport {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY);
+    if (!raw) return VIEWPORT_DEFAULTS;
+    const v = JSON.parse(raw) as Partial<PersistedViewport>;
+    return {
+      zoom: typeof v.zoom === 'number' ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.zoom)) : VIEWPORT_DEFAULTS.zoom,
+      panX: typeof v.panX === 'number' ? v.panX : VIEWPORT_DEFAULTS.panX,
+      panY: typeof v.panY === 'number' ? v.panY : VIEWPORT_DEFAULTS.panY,
+    };
+  } catch {
+    return VIEWPORT_DEFAULTS;
+  }
+}
+
+function saveViewport(v: PersistedViewport): void {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(v)); } catch { /* quota */ }
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -74,9 +103,27 @@ export interface CanvasModeState {
 
 export function useCanvasMode(): CanvasModeState {
   const [config, setConfig] = useState<PersistedConfig>(loadConfig);
-  const [zoom,   setZoomRaw] = useState(1);
-  const [panX,   setPanXRaw] = useState(0);
-  const [panY,   setPanYRaw] = useState(0);
+
+  // Viewport initializes from saved values — object permanence
+  const [zoom,   setZoomRaw] = useState<number>(() => loadViewport().zoom);
+  const [panX,   setPanXRaw] = useState<number>(() => loadViewport().panX);
+  const [panY,   setPanYRaw] = useState<number>(() => loadViewport().panY);
+
+  // Debounce viewport saves so rapid pan/zoom doesn't thrash localStorage
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef   = useRef<PersistedViewport>({ zoom, panX, panY });
+
+  // Sync pendingRef + schedule debounced save whenever viewport changes
+  useEffect(() => {
+    pendingRef.current = { zoom, panX, panY };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveViewport(pendingRef.current);
+    }, 400);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [zoom, panX, panY]);
 
   const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 

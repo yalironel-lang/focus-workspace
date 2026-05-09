@@ -26,11 +26,12 @@ export function MomentumMeter({ sections }: Props) {
     : pct >= 40 ? '#f59e0b'
     : '#f87171';
 
+  // Trend as a quiet directional signal — no coaching language
   const trend =
-    pct >= 70 ? '↑ Strong'
-    : pct >= 40 ? '→ Building'
-    : total === 0 ? '— No data'
-    : '↓ Get going';
+    pct >= 70 ? '↑'
+    : pct >= 40 ? '→'
+    : total === 0 ? '—'
+    : '↓';
 
   return (
     <div
@@ -39,7 +40,7 @@ export function MomentumMeter({ sections }: Props) {
     >
       {/* Label row */}
       <div className="flex items-center justify-between">
-        <span style={{ ...META, color: '#334155' }}>Momentum</span>
+        <span style={{ ...META, color: '#334155' }}>Progress</span>
         <span style={{ ...META, color, fontSize: '10px' }}>{trend}</span>
       </div>
 
@@ -90,7 +91,7 @@ export function MomentumMeter({ sections }: Props) {
               {pct}
             </span>
             <span style={{ ...META, color: '#334155', marginTop: '3px' }}>
-              % done
+              %
             </span>
           </div>
         </div>

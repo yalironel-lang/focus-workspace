@@ -87,16 +87,15 @@ export function ExecutePanel({ sections }: Props) {
       >
         <div className="flex items-center gap-2">
           <Zap className="w-3.5 h-3.5" style={{ color: '#34d399' }} />
-          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>Execute</span>
+          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>In motion</span>
         </div>
-        <span style={{ ...META, color: '#334155' }}>Quick wins first</span>
       </div>
 
       <div className="px-5">
         {quickWins.length > 0 && (
           <>
             <div className="pt-3 pb-1">
-              <span style={{ ...META, color: '#334155' }}>Almost done</span>
+              <span style={{ ...META, color: '#334155' }}>Almost there</span>
             </div>
             {quickWins.map(s => renderItem(s, 'win'))}
           </>

@@ -24,7 +24,7 @@ const PHASES: PhaseStep[] = [
   { key: 'capture',  label: 'Capture'  },
   { key: 'clarify',  label: 'Clarify'  },
   { key: 'focus',    label: 'Focus'    },
-  { key: 'execute',  label: 'Execute'  },
+  { key: 'execute',  label: 'In motion' },
   { key: 'recover',  label: 'Recover'  },
 ];
 

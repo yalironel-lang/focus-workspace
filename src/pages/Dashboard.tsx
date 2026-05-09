@@ -429,7 +429,7 @@ export function Dashboard() {
           className="flex items-center justify-between px-5 py-3.5"
           style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}
         >
-          <span style={{ fontSize: '14px', fontWeight: 600, color: tokens.textPrimary }}>Workspaces</span>
+          <span style={{ fontSize: '14px', fontWeight: 600, color: tokens.textPrimary }}>Spaces</span>
           <button
             onClick={() => { setShowNewSection(s => !s); setNewTitle(''); }}
             className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-all"
@@ -494,7 +494,7 @@ export function Dashboard() {
               onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover)}
               onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent)}
             >
-              <Plus className="w-3 h-3" /> Create workspace
+              <Plus className="w-3 h-3" /> New space
             </button>
           </div>
         ) : sections.length > 0 ? (
@@ -546,6 +546,16 @@ export function Dashboard() {
     if (id.startsWith('block-')) updateBlockTheme(id, {});
     else resetModule(id);
   }, [updateBlockTheme, resetModule]);
+
+  // ── Focus state ───────────────────────────────────────────────────────────
+  // When a session is live, the environment shifts: peripheral UI recedes,
+  // focus-related modules stay bright, everything else dims back.
+  // This is environmental, not modal — you can still see and touch everything.
+
+  const isFocused = !!activeSession && !designMode;
+
+  // Modules that stay at full presence during a session
+  const FOCUS_MODULES = new Set(['focus-mode', 'capture', 'deep-work-timer']);
 
   // ── Canvas ────────────────────────────────────────────────────────────────
 
@@ -681,24 +691,34 @@ export function Dashboard() {
       )}
 
       {/* ── Command Bar ───────────────────────────────────────── */}
-      <CommandBar
-        tokens={tokens}
-        atmosphereId={atmosphereId}
-        designMode={designMode}
-        canvasMode={canvasMode.mode}
-        userName={displayName}
-        onToggleDesign={() => {
-          setDesignMode(d => {
-            const next = !d;
-            if (!next) { setSelectedId(null); setInspectorOpen(false); }
-            return next;
-          });
+      {/* Recedes during active session — restore on hover so it's always reachable */}
+      <div
+        style={{
+          opacity:    isFocused ? 0.35 : 1,
+          transition: 'opacity 0.7s ease',
         }}
-        onToggleCanvas={canvasMode.toggleMode}
-        onOpenAdd={() => setAddPanelOpen(true)}
-        onSetAtmosphere={setAtmosphere}
-        onSignOut={handleSignOut}
-      />
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.opacity = isFocused ? '0.35' : '1'; }}
+      >
+        <CommandBar
+          tokens={tokens}
+          atmosphereId={atmosphereId}
+          designMode={designMode}
+          canvasMode={canvasMode.mode}
+          userName={displayName}
+          onToggleDesign={() => {
+            setDesignMode(d => {
+              const next = !d;
+              if (!next) { setSelectedId(null); setInspectorOpen(false); }
+              return next;
+            });
+          }}
+          onToggleCanvas={canvasMode.toggleMode}
+          onOpenAdd={() => setAddPanelOpen(true)}
+          onSetAtmosphere={setAtmosphere}
+          onSignOut={handleSignOut}
+        />
+      </div>
 
       {/* ── Freeform Canvas (when in freeform mode) ──────────── */}
       {canvasMode.mode === 'freeform' && !loading && (
@@ -808,15 +828,27 @@ export function Dashboard() {
                   const content = renderModuleContent(m.id);
                   if (content === null) return null;
 
+                  // During an active session, non-focus modules step back
+                  const isFocusModule  = FOCUS_MODULES.has(m.id.replace(/-copy$/, ''));
+                  const moduleDimmed   = isFocused && !isFocusModule;
+
                   return (
                     <React.Fragment key={m.id}>
                       <div
                         className="min-w-0"
                         data-module-id={m.id}
                         style={{
-                          gridColumn:      SIZE_SPAN[m.size],
-                          animation:       'slideUp 0.4s cubic-bezier(0.32,0.72,0,1) both',
-                          animationDelay:  `${50 + idx * 40}ms`,
+                          gridColumn:     SIZE_SPAN[m.size],
+                          animation:      'slideUp 0.4s cubic-bezier(0.32,0.72,0,1) both',
+                          animationDelay: `${50 + idx * 40}ms`,
+                          opacity:        moduleDimmed ? 0.6 : 1,
+                          transition:     'opacity 0.7s ease, box-shadow 1s ease',
+                          // Spatial warmth: the focus module glows softly when you
+                          // recently worked here — the space remembers through light
+                          ...(m.id === 'focus-mode' && continuity.isRecent && !designMode ? {
+                            borderRadius: `${design.radius}px`,
+                            boxShadow:    `0 0 0 1px ${tokens.accent}14, 0 0 48px 2px ${tokens.accent}08`,
+                          } : {}),
                         }}
                       >
                         <WorkspaceModule

@@ -30,11 +30,13 @@ function getStatus(progress: number, totalItems: number): StatusLevel {
   return 'at-risk';
 }
 
-const STATUS_CONFIG: Record<StatusLevel, { label: string; color: string; bg: string; border: string }> = {
-  'done':     { label: 'Done',     color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
-  'stable':   { label: 'Stable',   color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
-  'building': { label: 'Building', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',   border: 'rgba(251,191,36,0.2)'   },
-  'at-risk':  { label: 'At Risk',  color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.2)'  },
+// Status is expressed through color only — no corporate KPI labels.
+// The progress bar already tells the full story.
+const STATUS_CONFIG: Record<StatusLevel, { color: string; bg: string; border: string }> = {
+  'done':     { color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
+  'stable':   { color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
+  'building': { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',   border: 'rgba(251,191,36,0.2)'   },
+  'at-risk':  { color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.2)'  },
 };
 
 const PROGRESS_COLOR: Record<StatusLevel, string> = {
@@ -117,15 +119,16 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {section.total_items > 0 && (
               <span
-                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
                 style={{
-                  color: cfg.color,
-                  backgroundColor: cfg.bg,
-                  border: `1px solid ${cfg.border}`,
+                  display:         'block',
+                  width:           '6px',
+                  height:          '6px',
+                  borderRadius:    '50%',
+                  backgroundColor: cfg.color,
+                  boxShadow:       `0 0 5px ${cfg.color}60`,
+                  flexShrink:      0,
                 }}
-              >
-                {cfg.label}
-              </span>
+              />
             )}
             <button
               onClick={handleDelete}
@@ -133,7 +136,7 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
               style={{ color: '#2a3a50' }}
               onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.backgroundColor = 'rgba(248,113,113,0.1)'; }}
               onMouseLeave={e => { e.currentTarget.style.color = '#2a3a50'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-              title="Delete workspace"
+              title="Remove"
             >
               <Trash2 className="w-3 h-3" />
             </button>

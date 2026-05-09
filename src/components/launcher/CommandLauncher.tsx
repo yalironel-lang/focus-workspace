@@ -244,14 +244,14 @@ export function CommandLauncher({
         {
           id:       'start-session',
           kind:     'start-session',
-          label:    'Start a focus session',
-          sublabel: 'Choose workspace, set timer, lock in',
+          label:    'Start a session',
+          sublabel: 'Pick a space and begin',
         },
         {
           id:       'open-add',
           kind:     'open-add',
-          label:    'Add to workspace',
-          sublabel: 'Timer, note, checklist, tool and more',
+          label:    'Add something',
+          sublabel: 'Block, note, timer, or tool',
         },
       ];
 
@@ -509,7 +509,7 @@ export function CommandLauncher({
           {/* Workspaces */}
           {workspaces.length > 0 && (
             <div style={{ marginBottom: '6px' }}>
-              <GroupLabel tokens={tokens} label={q ? 'Workspaces' : 'Your workspaces'} />
+              <GroupLabel tokens={tokens} label={q ? 'Spaces' : 'Your spaces'} />
               {workspaces.map(renderAction)}
             </div>
           )}
