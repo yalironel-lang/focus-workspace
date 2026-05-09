@@ -44,6 +44,18 @@ function deadlineDiff(due: string): number {
   return Math.ceil((new Date(due + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
 
+// ── Space age ────────────────────────────────────────────────────────────────
+// A quiet ambient signal: how long has this space existed?
+// Not a KPI — just a sense of the space having history.
+function spaceAge(createdAt: string): string {
+  const days = (Date.now() - new Date(createdAt).getTime()) / 86_400_000;
+  if (days < 1)   return '';           // too new, say nothing
+  if (days < 7)   return `${Math.floor(days)}d`;
+  if (days < 60)  return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+
 const URGENCY_ORDER = { overdue: 0, urgent: 1, soon: 2, far: 3 } as const;
 type UrgencyLevel = keyof typeof URGENCY_ORDER;
 
@@ -142,23 +154,55 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
 
 // ── WorkItem ──────────────────────────────────────────────────────────────────
 
+// Items accumulate temporal presence. Something sitting unfinished for weeks
+// feels different from something you added this morning — not labeled, just subtly
+// more tired. The space has memory.
+function itemAge(createdAt: string): 'fresh' | 'settled' | 'lingering' | 'old' {
+  const days = (Date.now() - new Date(createdAt).getTime()) / 86_400_000;
+  if (days < 2)   return 'fresh';
+  if (days < 7)   return 'settled';
+  if (days < 21)  return 'lingering';
+  return 'old';
+}
+
 function WorkItem({ item, onToggle, onDelete }: {
   item: Item;
   onToggle: (id: string, completed: boolean) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
   const [hovered, setHovered] = useState(false);
+  const age = item.completed ? 'fresh' : itemAge(item.created_at);
+
+  // Temporal presence — older unfinished items recede slightly, like they've been
+  // sitting in the same place for a while.
+  const itemOpacity = item.completed ? 0.4
+    : age === 'fresh'     ? 1.0
+    : age === 'settled'   ? 0.92
+    : age === 'lingering' ? 0.82
+    : 0.70;
+
+  // The toggle button takes on a faint amber warmth for lingering/old items —
+  // a quiet signal that this has been waiting, without announcing it.
+  const toggleColor = item.completed ? '#10b981'
+    : age === 'lingering' ? '#6b5c3e'
+    : age === 'old'       ? '#7c5e3a'
+    : '#263043';
+
+  const toggleHoverColor = item.completed ? '#10b981'
+    : (age === 'lingering' || age === 'old') ? '#f59e0b'
+    : '#374151';
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: item.completed ? 0.45 : 1, transition: 'opacity 0.15s' }}
+      style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: itemOpacity, transition: 'opacity 0.3s ease' }}
     >
       <button
         onClick={() => onToggle(item.id, !item.completed).catch(() => toast.error('Failed'))}
-        style={{ flexShrink: 0, color: item.completed ? '#10b981' : '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
-        onMouseEnter={e => { if (!item.completed) (e.currentTarget as HTMLElement).style.color = '#374151'; }}
-        onMouseLeave={e => { if (!item.completed) (e.currentTarget as HTMLElement).style.color = '#263043'; }}
+        style={{ flexShrink: 0, color: toggleColor, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px', transition: 'color 0.2s ease' }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = toggleHoverColor; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = toggleColor; }}
       >
         {item.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
       </button>
@@ -697,6 +741,11 @@ export function SectionPage() {
                     <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em', margin: 0 }}>
                       {section.title}
                     </h1>
+                    {spaceAge(section.created_at) && (
+                      <span style={{ fontSize: '10px', color: '#1a2230', fontWeight: 400, letterSpacing: '0.02em', flexShrink: 0, userSelect: 'none' }}>
+                        {spaceAge(section.created_at)}
+                      </span>
+                    )}
                   </div>
 
                   {totalItems > 0 ? (
