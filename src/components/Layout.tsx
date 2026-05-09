@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { AtmosphereTokens } from '../hooks/useAtmosphere';
 import { BookOpenCheck, Sliders } from 'lucide-react';
@@ -29,12 +29,11 @@ const DEFAULT: Partial<AtmosphereTokens> = {
   blur:            14,
 };
 
-export function Layout({ children, tokens, onOpenDesigner, designMode, onToggleDesignMode }: LayoutProps) {
+export function Layout({ children, tokens, designMode, onToggleDesignMode }: LayoutProps) {
   const t = tokens ?? (DEFAULT as AtmosphereTokens);
 
   const { user, signOut } = useAuth();
   const navigate          = useNavigate();
-  const { pathname }      = useLocation();
 
   const handleSignOut = async () => {
     try {
@@ -92,43 +91,7 @@ export function Layout({ children, tokens, onOpenDesigner, designMode, onToggleD
             {user && (
               <div className="flex items-center gap-1">
 
-                {/* Route links */}
-                {([
-                  { to: '/dashboard', label: 'Dashboard' },
-                  { to: '/schedule',  label: 'Schedule'  },
-                ] as const).map(({ to, label }) => {
-                  const active = pathname === to;
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
-                      style={
-                        active
-                          ? { color: t.textPrimary, backgroundColor: t.cardBorder }
-                          : { color: t.textGhost }
-                      }
-                      onMouseEnter={e => {
-                        if (!active) {
-                          (e.currentTarget as HTMLElement).style.color = t.textSecondary;
-                          (e.currentTarget as HTMLElement).style.backgroundColor = t.cardBorder;
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        if (!active) {
-                          (e.currentTarget as HTMLElement).style.color = t.textGhost;
-                          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-                        }
-                      }}
-                    >
-                      {label}
-                    </Link>
-                  );
-                })}
-
-                <span className="w-px h-3.5 mx-1.5" style={{ backgroundColor: t.divider }} />
-
-                {/* Design mode toggle (dashboard only) */}
+                {/* Design mode toggle — only when explicitly wired */}
                 {onToggleDesignMode && (
                   <button
                     onClick={onToggleDesignMode}
@@ -136,60 +99,31 @@ export function Layout({ children, tokens, onOpenDesigner, designMode, onToggleD
                     style={{
                       color:           designMode ? t.accent       : t.textGhost,
                       backgroundColor: designMode ? t.accentSubtle ?? t.accent + '15' : 'transparent',
-                      border: designMode ? `1px solid ${t.accent}40` : '1px solid transparent',
                     }}
                     onMouseEnter={e => {
-                      if (!designMode) {
-                        (e.currentTarget as HTMLButtonElement).style.color = t.textMuted;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = t.cardBorder;
-                      }
+                      if (!designMode) (e.currentTarget as HTMLButtonElement).style.color = t.textMuted;
                     }}
                     onMouseLeave={e => {
-                      if (!designMode) {
-                        (e.currentTarget as HTMLButtonElement).style.color = t.textGhost;
-                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                      }
+                      if (!designMode) (e.currentTarget as HTMLButtonElement).style.color = t.textGhost;
                     }}
                     title="Toggle design mode"
                   >
                     <Sliders className="w-3 h-3" />
-                    <span className="hidden sm:inline">Design</span>
                   </button>
                 )}
 
-                {/* Customize / workspace designer */}
-                {onOpenDesigner && (
-                  <button
-                    onClick={onOpenDesigner}
-                    className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all"
-                    style={{ color: t.textGhost }}
-                    onMouseEnter={e => {
-                      (e.currentTarget as HTMLButtonElement).style.color = t.accent;
-                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = t.cardBorder;
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLButtonElement).style.color = t.textGhost;
-                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                    }}
-                    title="Customize workspace"
-                  >
-                    Customize
-                  </button>
-                )}
-
-                <span className="w-px h-3.5 mx-1" style={{ backgroundColor: t.divider }} />
-
+                {/* Sign out — ghost, only visible on hover */}
                 <button
                   onClick={handleSignOut}
-                  className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all"
-                  style={{ color: t.textGhost }}
+                  className="text-xs px-2 py-1.5 rounded-lg transition-all"
+                  style={{ color: t.textGhost, opacity: 0.4 }}
                   onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.opacity = '1';
                     (e.currentTarget as HTMLButtonElement).style.color = t.textSecondary;
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = t.cardBorder;
                   }}
                   onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.opacity = '0.4';
                     (e.currentTarget as HTMLButtonElement).style.color = t.textGhost;
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
                   }}
                 >
                   Sign out

@@ -20,30 +20,21 @@ function daysUntil(date: string): number {
   return Math.ceil((new Date(date + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
 
-type StatusLevel = 'stable' | 'building' | 'at-risk' | 'done';
+type Warmth = 'warm' | 'cool' | 'neutral' | 'done';
 
-function getStatus(progress: number, totalItems: number): StatusLevel {
-  if (totalItems === 0) return 'building';
+function getWarmth(progress: number, totalItems: number): Warmth {
+  if (totalItems === 0) return 'neutral';
   if (progress >= 100) return 'done';
-  if (progress >= 65)  return 'stable';
-  if (progress >= 25)  return 'building';
-  return 'at-risk';
+  if (progress >= 65)  return 'warm';
+  if (progress >= 25)  return 'cool';
+  return 'cool';
 }
 
-// Status is expressed through color only — no corporate KPI labels.
-// The progress bar already tells the full story.
-const STATUS_CONFIG: Record<StatusLevel, { color: string; bg: string; border: string }> = {
-  'done':     { color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
-  'stable':   { color: '#34d399', bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.2)'   },
-  'building': { color: '#fbbf24', bg: 'rgba(251,191,36,0.1)',   border: 'rgba(251,191,36,0.2)'   },
-  'at-risk':  { color: '#f87171', bg: 'rgba(248,113,113,0.1)',  border: 'rgba(248,113,113,0.2)'  },
-};
-
-const PROGRESS_COLOR: Record<StatusLevel, string> = {
-  'done':     '#34d399',
-  'stable':   '#34d399',
-  'building': '#fbbf24',
-  'at-risk':  '#f87171',
+const WARMTH_COLOR: Record<Warmth, string> = {
+  done:    '#34d399',
+  warm:    '#34d399',
+  cool:    '#fbbf24',
+  neutral: '#2a3a54',
 };
 
 interface SectionCardProps {
@@ -55,9 +46,8 @@ interface SectionCardProps {
 export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardProps) {
   const custom  = getWorkspaceCustomization(section.id);
   const accent  = custom.accent || accentFor(section.title);
-  const status  = getStatus(section.progress, section.total_items);
-  const cfg     = STATUS_CONFIG[status];
-  const remaining = section.total_items - section.completed_items;
+  const warmth  = getWarmth(section.progress, section.total_items);
+  const warmthColor = WARMTH_COLOR[warmth];
 
   const nearestDeadline = deadlines
     .filter(d => !d.completed)
@@ -68,38 +58,35 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
   const handleDelete = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (confirm('Delete this workspace and all its contents?')) onDelete(section.id);
+    if (confirm('Remove this space?')) onDelete(section.id);
   };
 
   return (
     <div
-      className="group relative rounded-2xl overflow-hidden flex flex-col transition-all duration-200"
+      className="group relative flex flex-col transition-all duration-300"
       style={{
-        backgroundColor: '#0d1424',
-        border: '1px solid #1a2638',
+        backgroundColor: 'rgba(255,255,255,0.025)',
+        borderRadius: '16px',
+        overflow: 'hidden',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.borderColor = '#2a3a54';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
+        (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.038)';
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.borderColor = '#1a2638';
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'none';
+        (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.025)';
       }}
     >
-      {/* Accent line */}
-      <div style={{ height: '3px', backgroundColor: accent, flexShrink: 0 }} />
+      {/* Accent line — spatial identity, not status */}
+      <div style={{ height: '2px', backgroundColor: accent, flexShrink: 0, opacity: 0.7 }} />
 
       <div className="p-5 flex flex-col flex-1 gap-4">
 
-        {/* Header row: avatar + title + status + delete */}
+        {/* Identity row */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div
               className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: `${accent}18` }}
+              style={{ backgroundColor: `${accent}14` }}
             >
               {custom.icon ? (
                 <span className="text-base leading-none" role="img">{custom.icon}</span>
@@ -109,135 +96,73 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
                 </span>
               )}
             </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-bold text-sm leading-snug truncate" style={{ color: '#f1f5f9' }}>
-                {section.title}
-              </h3>
-            </div>
+            <h3 className="font-semibold text-sm leading-snug truncate" style={{ color: '#e2e8f0' }}>
+              {section.title}
+            </h3>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {section.total_items > 0 && (
-              <span
-                style={{
-                  display:         'block',
-                  width:           '6px',
-                  height:          '6px',
-                  borderRadius:    '50%',
-                  backgroundColor: cfg.color,
-                  boxShadow:       `0 0 5px ${cfg.color}60`,
-                  flexShrink:      0,
-                }}
-              />
-            )}
-            <button
-              onClick={handleDelete}
-              className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all"
-              style={{ color: '#2a3a50' }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.backgroundColor = 'rgba(248,113,113,0.1)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#2a3a50'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-              title="Remove"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
+          <button
+            onClick={handleDelete}
+            className="opacity-0 group-hover:opacity-100 p-1 rounded-lg transition-all flex-shrink-0"
+            style={{ color: '#1e2d40' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#f87171'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#1e2d40'; }}
+            title="Remove"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
         </div>
 
-        {/* Next action */}
-        <div className="flex-1 min-h-[2rem]">
+        {/* What's next — no label, just context */}
+        <div className="flex-1 min-h-[1.75rem]">
           {section.next_item_title ? (
-            <div>
-              <span
-                className="block text-[10px] font-bold uppercase tracking-wider mb-1"
-                style={{ color: '#334155' }}
-              >
-                Next
-              </span>
-              <p
-                className="text-sm leading-snug line-clamp-2"
-                style={{ color: '#64748b' }}
-              >
-                {section.next_item_title}
-              </p>
-            </div>
+            <p className="text-sm leading-snug line-clamp-2" style={{ color: '#334155' }}>
+              {section.next_item_title}
+            </p>
           ) : (
-            <p
-              className="text-sm italic leading-snug"
-              style={{ color: '#1e2d40' }}
-            >
-              No actions yet
+            <p className="text-sm" style={{ color: '#1a2638' }}>
+              {section.total_items === 0 ? 'Empty' : 'All clear'}
             </p>
           )}
         </div>
 
-        {/* Progress */}
+        {/* Progress — bar only, no counters */}
         {section.total_items > 0 && (
           <div>
-            <div
-              className="rounded-full overflow-hidden"
-              style={{ height: '3px', backgroundColor: '#111d2e' }}
-            >
+            <div className="rounded-full overflow-hidden" style={{ height: '2px', backgroundColor: '#0f1826' }}>
               <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${section.progress}%`,
-                  backgroundColor: PROGRESS_COLOR[status],
-                }}
+                className="h-full rounded-full transition-all duration-700"
+                style={{ width: `${section.progress}%`, backgroundColor: warmthColor, opacity: 0.7 }}
               />
             </div>
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-[11px] font-medium" style={{ color: '#334155' }}>
-                {section.completed_items}/{section.total_items}
-              </span>
-              {examDays !== null ? (
-                <span
-                  className="text-[11px] font-semibold"
-                  style={{
-                    color: examDays <= 7 ? '#f87171' : examDays <= 14 ? '#fbbf24' : '#475569',
-                  }}
-                >
-                  Exam {examDays <= 0 ? 'today' : `in ${examDays}d`}
-                </span>
-              ) : nearestDeadline ? (
-                <span
-                  className="text-[11px] font-medium"
-                  style={{ color: daysUntil(nearestDeadline.due_date) <= 2 ? '#f87171' : '#475569' }}
-                >
-                  {(() => {
-                    const d = daysUntil(nearestDeadline.due_date);
-                    if (d < 0)  return `Due ${Math.abs(d)}d ago`;
-                    if (d === 0) return 'Due today';
-                    if (d === 1) return 'Due tomorrow';
-                    return `Due in ${d}d`;
-                  })()}
-                </span>
-              ) : null}
-            </div>
+
+            {/* Contextual time cue — only show if near */}
+            {examDays !== null && examDays >= 0 && examDays <= 14 ? (
+              <p className="text-[10px] mt-1.5 font-medium" style={{ color: examDays <= 3 ? '#f87171' : examDays <= 7 ? '#fbbf24' : '#334155' }}>
+                Exam {examDays === 0 ? 'today' : examDays === 1 ? 'tomorrow' : `in ${examDays}d`}
+              </p>
+            ) : nearestDeadline && daysUntil(nearestDeadline.due_date) <= 3 ? (
+              <p className="text-[10px] mt-1.5 font-medium" style={{ color: '#f87171' }}>
+                {(() => {
+                  const d = daysUntil(nearestDeadline.due_date);
+                  if (d < 0)  return `${Math.abs(d)}d overdue`;
+                  if (d === 0) return 'Due today';
+                  return `Due tomorrow`;
+                })()}
+              </p>
+            ) : null}
           </div>
         )}
 
-        {/* CTA footer */}
-        <div
-          className="pt-3 mt-auto"
-          style={{ borderTop: '1px solid #111d2e' }}
-        >
+        {/* Enter — just the arrow */}
+        <div className="pt-2.5 mt-auto" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
           <Link
             to={`/section/${section.id}`}
-            className="flex items-center justify-between group/link"
+            className="flex items-center justify-end group/link"
           >
-            <span
-              className="text-xs font-semibold transition-colors"
-              style={{ color: remaining === 0 && section.total_items > 0 ? '#34d399' : '#f59e0b' }}
-            >
-              {remaining === 0 && section.total_items > 0
-                ? 'All done ✓'
-                : remaining > 0
-                  ? `${remaining} remaining`
-                  : 'Open workspace'}
-            </span>
             <ArrowRight
-              className="w-3.5 h-3.5 transition-all group-hover/link:translate-x-0.5"
-              style={{ color: remaining === 0 && section.total_items > 0 ? '#34d399' : '#f59e0b' }}
+              className="w-3.5 h-3.5 transition-all duration-200 group-hover/link:translate-x-0.5 group-hover/link:opacity-100"
+              style={{ color: '#2a3a54', opacity: 0.6 }}
             />
           </Link>
         </div>

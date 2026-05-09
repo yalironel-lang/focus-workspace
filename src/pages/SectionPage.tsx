@@ -4,7 +4,6 @@ import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
-import { useAuth } from '../hooks/useAuth';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
@@ -86,7 +85,7 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 // ── SpaceNav ──────────────────────────────────────────────────────────────────
 
-function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize, onSignOut }: {
+function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   isCustomizing: boolean;
@@ -94,34 +93,33 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
   onCustomize: () => void;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
-  onSignOut: () => void;
 }) {
   return (
     <nav style={{
-      height: '48px', backgroundColor: 'rgba(7,11,20,0.96)',
-      borderBottom: '1px solid rgba(255,255,255,0.05)',
+      height: '44px', backgroundColor: 'rgba(7,11,20,0.92)',
+      borderBottom: '1px solid rgba(255,255,255,0.04)',
       backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <button onClick={onBack} style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
-          <ArrowLeft className="w-4 h-4" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <button onClick={onBack} style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
+          <ArrowLeft className="w-3.5 h-3.5" />
         </button>
-        <div style={{ width: '1px', height: '16px', backgroundColor: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+        <span style={{ width: '1px', height: '14px', backgroundColor: 'rgba(255,255,255,0.05)', flexShrink: 0 }} />
+        <span style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
           {title}
         </span>
-        <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0 }} />
+        <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0, opacity: 0.6 }} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
         {isCustomizing ? (
           <>
-            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}>
+            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: '#374151', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
               Reset
             </button>
             <button onClick={onExitCustomize} style={{ fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', border: 'none', cursor: 'pointer', padding: '4px 12px', borderRadius: '8px' }}
@@ -131,19 +129,12 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
             </button>
           </>
         ) : (
-          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 600, color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.04)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}>
+          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; }}>
             <Sliders className="w-3 h-3" />
-            Customize
           </button>
         )}
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-        <button onClick={onSignOut} style={{ fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
-          Sign out
-        </button>
       </div>
     </nav>
   );
@@ -327,7 +318,7 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
 export function SectionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+
   const {
     section, loading, fetchSection,
     addItem, pushItem, updateItem, deleteItem, toggleTask,
@@ -337,10 +328,6 @@ export function SectionPage() {
   const { links: globalLinks } = usePortalLinks('global');
   const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
 
-  const handleSignOut = async () => {
-    try { await signOut(); toast.success('Signed out'); navigate('/'); }
-    catch { toast.error('Failed to sign out'); }
-  };
 
   const [showAddLane,     setShowAddLane]     = useState(false);
   const [newLaneTitle,    setNewLaneTitle]     = useState('');
@@ -567,7 +554,6 @@ export function SectionPage() {
         onCustomize={enterDesignMode}
         onExitCustomize={exitDesignMode}
         onResetCustomize={resetDesign}
-        onSignOut={handleSignOut}
       />
 
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
