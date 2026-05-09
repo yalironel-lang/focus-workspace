@@ -386,7 +386,7 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
           className="add-hint"
           >
             <Plus style={{ width: '10px', height: '10px' }} />
-            <span style={{ ...CAP, fontSize: '8px' }}>Add to workspace</span>
+            <span style={{ ...CAP, fontSize: '8px' }}>Add to space</span>
           </div>
         )}
       </button>
@@ -583,11 +583,11 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
                 color:         tokens.textPrimary,
                 margin:        0,
               }}>
-                Add to your workspace
+                Add to your space
               </h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
                 <p style={{ ...CAP, fontSize: '9px', color: tokens.textGhost, margin: 0 }}>
-                  {modules.filter(m => m.enabled).length} items on canvas
+                  {modules.filter(m => m.enabled).length} items in your space
                 </p>
                 <kbd style={{
                   fontFamily:      "'Space Grotesk', monospace",

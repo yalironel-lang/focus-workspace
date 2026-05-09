@@ -222,20 +222,46 @@ export function Dashboard() {
     }
   }, [modules, blocks, reorder, reorderBlocks]);
 
-  // ── Add block with auto-select + scroll-into-view ─────────────────────────
+  // ── Viewport-center placement helper ─────────────────────────────────────
+  // Returns world coordinates for the center of the current canvas viewport.
+  // Used to place newly added items where the user is looking, not off-screen.
+
+  const viewportCenterWorld = useCallback((offsetX = 0, offsetY = 0) => {
+    const vpW  = window.innerWidth;
+    const vpH  = window.innerHeight - 48;
+    const snap = canvasMode.snapToGrid ? canvasMode.gridSize : 1;
+    const raw  = {
+      x: (-canvasMode.panX + vpW  / 2) / canvasMode.zoom - 170 + offsetX,
+      y: (-canvasMode.panY + vpH  / 2) / canvasMode.zoom - 100 + offsetY,
+    };
+    return {
+      x: Math.max(20, Math.round(raw.x / snap) * snap),
+      y: Math.max(20, Math.round(raw.y / snap) * snap),
+    };
+  }, [canvasMode.panX, canvasMode.panY, canvasMode.zoom, canvasMode.snapToGrid, canvasMode.gridSize]);
+
+  // ── Add block with spatial placement ─────────────────────────────────────
 
   const handleAddBlock = useCallback((type: BlockType) => {
     const newId = addBlock(type);
-    // Give the DOM a tick to render the new block, then select + scroll to it
+
+    if (canvasMode.mode === 'freeform') {
+      // Place at viewport center — item appears where the user is looking
+      const { x, y } = viewportCenterWorld();
+      blockPos.initPos(newId, { x, y, w: 340 });
+    }
+
+    // Slight delay so the block is rendered before we try to scroll/select
     setTimeout(() => {
       setSelectedId(newId);
       setPulsingId(newId);
-      const el = document.querySelector(`[data-module-id="${newId}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      // Remove pulse after animation completes
+      if (canvasMode.mode !== 'freeform') {
+        const el = document.querySelector(`[data-module-id="${newId}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
       setTimeout(() => setPulsingId(null), 1200);
     }, 80);
-  }, [addBlock]);
+  }, [addBlock, canvasMode.mode, viewportCenterWorld, blockPos]);
 
   // ── Apply starter template ────────────────────────────────────────────────
 
@@ -273,13 +299,15 @@ export function Dashboard() {
   // ── Onboarding path handler — after handleApplyTemplate to avoid TDZ ────────
   const handleOnboardingEnter = useCallback((path: OnboardingPath) => {
     completeOnboarding();
+    // Always enter Space — the canvas is the product
+    canvasMode.setMode('freeform');
     if (path === 'blank-canvas') {
       setDesignMode(true);
       setTimeout(() => setAddPanelOpen(true), 500);
     } else {
       handleApplyTemplate(path);
     }
-  }, [completeOnboarding, handleApplyTemplate]);
+  }, [completeOnboarding, handleApplyTemplate, canvasMode]);
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
@@ -399,23 +427,31 @@ export function Dashboard() {
 
   // ── Init positions when entering freeform mode ────────────────────────────
   //    Any item without a saved position gets placed automatically.
+  //    New items added while already in freeform mode go to viewport center.
+
+  const isInFreeform = canvasMode.mode === 'freeform';
 
   React.useEffect(() => {
-    if (canvasMode.mode !== 'freeform') return;
+    if (!isInFreeform) return;
+    const enabledNow = modules.filter(m => m.enabled);
     const allIds = [
-      ...enabledModulesForFreeform.map(m => m.id),
+      ...enabledNow.map(m => m.id),
       ...blocks.map(b => b.id),
       ...customTools.tools.map(t => t.id),
     ];
     allIds.forEach(id => {
       if (!blockPos.positions[id]) {
-        const { x, y } = blockPos.nextFreePos(blockPos.positions);
-        blockPos.initPos(id, { x, y, w: 340 });
+        // New items appear at viewport center so they land where the user is looking.
+        const pos = viewportCenterWorld(
+          (Math.random() - 0.5) * 80,
+          (Math.random() - 0.5) * 60,
+        );
+        blockPos.initPos(id, { x: pos.x, y: pos.y, w: 340 });
       }
     });
   // Re-run whenever mode changes or item list changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasMode.mode, blocks.length, customTools.tools.length]);
+  }, [isInFreeform, blocks.length, customTools.tools.length, modules.filter(m => m.enabled).length]);
 
   // ── Workspaces inline panel ───────────────────────────────────────────────
 
@@ -561,8 +597,6 @@ export function Dashboard() {
 
   const canvasStyle = computeCanvasBg(design, tokens, designMode);
   const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
-  // Alias used by freeform useEffect (defined before the effect that reads it)
-  const enabledModulesForFreeform = enabledModules;
   const hasContent = enabledModules.length > 0 || blocks.length > 0 || customTools.tools.length > 0;
 
   // ── Inline "Add anything" zone ────────────────────────────────────────────
@@ -720,7 +754,7 @@ export function Dashboard() {
         />
       </div>
 
-      {/* ── Freeform Canvas (when in freeform mode) ──────────── */}
+      {/* ── Space canvas ─────────────────────────────────────── */}
       {canvasMode.mode === 'freeform' && !loading && (
         <FreeformCanvas
           tokens={tokens}
@@ -731,6 +765,7 @@ export function Dashboard() {
           canvasState={canvasMode}
           designMode={designMode}
           selectedId={selectedId}
+          activeSession={!!activeSession}
           onSetPos={blockPos.setPos}
           onSelect={id => setSelectedId(id)}
           onRemoveModule={id => toggleModule(id)}
@@ -743,7 +778,7 @@ export function Dashboard() {
         />
       )}
 
-      {/* ── Grid Canvas (default mode) ────────────────────────── */}
+      {/* ── Organize view (secondary structured layout) ──────── */}
       <main
         className="relative"
         style={{

@@ -75,6 +75,8 @@ interface Props {
   canvasState:  CanvasModeState;
   designMode:   boolean;
   selectedId:   string | null;
+  /** True when a focus session is active — environment shifts */
+  activeSession?: boolean;
   onSetPos:     (id: string, pos: Partial<BlockPos>) => void;
   onSelect:     (id: string | null) => void;
   onRemoveModule:  (id: string) => void;
@@ -223,7 +225,7 @@ function CanvasControls({
 
 export function FreeformCanvas({
   tokens, modules, blocks, tools, positions,
-  canvasState, designMode, selectedId,
+  canvasState, designMode, selectedId, activeSession = false,
   onSetPos, onSelect,
   onRemoveModule, onRemoveBlock, onRemoveTool, onDuplicateBlock,
   onOpenAdd, renderModuleContent, getLabel,
@@ -239,14 +241,32 @@ export function FreeformCanvas({
   const rafRef  = useRef(0);                   // animation frame handle
 
   // ── Object aging ─────────────────────────────────────────────────────────
-  // Maps blockId → last-interaction timestamp (ms). Loaded once, updated on touch.
-  const activityRef = useRef<Record<string, number>>({});
+  // Loaded synchronously so return ritual can run on first render.
+  const activityRef = useRef<Record<string, number>>(
+    (() => {
+      try {
+        const raw = localStorage.getItem(ACTIVITY_KEY);
+        return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+      } catch { return {}; }
+    })()
+  );
+
+  // ── Return ritual ─────────────────────────────────────────────────────────
+  // On mount: softly re-illuminate the most recently touched object for 1.8s.
+  // No text. No modal. Just a quiet "welcome back, here's where you left off."
+  const [returnId, setReturnId] = useState<string | null>(() => {
+    const entries = Object.entries(activityRef.current);
+    if (entries.length === 0) return null;
+    const [id, ts] = entries.reduce((a, b) => b[1] > a[1] ? b : a);
+    const hoursAgo = (Date.now() - ts) / 3_600_000;
+    return hoursAgo < 72 ? id : null; // only highlight if touched within 3 days
+  });
+
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(ACTIVITY_KEY);
-      if (raw) activityRef.current = JSON.parse(raw) as Record<string, number>;
-    } catch { /* quota / corrupt */ }
-  }, []);
+    if (!returnId) return;
+    const timer = setTimeout(() => setReturnId(null), 1800);
+    return () => clearTimeout(timer);
+  }, [returnId]);
 
   const [showGuide, setShowGuide] = useState<boolean>(() => {
     try { return !localStorage.getItem(GUIDE_KEY); } catch { return false; }
@@ -668,6 +688,63 @@ export function FreeformCanvas({
           />
         ))}
 
+        {/* ── Spatial inbox — capture block lives here first ─── */}
+        {(() => {
+          const captureItem = allItems.find(i => i.id === 'capture' || i.id.startsWith('capture-'));
+          if (!captureItem) return null;
+          const pos = positions[captureItem.id];
+          if (!pos) return null;
+          const PAD = 22;
+          return (
+            <div
+              aria-hidden="true"
+              style={{
+                position:      'absolute',
+                left:           pos.x - PAD,
+                top:            pos.y - PAD,
+                width:          (pos.w > 0 ? pos.w : 340) + PAD * 2,
+                height:         240 + PAD * 2,
+                borderRadius:  '24px',
+                backgroundColor: `${tokens.accent}03`,
+                border:         `1px dashed ${tokens.accent}10`,
+                pointerEvents:  'none',
+                zIndex:         0,
+                transition:     'all 0.5s ease',
+              }}
+            />
+          );
+        })()}
+
+        {/* ── Focus bubble — ambient glow during a live session ── */}
+        {activeSession && !designMode && (() => {
+          const focusItem = allItems.find(i => i.id === 'focus-mode' || i.id.startsWith('focus-mode'));
+          if (!focusItem) return null;
+          const pos = positions[focusItem.id];
+          if (!pos) return null;
+          const bw = pos.w > 0 ? pos.w : 340;
+          const cx = pos.x + bw / 2;
+          const cy = pos.y + 160;
+          const R  = Math.max(bw, 320);
+          return (
+            <div
+              aria-hidden="true"
+              style={{
+                position:      'absolute',
+                left:           cx - R,
+                top:            cy - R * 0.75,
+                width:          R * 2,
+                height:         R * 1.5,
+                borderRadius:  '50%',
+                background:    `radial-gradient(ellipse, ${tokens.accent}0d 0%, transparent 65%)`,
+                filter:        'blur(24px)',
+                pointerEvents: 'none',
+                zIndex:        0,
+                animation:     'canvasBreath 7s ease-in-out infinite',
+              }}
+            />
+          );
+        })()}
+
         {allItems.map(item => {
           const pos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
 
@@ -704,7 +781,18 @@ export function FreeformCanvas({
           const lastActive = activityRef.current[item.id];
           const freshness = lastActive ? computeFreshness(lastActive) : 1.0;
 
-          const baseOpacity = isOtherDragging ? 0.45 : freshness;
+          // Focus session — non-focus items step back further on the canvas
+          const FOCUS_IDS = new Set(['focus-mode', 'capture', 'deep-work-timer']);
+          const baseId = item.id.replace(/-copy.*$/, '').replace(/-\d+$/, '');
+          const isFocusItem = FOCUS_IDS.has(baseId);
+          const sessionDim = activeSession && !designMode && !isFocusItem;
+
+          // Return ritual — most recently touched block gets a brief 1.8s welcome-back glow
+          const isReturning = returnId === item.id;
+
+          const baseOpacity = isOtherDragging ? 0.45
+            : sessionDim               ? Math.min(freshness, 0.5)
+            : freshness;
 
           return (
             <div
@@ -712,6 +800,10 @@ export function FreeformCanvas({
               style={{
                 opacity:    baseOpacity,
                 transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 0.8s ease',
+                // Return ritual — a soft pulse that says "here's where you left off"
+                ...(isReturning ? {
+                  filter: `drop-shadow(0 0 20px ${tokens.accent}30)`,
+                } : {}),
               }}
             >
               <FreeformBlock
@@ -852,7 +944,7 @@ export function FreeformCanvas({
                 fontSize: '11px', fontWeight: 700, color: tokens.textPrimary,
                 fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '0.01em',
               }}>
-                Thinking space
+                Your space
               </span>
             </div>
             <button

@@ -128,13 +128,16 @@ export function CommandBar({
         {/* ── Right: Controls ───────────────────────────────────── */}
         <div className="flex items-center" style={{ gap: '2px' }}>
 
-          {/* Space mode toggle — icon pair, one click to switch */}
+          {/* Mode toggle — Space (primary) / Organize view (secondary) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
             {([
-              { mode: 'grid',     icon: LayoutDashboard, title: 'Guided layout' },
-              { mode: 'freeform', icon: Move,            title: 'Thinking space' },
+              // Space is first — it's the product
+              { mode: 'freeform', icon: Move,            title: 'Space' },
+              // Organize view is secondary — a tool, not the destination
+              { mode: 'grid',     icon: LayoutDashboard, title: 'Organize view' },
             ] as const).map(({ mode, icon: Icon, title }) => {
-              const isActive = canvasMode === mode;
+              const isActive  = canvasMode === mode;
+              const isPrimary = mode === 'freeform';
               return (
                 <button
                   key={mode}
@@ -147,14 +150,24 @@ export function CommandBar({
                     alignItems:      'center',
                     justifyContent:  'center',
                     borderRadius:    '8px',
-                    border:          isActive ? `1px solid ${tokens.accent}30` : '1px solid transparent',
-                    backgroundColor: isActive ? tokens.accentSubtle : 'transparent',
-                    color:           isActive ? tokens.accent : tokens.textMuted,
+                    // Active Space = accent. Active Organize = muted (it's secondary).
+                    border:          isActive
+                      ? isPrimary
+                        ? `1px solid ${tokens.accent}30`
+                        : `1px solid ${tokens.cardBorder}`
+                      : '1px solid transparent',
+                    backgroundColor: isActive
+                      ? isPrimary ? tokens.accentSubtle : tokens.cardBorder
+                      : 'transparent',
+                    color:           isActive
+                      ? isPrimary ? tokens.accent : tokens.textMuted
+                      : tokens.textGhost,
                     cursor:          isActive ? 'default' : 'pointer',
                     transition:      'all 0.15s ease',
+                    opacity:         !isActive && !isPrimary ? 0.6 : 1,
                   }}
-                  onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary }); }}
-                  onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textMuted }); }}
+                  onMouseEnter={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: tokens.cardBorder, color: tokens.textSecondary, opacity: '1' }); }}
+                  onMouseLeave={e => { if (!isActive) Object.assign((e.currentTarget as HTMLElement).style, { backgroundColor: 'transparent', color: tokens.textGhost, opacity: (!isPrimary ? '0.6' : '1') }); }}
                 >
                   <Icon style={{ width: '13px', height: '13px' }} />
                 </button>

@@ -32,7 +32,7 @@ interface PersistedConfig {
 }
 
 const DEFAULTS: PersistedConfig = {
-  mode:       'grid',
+  mode:       'freeform',   // Space is the primary experience
   snapToGrid: true,
   gridSize:   DEFAULT_GRID_SIZE,
 };
