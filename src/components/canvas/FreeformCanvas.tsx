@@ -23,15 +23,34 @@ import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2, Move, X } from 'lucide-reac
 
 const GUIDE_KEY     = 'fw_free_canvas_guide_seen_v1';
 const ACTIVITY_KEY  = 'fw_obj_activity_v2';
+const WARMTH_KEY    = 'fw_region_warmth_v1';
 
-// Freshness: 1.0 when recently used, fades to 0.72 after 3+ days of no touch
-function computeFreshness(lastActive: number): number {
-  const hoursAgo = (Date.now() - lastActive) / 3_600_000;
-  if (hoursAgo < 1)   return 1.0;
-  if (hoursAgo < 24)  return 1.0 - (hoursAgo / 24) * 0.12;   // 1.0 → 0.88
-  if (hoursAgo < 72)  return 0.88 - ((hoursAgo - 24) / 48) * 0.16; // 0.88 → 0.72
-  return 0.72;
+// ── Thought lifecycle ─────────────────────────────────────────────────────────
+// Objects exist on a spectrum from freshly active to deeply dormant.
+// This shapes their visual presence — not their accessibility.
+//
+// active   < 2h    full presence (1.0)
+// warm     2–24h   settling (0.92 → 0.86)
+// dormant  1–3d    fading back (0.84 → 0.72)
+// fading   3–7d    receding further (0.72 → 0.62)
+// deep     7d+     ambient memory (0.60)
+
+type LifecycleState = 'active' | 'warm' | 'dormant' | 'fading' | 'deep';
+interface LifecycleResult { state: LifecycleState; opacity: number; }
+
+function computeLifecycle(lastActive: number | undefined): LifecycleResult {
+  if (!lastActive) return { state: 'warm', opacity: 0.88 };
+  const hrs = (Date.now() - lastActive) / 3_600_000;
+  if (hrs < 2)   return { state: 'active',  opacity: 1.0  };
+  if (hrs < 24)  return { state: 'warm',    opacity: 0.92 - (hrs / 24)        * 0.06 };
+  if (hrs < 72)  return { state: 'dormant', opacity: 0.84 - ((hrs - 24)  / 48) * 0.12 };
+  if (hrs < 168) return { state: 'fading',  opacity: 0.72 - ((hrs - 72)  / 96) * 0.10 };
+  return { state: 'deep', opacity: 0.60 };
 }
+
+// ── Region warmth helpers ─────────────────────────────────────────────────────
+
+interface WarmthPoint { x: number; y: number; age: number; } // age in fractional days
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ModuleConfig } from '../../hooks/useWorkspaceLayout';
 import type { CustomBlock } from '../../hooks/useCustomBlocks';
@@ -251,6 +270,65 @@ export function FreeformCanvas({
     })()
   );
 
+  // ── Region warmth — inhabited areas accumulate presence over time ────────
+  // Tracks up to 5 "warmth points" in world space. Each records where thinking
+  // has been concentrated. They render as extremely faint radial glows on the
+  // canvas surface — not UI, just environmental texture.
+  const warmthRef = useRef<WarmthPoint[]>(
+    (() => {
+      try {
+        const raw = localStorage.getItem(WARMTH_KEY);
+        if (!raw) return [];
+        const data = JSON.parse(raw) as WarmthPoint[];
+        // Prune points older than 30 days — they've fully dissolved
+        return data.filter((p: WarmthPoint) => typeof p.age === 'number' && p.age < 30);
+      } catch { return []; }
+    })()
+  );
+
+  // Debounced warmth accumulation: every time positions change, blend current
+  // block distribution into stored warmth memory.
+  const warmthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const posArray = Object.values(positions);
+    if (posArray.length === 0) return;
+    if (warmthTimerRef.current) clearTimeout(warmthTimerRef.current);
+    warmthTimerRef.current = setTimeout(() => {
+      // Compute centroid of the current occupied area
+      const cx = posArray.reduce((s, p) => s + p.x + (p.w > 0 ? p.w / 2 : 170), 0) / posArray.length;
+      const cy = posArray.reduce((s, p) => s + p.y + 120, 0) / posArray.length;
+      const MERGE_DIST = 260;
+      const current    = warmthRef.current;
+      const nearby     = current.find(p => Math.hypot(p.x - cx, p.y - cy) < MERGE_DIST);
+      if (nearby) {
+        // Reinforce existing warmth point — slow age by revisiting it
+        nearby.age = Math.max(0, nearby.age - 0.4);
+      } else if (current.length < 5) {
+        current.push({ x: cx, y: cy, age: 0 });
+      } else {
+        // Recycle oldest point
+        const oldest = current.reduce((a, b) => b.age > a.age ? b : a);
+        oldest.x = cx; oldest.y = cy; oldest.age = 0;
+      }
+      // Gently age all warmth points each update cycle
+      current.forEach(p => { p.age = Math.min(30, p.age + 0.015); });
+      try { localStorage.setItem(WARMTH_KEY, JSON.stringify(current)); } catch { /* quota */ }
+    }, 3000);
+    return () => { if (warmthTimerRef.current) clearTimeout(warmthTimerRef.current); };
+  }, [positions]);
+
+  // ── Revisit state ─────────────────────────────────────────────────────────
+  // When a dormant/fading thought is touched again, the space acknowledges it
+  // with a brief warm glow — the environment notices the return.
+  const [revisitId, setRevisitId] = useState<string | null>(null);
+
+  // ── Cluster stability (session-local) ─────────────────────────────────────
+  // Tracks when a cluster centroid was first observed this session.
+  // After 5 minutes of stability, the cluster backdrop solidifies slightly —
+  // communicating that this grouping has "settled" into the space.
+  const clusterFirstSeen = useRef<Map<string, number>>(new Map());
+
   // ── Return ritual ─────────────────────────────────────────────────────────
   // On mount: softly re-illuminate the most recently touched object for 1.8s.
   // No text. No modal. Just a quiet "welcome back, here's where you left off."
@@ -408,7 +486,13 @@ export function FreeformCanvas({
     // Cancel any running momentum (canvas or block) so a fresh drag starts clean
     cancelAnimationFrame(rafRef.current);
     velRef.current = { vx: 0, vy: 0 };
-    // Record touch for object aging — this block is live now
+    // Detect revisit: was this thought dormant/fading? If so, surface it.
+    const prevLifecycle = computeLifecycle(activityRef.current[blockId]);
+    if (prevLifecycle.state === 'dormant' || prevLifecycle.state === 'fading' || prevLifecycle.state === 'deep') {
+      setRevisitId(blockId);
+      setTimeout(() => setRevisitId(r => r === blockId ? null : r), 2500);
+    }
+    // Record touch — this thought is active again
     activityRef.current[blockId] = Date.now();
     try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
     onSelect(blockId);
@@ -667,49 +751,85 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
-        {/* ── Proximity cluster backdrops ─────────────────────── */}
-        {clusters.map((box, i) => (
-          <div
-            key={`cluster-${i}`}
-            aria-hidden="true"
-            style={{
-              position:        'absolute',
-              left:             box.x,
-              top:              box.y,
-              width:            box.w,
-              height:           box.h,
-              borderRadius:    '22px',
-              backgroundColor: `${tokens.accent}05`,
-              border:          `1px solid ${tokens.accent}0a`,
-              pointerEvents:   'none',
-              zIndex:          0,
-              transition:      'all 0.6s cubic-bezier(0.32,0.72,0,1)',
-            }}
-          />
-        ))}
+        {/* ── Region warmth — the canvas surface develops memory ─── */}
+        {warmthRef.current.filter(p => p.age < 30).map((point, i) => {
+          const intensity = Math.max(0, (1 - point.age / 30)) * 0.042;
+          const hex = Math.round(intensity * 255).toString(16).padStart(2, '0');
+          return (
+            <div
+              key={`warmth-${i}`}
+              aria-hidden="true"
+              style={{
+                position:      'absolute',
+                left:           point.x - 300,
+                top:            point.y - 240,
+                width:          '600px',
+                height:         '480px',
+                borderRadius:   '50%',
+                background:     `radial-gradient(ellipse, ${tokens.accent}${hex} 0%, transparent 60%)`,
+                filter:         'blur(48px)',
+                pointerEvents:  'none',
+                zIndex:         0,
+              }}
+            />
+          );
+        })}
 
-        {/* ── Spatial inbox — capture block lives here first ─── */}
+        {/* ── Proximity cluster backdrops ─────────────────────── */}
+        {clusters.map((box, i) => {
+          // Stability key: centroid rounded to 120px grid
+          const ck = `${Math.round((box.x + box.w / 2) / 120)}_${Math.round((box.y + box.h / 2) / 120)}`;
+          if (!clusterFirstSeen.current.has(ck)) clusterFirstSeen.current.set(ck, Date.now());
+          const seenMs   = Date.now() - (clusterFirstSeen.current.get(ck) ?? Date.now());
+          // After 5 quiet minutes this grouping has "settled" — border solidifies
+          const isStable = seenMs > 5 * 60 * 1000;
+          return (
+            <div
+              key={`cluster-${i}`}
+              aria-hidden="true"
+              style={{
+                position:        'absolute',
+                left:             box.x,
+                top:              box.y,
+                width:            box.w,
+                height:           box.h,
+                borderRadius:    '22px',
+                backgroundColor: `${tokens.accent}${isStable ? '07' : '05'}`,
+                border:          `1px ${isStable ? 'solid' : 'dashed'} ${tokens.accent}${isStable ? '10' : '08'}`,
+                pointerEvents:   'none',
+                zIndex:          0,
+                transition:      'all 0.6s cubic-bezier(0.32,0.72,0,1), border-style 1s ease, border-color 1s ease',
+              }}
+            />
+          );
+        })}
+
+        {/* ── Spatial inbox — the arrival point for new thoughts ─ */}
         {(() => {
           const captureItem = allItems.find(i => i.id === 'capture' || i.id.startsWith('capture-'));
           if (!captureItem) return null;
           const pos = positions[captureItem.id];
           if (!pos) return null;
+          // When the capture area has been dormant, its zone warms to amber —
+          // a quiet signal that thoughts are waiting there, not a notification.
+          const captureLife = computeLifecycle(activityRef.current[captureItem.id]);
+          const hasWaiting  = captureLife.state === 'dormant' || captureLife.state === 'fading';
           const PAD = 22;
           return (
             <div
               aria-hidden="true"
               style={{
-                position:      'absolute',
-                left:           pos.x - PAD,
-                top:            pos.y - PAD,
-                width:          (pos.w > 0 ? pos.w : 340) + PAD * 2,
-                height:         240 + PAD * 2,
-                borderRadius:  '24px',
-                backgroundColor: `${tokens.accent}03`,
-                border:         `1px dashed ${tokens.accent}10`,
-                pointerEvents:  'none',
-                zIndex:         0,
-                transition:     'all 0.5s ease',
+                position:        'absolute',
+                left:             pos.x - PAD,
+                top:              pos.y - PAD,
+                width:            (pos.w > 0 ? pos.w : 340) + PAD * 2,
+                height:           240 + PAD * 2,
+                borderRadius:    '24px',
+                backgroundColor:  hasWaiting ? 'rgba(245,158,11,0.025)' : `${tokens.accent}03`,
+                border:           `1px dashed ${hasWaiting ? 'rgba(245,158,11,0.12)' : `${tokens.accent}10`}`,
+                pointerEvents:    'none',
+                zIndex:           0,
+                transition:       'background-color 2s ease, border-color 2s ease',
               }}
             />
           );
@@ -777,33 +897,41 @@ export function FreeformCanvas({
           // — creates a "spotlight" effect and a sense of spatial depth
           const isOtherDragging = !!(draggingId && draggingId !== item.id);
 
-          // Object aging — freshness fades blocks that haven't been touched in days
-          const lastActive = activityRef.current[item.id];
-          const freshness = lastActive ? computeFreshness(lastActive) : 1.0;
+          // Thought lifecycle — each object exists on a spectrum from active to deep archive
+          const lifecycle   = computeLifecycle(activityRef.current[item.id]);
 
-          // Focus session — non-focus items step back further on the canvas
-          const FOCUS_IDS = new Set(['focus-mode', 'capture', 'deep-work-timer']);
-          const baseId = item.id.replace(/-copy.*$/, '').replace(/-\d+$/, '');
+          // Focus session — non-focus thoughts step further back
+          const FOCUS_IDS   = new Set(['focus-mode', 'capture', 'deep-work-timer']);
+          const baseId      = item.id.replace(/-copy.*$/, '').replace(/-\d+$/, '');
           const isFocusItem = FOCUS_IDS.has(baseId);
-          const sessionDim = activeSession && !designMode && !isFocusItem;
+          const sessionDim  = activeSession && !designMode && !isFocusItem;
 
-          // Return ritual — most recently touched block gets a brief 1.8s welcome-back glow
-          const isReturning = returnId === item.id;
+          // Return ritual — most recently touched block gets a brief welcome-back glow
+          const isReturning  = returnId   === item.id;
+          // Revisit — a dormant thought just woken up gets a warm amber signal
+          const isRevisiting = revisitId  === item.id;
 
           const baseOpacity = isOtherDragging ? 0.45
-            : sessionDim               ? Math.min(freshness, 0.5)
-            : freshness;
+            : sessionDim    ? Math.min(lifecycle.opacity, 0.5)
+            : lifecycle.opacity;
 
           return (
             <div
               key={item.id}
               style={{
                 opacity:    baseOpacity,
-                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 0.8s ease',
-                // Return ritual — a soft pulse that says "here's where you left off"
-                ...(isReturning ? {
-                  filter: `drop-shadow(0 0 20px ${tokens.accent}30)`,
-                } : {}),
+                transition: isOtherDragging ? 'opacity 0.15s ease' : 'opacity 1.2s ease',
+                // Revisit — a dormant thought returning to life: warm amber flash
+                // Return ritual — most recent block on open: soft accent pulse
+                filter: isRevisiting
+                  ? `drop-shadow(0 0 18px rgba(245,158,11,0.45))`
+                  : isReturning
+                    ? `drop-shadow(0 0 22px ${tokens.accent}35)`
+                    : 'none',
+                // Slow the filter transition so the glow fades gracefully
+                ...(isRevisiting || isReturning
+                  ? { transition: 'opacity 1.2s ease, filter 1.8s ease' }
+                  : {}),
               }}
             >
               <FreeformBlock
