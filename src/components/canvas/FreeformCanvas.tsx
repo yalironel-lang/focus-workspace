@@ -19,7 +19,9 @@
  */
 
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2, Move } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2, Move, X } from 'lucide-react';
+
+const GUIDE_KEY = 'fw_free_canvas_guide_seen_v1';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ModuleConfig } from '../../hooks/useWorkspaceLayout';
 import type { CustomBlock } from '../../hooks/useCustomBlocks';
@@ -211,6 +213,14 @@ export function FreeformCanvas({
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState<boolean>(() => {
+    try { return !localStorage.getItem(GUIDE_KEY); } catch { return false; }
+  });
+
+  const dismissGuide = useCallback(() => {
+    setShowGuide(false);
+    try { localStorage.setItem(GUIDE_KEY, '1'); } catch { /* quota */ }
+  }, []);
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
 
@@ -495,18 +505,61 @@ export function FreeformCanvas({
 
         {/* ── Empty state ────────────────────────────────────── */}
         {allItems.length === 0 && (
-          <div style={{ position: 'absolute', left: '50%', top: '30%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none' }}>
-            <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '13px', fontWeight: 600, color: tokens.textGhost, margin: 0 }}>
-              Canvas is empty
+          <div style={{
+            position: 'absolute', left: '50%', top: '38%',
+            transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
+          }}>
+            <div style={{
+              width: '48px', height: '48px', borderRadius: '14px', margin: '0 auto 12px',
+              backgroundColor: tokens.accentSubtle,
+              border: `1px solid ${tokens.accent}25`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Move style={{ width: '20px', height: '20px', color: tokens.accent, opacity: 0.7 }} />
+            </div>
+            <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '14px', fontWeight: 600, color: tokens.textSecondary, margin: 0 }}>
+              Your Free Canvas is empty
             </p>
-            <p style={{ fontSize: '11px', color: tokens.textGhost, margin: '4px 0 0', opacity: 0.6 }}>
-              Press ⌘K to add blocks, tools, and modules
+            <p style={{ fontSize: '12px', color: tokens.textMuted, margin: '6px 0 0', lineHeight: 1.5 }}>
+              Press <kbd style={{ fontFamily: 'monospace', padding: '1px 5px', borderRadius: '4px', border: `1px solid ${tokens.cardBorder}`, fontSize: '11px', color: tokens.textSecondary, backgroundColor: tokens.wellBg }}>⌘K</kbd> to add cards, tools, and modules
+            </p>
+          </div>
+        )}
+
+        {/* ── Selection hint (nothing selected, has items) ──── */}
+        {allItems.length > 0 && !selectedId && !draggingId && (
+          <div style={{
+            position: 'absolute', left: '50%', bottom: '80px',
+            transform: 'translateX(-50%)', textAlign: 'center', pointerEvents: 'none',
+            opacity: 0.5, transition: 'opacity 0.3s ease',
+          }}>
+            <p style={{ fontSize: '11px', color: tokens.textMuted, margin: 0, whiteSpace: 'nowrap' }}>
+              Click a card to select it · Drag its header to move
             </p>
           </div>
         )}
       </div>
 
-      {/* ── Move indicator (top-left badge) ─────────────────────── */}
+      {/* ── Mode badge (top-left) ─────────────────────────────────── */}
+      <div style={{
+        position: 'absolute', top: '12px', left: '16px', zIndex: 20,
+        display: 'flex', alignItems: 'center', gap: '5px',
+        padding: '3px 8px 3px 6px',
+        borderRadius: '8px',
+        backgroundColor: `${tokens.accent}14`,
+        border: `1px solid ${tokens.accent}28`,
+        color: tokens.accent,
+        fontSize: '10px', fontWeight: 700,
+        fontFamily: "'Space Grotesk', sans-serif",
+        letterSpacing: '0.06em',
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}>
+        <Move style={{ width: '9px', height: '9px' }} />
+        FREE CANVAS
+      </div>
+
+      {/* ── Move indicator (top-center badge) ─────────────────────── */}
       {draggingId && (
         <div style={{
           position:        'absolute',
@@ -545,6 +598,100 @@ export function FreeformCanvas({
         onToggleSnap={toggleSnap}
         onAutoOrganize={handleAutoOrganize}
       />
+
+      {/* ── First-time guide overlay ──────────────────────────────── */}
+      {showGuide && (
+        <div style={{
+          position: 'absolute', top: '16px', right: '16px', zIndex: 40,
+          width: '240px',
+          backgroundColor: `${tokens.cardBg}f4`,
+          border: `1px solid ${tokens.cardBorder}`,
+          borderRadius: `${Math.min(tokens.radius, 14)}px`,
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          boxShadow: tokens.shadowMd,
+          overflow: 'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 12px 8px',
+            borderBottom: `1px solid ${tokens.divider}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{
+                width: '20px', height: '20px', borderRadius: '6px',
+                backgroundColor: tokens.accentSubtle,
+                border: `1px solid ${tokens.accent}30`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Move style={{ width: '10px', height: '10px', color: tokens.accent }} />
+              </div>
+              <span style={{
+                fontSize: '11px', fontWeight: 700, color: tokens.textPrimary,
+                fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '0.01em',
+              }}>
+                Free Canvas
+              </span>
+            </div>
+            <button
+              onClick={dismissGuide}
+              style={{
+                width: '20px', height: '20px', borderRadius: '5px', border: 'none',
+                backgroundColor: 'transparent', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: tokens.textGhost,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
+            >
+              <X style={{ width: '11px', height: '11px' }} />
+            </button>
+          </div>
+          {/* Tips */}
+          <div style={{ padding: '8px 12px 10px' }}>
+            {([
+              ['↔', 'Drag background to pan'],
+              ['⌘+scroll', 'Zoom in/out'],
+              ['⣿', 'Drag card header to move'],
+              ['✦', 'Organize button to auto-tidy'],
+            ] as const).map(([key, label]) => (
+              <div key={key} style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '4px 0',
+              }}>
+                <span style={{
+                  fontFamily: 'monospace', fontSize: '10px', fontWeight: 600,
+                  color: tokens.accent, opacity: 0.85,
+                  minWidth: '54px', flexShrink: 0,
+                }}>
+                  {key}
+                </span>
+                <span style={{ fontSize: '11px', color: tokens.textSecondary }}>
+                  {label}
+                </span>
+              </div>
+            ))}
+            <button
+              onClick={dismissGuide}
+              style={{
+                marginTop: '8px', width: '100%',
+                padding: '5px 0',
+                borderRadius: '7px',
+                border: `1px solid ${tokens.accent}30`,
+                backgroundColor: tokens.accentSubtle,
+                color: tokens.accent,
+                fontSize: '11px', fontWeight: 600,
+                cursor: 'pointer', fontFamily: "'Space Grotesk', sans-serif",
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = `${tokens.accent}25`; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentSubtle; }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Add button (bottom-right) ───────────────────────────── */}
       <button

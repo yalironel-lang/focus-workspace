@@ -328,10 +328,12 @@ export function CommandBar({
             <span className="hidden sm:inline">Add</span>
           </button>
 
-          {/* Canvas mode toggle: Grid ↔ Freeform */}
+          {/* Canvas mode toggle: Structured ↔ Free Canvas */}
           <button
             onClick={onToggleCanvas}
-            title={canvasMode === 'freeform' ? 'Switch to Grid layout' : 'Switch to Freeform canvas'}
+            title={canvasMode === 'freeform'
+              ? 'Free Canvas — drag cards anywhere, scroll to zoom, drag background to pan. Click to switch to Structured layout.'
+              : 'Structured — fixed 12-column grid layout. Click to switch to Free Canvas where you can drag cards anywhere.'}
             style={{
               ...navBtn(tokens, canvasMode === 'freeform'),
               ...(canvasMode === 'freeform' ? {
@@ -360,7 +362,7 @@ export function CommandBar({
               : <LayoutDashboard style={{ width: '12px', height: '12px' }} />
             }
             <span className="hidden sm:inline">
-              {canvasMode === 'freeform' ? 'Freeform' : 'Grid'}
+              {canvasMode === 'freeform' ? 'Free Canvas' : 'Structured'}
             </span>
           </button>
 

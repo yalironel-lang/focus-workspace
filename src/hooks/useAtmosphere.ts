@@ -68,8 +68,8 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     wellBg:           '#0c0a07',
     textPrimary:      '#f5ede0',
     textSecondary:    '#a89070',
-    textMuted:        '#5c4830',
-    textGhost:        '#3a2e1e',   // visible on cardBg ~3.5:1
+    textMuted:        '#9a7a52',   // ~5:1 on cardBg
+    textGhost:        '#7a6040',   // ~3.5:1 on cardBg
     accent:           '#f59e0b',
     accentHover:      '#fbbf24',
     accentSubtle:     'rgba(245,158,11,0.10)',
@@ -100,9 +100,9 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     cardBorderHover:  'rgba(255,255,255,0.12)',
     wellBg:           '#050405',
     textPrimary:      '#e8e2f0',
-    textSecondary:    '#6b6280',
-    textMuted:        '#3c3850',
-    textGhost:        '#2a2838',   // visible ~3:1 on cardBg
+    textSecondary:    '#8a8298',
+    textMuted:        '#7a7290',   // ~4.5:1 on cardBg
+    textGhost:        '#5e5878',   // ~3:1 on cardBg
     accent:           '#818cf8',
     accentHover:      '#a5b4fc',
     accentSubtle:     'rgba(129,140,248,0.08)',
@@ -134,8 +134,8 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     wellBg:           '#0c0d0f',
     textPrimary:      '#eeeae5',
     textSecondary:    '#8898a8',
-    textMuted:        '#495562',
-    textGhost:        '#323d48',   // visible ~3:1 on cardBg
+    textMuted:        '#6a7e8e',   // ~4:1 on cardBg
+    textGhost:        '#506070',   // ~3:1 on cardBg
     accent:           '#38bdf8',
     accentHover:      '#7dd3fc',
     accentSubtle:     'rgba(56,189,248,0.08)',
@@ -166,9 +166,9 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     cardBorderHover:  'rgba(255,160,60,0.16)',
     wellBg:           '#0b0603',
     textPrimary:      '#fef0da',
-    textSecondary:    '#b07840',
-    textMuted:        '#6a4020',
-    textGhost:        '#3e2410',   // visible ~3:1 on cardBg
+    textSecondary:    '#c08840',
+    textMuted:        '#9e6030',   // ~4.5:1 on cardBg
+    textGhost:        '#7a4820',   // ~3:1 on cardBg
     accent:           '#f97316',
     accentHover:      '#fb923c',
     accentSubtle:     'rgba(249,115,22,0.10)',
@@ -199,9 +199,9 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     cardBorderHover:  'rgba(255,255,255,0.12)',
     wellBg:           '#080808',
     textPrimary:      '#e8e8e8',
-    textSecondary:    '#666666',
-    textMuted:        '#383838',
-    textGhost:        '#282828',   // just visible on #111
+    textSecondary:    '#8a8a8a',
+    textMuted:        '#787878',   // ~4.5:1 on #111
+    textGhost:        '#5a5a5a',   // ~3:1 on #111
     accent:           '#d4d4d4',
     accentHover:      '#f5f5f5',
     accentSubtle:     'rgba(212,212,212,0.06)',
@@ -232,9 +232,9 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     cardBorderHover:  'rgba(180,160,255,0.16)',
     wellBg:           '#060510',
     textPrimary:      '#f0eeff',
-    textSecondary:    '#9080c0',
-    textMuted:        '#504060',
-    textGhost:        '#332840',   // visible on #0e0b1a ~3:1
+    textSecondary:    '#a090d0',
+    textMuted:        '#8468a8',   // ~4.5:1 on cardBg
+    textGhost:        '#624e80',   // ~3:1 on cardBg
     accent:           '#a78bfa',
     accentHover:      '#c4b5fd',
     accentSubtle:     'rgba(167,139,250,0.10)',
@@ -265,9 +265,9 @@ export const ATMOSPHERES: AtmosphereTokens[] = [
     cardBorderHover:  'rgba(120,200,140,0.16)',
     wellBg:           '#050c08',
     textPrimary:      '#e6f0e8',
-    textSecondary:    '#78a882',
-    textMuted:        '#3e6045',
-    textGhost:        '#243828',   // visible on #0c1510 ~3:1
+    textSecondary:    '#88b892',
+    textMuted:        '#6a9470',   // ~4.5:1 on cardBg
+    textGhost:        '#4e7256',   // ~3:1 on cardBg
     accent:           '#4ade80',
     accentHover:      '#86efac',
     accentSubtle:     'rgba(74,222,128,0.08)',

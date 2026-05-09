@@ -822,14 +822,14 @@ export function AddWorkspacePanel({ open, modules, tokens, onToggle, onAddBlock,
                     </div>
                     <div style={{ flex: 1 }}>
                       <p style={{ fontSize: '13px', fontWeight: 700, color: tokens.textPrimary, margin: 0 }}>
-                        Create a Tool
+                        Create a calculator or formula tool
                       </p>
-                      <p style={{ fontSize: '10px', color: tokens.textGhost, margin: 0, marginTop: '1px' }}>
-                        Grade calculator, budget splitter, formula card — no code.
+                      <p style={{ fontSize: '10px', color: tokens.textMuted, margin: 0, marginTop: '2px', lineHeight: 1.4 }}>
+                        Grade averager · budget splitter · study hours tracker — no code needed
                       </p>
                     </div>
-                    <span style={{ fontSize: '10px', fontWeight: 700, color: tokens.accent, opacity: 0.7 }}>
-                      New →
+                    <span style={{ fontSize: '10px', fontWeight: 700, color: tokens.accent, opacity: 0.8 }}>
+                      Build →
                     </span>
                   </button>
                 </div>
