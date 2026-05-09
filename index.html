@@ -2,9 +2,52 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- App identity -->
     <title>Focus Workspace</title>
+    <meta name="description" content="Your calm daily operating layer. Capture thoughts, choose priorities, focus with momentum." />
+    <meta name="application-name" content="Focus" />
+
+    <!-- Theme & display -->
+    <meta name="theme-color" content="#0a0805" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Focus" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="mask-icon" href="/icon-maskable.svg" color="#f59e0b" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Focus Workspace" />
+    <meta property="og:description" content="Capture → Choose → Focus. Your calm daily operating layer." />
+    <meta property="og:type" content="website" />
+
+    <!-- Preconnect to Google Fonts (used in app) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Prevent FOUC: set dark background instantly before JS loads -->
+    <style>
+      html, body, #root {
+        background-color: #0a0805;
+        margin: 0;
+        padding: 0;
+        min-height: 100dvh;
+      }
+      /* iOS safe area padding */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

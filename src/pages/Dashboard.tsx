@@ -52,6 +52,7 @@ import { useContextualHints }       from '../hooks/useContextualHints';
 import { useSessionContinuity }     from '../hooks/useSessionContinuity';
 import { DailyEntryBanner }     from '../components/canvas/DailyEntryBanner';
 import { StartHerePanel }       from '../components/canvas/StartHerePanel';
+import { CommandLauncher }      from '../components/launcher/CommandLauncher';
 import { ContextualHint }       from '../components/canvas/ContextualHint';
 import { Loader2, Plus, X }     from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -145,6 +146,7 @@ export function Dashboard() {
   const [showSessionModal, setShowSessionModal]  = useState(false);
   const [newTitle,         setNewTitle]          = useState('');
   const [creating,         setCreating]          = useState(false);
+  const [launcherOpen,     setLauncherOpen]      = useState(false);
 
   // Pulse a newly added block once so user can see where it appeared
   const [pulsingId, setPulsingId] = useState<string | null>(null);
@@ -705,12 +707,12 @@ export function Dashboard() {
     if (hasContent) setShowDesignHint(false);
   }, [hasContent]);
 
-  // ── CMD+K / CTRL+K → open "Add to workspace" panel ───────────────────────
+  // ── CMD+K / CTRL+K → open command launcher ───────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setAddPanelOpen(true);
+        setLauncherOpen(o => !o);
       }
     };
     window.addEventListener('keydown', handler);
@@ -1085,6 +1087,19 @@ export function Dashboard() {
         tokens={tokens}
         onDismiss={hints.dismissHint}
         onAction={hints.triggerAction}
+      />
+
+      {/* ── Command Launcher ⌘K ──────────────────────────────── */}
+      <CommandLauncher
+        open={launcherOpen}
+        tokens={tokens}
+        sections={sections}
+        deadlines={deadlines}
+        onClose={() => setLauncherOpen(false)}
+        onCapture={handleCapture}
+        onStartSession={() => { setLauncherOpen(false); setShowSessionModal(true); }}
+        onOpenSection={id => { setLauncherOpen(false); navigate(`/section/${id}`); }}
+        onOpenAdd={() => { setLauncherOpen(false); setAddPanelOpen(true); }}
       />
 
       {/* ── Session modal ─────────────────────────────────────── */}
