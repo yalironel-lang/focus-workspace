@@ -29,6 +29,8 @@ const WARMTH_KEY    = 'fw_region_warmth_v1';
 const WHEEL_SENSITIVITY = 0.0012;      // per-pixel wheel scaling for exp zoom
 const WHEEL_DEADZONE = 0.8;            // ignore tiny wheel noise (pixel-equivalent)
 const MAX_WHEEL_DELTA = 60;            // clamp wheel bursts to avoid jump zoom
+const WHEEL_PAN_DEADZONE = 0.5;        // ignore tiny pan wheel noise
+const WHEEL_PAN_SPEED = 1.0;           // pan distance multiplier
 const ZOOM_SMOOTHING = 9.0;            // higher = faster settle, dt-based per second
 
 const PAN_VELOCITY_CLAMP = 2.8;        // px/ms
@@ -283,7 +285,9 @@ export function FreeformCanvas({
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
+  const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
   // Controls bar is ambient — only surfaces near the bottom edge
   const [controlsNear,   setControlsNear]    = useState(false);
 
@@ -523,6 +527,24 @@ export function FreeformCanvas({
   // ── Mouse event handlers ──────────────────────────────────────────────────
 
   const onBlockMouseDown = useCallback((blockId: string, e: React.MouseEvent, type: 'move' | 'resize') => {
+    if (spaceHeldRef.current || e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(zoomRafRef.current);
+      zoomRafRef.current = 0;
+      velRef.current = { vx: 0, vy: 0 };
+      onSelect(null);
+      dragRef.current = {
+        type: 'canvas',
+        startMouseX: e.clientX,
+        startMouseY: e.clientY,
+        startPanX: panX,
+        startPanY: panY,
+        panStarted: true,
+      };
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     // Cancel any running momentum or zoom lerp so a fresh drag starts clean
@@ -554,13 +576,16 @@ export function FreeformCanvas({
       resizeStarted: false,
     };
     setDraggingId(blockId);
-  }, [positions, onSelect]);
+  }, [positions, onSelect, panX, panY]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only pan on left-click on empty canvas
-    if (e.button !== 0) return;
+    // Left-click panning is only for empty canvas. Space+drag and middle-click
+    // should pan from anywhere for easier navigation.
+    if (e.button !== 0 && e.button !== 1) return;
     const target = e.target as HTMLElement;
-    if (target.closest('[data-freeform-block]')) return;
+    const forcePan = spaceHeldRef.current || e.button === 1;
+    if (!forcePan && target.closest('[data-freeform-block]')) return;
+    if (e.button === 1) e.preventDefault();
     // Cancel any running momentum or zoom lerp so the new drag starts fresh
     cancelAnimationFrame(rafRef.current);
     cancelAnimationFrame(zoomRafRef.current);
@@ -573,9 +598,45 @@ export function FreeformCanvas({
       startMouseY: e.clientY,
       startPanX:   panX,
       startPanY:   panY,
-      panStarted:  false,
+      panStarted:  forcePan ? true : false,
     };
   }, [onSelect, panX, panY]);
+
+  useEffect(() => {
+    const isEditingTarget = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false;
+      return !!el.closest('input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable]');
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return;
+      if (isEditingTarget(e.target)) return;
+      if (!spaceHeldRef.current) {
+        e.preventDefault();
+        spaceHeldRef.current = true;
+        setSpaceHeld(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return;
+      if (spaceHeldRef.current) {
+        spaceHeldRef.current = false;
+        setSpaceHeld(false);
+      }
+    };
+    const onBlur = () => {
+      if (!spaceHeldRef.current) return;
+      spaceHeldRef.current = false;
+      setSpaceHeld(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   // Attach global mousemove/mouseup on mount (avoids losing drag on fast moves)
   useEffect(() => {
@@ -773,6 +834,11 @@ export function FreeformCanvas({
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
+      const isZoomIntent = e.ctrlKey || e.metaKey;
+      const active = document.activeElement;
+      const editingFocus = active instanceof HTMLElement
+        && !!active.closest('input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable]');
+      if (!isZoomIntent && editingFocus) return;
       e.preventDefault();
 
       // Cancel pan momentum — zoom and momentum shouldn't fight
@@ -782,13 +848,25 @@ export function FreeformCanvas({
       const curX = e.clientX - rect.left;
       const curY = e.clientY - rect.top;
 
-      // Each wheel tick refines the TARGET (not the live view).
-      // Accumulating toward the target means rapid scroll wheel spins
-      // compound correctly into smooth continuous zoom.
       const deltaModeFactor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
-      const rawDelta = e.deltaY * deltaModeFactor;
-      if (Math.abs(rawDelta) < WHEEL_DEADZONE) return;
-      const wheelDelta = Math.max(-MAX_WHEEL_DELTA, Math.min(MAX_WHEEL_DELTA, rawDelta));
+      const rawDeltaY = e.deltaY * deltaModeFactor;
+      const rawDeltaX = e.deltaX * deltaModeFactor;
+
+      if (!isZoomIntent) {
+        if (Math.abs(rawDeltaY) < WHEEL_PAN_DEADZONE && Math.abs(rawDeltaX) < WHEEL_PAN_DEADZONE) return;
+        const cur = liveViewRef.current;
+        const nextPanX = cur.panX - rawDeltaX * WHEEL_PAN_SPEED;
+        const nextPanY = cur.panY - rawDeltaY * WHEEL_PAN_SPEED;
+        setPan(nextPanX, nextPanY);
+        targetViewRef.current = { zoom: cur.zoom, panX: nextPanX, panY: nextPanY };
+        return;
+      }
+
+      // Each zoom tick refines the TARGET (not the live view).
+      // Accumulating toward the target means rapid pinch/wheel zoom
+      // compounds into smooth continuous zoom.
+      if (Math.abs(rawDeltaY) < WHEEL_DEADZONE) return;
+      const wheelDelta = Math.max(-MAX_WHEEL_DELTA, Math.min(MAX_WHEEL_DELTA, rawDeltaY));
       const factor = Math.exp(-wheelDelta * WHEEL_SENSITIVITY);
       const prevZ  = targetViewRef.current.zoom;
       const newZ   = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
@@ -880,7 +958,7 @@ export function FreeformCanvas({
         right:      0,
         bottom:     0,
         overflow:   'hidden',
-        cursor:     draggingId ? 'grabbing' : 'grab',
+        cursor:     draggingId || dragRef.current?.type === 'canvas' ? 'grabbing' : (spaceHeld ? 'grab' : 'grab'),
         userSelect: draggingId ? 'none' : undefined,
         backgroundColor: tokens.pageBg,
       }}

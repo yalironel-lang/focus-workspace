@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
 
@@ -37,6 +37,10 @@ export interface SectionBlockPositionsState {
 
 export function useSectionBlockPositions(sectionId: string): SectionBlockPositionsState {
   const [positions, setPositions] = useState<PositionMap>(() => load(sectionId));
+
+  useEffect(() => {
+    setPositions(load(sectionId));
+  }, [sectionId]);
 
   const setPos = useCallback((id: string, patch: Partial<BlockPos>) => {
     setPositions(prev => {

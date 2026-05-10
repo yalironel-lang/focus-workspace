@@ -89,6 +89,15 @@ export function useSectionCanvasMode(sectionId: string): SectionCanvasState {
   const pendingRef = useRef<PersistedViewport>({ zoom, panX, panY });
 
   useEffect(() => {
+    const v = loadViewport(sectionId);
+    const p = loadPrefs(sectionId);
+    setZoomRaw(v.zoom);
+    setPanXRaw(v.panX);
+    setPanYRaw(v.panY);
+    setSnapToGrid(p.snapToGrid);
+  }, [sectionId]);
+
+  useEffect(() => {
     pendingRef.current = { zoom, panX, panY };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => saveViewport(sectionId, pendingRef.current), 300);

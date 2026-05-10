@@ -26,11 +26,16 @@ export function ProjectSpaceObjectRenderer({ object, tokens, onChange }: Props) 
       );
     case 'link':
       return (
-        <LinkBlock
-          content={object.content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-        />
+        <div>
+          <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+            Click to open. Double-click to edit.
+          </div>
+          <LinkBlock
+            content={object.content}
+            tokens={tokens}
+            onChange={c => onChange(c)}
+          />
+        </div>
       );
     case 'checklist':
       return (
@@ -42,11 +47,16 @@ export function ProjectSpaceObjectRenderer({ object, tokens, onChange }: Props) 
       );
     case 'image':
       return (
-        <ImageBlock
-          content={object.content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-        />
+        <div>
+          <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+            Hover image to change source.
+          </div>
+          <ImageBlock
+            content={object.content}
+            tokens={tokens}
+            onChange={c => onChange(c)}
+          />
+        </div>
       );
     default:
       return null;

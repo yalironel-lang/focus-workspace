@@ -22,6 +22,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   useEffect(() => { autoResize(); }, [content.body]);
 
+  const paperStyle = content.paperStyle ?? 'ruled';
+  const paperBackground = paperStyle === 'blank'
+    ? 'none'
+    : paperStyle === 'grid'
+      ? `linear-gradient(${tokens.cardBorder}35 1px, transparent 1px), linear-gradient(90deg, ${tokens.cardBorder}35 1px, transparent 1px)`
+      : `repeating-linear-gradient(180deg, transparent, transparent 30px, ${tokens.cardBorder}50 30px, ${tokens.cardBorder}50 31px)`;
+  const paperSize = paperStyle === 'grid' ? '28px 28px' : '100% 31px';
+
   return (
     <div
       style={{
@@ -42,6 +50,29 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       >
         Notebook
       </p>
+      <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
+        {(['blank', 'ruled', 'grid'] as const).map(style => (
+          <button
+            key={style}
+            onClick={() => onChange({ ...content, paperStyle: style })}
+            style={{
+              border: `1px solid ${paperStyle === style ? `${tokens.accent}50` : tokens.cardBorder}`,
+              backgroundColor: paperStyle === style ? `${tokens.accent}1a` : 'transparent',
+              color: paperStyle === style ? tokens.accent : tokens.textGhost,
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              padding: '3px 7px',
+              cursor: 'pointer',
+            }}
+            title={`Paper style: ${style}`}
+          >
+            {style}
+          </button>
+        ))}
+      </div>
       <textarea
         ref={ref}
         value={content.body}
@@ -56,6 +87,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           border: 'none',
           outline: 'none',
           background: 'transparent',
+          backgroundImage: paperBackground,
+          backgroundSize: paperSize,
           color: tokens.textPrimary,
           fontSize: '16px',
           lineHeight: 1.7,

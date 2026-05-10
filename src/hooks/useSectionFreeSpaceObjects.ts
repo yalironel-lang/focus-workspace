@@ -1,10 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 
 export type ProjectObjectType = 'notebook' | 'note' | 'link' | 'checklist' | 'image';
 
 export type ProjectObjectContent =
-  | { type: 'notebook'; body: string }
+  | { type: 'notebook'; body: string; paperStyle: 'blank' | 'ruled' | 'grid' }
   | { type: 'note'; body: string }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
@@ -42,7 +42,7 @@ function uid(type: ProjectObjectType): string {
 
 function makeDefaults(type: ProjectObjectType): { title: string; content: ProjectObjectContent } {
   switch (type) {
-    case 'notebook': return { title: 'Notebook', content: { type: 'notebook', body: '' } };
+    case 'notebook': return { title: 'Notebook', content: { type: 'notebook', body: '', paperStyle: 'ruled' } };
     case 'note': return { title: 'Note', content: { type: 'note', body: '' } };
     case 'link': return { title: 'Reference Link', content: { type: 'link', title: 'Untitled link', url: '' } };
     case 'checklist': return { title: 'Checklist', content: { type: 'checklist', items: [] } };
@@ -61,6 +61,20 @@ export interface SectionFreeSpaceObjectsState {
 
 export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceObjectsState {
   const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId));
+
+  useEffect(() => {
+    const reloaded = load(sectionId).map(o => {
+      if (o.content.type !== 'notebook') return o;
+      const normalizedContent = o.content.paperStyle
+        ? o.content
+        : { ...o.content, paperStyle: 'ruled' as const };
+      return {
+        ...o,
+        content: normalizedContent,
+      };
+    });
+    setObjects(reloaded);
+  }, [sectionId]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
     const d = makeDefaults(type);
