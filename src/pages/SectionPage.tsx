@@ -4,11 +4,17 @@ import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
+import { useAtmosphere } from '../hooks/useAtmosphere';
+import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
+import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
+import { useSectionFreeSpaceObjects, type ProjectObjectType } from '../hooks/useSectionFreeSpaceObjects';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
 import { DesignModeBar } from '../components/DesignModeBar';
+import { FreeformCanvas } from '../components/canvas/FreeformCanvas';
+import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
@@ -371,6 +377,11 @@ export function SectionPage() {
   const { links: courseLinks } = usePortalLinks('course', id);
   const { links: globalLinks } = usePortalLinks('global');
   const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
+  const { tokens } = useAtmosphere();
+
+  const sectionCanvas = useSectionCanvasMode(id ?? '');
+  const sectionPositions = useSectionBlockPositions(id ?? '');
+  const sectionObjects = useSectionFreeSpaceObjects(id ?? '');
 
 
   const [showAddLane,     setShowAddLane]     = useState(false);
@@ -378,6 +389,9 @@ export function SectionPage() {
   const [addingLane,      setAddingLane]       = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
+  const [sectionViewMode, setSectionViewMode] = useState<'work-surface' | 'free-space'>('work-surface');
+  const [showSpaceAdd, setShowSpaceAdd] = useState(false);
+  const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -586,6 +600,46 @@ export function SectionPage() {
     onRefresh:     fetchSection,
   };
 
+  const getSpaceLabel = (id: string): string => {
+    const obj = sectionObjects.getObject(id);
+    return obj?.title ?? 'Object';
+  };
+
+  const renderSpaceObject = (id: string): React.ReactNode | null => {
+    const obj = sectionObjects.getObject(id);
+    if (!obj) return null;
+    return (
+      <ProjectSpaceObjectRenderer
+        object={obj}
+        tokens={tokens}
+        onChange={content => sectionObjects.updateObjectContent(id, content)}
+      />
+    );
+  };
+
+  const viewportCenterWorld = (offsetX = 0, offsetY = 0) => {
+    const vpW  = window.innerWidth;
+    const vpH  = window.innerHeight - 44;
+    const snap = sectionCanvas.snapToGrid ? sectionCanvas.gridSize : 1;
+    const raw  = {
+      x: (-sectionCanvas.panX + vpW / 2) / sectionCanvas.zoom - 170 + offsetX,
+      y: (-sectionCanvas.panY + vpH / 2) / sectionCanvas.zoom - 110 + offsetY,
+    };
+    return {
+      x: Math.max(20, Math.round(raw.x / snap) * snap),
+      y: Math.max(20, Math.round(raw.y / snap) * snap),
+    };
+  };
+
+  const handleAddToSpace = (type: ProjectObjectType) => {
+    const obj = sectionObjects.addObject(type);
+    const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
+    const sizeHint = type === 'notebook' ? { w: 620, h: 520 } : type === 'image' ? { w: 460 } : { w: 360 };
+    sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
+    setSpaceSelectedId(obj.id);
+    setShowSpaceAdd(false);
+  };
+
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
 
@@ -600,8 +654,131 @@ export function SectionPage() {
         onResetCustomize={resetDesign}
       />
 
+      <div
+        style={{
+          height: '40px',
+          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 20px',
+          backgroundColor: '#070b14',
+        }}
+      >
+        <div
+          style={{
+            display: 'inline-flex',
+            borderRadius: '8px',
+            border: '1px solid #1a2230',
+            padding: '2px',
+            gap: '2px',
+            backgroundColor: '#0b1019',
+          }}
+        >
+          {([
+            { id: 'work-surface', label: 'Work Surface' },
+            { id: 'free-space', label: 'Free Space' },
+          ] as const).map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setSectionViewMode(opt.id)}
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '0.03em',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '5px 10px',
+                cursor: 'pointer',
+                backgroundColor: sectionViewMode === opt.id ? '#f59e0b' : 'transparent',
+                color: sectionViewMode === opt.id ? '#000' : '#4b5563',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
-      {designMode ? (
+      {sectionViewMode === 'free-space' ? (
+        <>
+          <FreeformCanvas
+            tokens={tokens}
+            modules={[]}
+            blocks={sectionObjects.objects}
+            tools={[]}
+            positions={sectionPositions.positions}
+            canvasState={sectionCanvas}
+            designMode={true}
+            selectedId={spaceSelectedId}
+            topOffset={84}
+            onSetPos={sectionPositions.setPos}
+            onSelect={id => setSpaceSelectedId(id)}
+            onRemoveModule={() => {}}
+            onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
+            onRemoveTool={() => {}}
+            onDuplicateBlock={id => {
+              const duplicated = sectionObjects.duplicateObject(id);
+              if (!duplicated) return;
+              const p = sectionPositions.positions[id];
+              sectionPositions.initPos(
+                duplicated.id,
+                p ? { x: p.x + 48, y: p.y + 40, w: p.w, h: p.h } : { x: 100, y: 100, w: 360 },
+              );
+              setSpaceSelectedId(duplicated.id);
+            }}
+            onOpenAdd={() => setShowSpaceAdd(v => !v)}
+            renderModuleContent={renderSpaceObject}
+            getLabel={getSpaceLabel}
+          />
+
+          {showSpaceAdd && (
+            <div
+              style={{
+                position: 'fixed',
+                top: '92px',
+                right: '20px',
+                zIndex: 60,
+                width: '220px',
+                backgroundColor: `${tokens.cardBg}f5`,
+                border: `1px solid ${tokens.cardBorder}`,
+                borderRadius: '12px',
+                padding: '8px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                backdropFilter: 'blur(16px)',
+              }}
+            >
+              {([
+                { type: 'notebook', label: 'Notebook', hint: 'Large writing surface' },
+                { type: 'note', label: 'Note', hint: 'Quick capture' },
+                { type: 'link', label: 'Link', hint: 'Reference URL' },
+                { type: 'checklist', label: 'Checklist', hint: 'Action list' },
+                { type: 'image', label: 'Image', hint: 'Visual reference' },
+              ] as const).map(item => (
+                <button
+                  key={item.type}
+                  onClick={() => handleAddToSpace(item.type)}
+                  style={{
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'transparent',
+                    borderRadius: '8px',
+                    padding: '7px 8px',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.wellBg)}
+                  onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent')}
+                >
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: tokens.textPrimary }}>{item.label}</div>
+                  <div style={{ fontSize: '10px', color: tokens.textGhost }}>{item.hint}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : designMode ? (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ maxWidth: '896px', margin: '0 auto', padding: '24px 24px 64px' }}>
 

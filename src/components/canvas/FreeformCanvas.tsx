@@ -68,10 +68,8 @@ function computeLifecycle(lastActive: number | undefined): LifecycleResult {
 interface WarmthPoint { x: number; y: number; age: number; } // age in fractional days
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ModuleConfig } from '../../hooks/useWorkspaceLayout';
-import type { CustomBlock } from '../../hooks/useCustomBlocks';
 import type { CustomTool } from '../../hooks/useCustomTools';
 import type { BlockPos, PositionMap } from '../../hooks/useBlockPositions';
-import type { CanvasModeState } from '../../hooks/useCanvasMode';
 import { FreeformBlock } from './FreeformBlock';
 import { CustomToolBlock } from './CustomToolBlock';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
@@ -109,12 +107,24 @@ interface DragState {
 interface Props {
   tokens:       AtmosphereTokens;
   modules:      ModuleConfig[];
-  blocks:       CustomBlock[];
+  blocks:       Array<{ id: string }>;
   tools:        CustomTool[];
   positions:    PositionMap;
-  canvasState:  CanvasModeState;
+  canvasState:  {
+    zoom: number;
+    panX: number;
+    panY: number;
+    snapToGrid: boolean;
+    gridSize: number;
+    setViewport: (zoom: number, panX: number, panY: number) => void;
+    setPan: (x: number, y: number) => void;
+    resetView: () => void;
+    centerView: (contentW: number, contentH: number, vpW: number, vpH: number) => void;
+    toggleSnap: () => void;
+  };
   designMode:   boolean;
   selectedId:   string | null;
+  topOffset?:   number;
   /** True when a focus session is active — environment shifts */
   activeSession?: boolean;
   onSetPos:     (id: string, pos: Partial<BlockPos>) => void;
@@ -266,6 +276,7 @@ function CanvasControls({
 export function FreeformCanvas({
   tokens, modules, blocks, tools, positions,
   canvasState, designMode, selectedId, activeSession = false,
+  topOffset = 48,
   onSetPos, onSelect,
   onRemoveModule, onRemoveBlock, onRemoveTool, onDuplicateBlock,
   onOpenAdd, renderModuleContent, getLabel,
@@ -864,7 +875,7 @@ export function FreeformCanvas({
       ref={viewportRef}
       style={{
         position:   'fixed',
-        top:        '48px',       // below CommandBar
+        top:        `${topOffset}px`,
         left:       0,
         right:      0,
         bottom:     0,
