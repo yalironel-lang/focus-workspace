@@ -25,6 +25,21 @@ const GUIDE_KEY     = 'fw_free_canvas_guide_seen_v1';
 const ACTIVITY_KEY  = 'fw_obj_activity_v2';
 const WARMTH_KEY    = 'fw_region_warmth_v1';
 
+// ── Movement tuning constants (low-risk quality pass) ────────────────────────
+const WHEEL_SENSITIVITY = 0.0012;      // per-pixel wheel scaling for exp zoom
+const WHEEL_DEADZONE = 0.8;            // ignore tiny wheel noise (pixel-equivalent)
+const MAX_WHEEL_DELTA = 60;            // clamp wheel bursts to avoid jump zoom
+const ZOOM_SMOOTHING = 9.0;            // higher = faster settle, dt-based per second
+
+const PAN_VELOCITY_CLAMP = 2.8;        // px/ms
+const PAN_FRICTION = 8.0;              // per-second exponential damping
+
+const BLOCK_VELOCITY_CLAMP = 2.2;      // px/ms
+const BLOCK_FRICTION = 12.0;           // per-second exponential damping
+
+const DRAG_SMOOTHING = 0.28;           // fraction toward target per move event
+const RESIZE_DEADBAND = 3;             // world px before resize commits
+
 // ── Thought lifecycle ─────────────────────────────────────────────────────────
 // Objects exist on a spectrum from freshly active to deeply dormant.
 // This shapes their visual presence — not their accessibility.
@@ -83,6 +98,12 @@ interface DragState {
   // last applied block world position — starting point for block inertia
   currentBlockX?: number;
   currentBlockY?: number;
+  currentBlockW?: number;
+  currentBlockH?: number;
+  // drag thresholds — prevent accidental movements from pure clicks
+  panStarted?:  boolean;   // canvas pan: true once cursor has moved ≥ 4px
+  moveStarted?: boolean;   // block move: true once cursor has moved ≥ 3px
+  resizeStarted?: boolean; // block resize: true once cursor has moved ≥ deadband
 }
 
 interface Props {
@@ -518,6 +539,8 @@ export function FreeformCanvas({
       startBlockY: pos.y,
       startBlockW: pos.w || 340,
       startBlockH: pos.h || 200,
+      moveStarted: false,
+      resizeStarted: false,
     };
     setDraggingId(blockId);
   }, [positions, onSelect]);
@@ -539,6 +562,7 @@ export function FreeformCanvas({
       startMouseY: e.clientY,
       startPanX:   panX,
       startPanY:   panY,
+      panStarted:  false,
     };
   }, [onSelect, panX, panY]);
 
@@ -552,30 +576,65 @@ export function FreeformCanvas({
       const dy = e.clientY - drag.startMouseY;
 
       if (drag.type === 'canvas') {
-        setPan((drag.startPanX ?? 0) + dx, (drag.startPanY ?? 0) + dy);
-        // Track instantaneous velocity for momentum
+        // ── Pan threshold: 4px before committing ──────────────────────
+        // Prevents accidental micro-pans on pure clicks or taps.
+        if (!drag.panStarted) {
+          if (Math.hypot(dx, dy) < 4) return;
+          drag.panStarted = true;
+        }
+
+        const targetPanX = (drag.startPanX ?? 0) + dx;
+        const targetPanY = (drag.startPanY ?? 0) + dy;
+        const curPanX = liveViewRef.current.panX;
+        const curPanY = liveViewRef.current.panY;
+        setPan(
+          curPanX + (targetPanX - curPanX) * DRAG_SMOOTHING,
+          curPanY + (targetPanY - curPanY) * DRAG_SMOOTHING,
+        );
+
+        // ── EMA velocity smoothing ────────────────────────────────────
+        // Exponential moving average reduces jitter in instantaneous velocity
+        // readings, giving momentum a smoother, more predictable character.
         const now = performance.now();
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
-          if (dt > 0 && dt < 40) { // ignore large gaps (e.g. tab switch)
-            velRef.current.vx = (e.clientX - drag.lastX) / dt;
-            velRef.current.vy = (e.clientY - drag.lastY) / dt;
+          if (dt > 0 && dt < 50) {
+            const rawVx = (e.clientX - drag.lastX) / dt;
+            const rawVy = (e.clientY - drag.lastY) / dt;
+            const α = 0.55; // 55% weight to new sample
+            velRef.current.vx = velRef.current.vx * (1 - α) + rawVx * α;
+            velRef.current.vy = velRef.current.vy * (1 - α) + rawVy * α;
           }
         }
         drag.lastX = e.clientX;
         drag.lastY = e.clientY;
         drag.lastT = now;
+
       } else if (drag.type === 'block-move' && drag.blockId != null) {
-        const newX = snap((drag.startBlockX ?? 0) + dx / zoom);
-        const newY = snap((drag.startBlockY ?? 0) + dy / zoom);
+        // ── Move threshold: 3px before committing ────────────────────
+        // Prevents accidental block shifts on selection clicks.
+        if (!drag.moveStarted) {
+          if (Math.hypot(dx, dy) < 3) return;
+          drag.moveStarted = true;
+        }
+
+        const targetX = (drag.startBlockX ?? 0) + dx / zoom;
+        const targetY = (drag.startBlockY ?? 0) + dy / zoom;
+        const baseX = drag.currentBlockX ?? (drag.startBlockX ?? 0);
+        const baseY = drag.currentBlockY ?? (drag.startBlockY ?? 0);
+        const newX = baseX + (targetX - baseX) * DRAG_SMOOTHING;
+        const newY = baseY + (targetY - baseY) * DRAG_SMOOTHING;
         onSetPos(drag.blockId, { x: newX, y: newY });
-        // Track position + velocity for block inertia
+
         const now = performance.now();
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
-          if (dt > 0 && dt < 40) {
-            velRef.current.vx = (e.clientX - drag.lastX) / dt;
-            velRef.current.vy = (e.clientY - drag.lastY) / dt;
+          if (dt > 0 && dt < 50) {
+            const rawVx = (e.clientX - drag.lastX) / dt;
+            const rawVy = (e.clientY - drag.lastY) / dt;
+            const α = 0.55;
+            velRef.current.vx = velRef.current.vx * (1 - α) + rawVx * α;
+            velRef.current.vy = velRef.current.vy * (1 - α) + rawVy * α;
           }
         }
         drag.lastX = e.clientX;
@@ -583,10 +642,23 @@ export function FreeformCanvas({
         drag.lastT = now;
         drag.currentBlockX = newX;
         drag.currentBlockY = newY;
+
       } else if (drag.type === 'block-resize' && drag.blockId != null) {
-        const newW = Math.max(200, snap((drag.startBlockW ?? 340) + dx / zoom));
-        const newH = Math.max(80,  snap((drag.startBlockH ?? 200) + dy / zoom));
+        const worldDx = dx / zoom;
+        const worldDy = dy / zoom;
+        if (!drag.resizeStarted) {
+          if (Math.hypot(worldDx, worldDy) < RESIZE_DEADBAND) return;
+          drag.resizeStarted = true;
+        }
+        const targetW = Math.max(200, (drag.startBlockW ?? 340) + worldDx);
+        const targetH = Math.max(80,  (drag.startBlockH ?? 200) + worldDy);
+        const baseW = drag.currentBlockW ?? (drag.startBlockW ?? 340);
+        const baseH = drag.currentBlockH ?? (drag.startBlockH ?? 200);
+        const newW = Math.max(200, baseW + (targetW - baseW) * DRAG_SMOOTHING);
+        const newH = Math.max(80,  baseH + (targetH - baseH) * DRAG_SMOOTHING);
         onSetPos(drag.blockId, { w: newW, h: newH });
+        drag.currentBlockW = newW;
+        drag.currentBlockH = newH;
       }
     };
 
@@ -595,61 +667,80 @@ export function FreeformCanvas({
       dragRef.current = null;
       setDraggingId(null);
 
-      // Launch momentum only for canvas pan, not for block moves
-      if (drag?.type === 'canvas') {
+      // Launch momentum only when the pan threshold was actually crossed
+      if (drag?.type === 'canvas' && drag.panStarted) {
         const { vx, vy } = velRef.current;
-        // Threshold: 0.22 px/ms — gentle flicks still get momentum
-        if (Math.abs(vx) > 0.22 || Math.abs(vy) > 0.22) {
+        const cvx = Math.sign(vx) * Math.min(Math.abs(vx), PAN_VELOCITY_CLAMP);
+        const cvy = Math.sign(vy) * Math.min(Math.abs(vy), PAN_VELOCITY_CLAMP);
+
+        if (Math.abs(cvx) > 0.12 || Math.abs(cvy) > 0.12) {
           let px = liveViewRef.current.panX;
           let py = liveViewRef.current.panY;
-          // Higher initial throw (22 vs 14) + slower decay (0.94 vs 0.88)
-          // creates the heavy, cinematic glide of Figma/Linear
-          let fx = vx * 22;
-          let fy = vy * 22;
-          const DECAY = 0.94;  // longer coast — feels like a weighted camera
-          const STOP  = 0.12;  // nearly silent before it stops
+          let mvx = cvx;
+          let mvy = cvy;
+          let lastTs = performance.now();
 
           cancelAnimationFrame(rafRef.current);
           cancelAnimationFrame(zoomRafRef.current);
           zoomRafRef.current = 0;
-          const step = () => {
-            fx *= DECAY;
-            fy *= DECAY;
-            if (Math.abs(fx) < STOP && Math.abs(fy) < STOP) return;
-            px += fx;
-            py += fy;
+          const step = (ts: number) => {
+            const dtMs = Math.min(40, Math.max(0.5, ts - lastTs));
+            const dtSec = dtMs / 1000;
+            lastTs = ts;
+            const decay = Math.exp(-PAN_FRICTION * dtSec);
+            mvx *= decay;
+            mvy *= decay;
+            if (Math.abs(mvx) < 0.01 && Math.abs(mvy) < 0.01) return;
+            px += mvx * dtMs;
+            py += mvy * dtMs;
             setPan(px, py);
             rafRef.current = requestAnimationFrame(step);
           };
           rafRef.current = requestAnimationFrame(step);
         }
         velRef.current = { vx: 0, vy: 0 };
-      } else if (drag?.type === 'block-move' && drag.blockId) {
+
+      } else if (drag?.type === 'block-move' && drag.blockId && drag.moveStarted) {
         const { vx, vy } = velRef.current;
-        // Block inertia: slightly heavier settle than before
-        if (Math.abs(vx) > 0.1 || Math.abs(vy) > 0.1) {
+        const cvx = Math.sign(vx) * Math.min(Math.abs(vx), BLOCK_VELOCITY_CLAMP);
+        const cvy = Math.sign(vy) * Math.min(Math.abs(vy), BLOCK_VELOCITY_CLAMP);
+
+        if (Math.abs(cvx) > 0.1 || Math.abs(cvy) > 0.1) {
           const blockId = drag.blockId;
           let bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
           let by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
-          // World velocity — scale down by zoom so feel is consistent at any scale
-          let fx = (vx * 11) / zoom;
-          let fy = (vy * 11) / zoom;
-          const DECAY = 0.78;  // blocks decelerate faster — heavy, planted feel
-          const STOP  = 0.10;
+          let mvx = cvx / zoom;
+          let mvy = cvy / zoom;
+          let lastTs = performance.now();
 
           cancelAnimationFrame(rafRef.current);
-          const step = () => {
-            fx *= DECAY;
-            fy *= DECAY;
-            if (Math.abs(fx) < STOP && Math.abs(fy) < STOP) return;
-            bx = snap(bx + fx);
-            by = snap(by + fy);
+          const step = (ts: number) => {
+            const dtMs = Math.min(40, Math.max(0.5, ts - lastTs));
+            const dtSec = dtMs / 1000;
+            lastTs = ts;
+            const decay = Math.exp(-BLOCK_FRICTION * dtSec);
+            mvx *= decay;
+            mvy *= decay;
+            if (Math.abs(mvx) < 0.01 && Math.abs(mvy) < 0.01) {
+              if (snapToGrid) onSetPos(blockId, { x: snap(bx), y: snap(by) });
+              return;
+            }
+            bx += mvx * dtMs;
+            by += mvy * dtMs;
             onSetPos(blockId, { x: bx, y: by });
             rafRef.current = requestAnimationFrame(step);
           };
           rafRef.current = requestAnimationFrame(step);
+        } else if (snapToGrid) {
+          const bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
+          const by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
+          onSetPos(drag.blockId, { x: snap(bx), y: snap(by) });
         }
         velRef.current = { vx: 0, vy: 0 };
+      } else if (drag?.type === 'block-resize' && drag.blockId && drag.resizeStarted) {
+        const bw = drag.currentBlockW ?? (drag.startBlockW ?? 340);
+        const bh = drag.currentBlockH ?? (drag.startBlockH ?? 200);
+        if (snapToGrid) onSetPos(drag.blockId, { w: snap(bw), h: snap(bh) });
       }
     };
 
@@ -683,8 +774,11 @@ export function FreeformCanvas({
       // Each wheel tick refines the TARGET (not the live view).
       // Accumulating toward the target means rapid scroll wheel spins
       // compound correctly into smooth continuous zoom.
-      const WHEEL_FACTOR = 0.09;  // slightly smaller step than ZOOM_STEP for smooth feel
-      const factor = e.deltaY < 0 ? (1 + WHEEL_FACTOR) : (1 - WHEEL_FACTOR);
+      const deltaModeFactor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
+      const rawDelta = e.deltaY * deltaModeFactor;
+      if (Math.abs(rawDelta) < WHEEL_DEADZONE) return;
+      const wheelDelta = Math.max(-MAX_WHEEL_DELTA, Math.min(MAX_WHEEL_DELTA, rawDelta));
+      const factor = Math.exp(-wheelDelta * WHEEL_SENSITIVITY);
       const prevZ  = targetViewRef.current.zoom;
       const newZ   = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
 
@@ -697,8 +791,12 @@ export function FreeformCanvas({
 
       // Kick off lerp loop if not already running
       if (!zoomRafRef.current) {
-        const LERP  = 0.145;  // 14.5% per frame ≈ smooth 350ms settle at 60fps
-        const lerpStep = () => {
+        let lastTs = performance.now();
+        const lerpStep = (ts: number) => {
+          const dtMs = Math.min(40, Math.max(0.5, ts - lastTs));
+          const dtSec = dtMs / 1000;
+          lastTs = ts;
+          const alpha = 1 - Math.exp(-ZOOM_SMOOTHING * dtSec);
           const tgt = targetViewRef.current;
           const cur = liveViewRef.current;
           const dz  = tgt.zoom - cur.zoom;
@@ -713,9 +811,9 @@ export function FreeformCanvas({
           }
 
           setViewport(
-            cur.zoom + dz  * LERP,
-            cur.panX + dpx * LERP,
-            cur.panY + dpy * LERP,
+            cur.zoom + dz  * alpha,
+            cur.panX + dpx * alpha,
+            cur.panY + dpy * alpha,
           );
           zoomRafRef.current = requestAnimationFrame(lerpStep);
         };

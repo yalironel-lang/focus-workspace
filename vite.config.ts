@@ -10,8 +10,13 @@ export default defineConfig({
       // Combined with the controllerchange reload in main.tsx, the page
       // refreshes automatically to pick up the new assets.
       registerType: 'autoUpdate',
+      minify: false,
 
       workbox: {
+        // Work around terser renderChunk hang in this toolchain by disabling
+        // SW minification path used by Workbox's production mode.
+        mode: 'development',
+
         // ── Precache ──────────────────────────────────────────────────────────
         // All app-shell assets are content-hashed, so Workbox can track
         // revisions and update them atomically across deploys.
