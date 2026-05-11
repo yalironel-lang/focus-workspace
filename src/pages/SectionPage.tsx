@@ -519,6 +519,25 @@ export function SectionPage() {
     }
   };
 
+  /** Must run before any early return — hooks order must be identical every render (React #310). */
+  const handleApplySpaceTemplate = useCallback(
+    (templateId: FreeSpaceTemplateId) => {
+      try {
+        const patches = computeFreeSpaceTemplateLayout(
+          templateId,
+          sectionObjects.objects,
+          sectionPositions.positions,
+        );
+        if (!patches || Object.keys(patches).length === 0) return;
+        sectionPositions.applyPositions(patches);
+      } catch (e) {
+        console.error('[FreeSpace] template apply failed', e);
+        toast.error('Could not apply layout. Try again.');
+      }
+    },
+    [sectionObjects.objects, sectionPositions.positions, sectionPositions.applyPositions],
+  );
+
   if (loading) {
     return (
       <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -644,24 +663,6 @@ export function SectionPage() {
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
   };
-
-  const handleApplySpaceTemplate = useCallback(
-    (templateId: FreeSpaceTemplateId) => {
-      try {
-        const patches = computeFreeSpaceTemplateLayout(
-          templateId,
-          sectionObjects.objects,
-          sectionPositions.positions,
-        );
-        if (!patches || Object.keys(patches).length === 0) return;
-        sectionPositions.applyPositions(patches);
-      } catch (e) {
-        console.error('[FreeSpace] template apply failed', e);
-        toast.error('Could not apply layout. Try again.');
-      }
-    },
-    [sectionObjects.objects, sectionPositions],
-  );
 
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
