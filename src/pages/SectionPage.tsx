@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -14,6 +14,11 @@ import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
 import { DesignModeBar } from '../components/DesignModeBar';
 import { FreeformCanvas } from '../components/canvas/FreeformCanvas';
+import { FreeSpaceArrangeControl } from '../components/canvas/FreeSpaceArrangeControl';
+import {
+  computeFreeSpaceTemplateLayout,
+  type FreeSpaceTemplateId,
+} from '../lib/sectionFreeSpaceLayoutTemplates';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import type { GroupWithItems } from '../types';
 import {
@@ -640,6 +645,19 @@ export function SectionPage() {
     setShowSpaceAdd(false);
   };
 
+  const handleApplySpaceTemplate = useCallback(
+    (templateId: FreeSpaceTemplateId) => {
+      const patches = computeFreeSpaceTemplateLayout(
+        templateId,
+        sectionObjects.objects,
+        sectionPositions.positions,
+      );
+      if (Object.keys(patches).length === 0) return;
+      sectionPositions.applyPositions(patches);
+    },
+    [sectionObjects.objects, sectionPositions],
+  );
+
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
 
@@ -702,6 +720,12 @@ export function SectionPage() {
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
       {sectionViewMode === 'free-space' ? (
         <>
+          <FreeSpaceArrangeControl
+            tokens={tokens}
+            topOffset={84}
+            objectCount={sectionObjects.objects.length}
+            onApplyTemplate={handleApplySpaceTemplate}
+          />
           <FreeformCanvas
             tokens={tokens}
             modules={[]}
@@ -711,6 +735,7 @@ export function SectionPage() {
             canvasState={sectionCanvas}
             designMode={true}
             selectedId={spaceSelectedId}
+            spatialAmbient
             topOffset={84}
             onSetPos={sectionPositions.setPos}
             onSelect={id => setSpaceSelectedId(id)}

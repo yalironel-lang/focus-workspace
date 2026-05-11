@@ -1,0 +1,139 @@
+/**
+ * Minimal “Templates / Arrange” entry for section Free Space.
+ */
+
+import { useState, useRef, useEffect } from 'react';
+import { LayoutTemplate, ChevronDown } from 'lucide-react';
+import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import {
+  FREE_SPACE_TEMPLATES,
+  FREE_SPACE_TEMPLATE_CONFIRM_MIN,
+  type FreeSpaceTemplateId,
+} from '../../lib/sectionFreeSpaceLayoutTemplates';
+
+interface Props {
+  tokens: AtmosphereTokens;
+  topOffset: number;
+  objectCount: number;
+  onApplyTemplate: (id: FreeSpaceTemplateId) => void;
+}
+
+export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onApplyTemplate }: Props) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const pick = (id: FreeSpaceTemplateId) => {
+    setOpen(false);
+    if (objectCount === 0) return;
+    if (objectCount >= FREE_SPACE_TEMPLATE_CONFIRM_MIN) {
+      const meta = FREE_SPACE_TEMPLATES.find((t) => t.id === id);
+      const ok = window.confirm(
+        `Apply “${meta?.label ?? id}”? This will reposition ${objectCount} objects. You can still drag and resize them afterward.`,
+      );
+      if (!ok) return;
+    }
+    onApplyTemplate(id);
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      style={{
+        position: 'fixed',
+        top: topOffset + 10,
+        left: 18,
+        zIndex: 45,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '6px 11px',
+          borderRadius: '10px',
+          border: `1px solid rgba(255,255,255,0.06)`,
+          background: `${tokens.cardBg}cc`,
+          color: tokens.textSecondary,
+          fontSize: '11px',
+          fontWeight: 600,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          cursor: 'pointer',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          boxShadow: `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04)`,
+          transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease',
+        }}
+      >
+        <LayoutTemplate style={{ width: 13, height: 13, opacity: 0.85 }} />
+        Arrange
+        <ChevronDown
+          style={{
+            width: 12,
+            height: 12,
+            opacity: 0.55,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.2s ease',
+          }}
+        />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Spatial templates"
+          style={{
+            marginTop: 6,
+            minWidth: 248,
+            maxWidth: 300,
+            padding: '6px',
+            borderRadius: 12,
+            border: `1px solid rgba(255,255,255,0.06)`,
+            background: `${tokens.cardBg}ee`,
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.45)',
+          }}
+        >
+          {FREE_SPACE_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="menuitem"
+              onClick={() => pick(t.id)}
+              disabled={objectCount === 0}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '9px 10px',
+                border: 'none',
+                borderRadius: 8,
+                background: 'transparent',
+                cursor: objectCount === 0 ? 'default' : 'pointer',
+                opacity: objectCount === 0 ? 0.45 : 1,
+              }}
+            >
+              <div style={{ fontSize: '12.5px', fontWeight: 600, color: tokens.textPrimary }}>{t.label}</div>
+              <div style={{ fontSize: '10.5px', color: tokens.textGhost, marginTop: 2, lineHeight: 1.35 }}>
+                {t.description}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

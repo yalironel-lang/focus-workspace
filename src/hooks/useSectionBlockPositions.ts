@@ -30,6 +30,8 @@ const makeDefault = (hint?: Partial<BlockPos>): BlockPos => ({
 export interface SectionBlockPositionsState {
   positions: PositionMap;
   setPos: (id: string, pos: Partial<BlockPos>) => void;
+  /** Apply many positions at once (e.g. spatial templates). Merges with existing map. */
+  applyPositions: (patches: Record<string, BlockPos>) => void;
   initPos: (id: string, hint?: Partial<BlockPos>) => void;
   removePos: (id: string) => void;
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
@@ -48,6 +50,17 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         ...prev,
         [id]: { ...(prev[id] ?? makeDefault()), ...patch },
       };
+      persist(sectionId, next);
+      return next;
+    });
+  }, [sectionId]);
+
+  const applyPositions = useCallback((patches: Record<string, BlockPos>) => {
+    setPositions(prev => {
+      const next: PositionMap = { ...prev };
+      for (const [id, pos] of Object.entries(patches)) {
+        next[id] = { ...(prev[id] ?? makeDefault()), ...pos };
+      }
       persist(sectionId, next);
       return next;
     });
@@ -84,6 +97,6 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     return { x, y };
   }, [positions]);
 
-  return { positions, setPos, initPos, removePos, nextFreePos };
+  return { positions, setPos, applyPositions, initPos, removePos, nextFreePos };
 }
 

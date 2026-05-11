@@ -74,6 +74,7 @@ import type { CustomTool } from '../../hooks/useCustomTools';
 import type { BlockPos, PositionMap } from '../../hooks/useBlockPositions';
 import { FreeformBlock } from './FreeformBlock';
 import { CustomToolBlock } from './CustomToolBlock';
+import { FreeSpaceSpatialAmbient } from './FreeSpaceSpatialAmbient';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -129,6 +130,8 @@ interface Props {
   topOffset?:   number;
   /** True when a focus session is active — environment shifts */
   activeSession?: boolean;
+  /** Section Free Space: subtle spatial ambient behind the world (does not affect interactions). */
+  spatialAmbient?: boolean;
   onSetPos:     (id: string, pos: Partial<BlockPos>) => void;
   onSelect:     (id: string | null) => void;
   onRemoveModule:  (id: string) => void;
@@ -278,6 +281,7 @@ function CanvasControls({
 export function FreeformCanvas({
   tokens, modules, blocks, tools, positions,
   canvasState, designMode, selectedId, activeSession = false,
+  spatialAmbient = false,
   topOffset = 48,
   onSetPos, onSelect,
   onRemoveModule, onRemoveBlock, onRemoveTool, onDuplicateBlock,
@@ -1004,6 +1008,8 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
+        {spatialAmbient ? <FreeSpaceSpatialAmbient tokens={tokens} /> : null}
+
         {/* ── Region warmth — the canvas surface develops memory ─── */}
         {warmthRef.current.filter(p => p.age < 30).map((point, i) => {
           const intensity = Math.max(0, (1 - point.age / 30)) * 0.042;
