@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { CommandPaletteProvider } from './command/CommandPaletteContext';
+import { GlobalCommandPalette } from './command/GlobalCommandPalette';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Auth } from './components/Auth';
 import { Dashboard } from './pages/Dashboard';
@@ -84,7 +86,10 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <CommandPaletteProvider>
+          <AppRoutes />
+          <GlobalCommandPalette />
+        </CommandPaletteProvider>
         <Toaster
           position="top-right"
           toastOptions={{

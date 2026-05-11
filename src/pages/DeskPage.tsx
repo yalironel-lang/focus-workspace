@@ -10,7 +10,7 @@ import type { ModuleTheme } from '../hooks/useWorkspaceTheme';
 import { useCustomBlocks } from '../hooks/useCustomBlocks';
 import type { BlockType, BlockTheme } from '../hooks/useCustomBlocks';
 import { STARTER_TEMPLATES } from '../data/starterTemplates';
-import { SessionModal } from '../components/SessionModal';
+import { useCommandPalette } from '../command/CommandPaletteContext';
 
 // ── Canvas primitives ─────────────────────────────────────────────────────────
 import { CommandBar }        from '../components/canvas/CommandBar';
@@ -49,7 +49,6 @@ import { loadSession, sortSectionsByUrgency } from '../utils/sessionPlan';
 import { computeIntelligence, getGreeting } from '../utils/workspaceIntelligence';
 import { useSessionContinuity }     from '../hooks/useSessionContinuity';
 import { StartHerePanel }       from '../components/canvas/StartHerePanel';
-import { CommandLauncher }      from '../components/launcher/CommandLauncher';
 import { Loader2, Plus, X }     from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -71,6 +70,7 @@ const ONBOARDING_KEY = 'fw_onboarding_v1';
 
 export function DeskPage() {
   const navigate = useNavigate();
+  const { openSessionModal } = useCommandPalette();
   const { user, signOut }                                       = useAuth();
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
@@ -129,10 +129,8 @@ export function DeskPage() {
   const [inspectorOpen,    setInspectorOpen]     = useState(false);
   const [inspectorTab,     setInspectorTab]      = useState<InspectorTab>('module');
   const [showNewSection,   setShowNewSection]    = useState(false);
-  const [showSessionModal, setShowSessionModal]  = useState(false);
   const [newTitle,         setNewTitle]          = useState('');
   const [creating,         setCreating]          = useState(false);
-  const [launcherOpen,     setLauncherOpen]      = useState(false);
 
   // Pulse a newly added block once so user can see where it appeared
   const [pulsingId, setPulsingId] = useState<string | null>(null);
@@ -372,7 +370,7 @@ export function DeskPage() {
             suggestedSection={suggestedSection}
             lastSession={continuity.isRecent ? continuity.lastSession : null}
             hasSections={sections.length > 0}
-            onStartSession={() => setShowSessionModal(true)}
+            onStartSession={() => openSessionModal()}
             onClearContinuity={continuity.clearLastSession}
           />
         );
@@ -669,18 +667,6 @@ export function DeskPage() {
     );
   }
 
-  // ── CMD+K / CTRL+K → open command launcher ───────────────────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setLauncherOpen(o => !o);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
   // ── Scroll position memory — the space remembers where you were ──────────
   // Save on scroll (sessionStorage: survives page refresh, not new tab opens)
   useEffect(() => {
@@ -852,7 +838,7 @@ export function DeskPage() {
                     greeting={getGreeting(displayName)}
                     lastSession={continuity.isRecent ? continuity.lastSession : null}
                     onCapture={handleCapture}
-                    onStartSession={() => setShowSessionModal(true)}
+                    onStartSession={() => openSessionModal()}
                     onOpenSection={id => navigate(`/section/${id}`)}
                     onDismissContinuity={continuity.clearLastSession}
                   />
@@ -1036,24 +1022,6 @@ export function DeskPage() {
         onAddBlock={handleAddBlock}
         onOpenModules={() => setAddPanelOpen(o => !o)}
       />
-
-      {/* ── Command Launcher ⌘K ──────────────────────────────── */}
-      <CommandLauncher
-        open={launcherOpen}
-        tokens={tokens}
-        sections={sections}
-        deadlines={deadlines}
-        onClose={() => setLauncherOpen(false)}
-        onCapture={handleCapture}
-        onStartSession={() => { setLauncherOpen(false); setShowSessionModal(true); }}
-        onOpenSection={id => { setLauncherOpen(false); navigate(`/section/${id}`); }}
-        onOpenAdd={() => { setLauncherOpen(false); setAddPanelOpen(true); }}
-      />
-
-      {/* ── Session modal ─────────────────────────────────────── */}
-      {showSessionModal && (
-        <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
-      )}
 
     </div>
   );

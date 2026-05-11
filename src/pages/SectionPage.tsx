@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
+import { useCommandPalette } from '../command/CommandPaletteContext';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -394,7 +395,8 @@ export function SectionPage() {
   const sectionCanvas = useSectionCanvasMode(id ?? '');
   const sectionPositions = useSectionBlockPositions(id ?? '');
   const sectionObjects = useSectionFreeSpaceObjects(id ?? '');
-
+  const { registerFreeSpace } = useCommandPalette();
+  const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
 
   const [showAddLane,     setShowAddLane]     = useState(false);
   const [newLaneTitle,    setNewLaneTitle]     = useState('');
@@ -546,6 +548,64 @@ export function SectionPage() {
     [sectionObjects.objects, sectionPositions.positions, sectionPositions.applyPositions],
   );
 
+  const viewportCenterWorld = useCallback((offsetX = 0, offsetY = 0) => {
+    const vpW  = window.innerWidth;
+    const vpH  = window.innerHeight - 44;
+    const snap = sectionCanvas.snapToGrid ? sectionCanvas.gridSize : 1;
+    const raw  = {
+      x: (-sectionCanvas.panX + vpW / 2) / sectionCanvas.zoom - 170 + offsetX,
+      y: (-sectionCanvas.panY + vpH / 2) / sectionCanvas.zoom - 110 + offsetY,
+    };
+    return {
+      x: Math.max(20, Math.round(raw.x / snap) * snap),
+      y: Math.max(20, Math.round(raw.y / snap) * snap),
+    };
+  }, [sectionCanvas.panX, sectionCanvas.panY, sectionCanvas.zoom, sectionCanvas.snapToGrid, sectionCanvas.gridSize]);
+
+  const handleAddToSpace = useCallback((type: ProjectObjectType) => {
+    const obj = sectionObjects.addObject(type);
+    const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
+    const sizeHint = type === 'notebook' ? { w: 620, h: 520 } : type === 'image' ? { w: 460 } : { w: 360 };
+    sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
+    setSpaceSelectedId(obj.id);
+    setShowSpaceAdd(false);
+  }, [sectionObjects, sectionPositions, viewportCenterWorld]);
+
+  const requestFreeSpaceAdd = useCallback((type: ProjectObjectType) => {
+    if (sectionViewMode === 'free-space') {
+      handleAddToSpace(type);
+      return;
+    }
+    pendingFreeSpaceType.current = type;
+    setSectionViewMode('free-space');
+  }, [sectionViewMode, handleAddToSpace]);
+
+  useLayoutEffect(() => {
+    if (sectionViewMode !== 'free-space') return;
+    const pending = pendingFreeSpaceType.current;
+    if (!pending) return;
+    pendingFreeSpaceType.current = null;
+    handleAddToSpace(pending);
+  }, [sectionViewMode, handleAddToSpace]);
+
+  useEffect(() => {
+    if (!id) {
+      registerFreeSpace(null);
+      return;
+    }
+    registerFreeSpace({
+      addNotebook: () => requestFreeSpaceAdd('notebook'),
+      addTextCard: () => requestFreeSpaceAdd('note'),
+      addCalculator: () => {
+        toast.success('Calculator object — coming soon', { icon: '🔢' });
+      },
+      addGraph: () => {
+        toast.success('Graph object — coming soon', { icon: '📈' });
+      },
+    });
+    return () => registerFreeSpace(null);
+  }, [id, registerFreeSpace, requestFreeSpaceAdd]);
+
   if (loading) {
     return (
       <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -650,29 +710,6 @@ export function SectionPage() {
         }}
       />
     );
-  };
-
-  const viewportCenterWorld = (offsetX = 0, offsetY = 0) => {
-    const vpW  = window.innerWidth;
-    const vpH  = window.innerHeight - 44;
-    const snap = sectionCanvas.snapToGrid ? sectionCanvas.gridSize : 1;
-    const raw  = {
-      x: (-sectionCanvas.panX + vpW / 2) / sectionCanvas.zoom - 170 + offsetX,
-      y: (-sectionCanvas.panY + vpH / 2) / sectionCanvas.zoom - 110 + offsetY,
-    };
-    return {
-      x: Math.max(20, Math.round(raw.x / snap) * snap),
-      y: Math.max(20, Math.round(raw.y / snap) * snap),
-    };
-  };
-
-  const handleAddToSpace = (type: ProjectObjectType) => {
-    const obj = sectionObjects.addObject(type);
-    const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
-    const sizeHint = type === 'notebook' ? { w: 620, h: 520 } : type === 'image' ? { w: 460 } : { w: 360 };
-    sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
-    setSpaceSelectedId(obj.id);
-    setShowSpaceAdd(false);
   };
 
   return (

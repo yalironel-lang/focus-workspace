@@ -1717,6 +1717,7 @@ export function ProjectNotebookBlock({
       {editorMode === 'edit' ? (
         <div
           ref={editorRootRef}
+          data-fw-cmd-ignore="1"
           role="textbox"
           aria-multiline
           aria-label="Notebook"

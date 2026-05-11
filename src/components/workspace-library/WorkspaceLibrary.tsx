@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -28,7 +28,8 @@ import { getWorkspaceCustomization } from '../../hooks/useWorkspaceCustomization
 import { loadSession } from '../../utils/sessionPlan';
 import type { SectionWithProgress } from '../../types';
 import type { Deadline } from '../../types';
-import { SessionModal } from '../SessionModal';
+import { useCommandPalette } from '../../command/CommandPaletteContext';
+import { LIBRARY_OPEN_CREATE_FLAG } from '../../command/constants';
 
 const ACCENT_POOL = ['#6366f1', '#8b5cf6', '#f59e0b', '#3b82f6', '#a78bfa', '#06b6d4'];
 
@@ -250,6 +251,7 @@ export function WorkspaceLibrary() {
   const continuity = useSessionContinuity();
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
   const { recentIdsOrdered, openedAt } = useRecentWorkspaces();
+  const { openSessionModal } = useCommandPalette();
 
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -257,9 +259,19 @@ export function WorkspaceLibrary() {
   const [creating, setCreating] = useState(false);
   const [folderDraft, setFolderDraft] = useState('');
   const [filterFolder, setFilterFolder] = useState<string | 'all' | 'unfiled'>('all');
-  const [showSessionModal, setShowSessionModal] = useState(false);
 
   const activeSession = loadSession();
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(LIBRARY_OPEN_CREATE_FLAG)) {
+        sessionStorage.removeItem(LIBRARY_OPEN_CREATE_FLAG);
+        setShowNew(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const displayName = useMemo(() => {
     if (!user?.email) return '';
@@ -600,7 +612,7 @@ export function WorkspaceLibrary() {
                     {sections.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => setShowSessionModal(true)}
+                        onClick={() => openSessionModal()}
                         className="text-left rounded-2xl px-5 py-4 min-w-[180px] border transition-all"
                         style={{
                           backgroundColor: 'rgba(255,255,255,0.02)',
@@ -840,9 +852,6 @@ export function WorkspaceLibrary() {
         </div>
       </main>
 
-      {showSessionModal && (
-        <SessionModal sections={sections} onClose={() => setShowSessionModal(false)} />
-      )}
     </div>
   );
 }
