@@ -525,32 +525,45 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const paperStyle = content.paperStyle ?? 'ruled';
 
-  /** Paper lines stay atmospheric — never compete with text. */
-  const writingPaperLayers = useMemo(() => {
+  const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 37px';
+
+  /** Paper + soft edge falloff (single declaration so background-size stays aligned). */
+  const writingSurfaceBackground = useMemo(() => {
+    const edge = `radial-gradient(ellipse 118% 95% at 50% 48%, transparent 40%, rgba(0,0,0,0.09) 82%, rgba(0,0,0,0.16) 100%)`;
     if (paperStyle === 'blank') {
-      return `
-        radial-gradient(ellipse 130% 75% at 50% -18%, ${tokens.accentSubtle}, transparent 58%),
-        radial-gradient(ellipse 90% 45% at 50% 108%, rgba(0,0,0,0.14), transparent 52%)
-      `;
+      return {
+        image: `
+          radial-gradient(ellipse 125% 70% at 50% -14%, ${tokens.accentSubtle}, transparent 62%),
+          radial-gradient(ellipse 95% 42% at 50% 108%, rgba(0,0,0,0.06), transparent 55%),
+          ${edge}
+        `,
+        size: '100% 100%, 100% 100%, 100% 100%',
+      };
     }
     if (paperStyle === 'grid') {
-      return `
-        linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px)
-      `;
+      return {
+        image: `
+          linear-gradient(rgba(255,255,255,0.007) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.007) 1px, transparent 1px),
+          ${edge}
+        `,
+        size: '36px 36px, 36px 36px, 100% 100%',
+      };
     }
-    return `
-      repeating-linear-gradient(
-        180deg,
-        transparent,
-        transparent 35px,
-        rgba(255,255,255,0.028) 35px,
-        rgba(255,255,255,0.028) 36px
-      )
-    `;
-  }, [paperStyle, tokens.accentSubtle]);
-
-  const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 36px';
+    return {
+      image: `
+        repeating-linear-gradient(
+          180deg,
+          transparent,
+          transparent 36px,
+          rgba(255,255,255,0.012) 36px,
+          rgba(255,255,255,0.012) 37px
+        ),
+        ${edge}
+      `,
+      size: `${paperSize}, 100% 100%`,
+    };
+  }, [paperStyle, paperSize, tokens.accentSubtle]);
 
   const setFocusIndexById = useCallback(
     (id: string) => {
@@ -586,8 +599,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       const active = surfaceFocusBlockId === blockId;
       const soften = has && !active;
       return {
-        opacity: soften ? 0.88 : 1,
-        filter: active ? 'brightness(1.04) saturate(1.02)' : 'none',
+        opacity: soften ? 0.93 : 1,
+        filter: active ? 'brightness(1.025) saturate(1.01)' : 'none',
         transition: 'opacity 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.26s ease',
       };
     },
@@ -702,34 +715,39 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: 'min(640px, 100%)',
+      maxWidth: 'min(592px, 100%)',
       margin: '0 auto',
       width: '100%',
-      paddingLeft: 'clamp(32px, 6vw, 72px)',
-      paddingRight: 'clamp(32px, 6vw, 72px)',
+      paddingLeft: 'clamp(28px, 5.5vw, 56px)',
+      paddingRight: 'clamp(28px, 5.5vw, 56px)',
     }),
     [],
   );
 
   const editorSurfaceStyle = useMemo(
     (): CSSProperties => ({
+      position: 'relative',
       width: '100%',
       minHeight: '420px',
       boxSizing: 'border-box',
       backgroundColor: 'transparent',
-      backgroundImage: writingPaperLayers,
-      backgroundSize: paperSize,
+      backgroundImage: writingSurfaceBackground.image,
+      backgroundSize: writingSurfaceBackground.size,
       color: tokens.textPrimary,
-      fontSize: '16px',
-      lineHeight: 1.78,
-      letterSpacing: '0.008em',
+      fontSize: '16.5px',
+      lineHeight: 1.82,
+      letterSpacing: '0.006em',
       fontFamily: fontStack,
-      paddingTop: '48px',
-      paddingBottom: '120px',
+      fontFeatureSettings: '"kern" 1, "liga" 1',
+      paddingTop: '56px',
+      paddingBottom: '128px',
       outline: 'none',
+      WebkitFontSmoothing: 'antialiased',
+      MozOsxFontSmoothing: 'grayscale',
+      textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease',
     }),
-    [fontStack, writingPaperLayers, paperSize, tokens.textPrimary],
+    [fontStack, writingSurfaceBackground, tokens.textPrimary],
   );
 
   const updateBlockText = useCallback(
@@ -1152,41 +1170,45 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
       <div
         style={{
-          padding: '32px 36px 40px',
+          padding: '28px 32px 36px',
           minHeight: '420px',
-          borderRadius: '26px',
+          borderRadius: '24px',
           position: 'relative',
           background: `
-            linear-gradient(155deg, rgba(255,255,255,0.045) 0%, transparent 42%),
+            linear-gradient(165deg, rgba(255,255,255,0.022) 0%, transparent 38%),
             linear-gradient(180deg, ${tokens.cardBg}, ${tokens.wellBg})
           `,
           boxShadow: `
-            0 40px 120px rgba(0,0,0,0.42),
-            0 0 0 1px rgba(255,255,255,0.05),
-            inset 0 1px 0 rgba(255,255,255,0.07),
-            inset 0 -1px 0 rgba(0,0,0,0.12)
+            0 52px 140px rgba(0,0,0,0.5),
+            0 24px 64px rgba(0,0,0,0.22),
+            0 0 0 1px rgba(255,255,255,0.032),
+            inset 0 1px 0 rgba(255,255,255,0.045),
+            inset 0 -1px 0 rgba(0,0,0,0.1)
           `,
         }}
       >
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'flex-end',
           justifyContent: 'space-between',
-          gap: '16px',
-          marginBottom: '16px',
+          gap: '20px',
+          flexWrap: 'wrap',
+          paddingBottom: '18px',
+          marginBottom: '4px',
+          borderBottom: '1px solid rgba(255,255,255,0.035)',
         }}
       >
-        <div>
+        <div style={{ minWidth: 0, flex: '1 1 200px' }}>
           <div
             style={{
-              fontSize: '10px',
+              fontSize: '9px',
               fontWeight: 600,
-              letterSpacing: '0.12em',
+              letterSpacing: '0.16em',
               textTransform: 'uppercase',
               color: tokens.textGhost,
-              opacity: 0.75,
-              marginBottom: '8px',
+              opacity: 0.5,
+              marginBottom: '6px',
             }}
           >
             Notebook
@@ -1194,14 +1216,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
           <div
             style={{
-              fontSize: '12.5px',
-              color: tokens.textGhost,
-              opacity: 0.85,
+              fontSize: '12px',
+              color: tokens.textMuted,
               letterSpacing: '0.01em',
-              lineHeight: 1.45,
+              lineHeight: 1.5,
+              maxWidth: '340px',
             }}
           >
-            Keyboard-first writing. Type / for blocks.
+            Calm surface for long-form thought. Press <span style={{ opacity: 0.75 }}>/</span> for structure.
           </div>
         </div>
 
@@ -1210,10 +1232,20 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'flex-end',
-            gap: '10px',
+            gap: '8px',
+            flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              padding: '3px',
+              gap: '2px',
+              borderRadius: '10px',
+              background: 'rgba(0,0,0,0.2)',
+              border: '1px solid rgba(255,255,255,0.04)',
+            }}
+          >
             {(['edit', 'preview'] as const).map((mode) => {
               const active = editorMode === mode;
               const label = mode === 'edit' ? 'Edit' : 'Preview';
@@ -1223,16 +1255,18 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   type="button"
                   onClick={() => setEditorMode(mode)}
                   style={{
-                    border: active ? `1px solid ${tokens.accent}55` : `1px solid ${tokens.cardBorder}`,
-                    background: active ? `${tokens.accent}18` : 'transparent',
-                    color: active ? tokens.accent : tokens.textGhost,
-                    borderRadius: '999px',
+                    border: 'none',
+                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
+                    color: active ? tokens.textPrimary : tokens.textGhost,
+                    borderRadius: '7px',
                     fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
-                    padding: '5px 10px',
+                    padding: '6px 11px',
                     cursor: 'pointer',
+                    opacity: active ? 1 : 0.72,
+                    transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
                   }}
                 >
                   {label}
@@ -1240,7 +1274,16 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               );
             })}
           </div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              padding: '3px',
+              gap: '2px',
+              borderRadius: '10px',
+              background: 'rgba(0,0,0,0.16)',
+              border: '1px solid rgba(255,255,255,0.035)',
+            }}
+          >
             {(['blank', 'ruled', 'grid'] as const).map((style) => {
               const active = paperStyle === style;
 
@@ -1250,16 +1293,18 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   type="button"
                   onClick={() => onChange({ ...content, paperStyle: style })}
                   style={{
-                    border: active ? `1px solid ${tokens.accent}55` : `1px solid ${tokens.cardBorder}`,
-                    background: active ? `${tokens.accent}18` : 'transparent',
-                    color: active ? tokens.accent : tokens.textGhost,
-                    borderRadius: '999px',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
+                    border: 'none',
+                    background: active ? 'rgba(255,255,255,0.06)' : 'transparent',
+                    color: active ? tokens.textSecondary : tokens.textGhost,
+                    borderRadius: '7px',
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    letterSpacing: '0.07em',
                     textTransform: 'uppercase',
-                    padding: '5px 10px',
+                    padding: '5px 9px',
                     cursor: 'pointer',
+                    opacity: active ? 1 : 0.65,
+                    transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
                   }}
                 >
                   {style}
@@ -1388,7 +1433,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       'opacity 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.26s ease, box-shadow 0.28s ease',
                     boxShadow:
                       focusedDividerId === block.id
-                        ? `0 0 28px ${tokens.accent}14, inset 0 0 0 1px ${tokens.accent}18`
+                        ? `0 0 24px ${tokens.accent}10, inset 0 0 0 1px ${tokens.accent}14`
                         : 'none',
                   }}
                   onFocus={() => {
@@ -1418,9 +1463,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       flex: 1,
                       height: '1px',
                       background: tokens.divider,
-                      opacity: focusedDividerId === block.id ? 0.88 : 0.52,
+                      opacity: focusedDividerId === block.id ? 0.82 : 0.38,
                       boxShadow:
-                        focusedDividerId === block.id ? `0 0 18px ${tokens.accent}18` : 'none',
+                        focusedDividerId === block.id ? `0 0 16px ${tokens.accent}12` : 'none',
                       transition: 'opacity 0.24s ease, box-shadow 0.28s ease',
                     }}
                   />
@@ -1450,11 +1495,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '34px',
+                      fontSize: '38px',
                       fontWeight: 700,
-                      letterSpacing: '-0.032em',
-                      lineHeight: 1.1,
-                      margin: '36px 0 22px',
+                      letterSpacing: '-0.038em',
+                      lineHeight: 1.05,
+                      margin: '44px 0 26px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1486,11 +1531,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '22px',
-                      fontWeight: 500,
-                      letterSpacing: '-0.02em',
-                      lineHeight: 1.34,
-                      margin: '48px 0 18px',
+                      fontSize: '23px',
+                      fontWeight: 600,
+                      letterSpacing: '-0.022em',
+                      lineHeight: 1.32,
+                      margin: '56px 0 22px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1510,8 +1555,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     ...blockSurfaceChrome(block.id),
                     display: 'flex',
                     alignItems: 'baseline',
-                    gap: '11px',
-                    margin: '14px 0',
+                    gap: '12px',
+                    margin: '16px 0',
                   }}
                 >
                   <button
@@ -1525,7 +1570,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       margin: 0,
                       padding: 0,
                       borderRadius: '4px',
-                      border: `1px solid ${block.checked ? `${tokens.accent}cc` : tokens.cardBorder}`,
+                      border: `1px solid ${
+                        block.checked ? `${tokens.accent}cc` : 'rgba(255,255,255,0.1)'
+                      }`,
                       background: block.checked
                         ? `linear-gradient(145deg, ${tokens.accent}35, ${tokens.accent}12)`
                         : 'rgba(255,255,255,0.02)',
@@ -1540,7 +1587,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                         'border-color 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), background 0.22s ease, box-shadow 0.24s ease, transform 0.16s ease',
                       boxShadow: block.checked
                         ? `0 0 0 1px ${tokens.accent}22, 0 0 14px ${tokens.accent}28`
-                        : 'inset 0 1px 1px rgba(0,0,0,0.12)',
+                        : 'inset 0 1px 0 rgba(255,255,255,0.04)',
                     }}
                     onMouseDown={(ev) => {
                       (ev.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)';
@@ -1584,9 +1631,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                         outline: 'none',
                         background: 'transparent',
                         color: tokens.textPrimary,
-                        fontSize: '16px',
+                        fontSize: '16.5px',
                         fontWeight: 400,
-                        lineHeight: 1.72,
+                        lineHeight: 1.8,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',
@@ -1606,10 +1653,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   data-block-id={block.id}
                   style={{
                     ...blockSurfaceChrome(block.id),
-                    margin: '24px 0',
-                    paddingLeft: '22px',
-                    borderLeft: `2px solid ${tokens.accent}22`,
-                    boxShadow: `-8px 0 32px ${tokens.accent}0a`,
+                    margin: '28px 0',
+                    paddingLeft: '26px',
+                    borderLeft: `1px solid ${tokens.accent}28`,
+                    boxShadow: `-12px 0 40px ${tokens.accent}08`,
                     transition: 'border-color 0.24s ease, box-shadow 0.26s ease',
                   }}
                 >
@@ -1626,11 +1673,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
-                      color: tokens.textMuted,
-                      fontSize: '16px',
+                      color: tokens.textSecondary,
+                      fontSize: '16.5px',
                       fontStyle: 'italic',
                       fontWeight: 400,
-                      lineHeight: 1.75,
+                      lineHeight: 1.82,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -1661,11 +1708,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     border: 'none',
                     outline: 'none',
                     background: 'transparent',
-                    color: tokens.textSecondary,
-                    fontSize: '16px',
+                    color: tokens.textPrimary,
+                    fontSize: '16.5px',
                     fontWeight: 400,
-                    lineHeight: 1.78,
-                    margin: '12px 0',
+                    lineHeight: 1.82,
+                    margin: '14px 0',
                     caretColor: tokens.accent,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
@@ -1688,11 +1735,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <div
                   key={index}
                   style={{
-                    fontSize: '34px',
+                    fontSize: '38px',
                     fontWeight: 700,
-                    letterSpacing: '-0.032em',
-                    lineHeight: 1.1,
-                    margin: '36px 0 22px',
+                    letterSpacing: '-0.038em',
+                    lineHeight: 1.05,
+                    margin: '44px 0 26px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1705,11 +1752,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <div
                   key={index}
                   style={{
-                    fontSize: '22px',
-                    fontWeight: 500,
-                    lineHeight: 1.34,
-                    letterSpacing: '-0.02em',
-                    margin: '48px 0 18px',
+                    fontSize: '23px',
+                    fontWeight: 600,
+                    lineHeight: 1.32,
+                    letterSpacing: '-0.022em',
+                    margin: '56px 0 22px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1725,7 +1772,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     height: '1px',
                     margin: '32px 0',
                     background: tokens.divider,
-                    opacity: 0.52,
+                    opacity: 0.38,
                   }}
                   role="separator"
                 />
@@ -1738,8 +1785,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   style={{
                     display: 'flex',
                     alignItems: 'baseline',
-                    gap: '11px',
-                    margin: '14px 0',
+                    gap: '12px',
+                    margin: '16px 0',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1752,7 +1799,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       position: 'relative',
                       top: '0.14em',
                       borderRadius: '4px',
-                      border: `1px solid ${line.checked ? `${tokens.accent}cc` : tokens.cardBorder}`,
+                      border: `1px solid ${line.checked ? `${tokens.accent}cc` : 'rgba(255,255,255,0.1)'}`,
                       background: line.checked
                         ? `linear-gradient(145deg, ${tokens.accent}35, ${tokens.accent}12)`
                         : 'rgba(255,255,255,0.02)',
@@ -1765,12 +1812,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       lineHeight: 1,
                       boxShadow: line.checked
                         ? `0 0 0 1px ${tokens.accent}22, 0 0 14px ${tokens.accent}28`
-                        : 'inset 0 1px 1px rgba(0,0,0,0.12)',
+                        : 'inset 0 1px 0 rgba(255,255,255,0.04)',
                     }}
                   >
                     {line.checked ? '✓' : ''}
                   </span>
-                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '16px', lineHeight: 1.72 }}>
+                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '16.5px', lineHeight: 1.8 }}>
                     {line.text}
                   </span>
                 </div>
@@ -1781,14 +1828,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <blockquote
                   key={index}
                   style={{
-                    margin: '24px 0',
-                    paddingLeft: '22px',
-                    borderLeft: `2px solid ${tokens.accent}22`,
-                    boxShadow: `-8px 0 32px ${tokens.accent}0a`,
-                    color: tokens.textMuted,
+                    margin: '28px 0',
+                    paddingLeft: '26px',
+                    borderLeft: `1px solid ${tokens.accent}28`,
+                    boxShadow: `-12px 0 40px ${tokens.accent}08`,
+                    color: tokens.textSecondary,
                     fontStyle: 'italic',
-                    fontSize: '16px',
-                    lineHeight: 1.75,
+                    fontSize: '16.5px',
+                    lineHeight: 1.82,
                     fontWeight: 400,
                     whiteSpace: 'pre-wrap',
                   }}
@@ -1801,10 +1848,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               <p
                 key={index}
                 style={{
-                  margin: '12px 0',
-                  color: tokens.textSecondary,
-                  fontSize: '16px',
-                  lineHeight: 1.78,
+                  margin: '14px 0',
+                  color: tokens.textPrimary,
+                  fontSize: '16.5px',
+                  lineHeight: 1.82,
                   whiteSpace: 'pre-wrap',
                 }}
               >
