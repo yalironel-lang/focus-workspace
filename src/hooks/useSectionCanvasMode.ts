@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ZOOM_MIN, ZOOM_MAX } from './useCanvasMode';
+import { fwPersistWarn, sanitizePrefs, sanitizeViewport } from '../lib/freeSpacePersistence';
 
 export const SECTION_ZOOM_STEP = 0.1;
 export const SECTION_DEFAULT_GRID_SIZE = 24;
@@ -40,40 +41,55 @@ const VIEW_DEFAULTS: PersistedViewport = { zoom: 1, panX: 40, panY: 40 };
 const PREF_DEFAULTS: PersistedPrefs = { snapToGrid: true, gridSize: SECTION_DEFAULT_GRID_SIZE };
 
 function loadViewport(sectionId: string): PersistedViewport {
+  if (!sectionId) return VIEW_DEFAULTS;
   try {
     const raw = localStorage.getItem(viewportKey(sectionId));
     if (!raw) return VIEW_DEFAULTS;
-    const v = JSON.parse(raw) as Partial<PersistedViewport>;
-    return {
-      zoom: typeof v.zoom === 'number' ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v.zoom)) : VIEW_DEFAULTS.zoom,
-      panX: typeof v.panX === 'number' ? v.panX : VIEW_DEFAULTS.panX,
-      panY: typeof v.panY === 'number' ? v.panY : VIEW_DEFAULTS.panY,
-    };
-  } catch {
+    const parsed: unknown = JSON.parse(raw);
+    const s = sanitizeViewport(parsed, sectionId, VIEW_DEFAULTS);
+    if (s.repaired) {
+      try {
+        localStorage.setItem(viewportKey(sectionId), JSON.stringify({ zoom: s.zoom, panX: s.panX, panY: s.panY }));
+      } catch { /* quota */ }
+    }
+    return { zoom: s.zoom, panX: s.panX, panY: s.panY };
+  } catch (e) {
+    fwPersistWarn(`Free Space viewport JSON unreadable for section "${sectionId}": ${String(e)}`);
     return VIEW_DEFAULTS;
   }
 }
 
 function loadPrefs(sectionId: string): PersistedPrefs {
+  if (!sectionId) return PREF_DEFAULTS;
   try {
     const raw = localStorage.getItem(prefsKey(sectionId));
     if (!raw) return PREF_DEFAULTS;
-    const p = JSON.parse(raw) as Partial<PersistedPrefs>;
-    return {
-      snapToGrid: typeof p.snapToGrid === 'boolean' ? p.snapToGrid : PREF_DEFAULTS.snapToGrid,
-      gridSize: typeof p.gridSize === 'number' ? p.gridSize : PREF_DEFAULTS.gridSize,
-    };
-  } catch {
+    const parsed: unknown = JSON.parse(raw);
+    const s = sanitizePrefs(parsed, sectionId, PREF_DEFAULTS);
+    if (s.repaired) {
+      try {
+        localStorage.setItem(prefsKey(sectionId), JSON.stringify({ snapToGrid: s.snapToGrid, gridSize: s.gridSize }));
+      } catch { /* quota */ }
+    }
+    return { snapToGrid: s.snapToGrid, gridSize: s.gridSize };
+  } catch (e) {
+    fwPersistWarn(`Free Space prefs JSON unreadable for section "${sectionId}": ${String(e)}`);
     return PREF_DEFAULTS;
   }
 }
 
 function saveViewport(sectionId: string, v: PersistedViewport): void {
-  try { localStorage.setItem(viewportKey(sectionId), JSON.stringify(v)); } catch { /* quota */ }
+  if (!sectionId) return;
+  try {
+    localStorage.setItem(viewportKey(sectionId), JSON.stringify(v));
+  } catch { /* quota */ }
 }
 
 function savePrefs(sectionId: string, p: PersistedPrefs): void {
-  try { localStorage.setItem(prefsKey(sectionId), JSON.stringify(p)); } catch { /* quota */ }
+  if (!sectionId) return;
+  try {
+    localStorage.setItem(prefsKey(sectionId), JSON.stringify(p));
+  } catch { /* quota */ }
 }
 
 export function useSectionCanvasMode(sectionId: string): SectionCanvasState {
@@ -83,7 +99,7 @@ export function useSectionCanvasMode(sectionId: string): SectionCanvasState {
   const [panX, setPanXRaw] = useState(initialViewport.panX);
   const [panY, setPanYRaw] = useState(initialViewport.panY);
   const [snapToGrid, setSnapToGrid] = useState(initialPrefs.snapToGrid);
-  const [gridSize] = useState(initialPrefs.gridSize);
+  const [gridSize, setGridSize] = useState(initialPrefs.gridSize);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<PersistedViewport>({ zoom, panX, panY });
@@ -95,6 +111,7 @@ export function useSectionCanvasMode(sectionId: string): SectionCanvasState {
     setPanXRaw(v.panX);
     setPanYRaw(v.panY);
     setSnapToGrid(p.snapToGrid);
+    setGridSize(p.gridSize);
   }, [sectionId]);
 
   useEffect(() => {
@@ -142,4 +159,3 @@ export function useSectionCanvasMode(sectionId: string): SectionCanvasState {
 
   return { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap };
 }
-

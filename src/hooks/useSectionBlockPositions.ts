@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
+import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap } from '../lib/freeSpacePersistence';
 
 function key(sectionId: string): string {
   return `fw_section_${sectionId}_free_space_positions_v1`;
@@ -10,8 +11,21 @@ function load(sectionId: string): PositionMap {
   if (!sectionId) return {};
   try {
     const raw = localStorage.getItem(key(sectionId));
-    return raw ? (JSON.parse(raw) as PositionMap) : {};
-  } catch {
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    const { map, repaired } = sanitizePositionMap(parsed, sectionId);
+    if (repaired) {
+      fwPersistWarn(`Repaired invalid Free Space positions for section "${sectionId}" and rewrote storage.`);
+      try {
+        localStorage.setItem(key(sectionId), JSON.stringify(map));
+      } catch { /* quota */ }
+    }
+    return map;
+  } catch (e) {
+    fwPersistWarn(`Failed to parse Free Space positions for section "${sectionId}": ${String(e)}; clearing positions key.`);
+    try {
+      localStorage.removeItem(key(sectionId));
+    } catch { /* ignore */ }
     return {};
   }
 }
@@ -35,6 +49,8 @@ export interface SectionBlockPositionsState {
   /** Apply many positions at once (e.g. spatial templates). Merges with existing map. */
   applyPositions: (patches: Record<string, BlockPos> | null | undefined) => void;
   initPos: (id: string, hint?: Partial<BlockPos>) => void;
+  /** Ensures every listed id has a position (single batched write). Recovers from missing/cleared position maps. */
+  seedMissingPositions: (ids: string[]) => void;
   removePos: (id: string) => void;
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
 }
@@ -48,9 +64,10 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
 
   const setPos = useCallback((id: string, patch: Partial<BlockPos>) => {
     setPositions(prev => {
+      const merged = { ...(prev[id] ?? makeDefault()), ...patch };
       const next: PositionMap = {
         ...prev,
-        [id]: { ...(prev[id] ?? makeDefault()), ...patch },
+        [id]: sanitizeBlockPos(merged),
       };
       persist(sectionId, next);
       return next;
@@ -63,10 +80,7 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
       const next: PositionMap = { ...prev };
       for (const [id, pos] of Object.entries(patches)) {
         if (!pos || typeof pos !== 'object') continue;
-        const merged = { ...(prev[id] ?? makeDefault()), ...pos };
-        if (![merged.x, merged.y, merged.w, merged.h].every((n) => typeof n === 'number' && Number.isFinite(n))) {
-          continue;
-        }
+        const merged = sanitizeBlockPos({ ...(prev[id] ?? makeDefault()), ...pos });
         next[id] = merged;
       }
       persist(sectionId, next);
@@ -77,7 +91,37 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
   const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
     setPositions(prev => {
       if (prev[id]) return prev;
-      const next: PositionMap = { ...prev, [id]: makeDefault(hint) };
+      const next: PositionMap = { ...prev, [id]: sanitizeBlockPos(makeDefault(hint)) };
+      persist(sectionId, next);
+      return next;
+    });
+  }, [sectionId]);
+
+  const seedMissingPositions = useCallback((ids: string[]) => {
+    if (!sectionId || !ids.length) return;
+    setPositions(prev => {
+      const next: PositionMap = { ...prev };
+      let changed = false;
+      for (const id of ids) {
+        if (!id || next[id]) continue;
+        let x = 80;
+        let y = 80;
+        for (let attempts = 0; attempts < 80; attempts++) {
+          const overlaps = Object.values(next).some(
+            p => Math.abs(p.x - x) < 56 && Math.abs(p.y - y) < 56,
+          );
+          if (!overlaps) break;
+          x += 56;
+          y += 40;
+          if (x > 1100) {
+            x = 80;
+            y += 120;
+          }
+        }
+        next[id] = sanitizeBlockPos(makeDefault({ x, y }));
+        changed = true;
+      }
+      if (!changed) return prev;
       persist(sectionId, next);
       return next;
     });
@@ -105,6 +149,6 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     return { x, y };
   }, [positions]);
 
-  return { positions, setPos, applyPositions, initPos, removePos, nextFreePos };
+  return { positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos };
 }
 

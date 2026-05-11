@@ -21,6 +21,11 @@ import {
   computeFreeSpaceTemplateLayout,
   type FreeSpaceTemplateId,
 } from '../lib/sectionFreeSpaceLayoutTemplates';
+import {
+  installFwFreeSpaceDevTools,
+  setFwFreeSpaceDevSectionContext,
+} from '../lib/freeSpacePersistence';
+import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import type { GroupWithItems } from '../types';
 import {
@@ -389,12 +394,12 @@ export function SectionPage() {
 
   const { links: courseLinks } = usePortalLinks('course', id);
   const { links: globalLinks } = usePortalLinks('global');
-  const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
+  const sectionId = id ?? '';
+  const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
   const { tokens } = useAtmosphere();
-
-  const sectionCanvas = useSectionCanvasMode(id ?? '');
-  const sectionPositions = useSectionBlockPositions(id ?? '');
-  const sectionObjects = useSectionFreeSpaceObjects(id ?? '');
+  const sectionCanvas = useSectionCanvasMode(sectionId);
+  const sectionPositions = useSectionBlockPositions(sectionId);
+  const sectionObjects = useSectionFreeSpaceObjects(sectionId);
   const { registerFreeSpace } = useCommandPalette();
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
 
@@ -611,6 +616,29 @@ export function SectionPage() {
     return () => registerFreeSpace(null);
   }, [id, registerFreeSpace, requestFreeSpaceAdd]);
 
+  useEffect(() => {
+    installFwFreeSpaceDevTools();
+  }, []);
+
+  useEffect(() => {
+    setFwFreeSpaceDevSectionContext(id ?? null);
+    return () => setFwFreeSpaceDevSectionContext(null);
+  }, [id]);
+
+  const freeSpaceObjectIdsKey = sectionObjects.objects.map(o => o.id).join('|');
+  const freeSpaceObjectsRef = useRef(sectionObjects.objects);
+  freeSpaceObjectsRef.current = sectionObjects.objects;
+  useEffect(() => {
+    if (!id) return;
+    sectionPositions.seedMissingPositions(freeSpaceObjectsRef.current.map(o => o.id));
+  }, [id, freeSpaceObjectIdsKey, sectionPositions.seedMissingPositions]);
+
+  useEffect(() => {
+    const valid = new Set(sectionObjects.objects.map(o => o.id));
+    if (spaceSelectedId && !valid.has(spaceSelectedId)) setSpaceSelectedId(null);
+    if (spaceEditingId && !valid.has(spaceEditingId)) setSpaceEditingId(null);
+  }, [sectionObjects.objects, spaceSelectedId, spaceEditingId]);
+
   if (loading) {
     return (
       <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -786,37 +814,39 @@ export function SectionPage() {
             onApplyTemplate={handleApplySpaceTemplate}
             chromeQuiet={!!spaceEditingId}
           />
-          <FreeformCanvas
-            tokens={tokens}
-            modules={[]}
-            blocks={sectionObjects.objects}
-            tools={[]}
-            positions={sectionPositions.positions}
-            canvasState={sectionCanvas}
-            designMode={true}
-            selectedId={spaceSelectedId}
-            focusEditingId={spaceEditingId}
-            spatialAmbient
-            topOffset={84}
-            onSetPos={sectionPositions.setPos}
-            onSelect={id => setSpaceSelectedId(id)}
-            onRemoveModule={() => {}}
-            onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
-            onRemoveTool={() => {}}
-            onDuplicateBlock={id => {
-              const duplicated = sectionObjects.duplicateObject(id);
-              if (!duplicated) return;
-              const p = sectionPositions.positions[id];
-              sectionPositions.initPos(
-                duplicated.id,
-                p ? { x: p.x + 48, y: p.y + 40, w: p.w, h: p.h } : { x: 100, y: 100, w: 360 },
-              );
-              setSpaceSelectedId(duplicated.id);
-            }}
-            onOpenAdd={() => setShowSpaceAdd(v => !v)}
-            renderModuleContent={renderSpaceObject}
-            getLabel={getSpaceLabel}
-          />
+          <FreeSpaceCanvasErrorBoundary tokens={tokens} topOffset={84}>
+            <FreeformCanvas
+              tokens={tokens}
+              modules={[]}
+              blocks={sectionObjects.objects}
+              tools={[]}
+              positions={sectionPositions.positions}
+              canvasState={sectionCanvas}
+              designMode={true}
+              selectedId={spaceSelectedId}
+              focusEditingId={spaceEditingId}
+              spatialAmbient
+              topOffset={84}
+              onSetPos={sectionPositions.setPos}
+              onSelect={id => setSpaceSelectedId(id)}
+              onRemoveModule={() => {}}
+              onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
+              onRemoveTool={() => {}}
+              onDuplicateBlock={id => {
+                const duplicated = sectionObjects.duplicateObject(id);
+                if (!duplicated) return;
+                const p = sectionPositions.positions[id];
+                sectionPositions.initPos(
+                  duplicated.id,
+                  p ? { x: p.x + 48, y: p.y + 40, w: p.w, h: p.h } : { x: 100, y: 100, w: 360 },
+                );
+                setSpaceSelectedId(duplicated.id);
+              }}
+              onOpenAdd={() => setShowSpaceAdd(v => !v)}
+              renderModuleContent={renderSpaceObject}
+              getLabel={getSpaceLabel}
+            />
+          </FreeSpaceCanvasErrorBoundary>
 
           {showSpaceAdd && (
             <div

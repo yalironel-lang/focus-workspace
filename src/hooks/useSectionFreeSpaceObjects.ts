@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
+import { fwPersistWarn } from '../lib/freeSpacePersistence';
 
 export type ProjectObjectType =
   | 'notebook'
@@ -186,7 +187,12 @@ function load(sectionId: string): ProjectSpaceObject[] {
     const raw = localStorage.getItem(key(sectionId));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      fwPersistWarn(
+        `Free Space objects for section "${sectionId}" were not a JSON array; showing an empty canvas until storage is fixed (key: ${key(sectionId)}). Use __FW_RESET_FREE_SPACE__() after backing up if needed.`,
+      );
+      return [];
+    }
 
     const normalized: ProjectSpaceObject[] = [];
     let needsWrite = false;
@@ -200,12 +206,14 @@ function load(sectionId: string): ProjectSpaceObject[] {
       normalized.push(n);
     }
     if (needsWrite) {
+      fwPersistWarn(`Repaired Free Space objects for section "${sectionId}" (${parsed.length} rows → ${normalized.length} valid); rewriting storage.`);
       try {
         localStorage.setItem(key(sectionId), JSON.stringify(normalized));
       } catch { /* quota */ }
     }
     return normalized;
-  } catch {
+  } catch (e) {
+    fwPersistWarn(`Free Space objects JSON unreadable for section "${sectionId}": ${String(e)}`);
     return [];
   }
 }

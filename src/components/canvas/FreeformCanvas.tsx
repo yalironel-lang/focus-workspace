@@ -431,14 +431,34 @@ export function FreeformCanvas({
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
 
+  const safeZoom =
+    typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0
+      ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom))
+      : 1;
+  const safePanX =
+    typeof panX === 'number' && Number.isFinite(panX)
+      ? Math.min(10_000_000, Math.max(-10_000_000, panX))
+      : 40;
+  const safePanY =
+    typeof panY === 'number' && Number.isFinite(panY)
+      ? Math.min(10_000_000, Math.max(-10_000_000, panY))
+      : 40;
+  const safeGridSize =
+    typeof gridSize === 'number' && Number.isFinite(gridSize) && gridSize > 0
+      ? Math.min(400, Math.max(4, gridSize))
+      : 24;
+
+  const usedViewportFallback =
+    !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(panX) || !Number.isFinite(panY);
+
   // Live viewport — updated each render so RAF loops can read current values
   // without stale closures. Tracks zoom too for the zoom lerp loop.
   const liveViewRef = useRef({ panX, panY, zoom });
   liveViewRef.current = { panX, panY, zoom };
 
   // Initialize targetView to current viewport on first render
-  if (targetViewRef.current.zoom === 0) {
-    targetViewRef.current = { zoom, panX, panY };
+  if (!Number.isFinite(targetViewRef.current.zoom) || targetViewRef.current.zoom === 0) {
+    targetViewRef.current = { zoom: safeZoom, panX: safePanX, panY: safePanY };
   }
 
   // ── All renderable items ───────────────────────────────────────────────────
@@ -558,8 +578,8 @@ export function FreeformCanvas({
 
   const snap = useCallback((v: number): number => {
     if (!snapToGrid) return v;
-    return Math.round(v / gridSize) * gridSize;
-  }, [snapToGrid, gridSize]);
+    return Math.round(v / safeGridSize) * safeGridSize;
+  }, [snapToGrid, safeGridSize]);
 
   // ── Mouse event handlers ──────────────────────────────────────────────────
 
@@ -981,9 +1001,9 @@ export function FreeformCanvas({
 
   // ── Dot grid background ───────────────────────────────────────────────────
 
-  const dotSpacing = gridSize * zoom;
-  const dotOffX    = ((panX % dotSpacing) + dotSpacing) % dotSpacing;
-  const dotOffY    = ((panY % dotSpacing) + dotSpacing) % dotSpacing;
+  const dotSpacing = safeGridSize * safeZoom;
+  const dotOffX    = ((safePanX % dotSpacing) + dotSpacing) % dotSpacing;
+  const dotOffY    = ((safePanY % dotSpacing) + dotSpacing) % dotSpacing;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1025,7 +1045,7 @@ export function FreeformCanvas({
             <circle
               cx={dotSpacing / 2}
               cy={dotSpacing / 2}
-              r={zoom > 0.5 ? 0.8 : 0.4}
+              r={safeZoom > 0.5 ? 0.8 : 0.4}
               fill={deepFocusAtmosphere ? `${tokens.accent}07` : `${tokens.accent}0c`}
             />
           </pattern>
@@ -1039,7 +1059,7 @@ export function FreeformCanvas({
           position:       'absolute',
           inset:          0,
           transformOrigin: '0 0',
-          transform:      `translate(${panX}px, ${panY}px) scale(${zoom})`,
+          transform:      `translate(${safePanX}px, ${safePanY}px) scale(${safeZoom})`,
           willChange:     'transform',
         }}
       >
@@ -1493,6 +1513,32 @@ export function FreeformCanvas({
         onToggleSnap={toggleSnap}
         onAutoOrganize={handleAutoOrganize}
       />
+
+      {usedViewportFallback && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute',
+            top: '12px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 25,
+            maxWidth: 'min(92vw, 440px)',
+            padding: '8px 12px',
+            borderRadius: '10px',
+            fontSize: '11px',
+            fontWeight: 600,
+            color: tokens.textSecondary,
+            backgroundColor: `${tokens.cardBg}f0`,
+            border: `1px solid ${tokens.cardBorder}`,
+            boxShadow: tokens.shadowMd,
+            pointerEvents: 'none',
+            textAlign: 'center',
+          }}
+        >
+          Viewport values were invalid and have been clamped for display. Use Reset zoom or reload if pan still looks wrong.
+        </div>
+      )}
 
       {/* ── First-time guide overlay ──────────────────────────────── */}
       {showGuide && (
