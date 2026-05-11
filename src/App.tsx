@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Auth } from './components/Auth';
 import { Dashboard } from './pages/Dashboard';
+import { DeskPage } from './pages/DeskPage';
 import { SectionPage } from './pages/SectionPage';
 import { SchedulePage } from './pages/SchedulePage';
 import { SessionPage } from './pages/SessionPage';
@@ -40,6 +41,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Dashboard />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/desk"
+        element={
+          <PrivateRoute>
+            <DeskPage />
           </PrivateRoute>
         }
       />

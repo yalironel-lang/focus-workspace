@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -379,6 +380,12 @@ export function SectionPage() {
     addItem, pushItem, updateItem, deleteItem, toggleTask,
     addGroup, updateGroup, deleteGroup, setExamDate,
   } = useSectionDetail(id);
+  const { touch: touchRecentWorkspace } = useRecentWorkspaces();
+
+  useEffect(() => {
+    if (section?.id) touchRecentWorkspace(section.id);
+  }, [section?.id, touchRecentWorkspace]);
+
   const { links: courseLinks } = usePortalLinks('course', id);
   const { links: globalLinks } = usePortalLinks('global');
   const { customization, setCustomization } = useWorkspaceCustomization(id ?? '');
