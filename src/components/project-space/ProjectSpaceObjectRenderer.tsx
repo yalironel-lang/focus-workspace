@@ -1,5 +1,9 @@
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import type { ProjectSpaceObject, ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
+import {
+  ensureProjectObjectContent,
+  type ProjectSpaceObject,
+  type ProjectObjectContent,
+} from '../../hooks/useSectionFreeSpaceObjects';
 import { NoteBlock } from '../workspace/blocks/NoteBlock';
 import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
@@ -22,11 +26,13 @@ export function ProjectSpaceObjectRenderer({
   onChange,
   onNotebookEditingChange,
 }: Props) {
-  switch (object.content.type) {
+  const content = ensureProjectObjectContent(object.type, object.content);
+
+  switch (content.type) {
     case 'notebook':
       return (
         <ProjectNotebookBlock
-          content={object.content}
+          content={content}
           tokens={tokens}
           onChange={onChange}
           context="free-space"
@@ -40,7 +46,7 @@ export function ProjectSpaceObjectRenderer({
     case 'note':
       return (
         <NoteBlock
-          content={{ type: 'note', body: object.content.body }}
+          content={{ type: 'note', body: content.body }}
           tokens={tokens}
           onChange={c => onChange({ type: 'note', body: c.body })}
         />
@@ -52,7 +58,7 @@ export function ProjectSpaceObjectRenderer({
             Click to open. Double-click to edit.
           </div>
           <LinkBlock
-            content={object.content}
+            content={content}
             tokens={tokens}
             onChange={c => onChange(c)}
           />
@@ -61,7 +67,7 @@ export function ProjectSpaceObjectRenderer({
     case 'checklist':
       return (
         <ChecklistBlock
-          content={object.content}
+          content={content}
           tokens={tokens}
           onChange={c => onChange(c)}
         />
@@ -73,7 +79,7 @@ export function ProjectSpaceObjectRenderer({
             Hover image to change source.
           </div>
           <ImageBlock
-            content={object.content}
+            content={content}
             tokens={tokens}
             onChange={c => onChange(c)}
           />
@@ -82,7 +88,7 @@ export function ProjectSpaceObjectRenderer({
     case 'calculator':
       return (
         <FreeSpaceCalculator
-          content={object.content}
+          content={content}
           tokens={tokens}
           onChange={c => onChange(c)}
         />
@@ -90,13 +96,24 @@ export function ProjectSpaceObjectRenderer({
     case 'graph':
       return (
         <FreeSpaceGraph
-          content={object.content}
+          content={content}
           tokens={tokens}
           onChange={c => onChange(c)}
         />
       );
     default:
-      return null;
+      return (
+        <div
+          className="rounded-xl p-4 text-xs"
+          style={{
+            backgroundColor: `${tokens.cardBg}ee`,
+            border: `1px solid ${tokens.cardBorder}`,
+            color: tokens.textMuted,
+          }}
+        >
+          This object could not be displayed. Try removing it and adding a new one.
+        </div>
+      );
   }
 }
 

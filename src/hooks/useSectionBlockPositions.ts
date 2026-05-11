@@ -7,6 +7,7 @@ function key(sectionId: string): string {
 }
 
 function load(sectionId: string): PositionMap {
+  if (!sectionId) return {};
   try {
     const raw = localStorage.getItem(key(sectionId));
     return raw ? (JSON.parse(raw) as PositionMap) : {};
@@ -16,6 +17,7 @@ function load(sectionId: string): PositionMap {
 }
 
 function persist(sectionId: string, m: PositionMap): void {
+  if (!sectionId) return;
   try { localStorage.setItem(key(sectionId), JSON.stringify(m)); } catch { /* quota */ }
 }
 
