@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useRef,
   useEffect,
   useMemo,
@@ -6,7 +7,11 @@ import {
   useCallback,
   useLayoutEffect,
 } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type {
+  CSSProperties,
+  FocusEvent as ReactFocusEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
@@ -450,8 +455,7 @@ function EditableLine({
         style={{
           ...style,
           minHeight: isEmpty ? `${lineHeight}em` : undefined,
-          transition: `${style.transition ? `${style.transition}, ` : ''}box-shadow 0.2s ease, color 0.18s ease`,
-          boxShadow: focused ? `inset 0 0 0 1px ${tokens.accent}18, 0 0 28px ${tokens.accent}0c` : 'none',
+          transition: `${style.transition ? `${style.transition}, ` : ''}color 0.2s ease`,
         }}
       />
     </div>
@@ -476,6 +480,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     selected: number;
   } | null>(null);
   const [focusedDividerId, setFocusedDividerId] = useState<string | null>(null);
+  const [surfaceFocusBlockId, setSurfaceFocusBlockId] = useState<string | null>(null);
 
   const editorRootRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
@@ -520,28 +525,32 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const paperStyle = content.paperStyle ?? 'ruled';
 
-  const paperBackground = useMemo(() => {
-    if (paperStyle === 'blank') return 'none';
-
-    if (paperStyle === 'grid') {
+  /** Paper lines stay atmospheric — never compete with text. */
+  const writingPaperLayers = useMemo(() => {
+    if (paperStyle === 'blank') {
       return `
-        linear-gradient(${tokens.cardBorder}20 1px, transparent 1px),
-        linear-gradient(90deg, ${tokens.cardBorder}20 1px, transparent 1px)
+        radial-gradient(ellipse 130% 75% at 50% -18%, ${tokens.accentSubtle}, transparent 58%),
+        radial-gradient(ellipse 90% 45% at 50% 108%, rgba(0,0,0,0.14), transparent 52%)
       `;
     }
-
+    if (paperStyle === 'grid') {
+      return `
+        linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px)
+      `;
+    }
     return `
       repeating-linear-gradient(
         180deg,
         transparent,
-        transparent 31px,
-        ${tokens.cardBorder}35 31px,
-        ${tokens.cardBorder}35 32px
+        transparent 35px,
+        rgba(255,255,255,0.028) 35px,
+        rgba(255,255,255,0.028) 36px
       )
     `;
-  }, [paperStyle, tokens.cardBorder]);
+  }, [paperStyle, tokens.accentSubtle]);
 
-  const paperSize = paperStyle === 'grid' ? '28px 28px' : '100% 32px';
+  const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 36px';
 
   const setFocusIndexById = useCallback(
     (id: string) => {
@@ -549,6 +558,40 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       if (idx !== -1) focusIndexRef.current = idx;
     },
     [blocks],
+  );
+
+  const handleSurfaceFocusIn = useCallback((e: ReactFocusEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement | null;
+    if (t === e.currentTarget) {
+      setSurfaceFocusBlockId(null);
+      return;
+    }
+    const wrap = t?.closest?.('[data-nb-surface-block]') as HTMLElement | null;
+    const bid = wrap?.dataset?.blockId;
+    if (bid) setSurfaceFocusBlockId(bid);
+  }, []);
+
+  const handleSurfaceBlur = useCallback((e: ReactFocusEvent<HTMLDivElement>) => {
+    const rt = e.relatedTarget as Node | null;
+    if (rt instanceof HTMLElement) {
+      if (e.currentTarget.contains(rt)) return;
+      if (rt.closest('[data-nb-slash-menu]')) return;
+    }
+    setSurfaceFocusBlockId(null);
+  }, []);
+
+  const blockSurfaceChrome = useCallback(
+    (blockId: string): CSSProperties => {
+      const has = surfaceFocusBlockId !== null;
+      const active = surfaceFocusBlockId === blockId;
+      const soften = has && !active;
+      return {
+        opacity: soften ? 0.88 : 1,
+        filter: active ? 'brightness(1.04) saturate(1.02)' : 'none',
+        transition: 'opacity 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.26s ease',
+      };
+    },
+    [surfaceFocusBlockId],
   );
 
   const syncSlashFromParagraph = useCallback((blockId: string, el: HTMLDivElement) => {
@@ -657,25 +700,36 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const fontStack = "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
 
+  const writingColumnStyle = useMemo(
+    (): CSSProperties => ({
+      maxWidth: 'min(640px, 100%)',
+      margin: '0 auto',
+      width: '100%',
+      paddingLeft: 'clamp(32px, 6vw, 72px)',
+      paddingRight: 'clamp(32px, 6vw, 72px)',
+    }),
+    [],
+  );
+
   const editorSurfaceStyle = useMemo(
     (): CSSProperties => ({
       width: '100%',
       minHeight: '420px',
       boxSizing: 'border-box',
       backgroundColor: 'transparent',
-      backgroundImage: paperBackground,
+      backgroundImage: writingPaperLayers,
       backgroundSize: paperSize,
       color: tokens.textPrimary,
-      fontSize: '15.5px',
-      lineHeight: 1.72,
-      letterSpacing: '0.01em',
+      fontSize: '16px',
+      lineHeight: 1.78,
+      letterSpacing: '0.008em',
       fontFamily: fontStack,
-      paddingTop: '12px',
-      paddingBottom: '96px',
+      paddingTop: '48px',
+      paddingBottom: '120px',
       outline: 'none',
-      transition: 'color 0.18s ease, background-image 0.22s ease',
+      transition: 'color 0.22s ease, background-image 0.28s ease',
     }),
-    [fontStack, paperBackground, paperSize, tokens.textPrimary],
+    [fontStack, writingPaperLayers, paperSize, tokens.textPrimary],
   );
 
   const updateBlockText = useCallback(
@@ -1086,16 +1140,34 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     ],
   );
 
+  const nbMotionCss = `
+@keyframes nbSlashIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+`;
+
   return (
-    <div
-      style={{
-        padding: '22px 24px 28px',
-        minHeight: '420px',
-        background: `linear-gradient(180deg, ${tokens.cardBg}, ${tokens.wellBg})`,
-        borderRadius: '22px',
-        position: 'relative',
-      }}
-    >
+    <Fragment>
+      <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
+      <div
+        style={{
+          padding: '32px 36px 40px',
+          minHeight: '420px',
+          borderRadius: '26px',
+          position: 'relative',
+          background: `
+            linear-gradient(155deg, rgba(255,255,255,0.045) 0%, transparent 42%),
+            linear-gradient(180deg, ${tokens.cardBg}, ${tokens.wellBg})
+          `,
+          boxShadow: `
+            0 40px 120px rgba(0,0,0,0.42),
+            0 0 0 1px rgba(255,255,255,0.05),
+            inset 0 1px 0 rgba(255,255,255,0.07),
+            inset 0 -1px 0 rgba(0,0,0,0.12)
+          `,
+        }}
+      >
       <div
         style={{
           display: 'flex',
@@ -1201,6 +1273,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       {editorMode === 'edit' && slashMenu && typeof document !== 'undefined'
         ? createPortal(
             <div
+              data-nb-slash-menu
               role="listbox"
               aria-label="Block commands"
               style={{
@@ -1209,14 +1282,19 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 top: slashMenu.top,
                 left: slashMenu.left,
                 minWidth: Math.max(200, slashMenu.width),
-                maxWidth: 280,
-                padding: '5px',
-                borderRadius: '12px',
-                border: '1px solid rgba(255,255,255,0.06)',
-                background: 'rgba(10,11,14,0.92)',
-                backdropFilter: 'blur(20px) saturate(1.25)',
-                WebkitBackdropFilter: 'blur(20px) saturate(1.25)',
-                boxShadow: `0 18px 50px rgba(0,0,0,0.55), 0 0 0 1px ${tokens.accent}12, inset 0 1px 0 rgba(255,255,255,0.04)`,
+                maxWidth: 288,
+                padding: '6px',
+                borderRadius: '14px',
+                border: '1px solid rgba(255,255,255,0.055)',
+                background: 'rgba(9,10,13,0.94)',
+                backdropFilter: 'blur(22px) saturate(1.35)',
+                WebkitBackdropFilter: 'blur(22px) saturate(1.35)',
+                boxShadow: `
+                  0 22px 56px rgba(0,0,0,0.58),
+                  0 0 0 1px ${tokens.accent}10,
+                  inset 0 1px 0 rgba(255,255,255,0.05)
+                `,
+                animation: 'nbSlashIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards',
               }}
             >
               {slashFiltered.length === 0 ? (
@@ -1236,25 +1314,34 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                         ev.preventDefault();
                         applySlashCommand(slashMenu.blockId, cmd.id);
                       }}
+                      onMouseEnter={(ev) => {
+                        if (!active) (ev.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.045)';
+                      }}
+                      onMouseLeave={(ev) => {
+                        const el = ev.currentTarget as HTMLButtonElement;
+                        el.style.background = active ? 'rgba(255,255,255,0.09)' : 'transparent';
+                      }}
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'flex-start',
-                        gap: '1px',
+                        gap: '2px',
                         width: '100%',
                         textAlign: 'left',
                         border: 'none',
-                        borderRadius: '8px',
+                        borderRadius: '9px',
                         cursor: 'pointer',
-                        padding: '7px 10px',
-                        marginBottom: i < slashFiltered.length - 1 ? 1 : 0,
-                        background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
+                        padding: '9px 11px',
+                        marginBottom: i < slashFiltered.length - 1 ? 2 : 0,
+                        background: active ? 'rgba(255,255,255,0.09)' : 'transparent',
                         color: active ? tokens.textPrimary : tokens.textSecondary,
-                        transition: 'background 0.12s ease, color 0.12s ease',
+                        transition:
+                          'background 0.16s cubic-bezier(0.25, 0.46, 0.45, 0.94), color 0.16s ease, transform 0.14s ease',
+                        transform: active ? 'translateX(1px)' : 'none',
                       }}
                     >
-                      <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.01em' }}>{cmd.label}</span>
-                      <span style={{ fontSize: '10px', color: tokens.textGhost, opacity: 0.55, fontWeight: 500 }}>
+                      <span style={{ fontSize: '13.5px', fontWeight: 600, letterSpacing: '-0.02em' }}>{cmd.label}</span>
+                      <span style={{ fontSize: '10px', color: tokens.textGhost, opacity: 0.5, fontWeight: 500 }}>
                         {cmd.hint}
                       </span>
                     </button>
@@ -1274,18 +1361,36 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           aria-label="Notebook"
           tabIndex={-1}
           onKeyDownCapture={handleEditorKeyCapture}
+          onFocusCapture={handleSurfaceFocusIn}
+          onBlur={handleSurfaceBlur}
           style={editorSurfaceStyle}
         >
+          <div style={writingColumnStyle}>
           {blocks.map((block, index) => {
             if (block.kind === 'divider') {
               return (
                 <div
                   key={block.id}
+                  data-nb-surface-block
                   data-block-id={block.id}
                   data-divider-row
                   tabIndex={0}
                   role="separator"
                   aria-label="Section divider"
+                  style={{
+                    ...blockSurfaceChrome(block.id),
+                    display: 'flex',
+                    alignItems: 'center',
+                    margin: '32px 0',
+                    outline: 'none',
+                    borderRadius: '10px',
+                    transition:
+                      'opacity 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.26s ease, box-shadow 0.28s ease',
+                    boxShadow:
+                      focusedDividerId === block.id
+                        ? `0 0 28px ${tokens.accent}14, inset 0 0 0 1px ${tokens.accent}18`
+                        : 'none',
+                  }}
                   onFocus={() => {
                     focusIndexRef.current = index;
                     setFocusedDividerId(block.id);
@@ -1307,28 +1412,16 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       removeBlockAt(index);
                     }
                   }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    margin: '28px 0',
-                    outline: 'none',
-                    borderRadius: '8px',
-                    transition: 'box-shadow 0.24s ease, opacity 0.18s ease',
-                    boxShadow:
-                      focusedDividerId === block.id
-                        ? `0 0 20px ${tokens.accent}18, inset 0 0 0 1px ${tokens.accent}22`
-                        : 'none',
-                  }}
                 >
                   <div
                     style={{
                       flex: 1,
                       height: '1px',
                       background: tokens.divider,
-                      opacity: focusedDividerId === block.id ? 0.95 : 0.65,
+                      opacity: focusedDividerId === block.id ? 0.88 : 0.52,
                       boxShadow:
-                        focusedDividerId === block.id ? `0 0 14px ${tokens.accent}22` : 'none',
-                      transition: 'opacity 0.2s ease, box-shadow 0.24s ease',
+                        focusedDividerId === block.id ? `0 0 18px ${tokens.accent}18` : 'none',
+                      transition: 'opacity 0.24s ease, box-shadow 0.28s ease',
                     }}
                   />
                 </div>
@@ -1337,7 +1430,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
             if (block.kind === 'title') {
               return (
-                <div key={block.id} data-block-id={block.id}>
+                <div
+                  key={block.id}
+                  data-nb-surface-block
+                  data-block-id={block.id}
+                  style={blockSurfaceChrome(block.id)}
+                >
                   <EditableLine
                     id={block.id}
                     text={block.text}
@@ -1352,11 +1450,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '30px',
-                      fontWeight: 600,
-                      letterSpacing: '-0.028em',
-                      lineHeight: 1.14,
-                      margin: '26px 0 20px',
+                      fontSize: '34px',
+                      fontWeight: 700,
+                      letterSpacing: '-0.032em',
+                      lineHeight: 1.1,
+                      margin: '36px 0 22px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1368,7 +1466,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
             if (block.kind === 'section') {
               return (
-                <div key={block.id} data-block-id={block.id}>
+                <div
+                  key={block.id}
+                  data-nb-surface-block
+                  data-block-id={block.id}
+                  style={blockSurfaceChrome(block.id)}
+                >
                   <EditableLine
                     id={block.id}
                     text={block.text}
@@ -1383,11 +1486,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '20px',
+                      fontSize: '22px',
                       fontWeight: 500,
-                      letterSpacing: '-0.018em',
-                      lineHeight: 1.36,
-                      margin: '34px 0 16px',
+                      letterSpacing: '-0.02em',
+                      lineHeight: 1.34,
+                      margin: '48px 0 18px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1401,12 +1504,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               return (
                 <div
                   key={block.id}
+                  data-nb-surface-block
                   data-block-id={block.id}
                   style={{
+                    ...blockSurfaceChrome(block.id),
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '10px',
-                    margin: '12px 0',
+                    alignItems: 'baseline',
+                    gap: '11px',
+                    margin: '14px 0',
                   }}
                 >
                   <button
@@ -1415,26 +1520,30 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     onClick={() => toggleTask(block.id)}
                     style={{
                       flexShrink: 0,
-                      width: '18px',
-                      height: '18px',
-                      marginTop: '0.32em',
-                      borderRadius: '5px',
-                      border: `1.5px solid ${block.checked ? tokens.accent : tokens.cardBorder}`,
-                      background: block.checked ? `${tokens.accent}18` : 'transparent',
+                      width: '15px',
+                      height: '15px',
+                      margin: 0,
+                      padding: 0,
+                      borderRadius: '4px',
+                      border: `1px solid ${block.checked ? `${tokens.accent}cc` : tokens.cardBorder}`,
+                      background: block.checked
+                        ? `linear-gradient(145deg, ${tokens.accent}35, ${tokens.accent}12)`
+                        : 'rgba(255,255,255,0.02)',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      color: tokens.accent,
-                      lineHeight: 1,
+                      position: 'relative',
+                      top: '0.14em',
+                      lineHeight: 0,
                       transition:
-                        'border-color 0.2s ease, background 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease',
-                      boxShadow: block.checked ? `0 0 12px ${tokens.accent}28` : 'none',
+                        'border-color 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), background 0.22s ease, box-shadow 0.24s ease, transform 0.16s ease',
+                      boxShadow: block.checked
+                        ? `0 0 0 1px ${tokens.accent}22, 0 0 14px ${tokens.accent}28`
+                        : 'inset 0 1px 1px rgba(0,0,0,0.12)',
                     }}
                     onMouseDown={(ev) => {
-                      (ev.currentTarget as HTMLButtonElement).style.transform = 'scale(0.94)';
+                      (ev.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)';
                     }}
                     onMouseUp={(ev) => {
                       (ev.currentTarget as HTMLButtonElement).style.transform = '';
@@ -1443,7 +1552,22 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       (ev.currentTarget as HTMLButtonElement).style.transform = '';
                     }}
                   >
-                    {block.checked ? '✓' : ''}
+                    <span
+                      aria-hidden
+                      style={{
+                        display: 'block',
+                        fontSize: '9px',
+                        fontWeight: 800,
+                        color: tokens.accent,
+                        lineHeight: 1,
+                        transform: block.checked ? 'scale(1)' : 'scale(0.7)',
+                        opacity: block.checked ? 1 : 0,
+                        transition:
+                          'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.16s ease',
+                      }}
+                    >
+                      ✓
+                    </span>
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <EditableLine
@@ -1460,9 +1584,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                         outline: 'none',
                         background: 'transparent',
                         color: tokens.textPrimary,
-                        fontSize: '15.5px',
+                        fontSize: '16px',
                         fontWeight: 400,
-                        lineHeight: 1.68,
+                        lineHeight: 1.72,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',
@@ -1478,13 +1602,15 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               return (
                 <div
                   key={block.id}
+                  data-nb-surface-block
                   data-block-id={block.id}
                   style={{
-                    margin: '18px 0',
-                    paddingLeft: '18px',
-                    borderLeft: `2px solid ${tokens.accent}30`,
-                    boxShadow: `-6px 0 22px ${tokens.accent}0f`,
-                    transition: 'border-color 0.2s ease, box-shadow 0.22s ease',
+                    ...blockSurfaceChrome(block.id),
+                    margin: '24px 0',
+                    paddingLeft: '22px',
+                    borderLeft: `2px solid ${tokens.accent}22`,
+                    boxShadow: `-8px 0 32px ${tokens.accent}0a`,
+                    transition: 'border-color 0.24s ease, box-shadow 0.26s ease',
                   }}
                 >
                   <EditableLine
@@ -1501,10 +1627,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textMuted,
-                      fontSize: '15.5px',
+                      fontSize: '16px',
                       fontStyle: 'italic',
                       fontWeight: 400,
-                      lineHeight: 1.72,
+                      lineHeight: 1.75,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -1516,7 +1642,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             }
 
             return (
-              <div key={block.id} data-block-id={block.id}>
+              <div
+                key={block.id}
+                data-nb-surface-block
+                data-block-id={block.id}
+                style={blockSurfaceChrome(block.id)}
+              >
                 <EditableLine
                   id={block.id}
                   text={block.text}
@@ -1531,10 +1662,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     outline: 'none',
                     background: 'transparent',
                     color: tokens.textSecondary,
-                    fontSize: '15.5px',
+                    fontSize: '16px',
                     fontWeight: 400,
-                    lineHeight: 1.72,
-                    margin: '10px 0',
+                    lineHeight: 1.78,
+                    margin: '12px 0',
                     caretColor: tokens.accent,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
@@ -1543,23 +1674,25 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               </div>
             );
           })}
+          </div>
         </div>
       ) : (
         <div role="document" aria-label="Notebook preview" style={editorSurfaceStyle}>
+          <div style={writingColumnStyle}>
           {previewLines.map((line, index) => {
             if (line.kind === 'blank') {
-              return <div key={index} style={{ height: '16px' }} />;
+              return <div key={index} style={{ height: '18px' }} />;
             }
             if (line.kind === 'title') {
               return (
                 <div
                   key={index}
                   style={{
-                    fontSize: '30px',
-                    fontWeight: 600,
-                    letterSpacing: '-0.028em',
-                    lineHeight: 1.14,
-                    margin: '26px 0 20px',
+                    fontSize: '34px',
+                    fontWeight: 700,
+                    letterSpacing: '-0.032em',
+                    lineHeight: 1.1,
+                    margin: '36px 0 22px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1572,11 +1705,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <div
                   key={index}
                   style={{
-                    fontSize: '20px',
+                    fontSize: '22px',
                     fontWeight: 500,
-                    lineHeight: 1.36,
-                    letterSpacing: '-0.018em',
-                    margin: '34px 0 16px',
+                    lineHeight: 1.34,
+                    letterSpacing: '-0.02em',
+                    margin: '48px 0 18px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1590,9 +1723,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={index}
                   style={{
                     height: '1px',
-                    margin: '28px 0',
+                    margin: '32px 0',
                     background: tokens.divider,
-                    opacity: 0.7,
+                    opacity: 0.52,
                   }}
                   role="separator"
                 />
@@ -1604,9 +1737,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={index}
                   style={{
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '10px',
-                    margin: '12px 0',
+                    alignItems: 'baseline',
+                    gap: '11px',
+                    margin: '14px 0',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1614,24 +1747,30 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     aria-hidden
                     style={{
                       flexShrink: 0,
-                      width: '18px',
-                      height: '18px',
-                      marginTop: '0.32em',
-                      borderRadius: '5px',
-                      border: `1.5px solid ${line.checked ? tokens.accent : tokens.cardBorder}`,
-                      background: line.checked ? `${tokens.accent}18` : 'transparent',
+                      width: '15px',
+                      height: '15px',
+                      position: 'relative',
+                      top: '0.14em',
+                      borderRadius: '4px',
+                      border: `1px solid ${line.checked ? `${tokens.accent}cc` : tokens.cardBorder}`,
+                      background: line.checked
+                        ? `linear-gradient(145deg, ${tokens.accent}35, ${tokens.accent}12)`
+                        : 'rgba(255,255,255,0.02)',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '11px',
+                      fontSize: '9px',
                       fontWeight: 800,
                       color: tokens.accent,
                       lineHeight: 1,
+                      boxShadow: line.checked
+                        ? `0 0 0 1px ${tokens.accent}22, 0 0 14px ${tokens.accent}28`
+                        : 'inset 0 1px 1px rgba(0,0,0,0.12)',
                     }}
                   >
                     {line.checked ? '✓' : ''}
                   </span>
-                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '15.5px', lineHeight: 1.68 }}>
+                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '16px', lineHeight: 1.72 }}>
                     {line.text}
                   </span>
                 </div>
@@ -1642,14 +1781,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <blockquote
                   key={index}
                   style={{
-                    margin: '18px 0',
-                    paddingLeft: '18px',
-                    borderLeft: `2px solid ${tokens.accent}30`,
-                    boxShadow: `-6px 0 22px ${tokens.accent}0f`,
+                    margin: '24px 0',
+                    paddingLeft: '22px',
+                    borderLeft: `2px solid ${tokens.accent}22`,
+                    boxShadow: `-8px 0 32px ${tokens.accent}0a`,
                     color: tokens.textMuted,
                     fontStyle: 'italic',
-                    fontSize: '15.5px',
-                    lineHeight: 1.72,
+                    fontSize: '16px',
+                    lineHeight: 1.75,
                     fontWeight: 400,
                     whiteSpace: 'pre-wrap',
                   }}
@@ -1662,10 +1801,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               <p
                 key={index}
                 style={{
-                  margin: '10px 0',
+                  margin: '12px 0',
                   color: tokens.textSecondary,
-                  fontSize: '15.5px',
-                  lineHeight: 1.72,
+                  fontSize: '16px',
+                  lineHeight: 1.78,
                   whiteSpace: 'pre-wrap',
                 }}
               >
@@ -1673,8 +1812,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               </p>
             );
           })}
+          </div>
         </div>
       )}
     </div>
+    </Fragment>
   );
 }
