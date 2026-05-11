@@ -40,6 +40,8 @@ const BLOCK_VELOCITY_CLAMP = 2.2;      // px/ms
 const BLOCK_FRICTION = 12.0;           // per-second exponential damping
 
 const DRAG_SMOOTHING = 0.28;           // fraction toward target per move event
+/** Slightly softer than move — dimension changes read smoother on release. */
+const RESIZE_SMOOTHING = 0.36;
 const RESIZE_DEADBAND = 3;             // world px before resize commits
 
 // ── Thought lifecycle ─────────────────────────────────────────────────────────
@@ -291,6 +293,8 @@ export function FreeformCanvas({
   const dragRef      = useRef<DragState | null>(null);
   const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
+  /** Distinct chrome for move vs resize without reading drag refs during pan. */
+  const [activeDragKind, setActiveDragKind] = useState<'move' | 'resize' | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Controls bar is ambient — only surfaces near the bottom edge
   const [controlsNear,   setControlsNear]    = useState(false);
@@ -580,6 +584,7 @@ export function FreeformCanvas({
       resizeStarted: false,
     };
     setDraggingId(blockId);
+    setActiveDragKind(type === 'resize' ? 'resize' : 'move');
   }, [positions, onSelect, panX, panY]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
@@ -730,8 +735,8 @@ export function FreeformCanvas({
         const targetH = Math.max(80,  (drag.startBlockH ?? 200) + worldDy);
         const baseW = drag.currentBlockW ?? (drag.startBlockW ?? 340);
         const baseH = drag.currentBlockH ?? (drag.startBlockH ?? 200);
-        const newW = Math.max(200, baseW + (targetW - baseW) * DRAG_SMOOTHING);
-        const newH = Math.max(80,  baseH + (targetH - baseH) * DRAG_SMOOTHING);
+        const newW = Math.max(200, baseW + (targetW - baseW) * RESIZE_SMOOTHING);
+        const newH = Math.max(80,  baseH + (targetH - baseH) * RESIZE_SMOOTHING);
         onSetPos(drag.blockId, { w: newW, h: newH });
         drag.currentBlockW = newW;
         drag.currentBlockH = newH;
@@ -742,6 +747,7 @@ export function FreeformCanvas({
       const drag = dragRef.current;
       dragRef.current = null;
       setDraggingId(null);
+      setActiveDragKind(null);
 
       // Launch momentum only when the pan threshold was actually crossed
       if (drag?.type === 'canvas' && drag.panStarted) {
@@ -1224,6 +1230,7 @@ export function FreeformCanvas({
                 selected={selectedId === item.id}
                 designMode={designMode}
                 isDragging={draggingId === item.id}
+                activeGesture={draggingId === item.id ? activeDragKind : null}
                 onBlockMouseDown={onBlockMouseDown}
                 onSelect={onSelect}
                 onRemove={handleRemove}

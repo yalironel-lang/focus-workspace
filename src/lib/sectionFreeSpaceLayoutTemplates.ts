@@ -29,7 +29,8 @@ export const FREE_SPACE_TEMPLATES: FreeSpaceTemplateMeta[] = [
   { id: 'brainstorm-canvas', label: 'Brainstorm Canvas', description: 'Organic spiral from a calm center.' },
 ];
 
-const GUTTER = 26;
+/** Inter-object breathing room (relax pass + stacks). Slightly generous for large canvases. */
+const GUTTER = 34;
 
 const DEFAULT_W: Record<ProjectObjectType, number> = {
   notebook: 620,
@@ -130,8 +131,8 @@ export function computeFreeSpaceTemplateLayout(
 
   switch (templateId) {
     case 'study-board': {
-      const colX: [number, number, number] = [96, 560, 1040];
-      const bottoms: [number, number, number] = [120, 120, 120];
+      const colX: [number, number, number] = [88, 548, 1028];
+      const bottoms: [number, number, number] = [112, 112, 112];
       for (const o of sorted) {
         const c = columnForType(o.type);
         const x = colX[c];
@@ -153,8 +154,8 @@ export function computeFreeSpaceTemplateLayout(
       break;
     }
     case 'research-map': {
-      const cx = 880;
-      const cy = 460;
+      const cx = 860;
+      const cy = 440;
       const buckets: Record<ProjectObjectType, ProjectSpaceObject[]> = {
         notebook: [],
         note: [],
@@ -172,7 +173,7 @@ export function computeFreeSpaceTemplateLayout(
         ring += 1;
         group.forEach((o, idx) => {
           const angle = baseAngle + idx * 0.55;
-          const r = 140 + idx * 72 + ring * 24;
+          const r = 168 + idx * 78 + ring * 28;
           const x = cx + Math.cos(angle) * r - DEFAULT_W[o.type] * 0.35;
           const y = cy + Math.sin(angle) * r * 0.82 - DEFAULT_H[o.type] * 0.25;
           out[o.id] = place(o.id, o.type, x, y, posMap);
@@ -183,15 +184,15 @@ export function computeFreeSpaceTemplateLayout(
     case 'course-workspace': {
       const notebooks = sorted.filter((o) => o.type === 'notebook');
       const rest = sorted.filter((o) => o.type !== 'notebook');
-      let x = 120;
-      const yTop = 96;
+      let x = 108;
+      const yTop = 88;
       for (const o of notebooks) {
         out[o.id] = place(o.id, o.type, x, yTop, posMap);
         const { w } = effDims(o.type, out[o.id]);
         x += w + GUTTER + 20;
       }
-      let x2 = 120;
-      let y2 = 620;
+      let x2 = 108;
+      let y2 = 608;
       let rowH = 0;
       for (const o of rest) {
         out[o.id] = place(o.id, o.type, x2, y2, posMap);
@@ -207,8 +208,8 @@ export function computeFreeSpaceTemplateLayout(
       break;
     }
     case 'weekly-planning': {
-      let x = 140;
-      const y = 240;
+      let x = 128;
+      const y = 228;
       for (const o of sorted) {
         out[o.id] = place(o.id, o.type, x, y, posMap);
         const { w } = effDims(o.type, out[o.id]);
@@ -217,12 +218,12 @@ export function computeFreeSpaceTemplateLayout(
       break;
     }
     case 'brainstorm-canvas': {
-      const cx = 780;
-      const cy = 420;
+      const cx = 760;
+      const cy = 400;
       const golden = 2.39996322972865332;
       sorted.forEach((o, i) => {
         const angle = i * golden;
-        const r = 90 + Math.sqrt(i + 1) * 58;
+        const r = 108 + Math.sqrt(i + 1) * 64;
         const x = cx + Math.cos(angle) * r - DEFAULT_W[o.type] * 0.4;
         const y = cy + Math.sin(angle) * r * 0.88 - DEFAULT_H[o.type] * 0.3;
         out[o.id] = place(o.id, o.type, x, y, posMap);
