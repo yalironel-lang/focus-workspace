@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { getOAuthRedirectTo } from '../lib/authRedirect';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -29,11 +30,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = async () => {
+    const redirectTo = getOAuthRedirectTo();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // Dynamic origin — works on localhost, Vercel, and any other host.
-        redirectTo: `${window.location.origin}/dashboard`,
+        redirectTo,
       },
     });
     if (error) throw error;

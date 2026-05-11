@@ -284,7 +284,21 @@ npm run build
 
 ### Update Supabase Auth Redirects
 
-After deployment, update your Supabase Auth redirect URLs to include your production domain.
+In the [Supabase Dashboard](https://supabase.com/dashboard) → **Authentication** → **URL Configuration**:
+
+1. **Redirect URLs** — add every origin users may return to after Google OAuth (Supabase only allows listed URLs; otherwise it falls back to **Site URL**, which often sends local dev to production).
+
+   Include at least:
+
+   - `http://localhost:5173/**`
+   - `http://localhost:5175/**`
+   - `http://127.0.0.1:5173/**`
+   - Full paths if you prefer explicit entries, e.g. `http://localhost:5173/dashboard` and `http://localhost:5175/dashboard`
+   - Your production app, e.g. `https://your-project.vercel.app/**` and `https://your-custom-domain.com/**`
+
+2. **Site URL** — set to your primary production URL (used as a fallback).
+
+The app builds `redirectTo` as the current origin + `/dashboard` on localhost (any port), and on non-local hosts uses `window.location.origin` or optional `VITE_AUTH_REDIRECT_ORIGIN` (see `.env.example`).
 
 ## Key Design Decisions
 

@@ -129,6 +129,8 @@ interface Props {
   };
   designMode:   boolean;
   selectedId:   string | null;
+  /** Id of a Free Space object whose inner editor is actively in edit mode (deep writing focus). */
+  focusEditingId?: string | null;
   topOffset?:   number;
   /** True when a focus session is active — environment shifts */
   activeSession?: boolean;
@@ -281,13 +283,27 @@ function CanvasControls({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function FreeformCanvas({
-  tokens, modules, blocks, tools, positions,
-  canvasState, designMode, selectedId, activeSession = false,
+  tokens,
+  modules,
+  blocks,
+  tools,
+  positions,
+  canvasState,
+  designMode,
+  selectedId,
+  activeSession = false,
   spatialAmbient = false,
+  focusEditingId, // currently unused: reserved for cinematic focus-lighting system
   topOffset = 48,
-  onSetPos, onSelect,
-  onRemoveModule, onRemoveBlock, onRemoveTool, onDuplicateBlock,
-  onOpenAdd, renderModuleContent, getLabel,
+  onSetPos,
+  onSelect,
+  onRemoveModule,
+  onRemoveBlock,
+  onRemoveTool,
+  onDuplicateBlock,
+  onOpenAdd,
+  renderModuleContent,
+  getLabel,
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -419,6 +435,9 @@ export function FreeformCanvas({
   // ── All renderable items ───────────────────────────────────────────────────
 
   const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
+
+  // Deep-focus flag from host (e.g. a notebook in immersive edit mode on Free Space).
+  const hasDeepFocus = !!focusEditingId;
 
   // All item IDs in render order (modules → blocks → tools)
   type CanvasItem =
@@ -1132,6 +1151,9 @@ export function FreeformCanvas({
 
         {allItems.map(item => {
           const pos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
+          const blockW = pos.w > 0 ? pos.w : 340;
+          const blockH = pos.h > 0 ? pos.h : 220;
+          const focusSurfaceActive = !hasDeepFocus || focusEditingId === item.id;
 
           const handleRemove = () => {
             if (item.kind === 'module') onRemoveModule(item.id);
@@ -1169,7 +1191,7 @@ export function FreeformCanvas({
           const FOCUS_IDS   = new Set(['focus-mode', 'capture', 'deep-work-timer']);
           const baseId      = item.id.replace(/-copy.*$/, '').replace(/-\d+$/, '');
           const isFocusItem = FOCUS_IDS.has(baseId);
-          const sessionDim  = activeSession && !designMode && !isFocusItem;
+          const sessionDim  = (activeSession || hasDeepFocus) && !designMode && !isFocusItem;
 
           // Return ritual — most recently touched block gets a brief welcome-back glow
           const isReturning  = returnId   === item.id;
@@ -1194,50 +1216,75 @@ export function FreeformCanvas({
           const sessionFilter = sessionDim ? 'saturate(0.35) brightness(0.7)' : 'none';
 
           return (
-            <div
-              key={item.id}
-              style={{
-                opacity:    baseOpacity,
-                transition: opacityTransition + (sessionDim ? ', filter 1.8s cubic-bezier(0.4,0,0.2,1)' : ''),
-                // Revisit — a dormant thought returning to life: warm amber flash
-                // Return ritual — most recent block on open: soft accent pulse
-                filter: isRevisiting
-                  ? `drop-shadow(0 0 18px rgba(245,158,11,0.4))`
-                  : isReturning
-                    ? `drop-shadow(0 0 22px ${tokens.accent}30)`
-                    : sessionDim
-                      ? sessionFilter
-                      : 'none',
-              }}
-              onClickCapture={() => {
-                // Pure clicks (no drag) must also record activity + trigger revisit.
-                // onBlockMouseDown handles drags; this covers taps and single-clicks
-                // that never fire a mousemove threshold.
-                const prev = computeLifecycle(activityRef.current[item.id]);
-                if (prev.state === 'dormant' || prev.state === 'fading' || prev.state === 'deep') {
-                  setRevisitId(item.id);
-                  setTimeout(() => setRevisitId(r => r === item.id ? null : r), 2500);
-                }
-                activityRef.current[item.id] = Date.now();
-                try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
-              }}
-            >
-              <FreeformBlock
-                id={item.id}
-                pos={pos}
-                label={getLabel(item.id)}
-                tokens={tokens}
-                selected={selectedId === item.id}
-                designMode={designMode}
-                isDragging={draggingId === item.id}
-                activeGesture={draggingId === item.id ? activeDragKind : null}
-                onBlockMouseDown={onBlockMouseDown}
-                onSelect={onSelect}
-                onRemove={handleRemove}
-                onDuplicate={handleDuplicate}
+            <div key={item.id}>
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: pos.x - 10,
+                  top: pos.y - 10,
+                  width: blockW + 20,
+                  height: blockH + 20,
+                  borderRadius: '24px',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                  opacity: hasDeepFocus ? 1 : 0,
+                  background: focusSurfaceActive
+                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}12 0%, transparent 66%)`
+                    : 'radial-gradient(120% 95% at 50% 36%, rgba(3,8,16,0.34) 0%, transparent 70%)',
+                  border: focusSurfaceActive
+                    ? `1px solid ${tokens.accent}18`
+                    : '1px solid rgba(9,14,24,0.5)',
+                  boxShadow: focusSurfaceActive
+                    ? `0 24px 56px rgba(0,0,0,0.42), 0 0 38px ${tokens.accentGlow}26, inset 0 1px 0 rgba(255,255,255,0.06)`
+                    : '0 16px 42px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.02)',
+                  transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1), background 0.6s cubic-bezier(0.4,0,0.2,1), border-color 0.5s cubic-bezier(0.4,0,0.2,1), box-shadow 0.55s cubic-bezier(0.4,0,0.2,1)',
+                }}
+              />
+              <div
+                style={{
+                  opacity:    baseOpacity,
+                  transition: opacityTransition + (sessionDim ? ', filter 1.8s cubic-bezier(0.4,0,0.2,1)' : ''),
+                  // Revisit — a dormant thought returning to life: warm amber flash
+                  // Return ritual — most recent block on open: soft accent pulse
+                  filter: isRevisiting
+                    ? `drop-shadow(0 0 18px rgba(245,158,11,0.4))`
+                    : isReturning
+                      ? `drop-shadow(0 0 22px ${tokens.accent}30)`
+                      : sessionDim
+                        ? sessionFilter
+                        : 'none',
+                }}
+                onClickCapture={() => {
+                  // Pure clicks (no drag) must also record activity + trigger revisit.
+                  // onBlockMouseDown handles drags; this covers taps and single-clicks
+                  // that never fire a mousemove threshold.
+                  const prev = computeLifecycle(activityRef.current[item.id]);
+                  if (prev.state === 'dormant' || prev.state === 'fading' || prev.state === 'deep') {
+                    setRevisitId(item.id);
+                    setTimeout(() => setRevisitId(r => r === item.id ? null : r), 2500);
+                  }
+                  activityRef.current[item.id] = Date.now();
+                  try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
+                }}
               >
-                {content}
-              </FreeformBlock>
+                <FreeformBlock
+                  id={item.id}
+                  pos={pos}
+                  label={getLabel(item.id)}
+                  tokens={tokens}
+                  selected={selectedId === item.id}
+                  designMode={designMode}
+                  isDragging={draggingId === item.id}
+                  activeGesture={draggingId === item.id ? activeDragKind : null}
+                  onBlockMouseDown={onBlockMouseDown}
+                  onSelect={onSelect}
+                  onRemove={handleRemove}
+                  onDuplicate={handleDuplicate}
+                >
+                  {content}
+                </FreeformBlock>
+              </div>
             </div>
           );
         })}

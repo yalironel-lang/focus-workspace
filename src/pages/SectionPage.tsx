@@ -397,6 +397,7 @@ export function SectionPage() {
   const [sectionViewMode, setSectionViewMode] = useState<'work-surface' | 'free-space'>('work-surface');
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
+  const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -637,6 +638,9 @@ export function SectionPage() {
         object={obj}
         tokens={tokens}
         onChange={content => sectionObjects.updateObjectContent(id, content)}
+        onNotebookEditingChange={(objectId, isEditing) => {
+          setSpaceEditingId(prev => (isEditing ? objectId : prev === objectId ? null : prev));
+        }}
       />
     );
   };
@@ -741,6 +745,7 @@ export function SectionPage() {
             canvasState={sectionCanvas}
             designMode={true}
             selectedId={spaceSelectedId}
+            focusEditingId={spaceEditingId}
             spatialAmbient
             topOffset={84}
             onSetPos={sectionPositions.setPos}

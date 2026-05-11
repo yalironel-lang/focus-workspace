@@ -18,6 +18,8 @@ import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObject
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
+type ParagraphVariant = 'muted' | 'fine';
+
 type NotebookLine =
   | { kind: 'blank' }
   | { kind: 'title'; text: string }
@@ -25,7 +27,7 @@ type NotebookLine =
   | { kind: 'divider' }
   | { kind: 'task'; checked: boolean; text: string }
   | { kind: 'quote'; text: string }
-  | { kind: 'paragraph'; text: string };
+  | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
 function normalizeNotebookSpaces(s: string): string {
@@ -62,6 +64,16 @@ function parseNotebookLine(raw: string): NotebookLine {
   const quoteMatch = trimmed.match(/^>\s?(.*)$/);
   if (quoteMatch && trimmed.startsWith('>')) return { kind: 'quote', text: (quoteMatch[1] ?? '').trimEnd() };
 
+  /** Pilcrow prefixes — editorial tone scale (not shown in contenteditable; storage + paste only). */
+  if (trimmed.startsWith('\u00b6\u00b6')) {
+    const rest = trimmed.slice(2).trimStart();
+    return { kind: 'paragraph', text: rest.trimEnd(), variant: 'fine' };
+  }
+  if (trimmed.startsWith('\u00b6')) {
+    const rest = trimmed.slice(1).trimStart();
+    return { kind: 'paragraph', text: rest.trimEnd(), variant: 'muted' };
+  }
+
   return { kind: 'paragraph', text: normalized };
 }
 
@@ -71,7 +83,7 @@ type Block =
   | { id: string; kind: 'task'; text: string; checked: boolean }
   | { id: string; kind: 'quote'; text: string }
   | { id: string; kind: 'divider' }
-  | { id: string; kind: 'paragraph'; text: string };
+  | { id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
 let blockIdSeq = 0;
 function newBlockId(): string {
@@ -96,12 +108,23 @@ function lineToBlock(line: string): Block {
     case 'quote':
       return { id, kind: 'quote', text: parsed.text };
     case 'paragraph':
-      return { id, kind: 'paragraph', text: parsed.text };
+      return {
+        id,
+        kind: 'paragraph',
+        text: parsed.text,
+        ...(parsed.variant ? { variant: parsed.variant } : {}),
+      };
   }
 }
 
 function parseBodyToBlocks(body: string): Block[] {
-  if (body.length === 0) return [{ id: newBlockId(), kind: 'paragraph', text: '' }];
+  // Empty document: title row + body row (storage is "# \n" — no placeholder text persisted).
+  if (body.trim().length === 0) {
+    return [
+      { id: newBlockId(), kind: 'title', text: '' },
+      { id: newBlockId(), kind: 'paragraph', text: '' },
+    ];
+  }
   return body.split(/\r?\n/).map(lineToBlock);
 }
 
@@ -118,11 +141,32 @@ function blockToLine(b: Block): string {
     case 'divider':
       return '---';
     case 'paragraph':
+      if (b.variant === 'muted') return `\u00b6 ${b.text}`;
+      if (b.variant === 'fine') return `\u00b6\u00b6 ${b.text}`;
       return b.text;
   }
 }
 
 function serializeBlocks(blocks: Block[]): string {
+  // Canonical empty document: persist as "" (no placeholder strings; parse maps back to title + body).
+  if (
+    blocks.length === 2 &&
+    blocks[0]?.kind === 'title' &&
+    blocks[0].text === '' &&
+    blocks[1]?.kind === 'paragraph' &&
+    blocks[1].text === '' &&
+    !blocks[1].variant
+  ) {
+    return '';
+  }
+  if (
+    blocks.length === 1 &&
+    blocks[0]?.kind === 'paragraph' &&
+    blocks[0].text === '' &&
+    !blocks[0].variant
+  ) {
+    return '';
+  }
   return blocks.map(blockToLine).join('\n');
 }
 
@@ -132,7 +176,13 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
     const parsed = parseNotebookLine(normalized);
     if (parsed.kind === 'blank') return { id: blockId, kind: 'paragraph', text: '' };
     if (parsed.kind === 'divider') return { id: blockId, kind: 'divider' };
-    if (parsed.kind === 'paragraph') return { id: blockId, kind: 'paragraph', text: parsed.text };
+    if (parsed.kind === 'paragraph')
+      return {
+        id: blockId,
+        kind: 'paragraph',
+        text: parsed.text,
+        ...(parsed.variant ? { variant: parsed.variant } : {}),
+      };
     if (parsed.kind === 'title') return { id: blockId, kind: 'title', text: parsed.text };
     if (parsed.kind === 'section') return { id: blockId, kind: 'section', text: parsed.text };
     if (parsed.kind === 'task')
@@ -164,6 +214,9 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
   if (block.kind === 'task') {
     const parsed = parseNotebookLine(trimmed);
     if (parsed.kind === 'task') return { ...block, text: parsed.text, checked: parsed.checked };
+    return { ...block, text: line.trimEnd() };
+  }
+  if (block.kind === 'paragraph') {
     return { ...block, text: line.trimEnd() };
   }
   return block;
@@ -299,8 +352,27 @@ function mergeBlocks(prev: Block, next: Block): Block {
     case 'task':
       return { id: prev.id, kind: 'task', text: mergedText, checked: prev.checked };
     case 'paragraph':
-      return { id: prev.id, kind: 'paragraph', text: mergedText };
+      if (next.kind !== 'paragraph') return { id: prev.id, kind: 'paragraph', text: mergedText };
+      if (prev.variant !== next.variant) return { id: prev.id, kind: 'paragraph', text: mergedText };
+      return {
+        id: prev.id,
+        kind: 'paragraph',
+        text: mergedText,
+        ...(prev.variant ? { variant: prev.variant } : {}),
+      };
   }
+}
+
+/** Typography scale rail + Alt+↑↓ — maps to block kinds / paragraph variants. */
+function getBlockLevel(b: Block): 1 | 2 | 3 | 4 | 5 | null {
+  if (b.kind === 'title') return 1;
+  if (b.kind === 'section') return 2;
+  if (b.kind === 'paragraph') {
+    if (b.variant === 'muted') return 4;
+    if (b.variant === 'fine') return 5;
+    return 3;
+  }
+  return null;
 }
 
 function prevNavBlockIndex(blocks: Block[], from: number): number {
@@ -359,11 +431,13 @@ function fuzzySlashScore(query: string, label: string, hint: string): number {
   return j === q.length ? 2 + 1 / hay.length : 0;
 }
 
-type SlashCommandId = 'title' | 'section' | 'task' | 'quote' | 'divider';
+type SlashCommandId = 'title' | 'section' | 'task' | 'quote' | 'divider' | 'muted' | 'fine';
 
 const SLASH_COMMAND_META: { id: SlashCommandId; label: string; hint: string }[] = [
-  { id: 'title', label: 'Title', hint: 'Large heading' },
-  { id: 'section', label: 'Section', hint: 'Subheading' },
+  { id: 'title', label: 'Title', hint: 'Level 1 — focal heading' },
+  { id: 'section', label: 'Section', hint: 'Level 2 — structure' },
+  { id: 'muted', label: 'Subtle', hint: 'Level 4 — softer body' },
+  { id: 'fine', label: 'Fine', hint: 'Level 5 — caption / aside' },
   { id: 'task', label: 'Task', hint: 'Checklist' },
   { id: 'quote', label: 'Quote', hint: 'Pull quote' },
   { id: 'divider', label: 'Divider', hint: 'Horizontal rule' },
@@ -425,12 +499,12 @@ function EditableLine({
             right: 0,
             pointerEvents: 'none',
             userSelect: 'none',
-            color: tokens.textGhost,
-            opacity: focused ? 0.1 : 0.18,
+            color: tokens.textMuted,
+            opacity: focused ? 0.28 : 0.38,
             fontWeight: 400,
             fontSize: style.fontSize,
             lineHeight: style.lineHeight ?? lineHeight,
-            letterSpacing: '0.03em',
+            letterSpacing: '0.02em',
             transition: 'opacity 0.2s ease',
           }}
         >
@@ -466,9 +540,22 @@ interface Props {
   content: NotebookContent;
   tokens: AtmosphereTokens;
   onChange: (content: NotebookContent) => void;
+  /**
+   * Optional host context (e.g. Free Space canvas) so the notebook can expose a richer focus state.
+   * When set to "free-space", edit/preview transitions can drive ambient canvas lighting.
+   */
+  context?: 'free-space' | 'inline';
+  /** Notify host when this notebook enters or exits edit mode (for cinematic focus on Free Space). */
+  onEditingChange?: (isEditing: boolean) => void;
 }
 
-export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
+export function ProjectNotebookBlock({
+  content,
+  tokens,
+  onChange,
+  context = 'inline',
+  onEditingChange,
+}: Props) {
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
   const [slashMenu, setSlashMenu] = useState<{
@@ -481,6 +568,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
   } | null>(null);
   const [focusedDividerId, setFocusedDividerId] = useState<string | null>(null);
   const [surfaceFocusBlockId, setSurfaceFocusBlockId] = useState<string | null>(null);
+  const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
+  const [typoRail, setTypoRail] = useState<{
+    top: number;
+    left: number;
+    blockId: string;
+    level: 1 | 2 | 3 | 4 | 5;
+  } | null>(null);
 
   const editorRootRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
@@ -498,6 +592,29 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     [content, onChange],
   );
 
+  const applyBlockLevel = useCallback(
+    (blockId: string, level: 1 | 2 | 3 | 4 | 5) => {
+      setMorphPulseId(blockId);
+      setBlocks((prev) => {
+        const i = prev.findIndex((b) => b.id === blockId);
+        if (i === -1) return prev;
+        const cur = prev[i]!;
+        if (cur.kind === 'divider') return prev;
+        const text = cur.text;
+        let nb: Block;
+        if (level === 1) nb = { id: blockId, kind: 'title', text };
+        else if (level === 2) nb = { id: blockId, kind: 'section', text };
+        else if (level === 3) nb = { id: blockId, kind: 'paragraph', text };
+        else if (level === 4) nb = { id: blockId, kind: 'paragraph', text, variant: 'muted' };
+        else nb = { id: blockId, kind: 'paragraph', text, variant: 'fine' };
+        const next = [...prev.slice(0, i), nb, ...prev.slice(i + 1)];
+        onChange({ ...content, body: serializeBlocks(next) });
+        return next;
+      });
+    },
+    [content, onChange],
+  );
+
   useEffect(() => {
     const body = content.body ?? '';
     setBlocks((prev) => {
@@ -505,6 +622,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       return parseBodyToBlocks(body);
     });
   }, [content.body]);
+
+  useEffect(() => {
+    if (!morphPulseId) return;
+    const t = window.setTimeout(() => setMorphPulseId(null), 420);
+    return () => window.clearTimeout(t);
+  }, [morphPulseId]);
 
   useLayoutEffect(() => {
     const pending = pendingCaretRef.current;
@@ -525,26 +648,25 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const paperStyle = content.paperStyle ?? 'ruled';
 
-  const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 37px';
+  const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 38px';
 
-  /** Paper + soft edge falloff (single declaration so background-size stays aligned). */
+  /** Paper + very light edge (lines stay faint; text stays dominant). */
   const writingSurfaceBackground = useMemo(() => {
-    const edge = `radial-gradient(ellipse 118% 95% at 50% 48%, transparent 40%, rgba(0,0,0,0.09) 82%, rgba(0,0,0,0.16) 100%)`;
+    const edge = `radial-gradient(ellipse 130% 100% at 50% 52%, transparent 55%, rgba(0,0,0,0.028) 88%, rgba(0,0,0,0.05) 100%)`;
     if (paperStyle === 'blank') {
       return {
         image: `
-          radial-gradient(ellipse 125% 70% at 50% -14%, ${tokens.accentSubtle}, transparent 62%),
-          radial-gradient(ellipse 95% 42% at 50% 108%, rgba(0,0,0,0.06), transparent 55%),
+          radial-gradient(ellipse 120% 55% at 50% -8%, rgba(255,255,255,0.04), transparent 55%),
           ${edge}
         `,
-        size: '100% 100%, 100% 100%, 100% 100%',
+        size: '100% 100%, 100% 100%',
       };
     }
     if (paperStyle === 'grid') {
       return {
         image: `
-          linear-gradient(rgba(255,255,255,0.007) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.007) 1px, transparent 1px),
+          linear-gradient(rgba(255,255,255,0.006) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.006) 1px, transparent 1px),
           ${edge}
         `,
         size: '36px 36px, 36px 36px, 100% 100%',
@@ -555,15 +677,51 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         repeating-linear-gradient(
           180deg,
           transparent,
-          transparent 36px,
-          rgba(255,255,255,0.012) 36px,
-          rgba(255,255,255,0.012) 37px
+          transparent 37px,
+          rgba(255,255,255,0.01) 37px,
+          rgba(255,255,255,0.01) 38px
         ),
         ${edge}
       `,
       size: `${paperSize}, 100% 100%`,
     };
-  }, [paperStyle, paperSize, tokens.accentSubtle]);
+  }, [paperStyle, paperSize]);
+
+  /** Editorial ink — brighter body for real reading on dark paper. */
+  const notebookInk = useMemo(
+    () => ({
+      headline: `color-mix(in srgb, ${tokens.textPrimary} 97%, #fafafa 3%)`,
+      primary: `color-mix(in srgb, ${tokens.textPrimary} 94%, #f8fafc 6%)`,
+      section: `color-mix(in srgb, ${tokens.textSecondary} 90%, #f1f5f9 10%)`,
+      secondary: `color-mix(in srgb, ${tokens.textSecondary} 90%, #f8fafc 10%)`,
+      muted: `color-mix(in srgb, ${tokens.textMuted} 88%, #f8fafc 12%)`,
+      ghost: `color-mix(in srgb, ${tokens.textGhost} 82%, #e2e8f0 18%)`,
+    }),
+    [tokens.textPrimary, tokens.textSecondary, tokens.textMuted, tokens.textGhost],
+  );
+
+  /** New empty doc: title + first body line, both empty (not legacy single empty paragraph). */
+  const isStarterNotebook = useMemo(
+    () =>
+      editorMode === 'edit' &&
+      blocks.length === 2 &&
+      blocks[0]?.kind === 'title' &&
+      blocks[0].text === '' &&
+      blocks[1]?.kind === 'paragraph' &&
+      blocks[1].text === '' &&
+      !blocks[1].variant,
+    [editorMode, blocks],
+  );
+
+  const isLegacySingleEmptyParagraph = useMemo(
+    () =>
+      editorMode === 'edit' &&
+      blocks.length === 1 &&
+      blocks[0]?.kind === 'paragraph' &&
+      blocks[0].text === '' &&
+      !blocks[0].variant,
+    [editorMode, blocks],
+  );
 
   const setFocusIndexById = useCallback(
     (id: string) => {
@@ -589,6 +747,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     if (rt instanceof HTMLElement) {
       if (e.currentTarget.contains(rt)) return;
       if (rt.closest('[data-nb-slash-menu]')) return;
+      if (rt.closest('[data-nb-typo-rail]')) return;
     }
     setSurfaceFocusBlockId(null);
   }, []);
@@ -599,9 +758,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       const active = surfaceFocusBlockId === blockId;
       const soften = has && !active;
       return {
-        opacity: soften ? 0.93 : 1,
-        filter: active ? 'brightness(1.025) saturate(1.01)' : 'none',
-        transition: 'opacity 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.26s ease',
+        opacity: soften ? 0.985 : 1,
+        filter: active ? 'brightness(1.012)' : 'none',
+        transition: 'opacity 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.22s ease',
       };
     },
     [surfaceFocusBlockId],
@@ -661,6 +820,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
   const applySlashCommand = useCallback(
     (blockId: string, cmd: SlashCommandId) => {
       setSlashMenu(null);
+      setMorphPulseId(blockId);
       setBlocks((prev) => {
         const i = prev.findIndex((b) => b.id === blockId);
         if (i === -1) return prev;
@@ -682,6 +842,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           case 'quote':
             next = [...prev.slice(0, i), { id, kind: 'quote', text: rest }, ...prev.slice(i + 1)];
             break;
+          case 'muted':
+            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'muted' }, ...prev.slice(i + 1)];
+            break;
+          case 'fine':
+            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'fine' }, ...prev.slice(i + 1)];
+            break;
           case 'divider': {
             const pid = newBlockId();
             next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
@@ -701,6 +867,49 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     [content, onChange],
   );
 
+  useLayoutEffect(() => {
+    if (editorMode !== 'edit' || slashMenu) {
+      setTypoRail(null);
+      return;
+    }
+    if (!surfaceFocusBlockId) {
+      setTypoRail(null);
+      return;
+    }
+    const blk = blocks.find((b) => b.id === surfaceFocusBlockId);
+    if (!blk || (blk.kind !== 'title' && blk.kind !== 'section' && blk.kind !== 'paragraph')) {
+      setTypoRail(null);
+      return;
+    }
+    const wrap = editorRootRef.current?.querySelector<HTMLElement>(
+      `[data-nb-surface-block][data-block-id="${surfaceFocusBlockId}"]`,
+    );
+    if (!wrap) {
+      setTypoRail(null);
+      return;
+    }
+    const level = getBlockLevel(blk);
+    if (level === null) {
+      setTypoRail(null);
+      return;
+    }
+    const r = wrap.getBoundingClientRect();
+    const railW = 96;
+    const railH = 26;
+    const m = 10;
+    // Small pill tucked to the block’s top-right — stays near the line, not floating mid-air.
+    let top = Math.round(r.top + 2);
+    let left = Math.round(r.right - railW - 6);
+    if (typeof window !== 'undefined') {
+      if (left < m) left = Math.round(r.left + 6);
+      left = Math.min(Math.max(m, left), window.innerWidth - railW - m);
+      top = Math.min(Math.max(m, top), window.innerHeight - railH - m);
+    } else {
+      left = Math.max(m, left);
+    }
+    setTypoRail({ top, left, blockId: surfaceFocusBlockId, level });
+  }, [editorMode, slashMenu, surfaceFocusBlockId, blocks]);
+
   const slashFiltered = useMemo(
     () => (slashMenu ? getSlashFiltered(slashMenu.query) : []),
     [slashMenu],
@@ -715,11 +924,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: 'min(592px, 100%)',
+      maxWidth: 'min(656px, 100%)',
       margin: '0 auto',
       width: '100%',
-      paddingLeft: 'clamp(28px, 5.5vw, 56px)',
-      paddingRight: 'clamp(28px, 5.5vw, 56px)',
+      paddingLeft: 'clamp(22px, 4.2vw, 52px)',
+      paddingRight: 'clamp(22px, 4.2vw, 52px)',
     }),
     [],
   );
@@ -733,21 +942,21 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       backgroundColor: 'transparent',
       backgroundImage: writingSurfaceBackground.image,
       backgroundSize: writingSurfaceBackground.size,
-      color: tokens.textPrimary,
-      fontSize: '16.5px',
-      lineHeight: 1.82,
-      letterSpacing: '0.006em',
+      color: notebookInk.primary,
+      fontSize: '17px',
+      lineHeight: 1.86,
+      letterSpacing: '0.005em',
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
-      paddingTop: '56px',
-      paddingBottom: '128px',
+      paddingTop: '12px',
+      paddingBottom: '72px',
       outline: 'none',
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease',
     }),
-    [fontStack, writingSurfaceBackground, tokens.textPrimary],
+    [fontStack, writingSurfaceBackground, notebookInk.primary],
   );
 
   const updateBlockText = useCallback(
@@ -780,10 +989,15 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             };
             return next;
           }
+          const variantMatch =
+            transformed.kind !== 'paragraph' || block.kind !== 'paragraph'
+              ? true
+              : (transformed.variant ?? undefined) === (block.variant ?? undefined);
           const sameShape =
             transformed.kind === block.kind &&
             transformed.text === block.text &&
-            transformed.id === block.id;
+            transformed.id === block.id &&
+            variantMatch;
           if (sameShape) return prev;
           const next = [...prev.slice(0, i), transformed, ...prev.slice(i + 1)];
           onChange({ ...content, body: serializeBlocks(next) });
@@ -837,7 +1051,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       setBlocks((prev) => {
         if (index < 0 || index >= prev.length) return prev;
         const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
-        const filled = next.length === 0 ? [{ id: newBlockId(), kind: 'paragraph' as const, text: '' }] : next;
+        const filled = next.length === 0 ? parseBodyToBlocks('') : next;
         onChange({ ...content, body: serializeBlocks(filled) });
         const focusIdx = Math.max(0, index - 1);
         const focusBlock = filled[focusIdx];
@@ -982,6 +1196,17 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       if (index === -1) return;
       const block = blocks[index]!;
 
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.repeat) {
+        const lv = getBlockLevel(block);
+        if (lv !== null) {
+          e.preventDefault();
+          const nextLv: 1 | 2 | 3 | 4 | 5 =
+            e.key === 'ArrowDown' ? (lv === 5 ? 1 : ((lv + 1) as 1 | 2 | 3 | 4 | 5)) : lv === 1 ? 5 : ((lv - 1) as 1 | 2 | 3 | 4 | 5);
+          applyBlockLevel(id, nextLv);
+          return;
+        }
+      }
+
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
         const offset = getCaretOffsetIn(editable);
         const text = editable.textContent ?? '';
@@ -1030,7 +1255,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         const nextText = text.slice(0, offset) + SOFT_BREAK + text.slice(offset);
         const nb: Block =
           block.kind === 'paragraph'
-            ? { id: block.id, kind: 'paragraph', text: nextText }
+            ? {
+                id: block.id,
+                kind: 'paragraph',
+                text: nextText,
+                ...(block.variant ? { variant: block.variant } : {}),
+              }
             : block.kind === 'title'
               ? { id: block.id, kind: 'title', text: nextText }
               : block.kind === 'section'
@@ -1152,6 +1382,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       persist,
       removeBlockAt,
       applySlashCommand,
+      applyBlockLevel,
       content,
       onChange,
       focusEditableBlock,
@@ -1163,27 +1394,35 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+@keyframes nbMorphGlow {
+  0% { box-shadow: 0 0 0 0 transparent; }
+  45% { box-shadow: 0 0 0 1px ${tokens.accent}14, 0 8px 28px ${tokens.accentGlow}18; }
+  100% { box-shadow: none; }
+}
+[data-nb-surface-block][data-nb-pulse="1"] { animation: nbMorphGlow 0.44s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
 `;
+
+  // Host notification: when running inside Free Space, surface edit vs preview to the canvas host.
+  useEffect(() => {
+    if (context !== 'free-space' || !onEditingChange) return;
+    onEditingChange(editorMode === 'edit');
+  }, [context, editorMode, onEditingChange]);
 
   return (
     <Fragment>
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
       <div
         style={{
-          padding: '28px 32px 36px',
+          padding: '18px 24px 28px',
           minHeight: '420px',
-          borderRadius: '24px',
+          borderRadius: '20px',
           position: 'relative',
-          background: `
-            linear-gradient(165deg, rgba(255,255,255,0.022) 0%, transparent 38%),
-            linear-gradient(180deg, ${tokens.cardBg}, ${tokens.wellBg})
-          `,
+          backgroundColor: tokens.cardBg,
+          backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.028) 0%, transparent 36%)`,
           boxShadow: `
-            0 52px 140px rgba(0,0,0,0.5),
-            0 24px 64px rgba(0,0,0,0.22),
-            0 0 0 1px rgba(255,255,255,0.032),
-            inset 0 1px 0 rgba(255,255,255,0.045),
-            inset 0 -1px 0 rgba(0,0,0,0.1)
+            0 28px 80px rgba(0,0,0,0.38),
+            0 0 0 1px rgba(255,255,255,0.06),
+            inset 0 1px 0 rgba(255,255,255,0.05)
           `,
         }}
       >
@@ -1192,11 +1431,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           display: 'flex',
           alignItems: 'flex-end',
           justifyContent: 'space-between',
-          gap: '20px',
+          gap: '16px',
           flexWrap: 'wrap',
-          paddingBottom: '18px',
-          marginBottom: '4px',
-          borderBottom: '1px solid rgba(255,255,255,0.035)',
+          paddingBottom: '10px',
+          marginBottom: '10px',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
         }}
       >
         <div style={{ minWidth: 0, flex: '1 1 200px' }}>
@@ -1204,11 +1443,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             style={{
               fontSize: '9px',
               fontWeight: 600,
-              letterSpacing: '0.16em',
+              letterSpacing: '0.14em',
               textTransform: 'uppercase',
-              color: tokens.textGhost,
-              opacity: 0.5,
-              marginBottom: '6px',
+              color: notebookInk.ghost,
+              opacity: 0.85,
+              marginBottom: '4px',
             }}
           >
             Notebook
@@ -1216,14 +1455,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
           <div
             style={{
-              fontSize: '12px',
-              color: tokens.textMuted,
+              fontSize: '11px',
+              color: notebookInk.muted,
               letterSpacing: '0.01em',
-              lineHeight: 1.5,
+              lineHeight: 1.45,
               maxWidth: '340px',
             }}
           >
-            Calm surface for long-form thought. Press <span style={{ opacity: 0.75 }}>/</span> for structure.
+            Slash commands · <span style={{ opacity: 0.9 }}>Alt</span> + ↑↓ for levels
           </div>
         </div>
 
@@ -1242,8 +1481,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               padding: '3px',
               gap: '2px',
               borderRadius: '10px',
-              background: 'rgba(0,0,0,0.2)',
-              border: '1px solid rgba(255,255,255,0.04)',
+              background: 'rgba(0,0,0,0.16)',
+              border: '1px solid rgba(255,255,255,0.055)',
             }}
           >
             {(['edit', 'preview'] as const).map((mode) => {
@@ -1256,8 +1495,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   onClick={() => setEditorMode(mode)}
                   style={{
                     border: 'none',
-                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
-                    color: active ? tokens.textPrimary : tokens.textGhost,
+                    background: active ? 'rgba(255,255,255,0.09)' : 'transparent',
+                    color: active ? notebookInk.primary : notebookInk.ghost,
                     borderRadius: '7px',
                     fontSize: '10px',
                     fontWeight: 600,
@@ -1265,7 +1504,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     textTransform: 'uppercase',
                     padding: '6px 11px',
                     cursor: 'pointer',
-                    opacity: active ? 1 : 0.72,
+                    opacity: active ? 1 : 0.82,
                     transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
                   }}
                 >
@@ -1280,8 +1519,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               padding: '3px',
               gap: '2px',
               borderRadius: '10px',
-              background: 'rgba(0,0,0,0.16)',
-              border: '1px solid rgba(255,255,255,0.035)',
+              background: 'rgba(0,0,0,0.12)',
+              border: '1px solid rgba(255,255,255,0.05)',
             }}
           >
             {(['blank', 'ruled', 'grid'] as const).map((style) => {
@@ -1294,8 +1533,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   onClick={() => onChange({ ...content, paperStyle: style })}
                   style={{
                     border: 'none',
-                    background: active ? 'rgba(255,255,255,0.06)' : 'transparent',
-                    color: active ? tokens.textSecondary : tokens.textGhost,
+                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
+                    color: active ? notebookInk.secondary : notebookInk.ghost,
                     borderRadius: '7px',
                     fontSize: '9px',
                     fontWeight: 600,
@@ -1303,7 +1542,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     textTransform: 'uppercase',
                     padding: '5px 9px',
                     cursor: 'pointer',
-                    opacity: active ? 1 : 0.65,
+                    opacity: active ? 1 : 0.78,
                     transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
                   }}
                 >
@@ -1314,6 +1553,83 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           </div>
         </div>
       </div>
+
+      {editorMode === 'edit' && typoRail && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              data-nb-typo-rail
+              role="toolbar"
+              aria-label="Text scale"
+              style={{
+                position: 'fixed',
+                zIndex: 10045,
+                top: typoRail.top,
+                left: typoRail.left,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '1px',
+                padding: '2px 4px',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgba(12,14,18,0.82)',
+                backdropFilter: 'blur(12px) saturate(1.1)',
+                WebkitBackdropFilter: 'blur(12px) saturate(1.1)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+                opacity: 0.55,
+                transition: 'opacity 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLDivElement).style.opacity = '1';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLDivElement).style.opacity = '0.55';
+              }}
+            >
+              {([1, 2, 3, 4, 5] as const).map((lv) => {
+                const on = typoRail.level === lv;
+                return (
+                  <button
+                    key={lv}
+                    type="button"
+                    title={
+                      lv === 1
+                        ? 'Title'
+                        : lv === 2
+                          ? 'Section'
+                          : lv === 3
+                            ? 'Body'
+                            : lv === 4
+                              ? 'Subtle'
+                              : 'Fine'
+                    }
+                    onMouseDown={(ev) => {
+                      ev.preventDefault();
+                      applyBlockLevel(typoRail.blockId, lv);
+                    }}
+                    style={{
+                      border: 'none',
+                      borderRadius: '5px',
+                      width: '18px',
+                      height: '20px',
+                      cursor: 'pointer',
+                      fontFamily: "'Space Grotesk', monospace",
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                      color: on ? notebookInk.primary : notebookInk.ghost,
+                      background: on ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      opacity: on ? 1 : 0.72,
+                      transition: 'background 0.16s ease, color 0.16s ease, opacity 0.16s ease',
+                    }}
+                  >
+                    {lv}
+                  </button>
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {editorMode === 'edit' && slashMenu && typeof document !== 'undefined'
         ? createPortal(
@@ -1412,6 +1728,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         >
           <div style={writingColumnStyle}>
           {blocks.map((block, index) => {
+            const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
             if (block.kind === 'divider') {
               return (
                 <div
@@ -1426,7 +1743,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     ...blockSurfaceChrome(block.id),
                     display: 'flex',
                     alignItems: 'center',
-                    margin: '32px 0',
+                    margin: '28px 0',
                     outline: 'none',
                     borderRadius: '10px',
                     transition:
@@ -1474,18 +1791,20 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             }
 
             if (block.kind === 'title') {
+              const titleMarginTop = index === 0 ? 0 : 32;
               return (
                 <div
                   key={block.id}
                   data-nb-surface-block
                   data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={blockSurfaceChrome(block.id)}
                 >
                   <EditableLine
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Title..."
+                    placeholder="Untitled"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
                     onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
@@ -1494,12 +1813,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
-                      color: tokens.textPrimary,
-                      fontSize: '38px',
+                      color: notebookInk.headline,
+                      fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
                       fontWeight: 700,
-                      letterSpacing: '-0.038em',
-                      lineHeight: 1.05,
-                      margin: '44px 0 26px',
+                      letterSpacing: '-0.03em',
+                      lineHeight: 1.08,
+                      margin: `${titleMarginTop}px 0 20px`,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1510,18 +1829,21 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
             }
 
             if (block.kind === 'section') {
+              const secTop =
+                index === 0 ? 8 : prevKind === 'title' ? 18 : prevKind === 'section' ? 24 : 28;
               return (
                 <div
                   key={block.id}
                   data-nb-surface-block
                   data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={blockSurfaceChrome(block.id)}
                 >
                   <EditableLine
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Section..."
+                    placeholder="Section label…"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
                     onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
@@ -1530,12 +1852,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
-                      color: tokens.textPrimary,
-                      fontSize: '23px',
+                      color: notebookInk.section,
+                      fontSize: 'clamp(1.125rem, 0.95rem + 0.55vw, 1.4375rem)',
                       fontWeight: 600,
-                      letterSpacing: '-0.022em',
-                      lineHeight: 1.32,
-                      margin: '56px 0 22px',
+                      letterSpacing: '-0.02em',
+                      lineHeight: 1.28,
+                      margin: `${secTop}px 0 16px`,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -1551,12 +1873,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={block.id}
                   data-nb-surface-block
                   data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={{
                     ...blockSurfaceChrome(block.id),
                     display: 'flex',
                     alignItems: 'baseline',
                     gap: '12px',
-                    margin: '16px 0',
+                    margin: `${prevKind === 'title' ? 12 : 14}px 0`,
                   }}
                 >
                   <button
@@ -1621,7 +1944,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       id={block.id}
                       text={block.text}
                       tokens={tokens}
-                      placeholder="Task..."
+                      placeholder="Checklist line…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
                       onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
@@ -1630,10 +1953,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                         border: 'none',
                         outline: 'none',
                         background: 'transparent',
-                        color: tokens.textPrimary,
-                        fontSize: '16.5px',
+                        color: notebookInk.primary,
+                        fontSize: '17px',
                         fontWeight: 400,
-                        lineHeight: 1.8,
+                        lineHeight: 1.86,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',
@@ -1651,12 +1974,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={block.id}
                   data-nb-surface-block
                   data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={{
                     ...blockSurfaceChrome(block.id),
-                    margin: '28px 0',
+                    margin: '24px 0',
                     paddingLeft: '26px',
-                    borderLeft: `1px solid ${tokens.accent}28`,
-                    boxShadow: `-12px 0 40px ${tokens.accent}08`,
+                    borderLeft: `1px solid rgba(255,255,255,0.1)`,
+                    boxShadow: `-6px 0 24px rgba(0,0,0,0.12)`,
                     transition: 'border-color 0.24s ease, box-shadow 0.26s ease',
                   }}
                 >
@@ -1664,7 +1988,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Quote..."
+                    placeholder="Pull quote…"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
                     onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
@@ -1673,11 +1997,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
-                      color: tokens.textSecondary,
-                      fontSize: '16.5px',
+                      color: notebookInk.secondary,
+                      fontSize: '17px',
                       fontStyle: 'italic',
                       fontWeight: 400,
-                      lineHeight: 1.82,
+                      lineHeight: 1.86,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -1688,18 +2012,35 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               );
             }
 
+            const paraMuted = block.variant === 'muted';
+            const paraFine = block.variant === 'fine';
+            const paraTop =
+              index === 0 ? 0 : prevKind === 'title' ? 8 : prevKind === 'section' ? 10 : 10;
+            const useStartWritingPlaceholder =
+              block.text === '' &&
+              !paraFine &&
+              !paraMuted &&
+              ((isStarterNotebook && index === 1) || (isLegacySingleEmptyParagraph && index === 0));
+            const paragraphPlaceholder = useStartWritingPlaceholder
+              ? 'Start writing...'
+              : paraFine
+                ? 'Fine print…'
+                : paraMuted
+                  ? 'Softer emphasis…'
+                  : 'Write…';
             return (
               <div
                 key={block.id}
                 data-nb-surface-block
                 data-block-id={block.id}
+                data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                 style={blockSurfaceChrome(block.id)}
               >
                 <EditableLine
                   id={block.id}
                   text={block.text}
                   tokens={tokens}
-                  placeholder="Write..."
+                  placeholder={paragraphPlaceholder}
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
                   onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
@@ -1708,11 +2049,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     border: 'none',
                     outline: 'none',
                     background: 'transparent',
-                    color: tokens.textPrimary,
-                    fontSize: '16.5px',
+                    color: paraFine ? notebookInk.muted : paraMuted ? notebookInk.secondary : notebookInk.primary,
+                    fontSize: paraFine ? '14.5px' : paraMuted ? '15.875px' : '17px',
                     fontWeight: 400,
-                    lineHeight: 1.82,
-                    margin: '14px 0',
+                    lineHeight: 1.86,
+                    letterSpacing: paraFine ? '0.028em' : '0.005em',
+                    margin: `${paraTop}px 0 12px`,
+                    opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
                     caretColor: tokens.accent,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
@@ -1726,38 +2069,78 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       ) : (
         <div role="document" aria-label="Notebook preview" style={editorSurfaceStyle}>
           <div style={writingColumnStyle}>
-          {previewLines.map((line, index) => {
+          {(content.body ?? '').trim() === '' ? (
+            <>
+              <div
+                style={{
+                  fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
+                  fontWeight: 700,
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1.08,
+                  margin: '0 0 20px',
+                  color: notebookInk.headline,
+                }}
+              >
+                <span style={{ color: notebookInk.muted, fontWeight: 600 }}>Untitled</span>
+              </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '17px',
+                  lineHeight: 1.86,
+                  color: notebookInk.muted,
+                  letterSpacing: '0.005em',
+                }}
+              >
+                Start writing...
+              </p>
+            </>
+          ) : null}
+          {(content.body ?? '').trim() === ''
+            ? null
+            : previewLines.map((line, index) => {
+            const prevLine = index > 0 ? previewLines[index - 1] : undefined;
+            const prevKind =
+              prevLine && prevLine.kind !== 'blank' ? prevLine.kind : undefined;
             if (line.kind === 'blank') {
-              return <div key={index} style={{ height: '18px' }} />;
+              return <div key={index} style={{ height: '14px' }} />;
             }
             if (line.kind === 'title') {
+              const titleMarginTop = index === 0 ? 0 : 32;
+              const showPreviewUntitled = line.text.trim() === '';
               return (
                 <div
                   key={index}
                   style={{
-                    fontSize: '38px',
+                    fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
                     fontWeight: 700,
-                    letterSpacing: '-0.038em',
-                    lineHeight: 1.05,
-                    margin: '44px 0 26px',
-                    color: tokens.textPrimary,
+                    letterSpacing: '-0.03em',
+                    lineHeight: 1.08,
+                    margin: `${titleMarginTop}px 0 20px`,
+                    color: notebookInk.headline,
                   }}
                 >
-                  {line.text}
+                  {showPreviewUntitled ? (
+                    <span style={{ color: notebookInk.muted, fontWeight: 600 }}>Untitled</span>
+                  ) : (
+                    line.text
+                  )}
                 </div>
               );
             }
             if (line.kind === 'section') {
+              const secTop =
+                index === 0 ? 10 : prevKind === 'title' ? 18 : prevKind === 'section' ? 24 : 28;
               return (
                 <div
                   key={index}
                   style={{
-                    fontSize: '23px',
+                    fontSize: 'clamp(1.125rem, 0.95rem + 0.55vw, 1.4375rem)',
                     fontWeight: 600,
-                    lineHeight: 1.32,
-                    letterSpacing: '-0.022em',
-                    margin: '56px 0 22px',
-                    color: tokens.textPrimary,
+                    lineHeight: 1.28,
+                    letterSpacing: '-0.02em',
+                    margin: `${secTop}px 0 16px`,
+                    color: notebookInk.section,
                   }}
                 >
                   {line.text}
@@ -1770,9 +2153,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={index}
                   style={{
                     height: '1px',
-                    margin: '32px 0',
+                    margin: '28px 0',
                     background: tokens.divider,
-                    opacity: 0.38,
+                    opacity: 0.48,
                   }}
                   role="separator"
                 />
@@ -1786,8 +2169,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     display: 'flex',
                     alignItems: 'baseline',
                     gap: '12px',
-                    margin: '16px 0',
-                    color: tokens.textPrimary,
+                    margin: `${prevKind === 'title' ? 12 : 14}px 0`,
+                    color: notebookInk.primary,
                   }}
                 >
                   <span
@@ -1817,7 +2200,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   >
                     {line.checked ? '✓' : ''}
                   </span>
-                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '16.5px', lineHeight: 1.8 }}>
+                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '17px', lineHeight: 1.86 }}>
                     {line.text}
                   </span>
                 </div>
@@ -1828,14 +2211,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <blockquote
                   key={index}
                   style={{
-                    margin: '28px 0',
+                    margin: '24px 0',
                     paddingLeft: '26px',
-                    borderLeft: `1px solid ${tokens.accent}28`,
-                    boxShadow: `-12px 0 40px ${tokens.accent}08`,
-                    color: tokens.textSecondary,
+                    borderLeft: `1px solid rgba(255,255,255,0.1)`,
+                    boxShadow: `-6px 0 24px rgba(0,0,0,0.12)`,
+                    color: notebookInk.secondary,
                     fontStyle: 'italic',
-                    fontSize: '16.5px',
-                    lineHeight: 1.82,
+                    fontSize: '17px',
+                    lineHeight: 1.86,
                     fontWeight: 400,
                     whiteSpace: 'pre-wrap',
                   }}
@@ -1844,20 +2227,29 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 </blockquote>
               );
             }
-            return (
-              <p
-                key={index}
-                style={{
-                  margin: '14px 0',
-                  color: tokens.textPrimary,
-                  fontSize: '16.5px',
-                  lineHeight: 1.82,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {line.text}
-              </p>
-            );
+            if (line.kind === 'paragraph') {
+              const fine = line.variant === 'fine';
+              const muted = line.variant === 'muted';
+              const paraTop =
+                index === 0 ? 0 : prevKind === 'title' ? 8 : prevKind === 'section' ? 10 : 10;
+              return (
+                <p
+                  key={index}
+                  style={{
+                    margin: `${paraTop}px 0 12px`,
+                    color: fine ? notebookInk.muted : muted ? notebookInk.secondary : notebookInk.primary,
+                    fontSize: fine ? '14.5px' : muted ? '15.875px' : '17px',
+                    lineHeight: 1.86,
+                    letterSpacing: fine ? '0.028em' : '0.005em',
+                    opacity: fine ? 0.9 : muted ? 0.94 : 1,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {line.text}
+                </p>
+              );
+            }
+            return null;
           })}
           </div>
         </div>
