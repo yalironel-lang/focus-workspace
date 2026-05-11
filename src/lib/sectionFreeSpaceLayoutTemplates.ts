@@ -38,6 +38,8 @@ const DEFAULT_W: Record<ProjectObjectType, number> = {
   link: 360,
   checklist: 360,
   image: 460,
+  calculator: 300,
+  graph: 400,
 };
 
 const DEFAULT_H: Record<ProjectObjectType, number> = {
@@ -46,6 +48,8 @@ const DEFAULT_H: Record<ProjectObjectType, number> = {
   link: 240,
   checklist: 300,
   image: 360,
+  calculator: 420,
+  graph: 360,
 };
 
 function effDims(type: ProjectObjectType, p: BlockPos | undefined): { w: number; h: number } {
@@ -162,9 +166,19 @@ export function computeFreeSpaceTemplateLayout(
         link: [],
         checklist: [],
         image: [],
+        calculator: [],
+        graph: [],
       };
       for (const o of sorted) buckets[o.type].push(o);
-      const typeOrder: ProjectObjectType[] = ['notebook', 'note', 'link', 'checklist', 'image'];
+      const typeOrder: ProjectObjectType[] = [
+        'notebook',
+        'note',
+        'link',
+        'checklist',
+        'image',
+        'calculator',
+        'graph',
+      ];
       let ring = 0;
       for (const type of typeOrder) {
         const group = buckets[type];

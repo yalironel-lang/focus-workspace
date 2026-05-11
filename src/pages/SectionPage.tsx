@@ -565,7 +565,16 @@ export function SectionPage() {
   const handleAddToSpace = useCallback((type: ProjectObjectType) => {
     const obj = sectionObjects.addObject(type);
     const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
-    const sizeHint = type === 'notebook' ? { w: 620, h: 520 } : type === 'image' ? { w: 460 } : { w: 360 };
+    const sizeHint =
+      type === 'notebook'
+        ? { w: 620, h: 520 }
+        : type === 'image'
+          ? { w: 460, h: 360 }
+          : type === 'graph'
+            ? { w: 400, h: 360 }
+            : type === 'calculator'
+              ? { w: 300, h: 420 }
+              : { w: 360, h: 280 };
     sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
@@ -596,12 +605,8 @@ export function SectionPage() {
     registerFreeSpace({
       addNotebook: () => requestFreeSpaceAdd('notebook'),
       addTextCard: () => requestFreeSpaceAdd('note'),
-      addCalculator: () => {
-        toast.success('Calculator object — coming soon', { icon: '🔢' });
-      },
-      addGraph: () => {
-        toast.success('Graph object — coming soon', { icon: '📈' });
-      },
+      addCalculator: () => requestFreeSpaceAdd('calculator'),
+      addGraph: () => requestFreeSpaceAdd('graph'),
     });
     return () => registerFreeSpace(null);
   }, [id, registerFreeSpace, requestFreeSpaceAdd]);
@@ -839,6 +844,8 @@ export function SectionPage() {
                 { type: 'link', label: 'Link', hint: 'Reference URL' },
                 { type: 'checklist', label: 'Checklist', hint: 'Action list' },
                 { type: 'image', label: 'Image', hint: 'Visual reference' },
+                { type: 'calculator', label: 'Calculator', hint: 'Safe math scratchpad' },
+                { type: 'graph', label: 'Graph', hint: 'Plot y = f(x)' },
               ] as const).map(item => (
                 <button
                   key={item.type}

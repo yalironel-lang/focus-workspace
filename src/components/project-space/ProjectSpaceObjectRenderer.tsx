@@ -5,6 +5,8 @@ import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
 import { ImageBlock } from '../workspace/blocks/ImageBlock';
 import { ProjectNotebookBlock } from './ProjectNotebookBlock';
+import { FreeSpaceCalculator } from './FreeSpaceCalculator';
+import { FreeSpaceGraph } from './FreeSpaceGraph';
 
 interface Props {
   object: ProjectSpaceObject;
@@ -76,6 +78,22 @@ export function ProjectSpaceObjectRenderer({
             onChange={c => onChange(c)}
           />
         </div>
+      );
+    case 'calculator':
+      return (
+        <FreeSpaceCalculator
+          content={object.content}
+          tokens={tokens}
+          onChange={c => onChange(c)}
+        />
+      );
+    case 'graph':
+      return (
+        <FreeSpaceGraph
+          content={object.content}
+          tokens={tokens}
+          onChange={c => onChange(c)}
+        />
       );
     default:
       return null;

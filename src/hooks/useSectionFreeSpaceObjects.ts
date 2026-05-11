@@ -1,14 +1,32 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 
-export type ProjectObjectType = 'notebook' | 'note' | 'link' | 'checklist' | 'image';
+export type ProjectObjectType =
+  | 'notebook'
+  | 'note'
+  | 'link'
+  | 'checklist'
+  | 'image'
+  | 'calculator'
+  | 'graph';
+
+export type CalculatorHistoryEntry = { expr: string; result: string };
 
 export type ProjectObjectContent =
   | { type: 'notebook'; body: string; paperStyle: 'blank' | 'ruled' | 'grid' }
   | { type: 'note'; body: string }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
-  | { type: 'image'; url: string; alt?: string; caption?: string };
+  | { type: 'image'; url: string; alt?: string; caption?: string }
+  | { type: 'calculator'; input: string; history: CalculatorHistoryEntry[] }
+  | {
+      type: 'graph';
+      expression: string;
+      xmin: number;
+      xmax: number;
+      ymin: number;
+      ymax: number;
+    };
 
 export interface ProjectSpaceObject {
   id: string;
@@ -47,6 +65,20 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
     case 'link': return { title: 'Reference Link', content: { type: 'link', title: 'Untitled link', url: '' } };
     case 'checklist': return { title: 'Checklist', content: { type: 'checklist', items: [] } };
     case 'image': return { title: 'Image', content: { type: 'image', url: '' } };
+    case 'calculator':
+      return { title: 'Calculator', content: { type: 'calculator', input: '', history: [] } };
+    case 'graph':
+      return {
+        title: 'Graph',
+        content: {
+          type: 'graph',
+          expression: 'x^2',
+          xmin: -6,
+          xmax: 6,
+          ymin: -4,
+          ymax: 8,
+        },
+      };
   }
 }
 
