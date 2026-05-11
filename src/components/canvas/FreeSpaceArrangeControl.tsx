@@ -16,10 +16,13 @@ interface Props {
   topOffset: number;
   objectCount: number;
   onApplyTemplate: (id: FreeSpaceTemplateId) => void;
+  /** Notebook deep edit: control recedes until hovered. */
+  chromeQuiet?: boolean;
 }
 
-export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onApplyTemplate }: Props) {
+export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onApplyTemplate, chromeQuiet = false }: Props) {
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,14 +52,20 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
     onApplyTemplate(id);
   };
 
+  const quietOpacity = chromeQuiet && !hovered && !open ? 0.62 : 1;
+
   return (
     <div
       ref={rootRef}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: 'fixed',
         top: topOffset + 10,
         left: 18,
         zIndex: 45,
+        opacity: quietOpacity,
+        transition: 'opacity 0.35s ease',
       }}
     >
       <button

@@ -735,6 +735,7 @@ export function SectionPage() {
             topOffset={84}
             objectCount={sectionObjects.objects.length}
             onApplyTemplate={handleApplySpaceTemplate}
+            chromeQuiet={!!spaceEditingId}
           />
           <FreeformCanvas
             tokens={tokens}
@@ -784,6 +785,8 @@ export function SectionPage() {
                 flexDirection: 'column',
                 gap: '4px',
                 backdropFilter: 'blur(16px)',
+                opacity: spaceEditingId ? 0.88 : 1,
+                transition: 'opacity 0.35s ease',
               }}
             >
               {([

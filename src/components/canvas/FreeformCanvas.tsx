@@ -152,13 +152,15 @@ interface Props {
 // ── Canvas controls ───────────────────────────────────────────────────────────
 
 function CanvasControls({
-  tokens, zoom, snapToGrid, visible,
+  tokens, zoom, snapToGrid, visible, chromeQuiet = false,
   onZoomIn, onZoomOut, onReset, onCenter, onToggleSnap, onAutoOrganize,
 }: {
   tokens: AtmosphereTokens;
   zoom: number;
   snapToGrid: boolean;
   visible: boolean;
+  /** Deep writing focus: bar stays usable but visually recedes until hovered. */
+  chromeQuiet?: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
@@ -166,6 +168,8 @@ function CanvasControls({
   onToggleSnap: () => void;
   onAutoOrganize: () => void;
 }) {
+  const [barHovered, setBarHovered] = useState(false);
+  const quietOpacity = chromeQuiet && !barHovered ? 0.68 : 1;
   const btn: React.CSSProperties = {
     width:           '30px',
     height:          '30px',
@@ -187,6 +191,8 @@ function CanvasControls({
 
   return (
     <div
+      onMouseEnter={() => setBarHovered(true)}
+      onMouseLeave={() => setBarHovered(false)}
       style={{
         position:             'absolute',
         bottom:               '20px',
@@ -202,10 +208,12 @@ function CanvasControls({
         border:               `1px solid ${tokens.cardBorder}`,
         backdropFilter:       'blur(24px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-        boxShadow:            '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
-        opacity:              visible ? 1 : 0,
+        boxShadow:            chromeQuiet && !barHovered
+          ? '0 6px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03)'
+          : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
+        opacity:              visible ? quietOpacity : 0,
         pointerEvents:        visible ? 'auto' : 'none',
-        transition:           'opacity 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1)',
+        transition:           'opacity 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1), box-shadow 0.35s ease',
       }}
     >
       <button style={btn} title="Zoom out" onClick={onZoomOut}
@@ -293,7 +301,7 @@ export function FreeformCanvas({
   selectedId,
   activeSession = false,
   spatialAmbient = false,
-  focusEditingId, // currently unused: reserved for cinematic focus-lighting system
+  focusEditingId,
   topOffset = 48,
   onSetPos,
   onSelect,
@@ -314,6 +322,7 @@ export function FreeformCanvas({
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Controls bar is ambient — only surfaces near the bottom edge
   const [controlsNear,   setControlsNear]    = useState(false);
+  const [addChromeHovered, setAddChromeHovered] = useState(false);
 
   // ── Momentum / inertia refs ───────────────────────────────────────────────
   const velRef     = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
@@ -436,8 +445,9 @@ export function FreeformCanvas({
 
   const enabledModules = modules.filter(m => m.enabled).sort((a, b) => a.order - b.order);
 
-  // Deep-focus flag from host (e.g. a notebook in immersive edit mode on Free Space).
+  // Deep-focus: notebook editor is active on Free Space (viewport + chrome breathe with it).
   const hasDeepFocus = !!focusEditingId;
+  const deepFocusAtmosphere = hasDeepFocus && !designMode;
 
   // All item IDs in render order (modules → blocks → tools)
   type CanvasItem =
@@ -1016,7 +1026,7 @@ export function FreeformCanvas({
               cx={dotSpacing / 2}
               cy={dotSpacing / 2}
               r={zoom > 0.5 ? 0.8 : 0.4}
-              fill={`${tokens.accent}0c`}
+              fill={deepFocusAtmosphere ? `${tokens.accent}07` : `${tokens.accent}0c`}
             />
           </pattern>
         </defs>
@@ -1058,6 +1068,58 @@ export function FreeformCanvas({
             />
           );
         })}
+
+        {/* ── Deep focus: imperceptible anchor light (follows the active block in world space) ── */}
+        {deepFocusAtmosphere && focusEditingId && positions[focusEditingId] && (() => {
+          const p = positions[focusEditingId]!;
+          const bw = p.w > 0 ? p.w : 340;
+          const bh = p.h > 0 ? p.h : 220;
+          const cx = p.x + bw / 2;
+          const cy = p.y + bh / 2;
+          const rw = Math.max(bw * 2.15, 520);
+          const rh = Math.max(bh * 1.75, 360);
+          return (
+            <div
+              key="fw-deep-focus-wash"
+              aria-hidden
+              style={{
+                position:       'absolute',
+                left:           cx,
+                top:            cy,
+                width:          rw,
+                height:         rh,
+                transform:      'translate(-50%, -50%)',
+                borderRadius:   '50%',
+                background:     `radial-gradient(ellipse 52% 50% at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 34%, transparent 72%)`,
+                filter:         'blur(52px)',
+                opacity:        0.9,
+                pointerEvents:  'none',
+                zIndex:         0,
+                transition:     'opacity 0.55s cubic-bezier(0.4,0,0.2,1)',
+              }}
+            />
+          );
+        })()}
+
+        {/* ── Deep focus: micro topology (nearly invisible; reinforces depth) ── */}
+        {deepFocusAtmosphere && (
+          <div
+            aria-hidden
+            style={{
+              position:       'absolute',
+              inset:          0,
+              pointerEvents:  'none',
+              zIndex:         0,
+              opacity:        0.22,
+              backgroundImage: `
+                repeating-linear-gradient(90deg, transparent 0px, transparent 199px, rgba(255,255,255,0.011) 199px, rgba(255,255,255,0.011) 200px),
+                repeating-linear-gradient(0deg, transparent 0px, transparent 319px, rgba(255,255,255,0.008) 319px, rgba(255,255,255,0.008) 320px)
+              `,
+              mixBlendMode:   'overlay',
+              transition:     'opacity 0.6s ease',
+            }}
+          />
+        )}
 
         {/* ── Proximity cluster backdrops ─────────────────────── */}
         {clusters.map((box, i) => {
@@ -1187,11 +1249,15 @@ export function FreeformCanvas({
           // Thought lifecycle — each object exists on a spectrum from active to deep archive
           const lifecycle   = computeLifecycle(activityRef.current[item.id]);
 
-          // Focus session — non-focus thoughts step further back
+          // Live session: legacy strong dim for non-focus system cards only (not deep-writing focus).
           const FOCUS_IDS   = new Set(['focus-mode', 'capture', 'deep-work-timer']);
           const baseId      = item.id.replace(/-copy.*$/, '').replace(/-\d+$/, '');
           const isFocusItem = FOCUS_IDS.has(baseId);
-          const sessionDim  = (activeSession || hasDeepFocus) && !designMode && !isFocusItem;
+          const sessionDim  = activeSession && !designMode && !isFocusItem;
+
+          // Deep writing focus: other objects recede only via mild tonal shift (no opacity crush).
+          const deepInactive =
+            hasDeepFocus && !designMode && focusEditingId !== item.id && !isFocusItem;
 
           // Return ritual — most recently touched block gets a brief welcome-back glow
           const isReturning  = returnId   === item.id;
@@ -1211,9 +1277,17 @@ export function FreeformCanvas({
             : (isRevisiting || isReturning)              ? 'opacity 1.4s cubic-bezier(0.4,0,0.2,1), filter 2s cubic-bezier(0.4,0,0.2,1)'
             : 'opacity 1.8s cubic-bezier(0.4,0,0.2,1)';
 
-          // Session focus: non-focus objects also desaturate — they recede tonally
-          // not just in opacity, making the focus region feel genuinely isolated
-          const sessionFilter = sessionDim ? 'saturate(0.35) brightness(0.7)' : 'none';
+          // Session focus: strong isolation for focus-session cards.
+          // Deep focus: whisper-quiet recession for peers (readable, stable).
+          const sessionFilter = sessionDim
+            ? 'saturate(0.35) brightness(0.7)'
+            : deepInactive
+              ? 'saturate(0.9) brightness(0.96)'
+              : 'none';
+
+          const filterTransition = (sessionDim || deepInactive || isRevisiting || isReturning)
+            ? ', filter 1.4s cubic-bezier(0.4,0,0.2,1)'
+            : '';
 
           return (
             <div key={item.id}>
@@ -1230,21 +1304,27 @@ export function FreeformCanvas({
                   zIndex: 1,
                   opacity: hasDeepFocus ? 1 : 0,
                   background: focusSurfaceActive
-                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}12 0%, transparent 66%)`
-                    : 'radial-gradient(120% 95% at 50% 36%, rgba(3,8,16,0.34) 0%, transparent 70%)',
+                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}10 0%, transparent 68%)`
+                    : deepInactive
+                      ? 'radial-gradient(120% 95% at 50% 36%, rgba(5,10,18,0.2) 0%, transparent 74%)'
+                      : 'radial-gradient(120% 95% at 50% 36%, rgba(3,8,16,0.34) 0%, transparent 70%)',
                   border: focusSurfaceActive
-                    ? `1px solid ${tokens.accent}18`
-                    : '1px solid rgba(9,14,24,0.5)',
+                    ? `1px solid ${tokens.accent}14`
+                    : deepInactive
+                      ? '1px solid rgba(12,18,28,0.35)'
+                      : '1px solid rgba(9,14,24,0.5)',
                   boxShadow: focusSurfaceActive
-                    ? `0 24px 56px rgba(0,0,0,0.42), 0 0 38px ${tokens.accentGlow}26, inset 0 1px 0 rgba(255,255,255,0.06)`
-                    : '0 16px 42px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.02)',
+                    ? `0 22px 52px rgba(0,0,0,0.38), 0 0 28px ${tokens.accentGlow}18, inset 0 1px 0 rgba(255,255,255,0.055)`
+                    : deepInactive
+                      ? '0 12px 32px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.02)'
+                      : '0 16px 42px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.02)',
                   transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1), background 0.6s cubic-bezier(0.4,0,0.2,1), border-color 0.5s cubic-bezier(0.4,0,0.2,1), box-shadow 0.55s cubic-bezier(0.4,0,0.2,1)',
                 }}
               />
               <div
                 style={{
                   opacity:    baseOpacity,
-                  transition: opacityTransition + (sessionDim ? ', filter 1.8s cubic-bezier(0.4,0,0.2,1)' : ''),
+                  transition: opacityTransition + filterTransition,
                   // Revisit — a dormant thought returning to life: warm amber flash
                   // Return ritual — most recent block on open: soft accent pulse
                   filter: isRevisiting
@@ -1277,6 +1357,7 @@ export function FreeformCanvas({
                   designMode={designMode}
                   isDragging={draggingId === item.id}
                   activeGesture={draggingId === item.id ? activeDragKind : null}
+                  deepFocusAnchor={deepFocusAtmosphere && focusEditingId === item.id}
                   onBlockMouseDown={onBlockMouseDown}
                   onSelect={onSelect}
                   onRemove={handleRemove}
@@ -1358,9 +1439,11 @@ export function FreeformCanvas({
           inset:         0,
           pointerEvents: 'none',
           zIndex:        1,
-          background: activeSession && !designMode
-            ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
-            : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
+          background: deepFocusAtmosphere
+            ? `radial-gradient(ellipse at 50% 44%, transparent 46%, ${tokens.pageBg}7a 100%)`
+            : activeSession && !designMode
+              ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
+              : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
           transition:  'background 1.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
@@ -1373,6 +1456,8 @@ export function FreeformCanvas({
           inset:         0,
           pointerEvents: 'none',
           zIndex:        1,
+          opacity:       deepFocusAtmosphere ? 0.55 : 1,
+          transition:    'opacity 0.6s ease',
           background: `
             linear-gradient(180deg, ${tokens.pageBg}28 0%, transparent 5%, transparent 93%, ${tokens.pageBg}28 100%),
             linear-gradient(90deg,  ${tokens.pageBg}20 0%, transparent 4%, transparent 96%, ${tokens.pageBg}20 100%)
@@ -1387,7 +1472,10 @@ export function FreeformCanvas({
           inset:         0,
           pointerEvents: 'none',
           zIndex:        1,
-          boxShadow:     `inset 0 0 80px rgba(7,11,20,0.5)`,
+          boxShadow:     deepFocusAtmosphere
+            ? `inset 0 0 96px rgba(7,11,20,0.32)`
+            : `inset 0 0 80px rgba(7,11,20,0.5)`,
+          transition:    'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
 
@@ -1397,6 +1485,7 @@ export function FreeformCanvas({
         zoom={zoom}
         snapToGrid={snapToGrid}
         visible={controlsNear || draggingId !== null}
+        chromeQuiet={deepFocusAtmosphere}
         onZoomIn={() => setViewport(Math.min(ZOOM_MAX, zoom + ZOOM_STEP), panX, panY)}
         onZoomOut={() => setViewport(Math.max(ZOOM_MIN, zoom - ZOOM_STEP), panX, panY)}
         onReset={resetView}
@@ -1519,16 +1608,22 @@ export function FreeformCanvas({
           display:         'flex',
           alignItems:      'center',
           justifyContent:  'center',
-          boxShadow:       `0 4px 20px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`,
-          transition:      'all 0.3s cubic-bezier(0.34,1.2,0.64,1)',
+          boxShadow:       deepFocusAtmosphere && !addChromeHovered
+            ? `0 3px 14px ${tokens.accentGlow}88, 0 0 0 1px ${tokens.accent}30`
+            : `0 4px 20px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`,
+          opacity:         deepFocusAtmosphere && !addChromeHovered ? 0.52 : 1,
+          transform:       'scale(1)',
+          transition:      'opacity 0.35s ease, box-shadow 0.35s ease, transform 0.3s cubic-bezier(0.34,1.2,0.64,1), background-color 0.25s ease',
           fontWeight:      300,
           lineHeight:      1,
         }}
-        onMouseEnter={e => {
+        onMouseEnter={(e) => {
+          setAddChromeHovered(true);
           (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentHover;
           (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.06)';
         }}
-        onMouseLeave={e => {
+        onMouseLeave={(e) => {
+          setAddChromeHovered(false);
           (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accent;
           (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
         }}

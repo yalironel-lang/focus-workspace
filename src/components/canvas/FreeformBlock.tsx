@@ -25,6 +25,8 @@ interface Props {
   isDragging: boolean;
   /** When dragging this block, whether the gesture is move or resize (for chrome only). */
   activeGesture?: BlockActiveGesture;
+  /** Free Space: notebook is in deep edit — subtle anchor lift and calmer chrome on this card only. */
+  deepFocusAnchor?: boolean;
   children: React.ReactNode;
   onBlockMouseDown: (id: string, e: React.MouseEvent, type: 'move' | 'resize') => void;
   onSelect: (id: string) => void;
@@ -44,6 +46,7 @@ export function FreeformBlock({
   designMode,
   isDragging,
   activeGesture = null,
+  deepFocusAnchor = false,
   children,
   onBlockMouseDown,
   onSelect,
@@ -64,18 +67,25 @@ export function FreeformBlock({
   const showActions = (selected || designMode) && (onDuplicate || onRemove);
   const actionOpacity = headerHot ? 1 : designMode ? 0.28 : 0;
 
-  let transform = 'translate3d(0,0,0) scale(1)';
-  if (isDragging && activeGesture === 'resize') transform = 'translate3d(0,-3px,0) scale(1.004)';
-  else if (isDragging) transform = 'translate3d(0,-5px,0) scale(1.01) rotate(0.28deg)';
-  else if (selected) transform = 'translate3d(0,-4px,0) scale(1.003)';
-  else if (hovered) transform = 'translate3d(0,-2px,0) scale(1.0018)';
-  else if (recede) transform = 'translate3d(0,1px,0) scale(0.996)';
+  const anchorNudge = deepFocusAnchor && !isDragging ? ' translateY(-1px)' : '';
+
+  let transform = `translate3d(0,0,0) scale(1)${anchorNudge}`;
+  if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-3px,0) scale(1.004)${anchorNudge}`;
+  else if (isDragging) transform = `translate3d(0,-5px,0) scale(1.01) rotate(0.28deg)${anchorNudge}`;
+  else if (selected) transform = `translate3d(0,-4px,0) scale(1.003)${anchorNudge}`;
+  else if (hovered) transform = `translate3d(0,-2px,0) scale(1.0018)${anchorNudge}`;
+  else if (recede) transform = `translate3d(0,1px,0) scale(0.996)${anchorNudge}`;
 
   let filter = 'none';
   if (isDragging) filter = 'brightness(1.04) saturate(1.05)';
   else if (selected) filter = 'brightness(1.025) saturate(1.03)';
   else if (hovered) filter = 'brightness(1.012) saturate(1.02)';
   else if (recede) filter = 'brightness(0.97) saturate(0.96)';
+  if (deepFocusAnchor && !isDragging) {
+    filter = filter === 'none'
+      ? 'brightness(1.018) saturate(1.03)'
+      : `saturate(1.03) ${filter}`;
+  }
 
   const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.045)';
   const innerHighlight = selected
@@ -92,6 +102,9 @@ export function FreeformBlock({
     boxShadow = `${innerRim}${innerHighlight}, 0 4px 8px rgba(0,0,0,0.2), 0 18px 44px rgba(0,0,0,0.32), 0 0 36px ${tokens.accentGlow}38`;
   } else if (hovered) {
     boxShadow = `${innerRim}, 0 3px 6px rgba(0,0,0,0.16), 0 14px 36px rgba(0,0,0,0.26)`;
+  }
+  if (deepFocusAnchor && !isDragging) {
+    boxShadow = `${boxShadow}, 0 18px 48px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.05)`;
   }
 
   const borderColor = selected
@@ -150,7 +163,7 @@ export function FreeformBlock({
             transform: 'translate(-50%, -50%)',
             borderRadius: '22px',
             background: `radial-gradient(ellipse at 50% 35%, ${tokens.accentGlow}22 0%, transparent 62%)`,
-            opacity: selected ? 0.55 : 0.28,
+            opacity: deepFocusAnchor ? Math.min(selected ? 0.55 : 0.28, 0.22) : selected ? 0.55 : 0.28,
             pointerEvents: 'none',
             zIndex: 0,
             transition: `opacity 0.45s ${chromeEase}`,
