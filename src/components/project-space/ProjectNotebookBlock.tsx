@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
 } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 
@@ -21,20 +22,42 @@ type NotebookLine =
   | { kind: 'quote'; text: string }
   | { kind: 'paragraph'; text: string };
 
+/** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
+function normalizeNotebookSpaces(s: string): string {
+  return s.replace(/\u00a0/g, ' ');
+}
+
+/**
+ * Parse one storage line into a notebook line shape.
+ * Used for load, preview, and paragraph→block morph. Prefixes are never part of title/section/task/quote text.
+ */
 function parseNotebookLine(raw: string): NotebookLine {
-  const trimmed = raw.trim();
+  const normalized = normalizeNotebookSpaces(raw);
+  const trimmed = normalized.trim();
   if (trimmed === '') return { kind: 'blank' };
   if (trimmed === '---') return { kind: 'divider' };
-  if (trimmed.startsWith('## ')) return { kind: 'section', text: trimmed.slice(3) };
-  if (trimmed.startsWith('# ')) return { kind: 'title', text: trimmed.slice(2) };
-  const taskMatch = trimmed.match(/^- \[([ xX])\]\s*(.*)$/);
+
+  const sectionMatch = trimmed.match(/^##\s*(.*)$/);
+  if (sectionMatch) return { kind: 'section', text: (sectionMatch[1] ?? '').trimEnd() };
+
+  const titleMatch = trimmed.match(/^#(?!\#)\s*(.*)$/);
+  if (titleMatch) return { kind: 'title', text: (titleMatch[1] ?? '').trimEnd() };
+
+  const taskMatch = trimmed.match(/^- \[\s*([xX ])\s*\]\s*(.*)$/);
   if (taskMatch) {
-    const checked = taskMatch[1].toLowerCase() === 'x';
-    return { kind: 'task', checked, text: taskMatch[2] };
+    const checked = taskMatch[1]!.trim().toLowerCase() === 'x';
+    return { kind: 'task', checked, text: (taskMatch[2] ?? '').trimEnd() };
   }
-  if (trimmed.startsWith('> ')) return { kind: 'quote', text: trimmed.slice(2) };
-  if (trimmed.startsWith('>')) return { kind: 'quote', text: trimmed.slice(1).trimStart() };
-  return { kind: 'paragraph', text: raw };
+
+  const looseTaskMatch = trimmed.match(/^- (?!\[)\s*(.*)$/);
+  if (looseTaskMatch) {
+    return { kind: 'task', checked: false, text: (looseTaskMatch[1] ?? '').trimEnd() };
+  }
+
+  const quoteMatch = trimmed.match(/^>\s?(.*)$/);
+  if (quoteMatch && trimmed.startsWith('>')) return { kind: 'quote', text: (quoteMatch[1] ?? '').trimEnd() };
+
+  return { kind: 'paragraph', text: normalized };
 }
 
 type Block =
@@ -74,7 +97,7 @@ function lineToBlock(line: string): Block {
 
 function parseBodyToBlocks(body: string): Block[] {
   if (body.length === 0) return [{ id: newBlockId(), kind: 'paragraph', text: '' }];
-  return body.split('\n').map(lineToBlock);
+  return body.split(/\r?\n/).map(lineToBlock);
 }
 
 function blockToLine(b: Block): string {
@@ -99,7 +122,7 @@ function serializeBlocks(blocks: Block[]): string {
 }
 
 function morphParagraphLine(text: string, blockId: string): Block | Block[] {
-  const normalized = text.replace(/\r\n/g, '\n');
+  const normalized = normalizeNotebookSpaces(text).replace(/\r\n/g, '\n');
   if (!normalized.includes('\n')) {
     const parsed = parseNotebookLine(normalized);
     if (parsed.kind === 'blank') return { id: blockId, kind: 'paragraph', text: '' };
@@ -112,7 +135,37 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
     if (parsed.kind === 'quote') return { id: blockId, kind: 'quote', text: parsed.text };
     return { id: blockId, kind: 'paragraph', text: normalized };
   }
-  return normalized.split('\n').map((ln) => lineToBlock(ln));
+  return normalized.split(/\r?\n/).map((ln) => lineToBlock(ln));
+}
+
+type EditableBlock = Exclude<Block, { kind: 'divider' }>;
+
+/** Map contenteditable text to stored visible payload (strip markdown-lite prefixes if pasted). */
+function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: string): EditableBlock {
+  const line = normalizeNotebookSpaces(rawSingleLine).split('\n')[0] ?? '';
+  const trimmed = line.trim();
+  if (block.kind === 'title') {
+    const m = trimmed.match(/^#(?!\#)\s*(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'section') {
+    const m = trimmed.match(/^##\s*(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'quote') {
+    const m = trimmed.match(/^>\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'task') {
+    const parsed = parseNotebookLine(trimmed);
+    if (parsed.kind === 'task') return { ...block, text: parsed.text, checked: parsed.checked };
+    return { ...block, text: line.trimEnd() };
+  }
+  return block;
+}
+
+function blockTextLen(b: Block): number {
+  return b.kind === 'divider' ? 0 : b.text.length;
 }
 
 function getCaretOffsetIn(el: HTMLElement): number {
@@ -157,6 +210,76 @@ function setCaretOffsetIn(el: HTMLElement, offset: number) {
   sel.addRange(range);
 }
 
+function rangeHeightFromStartToCaret(editable: HTMLElement): number {
+  const sel = window.getSelection();
+  const an = sel?.anchorNode;
+  if (!sel?.rangeCount || !an || !editable.contains(an)) return 0;
+  const range = document.createRange();
+  try {
+    range.selectNodeContents(editable);
+    range.setEnd(an, sel.anchorOffset);
+  } catch {
+    return 0;
+  }
+  const h = range.getBoundingClientRect().height;
+  return Number.isFinite(h) ? h : 0;
+}
+
+function rangeHeightFromCaretToEnd(editable: HTMLElement): number {
+  const sel = window.getSelection();
+  const an = sel?.anchorNode;
+  if (!sel?.rangeCount || !an || !editable.contains(an)) return 0;
+  const range = document.createRange();
+  try {
+    range.selectNodeContents(editable);
+    range.setStart(an, sel.anchorOffset);
+  } catch {
+    return 0;
+  }
+  return range.getBoundingClientRect().height;
+}
+
+function lineHeightOf(el: HTMLElement): number {
+  const lh = parseFloat(getComputedStyle(el).lineHeight);
+  if (!Number.isNaN(lh) && lh > 0) return lh;
+  const fs = parseFloat(getComputedStyle(el).fontSize) || 16;
+  return fs * 1.5;
+}
+
+function caretInFirstVisualLine(el: HTMLElement): boolean {
+  const h = rangeHeightFromStartToCaret(el);
+  return h <= lineHeightOf(el) * 1.35;
+}
+
+function caretInLastVisualLine(el: HTMLElement): boolean {
+  const h = rangeHeightFromCaretToEnd(el);
+  return h <= lineHeightOf(el) * 1.35;
+}
+
+function caretAtVisualLineStart(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !el.contains(sel.anchorNode)) return getCaretOffsetIn(el) === 0;
+  const r = sel.getRangeAt(0).cloneRange();
+  r.collapse(true);
+  const cr = r.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  if (cr.width === 0 && cr.height === 0) return getCaretOffsetIn(el) === 0;
+  return cr.left <= er.left + 10;
+}
+
+function caretAtVisualLineEnd(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !el.contains(sel.anchorNode)) return true;
+  const r = sel.getRangeAt(0).cloneRange();
+  r.collapse(true);
+  const cr = r.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  if (cr.width === 0 && cr.height === 0) return true;
+  return cr.right >= er.right - 10;
+}
+
+const SOFT_BREAK = '\u2028';
+
 function mergeBlocks(prev: Block, next: Block): Block {
   if (prev.kind === 'divider') return next;
   const nextText = next.kind === 'divider' ? '' : next.text;
@@ -175,6 +298,80 @@ function mergeBlocks(prev: Block, next: Block): Block {
   }
 }
 
+function prevNavBlockIndex(blocks: Block[], from: number): number {
+  for (let i = from - 1; i >= 0; i--) if (blocks[i]!.kind !== 'divider') return i;
+  return -1;
+}
+
+function nextNavBlockIndex(blocks: Block[], from: number): number {
+  for (let i = from + 1; i < blocks.length; i++) if (blocks[i]!.kind !== 'divider') return i;
+  return -1;
+}
+
+/** First segment after `/`: command token + optional body (never treat command label as content). */
+function parseSlashFirstSegment(firstLine: string): { commandToken: string; body: string } | null {
+  const t = firstLine.trimStart();
+  if (!t.startsWith('/')) return null;
+  const after = t.slice(1).trimStart();
+  if (after === '') return { commandToken: '', body: '' };
+  const m = after.match(/^([\w-]+)(?:\s+(.*))?$/s);
+  if (!m) return { commandToken: '', body: '' };
+  return { commandToken: m[1] ?? '', body: (m[2] ?? '').trimStart() };
+}
+
+/** Token after `/` for slash menu fuzzy filter (not the full line). */
+function slashFilterTokenFromParagraph(text: string): string | null {
+  const first = (text.split(SOFT_BREAK)[0] ?? '').split('\n')[0] ?? '';
+  const p = parseSlashFirstSegment(first);
+  if (!p) return null;
+  return p.commandToken;
+}
+
+/** Body to keep after applying a slash command; removes `/token` and command word only. */
+function paragraphTextAfterSlashApply(fullParagraphText: string, _cmd: SlashCommandId): string {
+  const parts = fullParagraphText.split(SOFT_BREAK);
+  const p0 = parseSlashFirstSegment(parts[0] ?? '');
+  if (!p0) return fullParagraphText;
+  const firstBody = p0.body;
+  return [firstBody, ...parts.slice(1)].join(SOFT_BREAK);
+}
+
+/** Strip slash invocation on Escape: keep body text only, or clear slash fragment. */
+function stripSlashInvocationForEscape(fullParagraphText: string): string {
+  const parts = fullParagraphText.split(SOFT_BREAK);
+  const p = parseSlashFirstSegment(parts[0] ?? '');
+  if (!p) return fullParagraphText;
+  if (p.body.length > 0) return [p.body, ...parts.slice(1)].join(SOFT_BREAK);
+  return parts.slice(1).join(SOFT_BREAK);
+}
+
+function fuzzySlashScore(query: string, label: string, hint: string): number {
+  const q = query.trim().toLowerCase();
+  const hay = `${label} ${hint}`.toLowerCase();
+  if (!q) return 1;
+  let j = 0;
+  for (let i = 0; i < hay.length && j < q.length; i++) if (hay[i] === q[j]) j++;
+  return j === q.length ? 2 + 1 / hay.length : 0;
+}
+
+type SlashCommandId = 'title' | 'section' | 'task' | 'quote' | 'divider';
+
+const SLASH_COMMAND_META: { id: SlashCommandId; label: string; hint: string }[] = [
+  { id: 'title', label: 'Title', hint: 'Large heading' },
+  { id: 'section', label: 'Section', hint: 'Subheading' },
+  { id: 'task', label: 'Task', hint: 'Checklist' },
+  { id: 'quote', label: 'Quote', hint: 'Pull quote' },
+  { id: 'divider', label: 'Divider', hint: 'Horizontal rule' },
+];
+
+function getSlashFiltered(query: string): { id: SlashCommandId; label: string; hint: string }[] {
+  return [...SLASH_COMMAND_META]
+    .map((c) => ({ c, s: fuzzySlashScore(query, c.label, c.hint) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.c);
+}
+
 interface EditableLineProps {
   id: string;
   text: string;
@@ -183,23 +380,37 @@ interface EditableLineProps {
   style: CSSProperties;
   onUpdate: (id: string, raw: string) => void;
   onFocusIndex: (id: string) => void;
+  onAfterInput?: (el: HTMLDivElement) => void;
 }
 
-function EditableLine({ id, text, tokens, placeholder, style, onUpdate, onFocusIndex }: EditableLineProps) {
+function EditableLine({
+  id,
+  text,
+  tokens,
+  placeholder,
+  style,
+  onUpdate,
+  onFocusIndex,
+  onAfterInput,
+}: EditableLineProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [showPlaceholder, setShowPlaceholder] = useState(text.length === 0);
+  const [focused, setFocused] = useState(false);
+  const isEmpty = text.length === 0;
+  const lineHeight = typeof style.lineHeight === 'number' ? style.lineHeight : 1.65;
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (document.activeElement === el) return;
     if (el.textContent !== text) el.textContent = text;
-    setShowPlaceholder(text.length === 0);
   }, [text, id]);
 
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      {showPlaceholder ? (
+    <div
+      style={{ position: 'relative', width: '100%' }}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={() => setFocused(false)}
+    >
+      {isEmpty ? (
         <div
           aria-hidden
           style={{
@@ -208,10 +419,14 @@ function EditableLine({ id, text, tokens, placeholder, style, onUpdate, onFocusI
             top: 0,
             right: 0,
             pointerEvents: 'none',
+            userSelect: 'none',
             color: tokens.textGhost,
-            opacity: 0.42,
-            fontWeight: 500,
-            transition: 'opacity 0.16s ease',
+            opacity: focused ? 0.1 : 0.18,
+            fontWeight: 400,
+            fontSize: style.fontSize,
+            lineHeight: style.lineHeight ?? lineHeight,
+            letterSpacing: '0.03em',
+            transition: 'opacity 0.2s ease',
           }}
         >
           {placeholder}
@@ -226,17 +441,18 @@ function EditableLine({ id, text, tokens, placeholder, style, onUpdate, onFocusI
         spellCheck={false}
         onInput={(ev) => {
           const raw = ev.currentTarget.textContent ?? '';
-          setShowPlaceholder(raw.length === 0);
           onUpdate(id, raw);
+          requestAnimationFrame(() => onAfterInput?.(ev.currentTarget));
         }}
         onFocus={() => {
-          setShowPlaceholder(false);
           onFocusIndex(id);
         }}
-        onBlur={(ev) => {
-          if (ev.currentTarget.textContent?.length === 0) setShowPlaceholder(true);
+        style={{
+          ...style,
+          minHeight: isEmpty ? `${lineHeight}em` : undefined,
+          transition: `${style.transition ? `${style.transition}, ` : ''}box-shadow 0.2s ease, color 0.18s ease`,
+          boxShadow: focused ? `inset 0 0 0 1px ${tokens.accent}18, 0 0 28px ${tokens.accent}0c` : 'none',
         }}
-        style={style}
       />
     </div>
   );
@@ -248,26 +464,24 @@ interface Props {
   onChange: (content: NotebookContent) => void;
 }
 
-type HelperSpec =
-  | { label: string; kind: 'title'; text: string }
-  | { label: string; kind: 'section'; text: string }
-  | { label: string; kind: 'task'; text: string; checked: boolean }
-  | { label: string; kind: 'quote'; text: string }
-  | { label: string; kind: 'divider' };
-
-const HELPER_SPECS: HelperSpec[] = [
-  { label: 'Title', kind: 'title', text: 'Title' },
-  { label: 'Section', kind: 'section', text: 'Section' },
-  { label: 'Task', kind: 'task', text: 'Task', checked: false },
-  { label: 'Quote', kind: 'quote', text: 'Quote' },
-  { label: 'Line', kind: 'divider' },
-];
-
 export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
+  const [slashMenu, setSlashMenu] = useState<{
+    blockId: string;
+    query: string;
+    top: number;
+    left: number;
+    width: number;
+    selected: number;
+  } | null>(null);
+  const [focusedDividerId, setFocusedDividerId] = useState<string | null>(null);
 
   const editorRootRef = useRef<HTMLDivElement>(null);
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  const slashMenuRef = useRef(slashMenu);
+  slashMenuRef.current = slashMenu;
   const focusIndexRef = useRef(0);
   const pendingCaretRef = useRef<{ id: string; offset: number } | null>(null);
 
@@ -337,32 +551,108 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     [blocks],
   );
 
-  const insertHelperBlock = useCallback(
-    (spec: HelperSpec) => {
+  const syncSlashFromParagraph = useCallback((blockId: string, el: HTMLDivElement) => {
+    const blk = blocksRef.current.find((b) => b.id === blockId);
+    if (blk?.kind !== 'paragraph') {
+      setSlashMenu((s) => (s?.blockId === blockId ? null : s));
+      return;
+    }
+    const text = el.textContent ?? '';
+    const token = slashFilterTokenFromParagraph(text);
+    if (token === null) {
+      setSlashMenu((s) => (s?.blockId === blockId ? null : s));
+      return;
+    }
+    const sel = window.getSelection();
+    let rect: DOMRect | null = null;
+    if (sel?.rangeCount && el.contains(sel.anchorNode)) {
+      const r = sel.getRangeAt(0).cloneRange();
+      r.collapse(true);
+      rect = r.getBoundingClientRect();
+    }
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      rect = el.getBoundingClientRect();
+    }
+    const filtered = getSlashFiltered(token);
+    const margin = 10;
+    const estW = 260;
+    const estH = 240;
+    let top = rect.bottom + 8;
+    let left = rect.left;
+    if (typeof window !== 'undefined') {
+      left = Math.min(Math.max(margin, left), window.innerWidth - estW - margin);
+      if (top + estH > window.innerHeight - margin) {
+        top = Math.max(margin, rect.top - estH - 8);
+      }
+      top = Math.min(Math.max(margin, top), window.innerHeight - margin);
+    }
+    setSlashMenu((prev) => {
+      const selected =
+        prev && prev.blockId === blockId && prev.query === token
+          ? Math.min(prev.selected, Math.max(0, filtered.length - 1))
+          : 0;
+      return {
+        blockId,
+        query: token,
+        top,
+        left,
+        width: Math.max(200, Math.min(estW, rect.width || 200)),
+        selected,
+      };
+    });
+  }, []);
+
+  const applySlashCommand = useCallback(
+    (blockId: string, cmd: SlashCommandId) => {
+      setSlashMenu(null);
       setBlocks((prev) => {
-        const focus = Math.min(Math.max(focusIndexRef.current, 0), Math.max(prev.length - 1, 0));
-        const insertAt = Math.min(focus + 1, prev.length);
-        let insert: Block;
-        if (spec.kind === 'divider') insert = { id: newBlockId(), kind: 'divider' };
-        else if (spec.kind === 'task')
-          insert = { id: newBlockId(), kind: 'task', text: spec.text, checked: spec.checked };
-        else insert = { id: newBlockId(), kind: spec.kind, text: spec.text };
-        const next = [...prev.slice(0, insertAt), insert, ...prev.slice(insertAt)];
+        const i = prev.findIndex((b) => b.id === blockId);
+        if (i === -1) return prev;
+        const cur = prev[i]!;
+        if (cur.kind !== 'paragraph') return prev;
+        const rest = paragraphTextAfterSlashApply(cur.text, cmd);
+        const id = cur.id;
+        let next: Block[];
+        switch (cmd) {
+          case 'title':
+            next = [...prev.slice(0, i), { id, kind: 'title', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'section':
+            next = [...prev.slice(0, i), { id, kind: 'section', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'task':
+            next = [...prev.slice(0, i), { id, kind: 'task', text: rest, checked: false }, ...prev.slice(i + 1)];
+            break;
+          case 'quote':
+            next = [...prev.slice(0, i), { id, kind: 'quote', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'divider': {
+            const pid = newBlockId();
+            next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
+            const serialized = serializeBlocks(next);
+            onChange({ ...content, body: serialized });
+            pendingCaretRef.current = { id: pid, offset: rest.length };
+            return next;
+          }
+        }
         const serialized = serializeBlocks(next);
         onChange({ ...content, body: serialized });
-        if (insert.kind === 'divider') pendingCaretRef.current = { id: insert.id, offset: 0 };
-        else if (spec.kind !== 'divider') {
-          pendingCaretRef.current = { id: insert.id, offset: spec.text.length };
-        }
+        const nb = next[i]!;
+        pendingCaretRef.current = { id: nb.id, offset: rest.length };
         return next;
       });
     },
     [content, onChange],
   );
 
+  const slashFiltered = useMemo(
+    () => (slashMenu ? getSlashFiltered(slashMenu.query) : []),
+    [slashMenu],
+  );
+
   const previewLines = useMemo(() => {
     const body = content.body ?? '';
-    return body.split('\n').map(parseNotebookLine);
+    return body.split(/\r?\n/).map(parseNotebookLine);
   }, [content.body]);
 
   const fontStack = "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
@@ -376,11 +666,12 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
       backgroundImage: paperBackground,
       backgroundSize: paperSize,
       color: tokens.textPrimary,
-      fontSize: '16px',
-      lineHeight: 1.75,
+      fontSize: '15.5px',
+      lineHeight: 1.72,
       letterSpacing: '0.01em',
       fontFamily: fontStack,
-      paddingBottom: '80px',
+      paddingTop: '12px',
+      paddingBottom: '96px',
       outline: 'none',
       transition: 'color 0.18s ease, background-image 0.22s ease',
     }),
@@ -440,8 +731,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         }
 
         const singleLine = text.includes('\n') ? (text.split('\n')[0] ?? '') : text;
-        if (singleLine === block.text) return prev;
-        const next = [...prev.slice(0, i), { ...block, text: singleLine } as Block, ...prev.slice(i + 1)];
+        const edited: Block = applyVisualEditToStructuredBlock(block, singleLine);
+        const same =
+          edited.kind === block.kind &&
+          edited.text === block.text &&
+          (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked));
+        if (same) return prev;
+        const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
         onChange({ ...content, body: serializeBlocks(next) });
         return next;
       });
@@ -491,13 +787,73 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
     [content, onChange],
   );
 
-  const handleRootKeyDown = useCallback(
+  const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
+    if (block.kind === 'divider') {
+      (root.querySelector(`[data-divider-row][data-block-id="${block.id}"]`) as HTMLElement | null)?.focus();
+      return;
+    }
+    const len = block.text.length;
+    const o = Math.max(0, Math.min(offset, len));
+    pendingCaretRef.current = { id: block.id, offset: o };
+    requestAnimationFrame(() => {
+      const el = root.querySelector<HTMLElement>(`[data-editable-id="${block.id}"]`);
+      el?.focus();
+      if (el) setCaretOffsetIn(el, o);
+      pendingCaretRef.current = null;
+    });
+  }, []);
+
+  const handleEditorKeyCapture = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (editorMode !== 'edit') return;
+      if (e.key === 'Tab') return;
+
       const root = editorRootRef.current;
       if (!root) return;
+      const blocks = blocksRef.current;
+      const sm = slashMenuRef.current;
 
-      if (e.key === 'Backspace' && e.target instanceof HTMLElement) {
+      if (sm) {
+        const filtered = getSlashFiltered(sm.query);
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          const { blockId } = sm;
+          setSlashMenu(null);
+          setBlocks((prev) => {
+            const i = prev.findIndex((b) => b.id === blockId);
+            if (i === -1) return prev;
+            const b = prev[i]!;
+            if (b.kind !== 'paragraph') return prev;
+            const nt = stripSlashInvocationForEscape(b.text);
+            if (nt === b.text) return prev;
+            const next = [...prev.slice(0, i), { ...b, text: nt }, ...prev.slice(i + 1)];
+            onChange({ ...content, body: serializeBlocks(next) });
+            pendingCaretRef.current = { id: blockId, offset: 0 };
+            return next;
+          });
+          return;
+        }
+        if (e.key === 'ArrowDown' && filtered.length > 0) {
+          e.preventDefault();
+          setSlashMenu((s) =>
+            s ? { ...s, selected: Math.min(s.selected + 1, filtered.length - 1) } : s,
+          );
+          return;
+        }
+        if (e.key === 'ArrowUp' && filtered.length > 0) {
+          e.preventDefault();
+          setSlashMenu((s) => (s ? { ...s, selected: Math.max(s.selected - 1, 0) } : s));
+          return;
+        }
+        if (e.key === 'Enter' && filtered.length > 0) {
+          e.preventDefault();
+          const cmd = filtered[Math.min(sm.selected, filtered.length - 1)]!.id;
+          applySlashCommand(sm.blockId, cmd);
+          return;
+        }
+      }
+
+      if ((e.key === 'Backspace' || e.key === 'Delete') && e.target instanceof HTMLElement) {
         const row = e.target.closest<HTMLElement>('[data-divider-row]');
         if (row) {
           e.preventDefault();
@@ -511,6 +867,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return;
+
       let node: Node | null = sel.anchorNode;
       let editable: HTMLElement | null = null;
       while (node && node !== root) {
@@ -520,17 +877,121 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         }
         node = node.parentNode;
       }
-      if (!editable) return;
+
+      if (!editable) {
+        if (
+          (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+          document.activeElement &&
+          root.contains(document.activeElement)
+        ) {
+          const row = (document.activeElement as HTMLElement).closest('[data-divider-row]');
+          if (row) {
+            const did = row.getAttribute('data-block-id');
+            const idx = did ? blocks.findIndex((b) => b.id === did) : -1;
+            if (idx !== -1) {
+              const ti =
+                e.key === 'ArrowUp' ? prevNavBlockIndex(blocks, idx) : nextNavBlockIndex(blocks, idx);
+              if (ti !== -1) {
+                e.preventDefault();
+                const tb = blocks[ti]!;
+                const off =
+                  tb.kind === 'divider' ? 0 : e.key === 'ArrowUp' ? tb.text.length : 0;
+                focusEditableBlock(root, tb, off);
+              }
+            }
+          }
+        }
+        return;
+      }
+
       const id = editable.dataset.editableId;
       if (!id) return;
       const index = blocks.findIndex((b) => b.id === id);
       if (index === -1) return;
       const block = blocks[index]!;
 
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
+        const offset = getCaretOffsetIn(editable);
+        const text = editable.textContent ?? '';
+        const len = text.length;
+        const lh = lineHeightOf(editable);
+        const hStart = rangeHeightFromStartToCaret(editable);
+        const hEnd = rangeHeightFromCaretToEnd(editable);
+        const firstVisual = caretInFirstVisualLine(editable);
+        const lastVisual = caretInLastVisualLine(editable);
+        const atLineStart = caretAtVisualLineStart(editable);
+        const atLineEnd = caretAtVisualLineEnd(editable);
+        const upLeave =
+          (firstVisual && atLineStart) ||
+          (offset === 0 && (hStart <= lh * 1.35 || !Number.isFinite(hStart) || hStart === 0));
+        const downLeave =
+          (lastVisual && atLineEnd) ||
+          (offset >= len && (hEnd <= lh * 1.35 || !Number.isFinite(hEnd) || hEnd === 0));
+
+        if (e.key === 'ArrowUp' && !upLeave) return;
+        if (e.key === 'ArrowDown' && !downLeave) return;
+
+        if (e.key === 'ArrowUp') {
+          const pi = prevNavBlockIndex(blocks, index);
+          if (pi === -1) return;
+          e.preventDefault();
+          const pb = blocks[pi]!;
+          const col = pb.kind === 'divider' ? 0 : Math.min(offset, pb.text.length);
+          focusEditableBlock(root, pb, col);
+          return;
+        }
+
+        const ni = nextNavBlockIndex(blocks, index);
+        if (ni === -1) return;
+        e.preventDefault();
+        const nb = blocks[ni]!;
+        const col = nb.kind === 'divider' ? 0 : Math.min(offset, nb.text.length);
+        focusEditableBlock(root, nb, col);
+        return;
+      }
+
+      if (e.key === 'Enter' && e.shiftKey) {
+        if (block.kind === 'divider') return;
         e.preventDefault();
         const offset = getCaretOffsetIn(editable);
         const text = editable.textContent ?? '';
+        const nextText = text.slice(0, offset) + SOFT_BREAK + text.slice(offset);
+        const nb: Block =
+          block.kind === 'paragraph'
+            ? { id: block.id, kind: 'paragraph', text: nextText }
+            : block.kind === 'title'
+              ? { id: block.id, kind: 'title', text: nextText }
+              : block.kind === 'section'
+                ? { id: block.id, kind: 'section', text: nextText }
+                : block.kind === 'quote'
+                  ? { id: block.id, kind: 'quote', text: nextText }
+                  : { id: block.id, kind: 'task', text: nextText, checked: block.checked };
+        const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
+        persist(next);
+        pendingCaretRef.current = { id: block.id, offset: offset + 1 };
+        return;
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const offset = getCaretOffsetIn(editable);
+        const text = editable.textContent ?? '';
+
+        if (
+          (block.kind === 'title' ||
+            block.kind === 'section' ||
+            block.kind === 'quote' ||
+            block.kind === 'task') &&
+          text.trim() === ''
+        ) {
+          e.preventDefault();
+          const nb: Block = { id: block.id, kind: 'paragraph', text: '' };
+          const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
+          persist(next);
+          pendingCaretRef.current = { id: nb.id, offset: 0 };
+          return;
+        }
+
+        e.preventDefault();
 
         if (block.kind === 'divider') {
           const fresh: Block = { id: newBlockId(), kind: 'paragraph', text: '' };
@@ -561,19 +1022,42 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         return;
       }
 
+      if (e.key === 'Delete') {
+        const offset = getCaretOffsetIn(editable);
+        const text = editable.textContent ?? '';
+        if (offset < text.length) return;
+        if (index >= blocks.length - 1) return;
+        const nx = blocks[index + 1]!;
+        e.preventDefault();
+        if (nx.kind === 'divider') {
+          removeBlockAt(index + 1);
+          return;
+        }
+        const merged = mergeBlocks(block, nx);
+        const next = [...blocks.slice(0, index), merged, ...blocks.slice(index + 2)];
+        persist(next);
+        pendingCaretRef.current = { id: merged.id, offset: blockTextLen(block) };
+        return;
+      }
+
       if (e.key === 'Backspace') {
         const offset = getCaretOffsetIn(editable);
         const text = editable.textContent ?? '';
 
-        if (block.kind === 'title' || block.kind === 'section') {
-          if (offset === 0 && text.length === 0) {
-            e.preventDefault();
-            const nextBlock: Block = { id: block.id, kind: 'paragraph', text: '' };
-            const next = [...blocks.slice(0, index), nextBlock, ...blocks.slice(index + 1)];
-            persist(next);
-            pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
-            return;
-          }
+        if (
+          (block.kind === 'title' ||
+            block.kind === 'section' ||
+            block.kind === 'quote' ||
+            block.kind === 'task') &&
+          offset === 0 &&
+          text.length === 0
+        ) {
+          e.preventDefault();
+          const nextBlock: Block = { id: block.id, kind: 'paragraph', text: '' };
+          const next = [...blocks.slice(0, index), nextBlock, ...blocks.slice(index + 1)];
+          persist(next);
+          pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
+          return;
         }
 
         if (block.kind === 'paragraph' && offset === 0 && index > 0) {
@@ -591,7 +1075,15 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         }
       }
     },
-    [blocks, editorMode, persist, removeBlockAt],
+    [
+      editorMode,
+      persist,
+      removeBlockAt,
+      applySlashCommand,
+      content,
+      onChange,
+      focusEditableBlock,
+    ],
   );
 
   return (
@@ -616,12 +1108,13 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         <div>
           <div
             style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.14em',
+              fontSize: '10px',
+              fontWeight: 600,
+              letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: tokens.textGhost,
-              marginBottom: '6px',
+              opacity: 0.75,
+              marginBottom: '8px',
             }}
           >
             Notebook
@@ -629,11 +1122,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
 
           <div
             style={{
-              fontSize: '13px',
-              color: tokens.textMuted,
+              fontSize: '12.5px',
+              color: tokens.textGhost,
+              opacity: 0.85,
+              letterSpacing: '0.01em',
+              lineHeight: 1.45,
             }}
           >
-            Write, divide, collect, return.
+            Keyboard-first writing. Type / for blocks.
           </div>
         </div>
 
@@ -702,38 +1198,73 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
         </div>
       </div>
 
-      {editorMode === 'edit' ? (
-        <div
-          style={{
-            display: 'flex',
-            gap: '6px',
-            flexWrap: 'wrap',
-            marginBottom: '14px',
-            opacity: 0.9,
-          }}
-        >
-          {HELPER_SPECS.map((button) => (
-            <button
-              key={button.label}
-              type="button"
-              onClick={() => insertHelperBlock(button)}
+      {editorMode === 'edit' && slashMenu && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              role="listbox"
+              aria-label="Block commands"
               style={{
-                border: `1px solid ${tokens.cardBorder}`,
-                background: `${tokens.wellBg}80`,
-                color: tokens.textMuted,
-                borderRadius: '999px',
-                fontSize: '11px',
-                fontWeight: 600,
-                padding: '6px 10px',
-                cursor: 'pointer',
-                transition: 'background 0.15s ease, border-color 0.15s ease',
+                position: 'fixed',
+                zIndex: 10050,
+                top: slashMenu.top,
+                left: slashMenu.left,
+                minWidth: Math.max(200, slashMenu.width),
+                maxWidth: 280,
+                padding: '5px',
+                borderRadius: '12px',
+                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgba(10,11,14,0.92)',
+                backdropFilter: 'blur(20px) saturate(1.25)',
+                WebkitBackdropFilter: 'blur(20px) saturate(1.25)',
+                boxShadow: `0 18px 50px rgba(0,0,0,0.55), 0 0 0 1px ${tokens.accent}12, inset 0 1px 0 rgba(255,255,255,0.04)`,
               }}
             >
-              + {button.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+              {slashFiltered.length === 0 ? (
+                <div style={{ padding: '10px 12px', fontSize: '12px', color: tokens.textGhost, opacity: 0.65 }}>
+                  No matches
+                </div>
+              ) : (
+                slashFiltered.map((cmd, i) => {
+                  const active = i === slashMenu.selected;
+                  return (
+                    <button
+                      key={cmd.id}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onMouseDown={(ev) => {
+                        ev.preventDefault();
+                        applySlashCommand(slashMenu.blockId, cmd.id);
+                      }}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: '1px',
+                        width: '100%',
+                        textAlign: 'left',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        padding: '7px 10px',
+                        marginBottom: i < slashFiltered.length - 1 ? 1 : 0,
+                        background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
+                        color: active ? tokens.textPrimary : tokens.textSecondary,
+                        transition: 'background 0.12s ease, color 0.12s ease',
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.01em' }}>{cmd.label}</span>
+                      <span style={{ fontSize: '10px', color: tokens.textGhost, opacity: 0.55, fontWeight: 500 }}>
+                        {cmd.hint}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {editorMode === 'edit' ? (
         <div
@@ -742,7 +1273,7 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
           aria-multiline
           aria-label="Notebook"
           tabIndex={-1}
-          onKeyDown={handleRootKeyDown}
+          onKeyDownCapture={handleEditorKeyCapture}
           style={editorSurfaceStyle}
         >
           {blocks.map((block, index) => {
@@ -757,12 +1288,17 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   aria-label="Section divider"
                   onFocus={() => {
                     focusIndexRef.current = index;
+                    setFocusedDividerId(block.id);
+                  }}
+                  onBlur={() => {
+                    setFocusedDividerId((id) => (id === block.id ? null : id));
                   }}
                   onKeyDown={(ev) => {
                     if (ev.key === 'Enter' && !ev.shiftKey) {
                       ev.preventDefault();
                       const fresh: Block = { id: newBlockId(), kind: 'paragraph', text: '' };
-                      persist([...blocks.slice(0, index + 1), fresh, ...blocks.slice(index + 1)]);
+                      const b = blocksRef.current;
+                      persist([...b.slice(0, index + 1), fresh, ...b.slice(index + 1)]);
                       pendingCaretRef.current = { id: fresh.id, offset: 0 };
                       return;
                     }
@@ -774,18 +1310,25 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    margin: '22px 0',
+                    margin: '28px 0',
                     outline: 'none',
                     borderRadius: '8px',
-                    transition: 'opacity 0.18s ease',
+                    transition: 'box-shadow 0.24s ease, opacity 0.18s ease',
+                    boxShadow:
+                      focusedDividerId === block.id
+                        ? `0 0 20px ${tokens.accent}18, inset 0 0 0 1px ${tokens.accent}22`
+                        : 'none',
                   }}
                 >
                   <div
                     style={{
                       flex: 1,
                       height: '1px',
-                      background: tokens.cardBorder,
-                      opacity: 0.88,
+                      background: tokens.divider,
+                      opacity: focusedDividerId === block.id ? 0.95 : 0.65,
+                      boxShadow:
+                        focusedDividerId === block.id ? `0 0 14px ${tokens.accent}22` : 'none',
+                      transition: 'opacity 0.2s ease, box-shadow 0.24s ease',
                     }}
                   />
                 </div>
@@ -799,20 +1342,21 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Title"
+                    placeholder="Title..."
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
+                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '28px',
-                      fontWeight: 800,
-                      letterSpacing: '-0.025em',
-                      lineHeight: 1.2,
-                      margin: '10px 0 12px',
+                      fontSize: '30px',
+                      fontWeight: 600,
+                      letterSpacing: '-0.028em',
+                      lineHeight: 1.14,
+                      margin: '26px 0 20px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -829,20 +1373,21 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Section"
+                    placeholder="Section..."
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
+                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textPrimary,
-                      fontSize: '19px',
-                      fontWeight: 700,
-                      letterSpacing: '-0.015em',
-                      lineHeight: 1.35,
-                      margin: '22px 0 10px',
+                      fontSize: '20px',
+                      fontWeight: 500,
+                      letterSpacing: '-0.018em',
+                      lineHeight: 1.36,
+                      margin: '34px 0 16px',
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -860,8 +1405,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: '12px',
-                    margin: '8px 0',
+                    gap: '10px',
+                    margin: '12px 0',
                   }}
                 >
                   <button
@@ -870,21 +1415,32 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                     onClick={() => toggleTask(block.id)}
                     style={{
                       flexShrink: 0,
-                      width: '20px',
-                      height: '20px',
-                      marginTop: '5px',
-                      borderRadius: '6px',
-                      border: `2px solid ${block.checked ? tokens.accent : tokens.cardBorder}`,
-                      background: block.checked ? `${tokens.accent}20` : 'transparent',
+                      width: '18px',
+                      height: '18px',
+                      marginTop: '0.32em',
+                      borderRadius: '5px',
+                      border: `1.5px solid ${block.checked ? tokens.accent : tokens.cardBorder}`,
+                      background: block.checked ? `${tokens.accent}18` : 'transparent',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '12px',
+                      fontSize: '11px',
                       fontWeight: 800,
                       color: tokens.accent,
                       lineHeight: 1,
-                      transition: 'border-color 0.16s ease, background 0.16s ease',
+                      transition:
+                        'border-color 0.2s ease, background 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease',
+                      boxShadow: block.checked ? `0 0 12px ${tokens.accent}28` : 'none',
+                    }}
+                    onMouseDown={(ev) => {
+                      (ev.currentTarget as HTMLButtonElement).style.transform = 'scale(0.94)';
+                    }}
+                    onMouseUp={(ev) => {
+                      (ev.currentTarget as HTMLButtonElement).style.transform = '';
+                    }}
+                    onMouseLeave={(ev) => {
+                      (ev.currentTarget as HTMLButtonElement).style.transform = '';
                     }}
                   >
                     {block.checked ? '✓' : ''}
@@ -894,18 +1450,19 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       id={block.id}
                       text={block.text}
                       tokens={tokens}
-                      placeholder="Task"
+                      placeholder="Task..."
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
+                      onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
                       style={{
                         width: '100%',
                         border: 'none',
                         outline: 'none',
                         background: 'transparent',
                         color: tokens.textPrimary,
-                        fontSize: '16px',
-                        fontWeight: 500,
-                        lineHeight: 1.75,
+                        fontSize: '15.5px',
+                        fontWeight: 400,
+                        lineHeight: 1.68,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',
@@ -923,29 +1480,31 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={block.id}
                   data-block-id={block.id}
                   style={{
-                    margin: '12px 0',
-                    paddingLeft: '14px',
-                    borderLeft: `3px solid ${tokens.accent}55`,
-                    transition: 'border-color 0.18s ease',
+                    margin: '18px 0',
+                    paddingLeft: '18px',
+                    borderLeft: `2px solid ${tokens.accent}30`,
+                    boxShadow: `-6px 0 22px ${tokens.accent}0f`,
+                    transition: 'border-color 0.2s ease, box-shadow 0.22s ease',
                   }}
                 >
                   <EditableLine
                     id={block.id}
                     text={block.text}
                     tokens={tokens}
-                    placeholder="Quote"
+                    placeholder="Quote..."
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
+                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
                       color: tokens.textMuted,
-                      fontSize: '16px',
+                      fontSize: '15.5px',
                       fontStyle: 'italic',
-                      fontWeight: 500,
-                      lineHeight: 1.75,
+                      fontWeight: 400,
+                      lineHeight: 1.72,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -962,19 +1521,20 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   id={block.id}
                   text={block.text}
                   tokens={tokens}
-                  placeholder="Write…"
+                  placeholder="Write..."
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
+                  onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
                   style={{
                     width: '100%',
                     border: 'none',
                     outline: 'none',
                     background: 'transparent',
-                    color: tokens.textPrimary,
-                    fontSize: '16px',
+                    color: tokens.textSecondary,
+                    fontSize: '15.5px',
                     fontWeight: 400,
-                    lineHeight: 1.75,
-                    margin: '6px 0',
+                    lineHeight: 1.72,
+                    margin: '10px 0',
                     caretColor: tokens.accent,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
@@ -995,11 +1555,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <div
                   key={index}
                   style={{
-                    fontSize: '26px',
-                    fontWeight: 800,
-                    letterSpacing: '-0.02em',
-                    lineHeight: 1.25,
-                    margin: '8px 0 10px',
+                    fontSize: '30px',
+                    fontWeight: 600,
+                    letterSpacing: '-0.028em',
+                    lineHeight: 1.14,
+                    margin: '26px 0 20px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1012,10 +1572,11 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <div
                   key={index}
                   style={{
-                    fontSize: '18px',
-                    fontWeight: 700,
-                    lineHeight: 1.35,
-                    margin: '22px 0 8px',
+                    fontSize: '20px',
+                    fontWeight: 500,
+                    lineHeight: 1.36,
+                    letterSpacing: '-0.018em',
+                    margin: '34px 0 16px',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1029,9 +1590,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   key={index}
                   style={{
                     height: '1px',
-                    margin: '18px 0',
-                    background: tokens.cardBorder,
-                    opacity: 0.85,
+                    margin: '28px 0',
+                    background: tokens.divider,
+                    opacity: 0.7,
                   }}
                   role="separator"
                 />
@@ -1044,8 +1605,8 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: '12px',
-                    margin: '6px 0',
+                    gap: '10px',
+                    margin: '12px 0',
                     color: tokens.textPrimary,
                   }}
                 >
@@ -1055,14 +1616,14 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                       flexShrink: 0,
                       width: '18px',
                       height: '18px',
-                      marginTop: '5px',
+                      marginTop: '0.32em',
                       borderRadius: '5px',
-                      border: `2px solid ${line.checked ? tokens.accent : tokens.cardBorder}`,
-                      background: line.checked ? `${tokens.accent}22` : 'transparent',
+                      border: `1.5px solid ${line.checked ? tokens.accent : tokens.cardBorder}`,
+                      background: line.checked ? `${tokens.accent}18` : 'transparent',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '12px',
+                      fontSize: '11px',
                       fontWeight: 800,
                       color: tokens.accent,
                       lineHeight: 1,
@@ -1070,7 +1631,9 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                   >
                     {line.checked ? '✓' : ''}
                   </span>
-                  <span style={{ flex: 1, whiteSpace: 'pre-wrap' }}>{line.text}</span>
+                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '15.5px', lineHeight: 1.68 }}>
+                    {line.text}
+                  </span>
                 </div>
               );
             }
@@ -1079,11 +1642,15 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
                 <blockquote
                   key={index}
                   style={{
-                    margin: '10px 0',
-                    paddingLeft: '16px',
-                    borderLeft: `3px solid ${tokens.accent}66`,
+                    margin: '18px 0',
+                    paddingLeft: '18px',
+                    borderLeft: `2px solid ${tokens.accent}30`,
+                    boxShadow: `-6px 0 22px ${tokens.accent}0f`,
                     color: tokens.textMuted,
                     fontStyle: 'italic',
+                    fontSize: '15.5px',
+                    lineHeight: 1.72,
+                    fontWeight: 400,
                     whiteSpace: 'pre-wrap',
                   }}
                 >
@@ -1095,8 +1662,10 @@ export function ProjectNotebookBlock({ content, tokens, onChange }: Props) {
               <p
                 key={index}
                 style={{
-                  margin: '4px 0',
-                  color: tokens.textPrimary,
+                  margin: '10px 0',
+                  color: tokens.textSecondary,
+                  fontSize: '15.5px',
+                  lineHeight: 1.72,
                   whiteSpace: 'pre-wrap',
                 }}
               >
