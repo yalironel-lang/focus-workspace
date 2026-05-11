@@ -3,7 +3,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { LayoutTemplate, ChevronDown } from 'lucide-react';
+import { Grid3x3, ChevronDown } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   FREE_SPACE_TEMPLATES,
@@ -12,7 +12,7 @@ import {
 } from '../../lib/sectionFreeSpaceLayoutTemplates';
 
 interface Props {
-  tokens: AtmosphereTokens;
+  tokens: AtmosphereTokens | null | undefined;
   topOffset: number;
   objectCount: number;
   onApplyTemplate: (id: FreeSpaceTemplateId) => void;
@@ -24,6 +24,7 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
 
   useEffect(() => {
     if (!open) return;
+    if (typeof document === 'undefined') return;
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -31,10 +32,14 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  if (!tokens || typeof tokens !== 'object') {
+    return null;
+  }
+
   const pick = (id: FreeSpaceTemplateId) => {
     setOpen(false);
     if (objectCount === 0) return;
-    if (objectCount >= FREE_SPACE_TEMPLATE_CONFIRM_MIN) {
+    if (objectCount >= FREE_SPACE_TEMPLATE_CONFIRM_MIN && typeof window !== 'undefined') {
       const meta = FREE_SPACE_TEMPLATES.find((t) => t.id === id);
       const ok = window.confirm(
         `Apply “${meta?.label ?? id}”? This will reposition ${objectCount} objects. You can still drag and resize them afterward.`,
@@ -77,7 +82,7 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
           transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease',
         }}
       >
-        <LayoutTemplate style={{ width: 13, height: 13, opacity: 0.85 }} />
+        <Grid3x3 style={{ width: 13, height: 13, opacity: 0.85 }} />
         Arrange
         <ChevronDown
           style={{

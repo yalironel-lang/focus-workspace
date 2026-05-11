@@ -119,11 +119,12 @@ function columnForType(t: ProjectObjectType): 0 | 1 | 2 {
 
 export function computeFreeSpaceTemplateLayout(
   templateId: FreeSpaceTemplateId,
-  objects: ProjectSpaceObject[],
-  positions: PositionMap,
+  objects: ProjectSpaceObject[] | null | undefined,
+  positions: PositionMap | null | undefined,
 ): Record<string, BlockPos> {
-  if (objects.length === 0) return {};
+  if (!objects || objects.length === 0) return {};
 
+  const posMap: PositionMap = positions && typeof positions === 'object' ? positions : {};
   const sorted = [...objects].sort((a, b) => a.createdAt - b.createdAt);
   const out: Record<string, BlockPos> = {};
 
@@ -135,7 +136,7 @@ export function computeFreeSpaceTemplateLayout(
         const c = columnForType(o.type);
         const x = colX[c];
         const y = bottoms[c];
-        out[o.id] = place(o.id, o.type, x, y, positions);
+        out[o.id] = place(o.id, o.type, x, y, posMap);
         const { h } = effDims(o.type, out[o.id]);
         bottoms[c] = y + h + GUTTER;
       }
@@ -145,7 +146,7 @@ export function computeFreeSpaceTemplateLayout(
       let y = 100;
       const x = 420;
       for (const o of sorted) {
-        out[o.id] = place(o.id, o.type, x, y, positions);
+        out[o.id] = place(o.id, o.type, x, y, posMap);
         const { h } = effDims(o.type, out[o.id]);
         y += h + GUTTER + 8;
       }
@@ -174,7 +175,7 @@ export function computeFreeSpaceTemplateLayout(
           const r = 140 + idx * 72 + ring * 24;
           const x = cx + Math.cos(angle) * r - DEFAULT_W[o.type] * 0.35;
           const y = cy + Math.sin(angle) * r * 0.82 - DEFAULT_H[o.type] * 0.25;
-          out[o.id] = place(o.id, o.type, x, y, positions);
+          out[o.id] = place(o.id, o.type, x, y, posMap);
         });
       }
       break;
@@ -185,7 +186,7 @@ export function computeFreeSpaceTemplateLayout(
       let x = 120;
       const yTop = 96;
       for (const o of notebooks) {
-        out[o.id] = place(o.id, o.type, x, yTop, positions);
+        out[o.id] = place(o.id, o.type, x, yTop, posMap);
         const { w } = effDims(o.type, out[o.id]);
         x += w + GUTTER + 20;
       }
@@ -193,7 +194,7 @@ export function computeFreeSpaceTemplateLayout(
       let y2 = 620;
       let rowH = 0;
       for (const o of rest) {
-        out[o.id] = place(o.id, o.type, x2, y2, positions);
+        out[o.id] = place(o.id, o.type, x2, y2, posMap);
         const { w, h } = effDims(o.type, out[o.id]);
         rowH = Math.max(rowH, h);
         x2 += w + GUTTER;
@@ -209,7 +210,7 @@ export function computeFreeSpaceTemplateLayout(
       let x = 140;
       const y = 240;
       for (const o of sorted) {
-        out[o.id] = place(o.id, o.type, x, y, positions);
+        out[o.id] = place(o.id, o.type, x, y, posMap);
         const { w } = effDims(o.type, out[o.id]);
         x += w + GUTTER + 18;
       }
@@ -224,7 +225,7 @@ export function computeFreeSpaceTemplateLayout(
         const r = 90 + Math.sqrt(i + 1) * 58;
         const x = cx + Math.cos(angle) * r - DEFAULT_W[o.type] * 0.4;
         const y = cy + Math.sin(angle) * r * 0.88 - DEFAULT_H[o.type] * 0.3;
-        out[o.id] = place(o.id, o.type, x, y, positions);
+        out[o.id] = place(o.id, o.type, x, y, posMap);
       });
       break;
     }

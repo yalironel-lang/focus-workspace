@@ -647,13 +647,18 @@ export function SectionPage() {
 
   const handleApplySpaceTemplate = useCallback(
     (templateId: FreeSpaceTemplateId) => {
-      const patches = computeFreeSpaceTemplateLayout(
-        templateId,
-        sectionObjects.objects,
-        sectionPositions.positions,
-      );
-      if (Object.keys(patches).length === 0) return;
-      sectionPositions.applyPositions(patches);
+      try {
+        const patches = computeFreeSpaceTemplateLayout(
+          templateId,
+          sectionObjects.objects,
+          sectionPositions.positions,
+        );
+        if (!patches || Object.keys(patches).length === 0) return;
+        sectionPositions.applyPositions(patches);
+      } catch (e) {
+        console.error('[FreeSpace] template apply failed', e);
+        toast.error('Could not apply layout. Try again.');
+      }
     },
     [sectionObjects.objects, sectionPositions],
   );

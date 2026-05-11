@@ -1008,7 +1008,7 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
-        {spatialAmbient ? <FreeSpaceSpatialAmbient tokens={tokens} /> : null}
+        {spatialAmbient && tokens ? <FreeSpaceSpatialAmbient tokens={tokens} /> : null}
 
         {/* ── Region warmth — the canvas surface develops memory ─── */}
         {warmthRef.current.filter(p => p.age < 30).map((point, i) => {

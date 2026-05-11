@@ -31,7 +31,7 @@ export interface SectionBlockPositionsState {
   positions: PositionMap;
   setPos: (id: string, pos: Partial<BlockPos>) => void;
   /** Apply many positions at once (e.g. spatial templates). Merges with existing map. */
-  applyPositions: (patches: Record<string, BlockPos>) => void;
+  applyPositions: (patches: Record<string, BlockPos> | null | undefined) => void;
   initPos: (id: string, hint?: Partial<BlockPos>) => void;
   removePos: (id: string) => void;
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
@@ -55,11 +55,17 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     });
   }, [sectionId]);
 
-  const applyPositions = useCallback((patches: Record<string, BlockPos>) => {
-    setPositions(prev => {
+  const applyPositions = useCallback((patches: Record<string, BlockPos> | null | undefined) => {
+    if (!patches || typeof patches !== 'object') return;
+    setPositions((prev) => {
       const next: PositionMap = { ...prev };
       for (const [id, pos] of Object.entries(patches)) {
-        next[id] = { ...(prev[id] ?? makeDefault()), ...pos };
+        if (!pos || typeof pos !== 'object') continue;
+        const merged = { ...(prev[id] ?? makeDefault()), ...pos };
+        if (![merged.x, merged.y, merged.w, merged.h].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+          continue;
+        }
+        next[id] = merged;
       }
       persist(sectionId, next);
       return next;
