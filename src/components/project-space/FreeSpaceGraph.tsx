@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
-import { safeEvaluateAtX } from '../../lib/safeMathExpr';
+import { safeEvaluateAtX, validateGraphExpression } from '../../lib/safeMathExpr';
 
 type GraphContent = Extract<ProjectObjectContent, { type: 'graph' }>;
 
@@ -82,6 +82,9 @@ function buildPathD(
 }
 
 export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
+  const [exprDraft, setExprDraft] = useState(content.expression);
+  const lastCommittedExprRef = useRef<string | null>(null);
+
   const [rangeDraft, setRangeDraft] = useState({
     xmin: String(content.xmin),
     xmax: String(content.xmax),
@@ -97,6 +100,14 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
       ymax: String(content.ymax),
     });
   }, [content.xmin, content.xmax, content.ymin, content.ymax]);
+
+  useEffect(() => {
+    if (lastCommittedExprRef.current !== null && content.expression === lastCommittedExprRef.current) {
+      lastCommittedExprRef.current = null;
+      return;
+    }
+    setExprDraft(content.expression);
+  }, [content.expression]);
 
   const patch = useCallback(
     (next: Partial<GraphContent>) => {
@@ -121,6 +132,11 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
       err: null as string | null,
     };
   }, [content.expression, content.xmin, content.xmax, content.ymin, content.ymax]);
+
+  const draftErr = useMemo(() => {
+    const v = validateGraphExpression(exprDraft);
+    return v.ok ? null : v.error;
+  }, [exprDraft]);
 
   const axes = useMemo(() => {
     const { xmin: xa, xmax: xb, ymin: ya, ymax: yb } = clampRange(
@@ -204,7 +220,11 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
             <button
               key={pr.label}
               type="button"
-              onClick={() => patch({ expression: pr.expression })}
+              onClick={() => {
+                lastCommittedExprRef.current = pr.expression;
+                patch({ expression: pr.expression });
+                setExprDraft(pr.expression);
+              }}
               className="text-[9px] font-semibold px-2 py-0.5 rounded-md"
               style={{
                 backgroundColor: tokens.wellBg,
@@ -220,13 +240,21 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
 
       <div className="p-3 flex flex-col gap-2">
         <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: tokens.textGhost }}>
-          y = … (use x)
+          y = … (x or X)
         </label>
         <input
           type="text"
-          value={content.expression}
-          onChange={e => patch({ expression: e.target.value })}
-          placeholder="x^2"
+          value={exprDraft}
+          onChange={e => {
+            const next = e.target.value;
+            setExprDraft(next);
+            const v = validateGraphExpression(next);
+            if (v.ok) {
+              lastCommittedExprRef.current = v.normalized;
+              patch({ expression: v.normalized });
+            }
+          }}
+          placeholder="2x + 1, y = sin x, 3(x+1)…"
           className="w-full rounded-lg px-3 py-2 text-sm outline-none font-mono"
           style={{
             backgroundColor: tokens.wellBg,
@@ -273,8 +301,13 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
             )}
           </svg>
         </div>
-        {err && (
-          <p className="text-[10px]" style={{ color: '#f87171' }}>
+        {draftErr && (
+          <p className="text-[10px] leading-snug" style={{ color: tokens.textMuted }}>
+            {draftErr}
+          </p>
+        )}
+        {!draftErr && err && (
+          <p className="text-[10px] leading-snug" style={{ color: tokens.textMuted }}>
             {err}
           </p>
         )}

@@ -11,6 +11,7 @@ import type {
   CSSProperties,
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
@@ -462,6 +463,74 @@ interface EditableLineProps {
   onAfterInput?: (el: HTMLDivElement) => void;
 }
 
+/** Free Space: fixed chrome height + scrollable writing/preview; wheel does not bubble to canvas. */
+function NotebookBodyScroll({
+  enabled,
+  scrollRef,
+  children,
+}: {
+  enabled: boolean;
+  scrollRef: RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+}) {
+  if (!enabled) return <Fragment>{children}</Fragment>;
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        ref={scrollRef}
+        data-nb-body-scroll="1"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
+        }}
+        onWheelCapture={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        {children}
+      </div>
+      <div
+        aria-hidden
+        style={{
+          pointerEvents: 'none',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 0,
+          height: 16,
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.28) 0%, transparent 100%)',
+          opacity: 0.25,
+        }}
+      />
+      <div
+        aria-hidden
+        style={{
+          pointerEvents: 'none',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 20,
+          background: 'linear-gradient(0deg, rgba(0,0,0,0.26) 0%, transparent 100%)',
+          opacity: 0.3,
+        }}
+      />
+    </div>
+  );
+}
+
 function EditableLine({
   id,
   text,
@@ -577,6 +646,7 @@ export function ProjectNotebookBlock({
   } | null>(null);
 
   const editorRootRef = useRef<HTMLDivElement>(null);
+  const notebookBodyScrollRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
   const slashMenuRef = useRef(slashMenu);
@@ -628,23 +698,6 @@ export function ProjectNotebookBlock({
     const t = window.setTimeout(() => setMorphPulseId(null), 420);
     return () => window.clearTimeout(t);
   }, [morphPulseId]);
-
-  useLayoutEffect(() => {
-    const pending = pendingCaretRef.current;
-    if (!pending) return;
-    const row = editorRootRef.current?.querySelector<HTMLElement>(
-      `[data-divider-row][data-block-id="${pending.id}"]`,
-    );
-    if (row) {
-      row.focus();
-      pendingCaretRef.current = null;
-      return;
-    }
-    const host = editorRootRef.current?.querySelector<HTMLElement>(`[data-editable-id="${pending.id}"]`);
-    if (!host) return;
-    setCaretOffsetIn(host, pending.offset);
-    pendingCaretRef.current = null;
-  }, [blocks]);
 
   const paperStyle = content.paperStyle ?? 'ruled';
 
@@ -817,6 +870,53 @@ export function ProjectNotebookBlock({
     });
   }, []);
 
+  const ensureNotebookBodyCaretVisible = useCallback(
+    (host: HTMLElement) => {
+      const sc = notebookBodyScrollRef.current;
+      if (context !== 'free-space' || !sc?.contains(host)) return;
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return;
+      const sr = sc.getBoundingClientRect();
+      const pad = 28;
+      if (r.bottom > sr.bottom - pad) {
+        sc.scrollTop += Math.max(1, r.bottom - sr.bottom + pad);
+      } else if (r.top < sr.top + pad) {
+        sc.scrollTop -= Math.max(1, sr.top + pad - r.top);
+      }
+    },
+    [context],
+  );
+
+  const onEditableAfterInput = useCallback(
+    (blockId: string, el: HTMLDivElement) => {
+      syncSlashFromParagraph(blockId, el);
+      ensureNotebookBodyCaretVisible(el);
+    },
+    [syncSlashFromParagraph, ensureNotebookBodyCaretVisible],
+  );
+
+  useLayoutEffect(() => {
+    const pending = pendingCaretRef.current;
+    if (!pending) return;
+    const row = editorRootRef.current?.querySelector<HTMLElement>(
+      `[data-divider-row][data-block-id="${pending.id}"]`,
+    );
+    if (row) {
+      row.focus();
+      pendingCaretRef.current = null;
+      return;
+    }
+    const host = editorRootRef.current?.querySelector<HTMLElement>(`[data-editable-id="${pending.id}"]`);
+    if (!host) return;
+    setCaretOffsetIn(host, pending.offset);
+    pendingCaretRef.current = null;
+    requestAnimationFrame(() => {
+      ensureNotebookBodyCaretVisible(host);
+    });
+  }, [blocks, ensureNotebookBodyCaretVisible]);
+
   const applySlashCommand = useCallback(
     (blockId: string, cmd: SlashCommandId) => {
       setSlashMenu(null);
@@ -937,7 +1037,7 @@ export function ProjectNotebookBlock({
     (): CSSProperties => ({
       position: 'relative',
       width: '100%',
-      minHeight: '420px',
+      ...(context === 'free-space' ? {} : { minHeight: '420px' }),
       boxSizing: 'border-box',
       backgroundColor: 'transparent',
       backgroundImage: writingSurfaceBackground.image,
@@ -956,7 +1056,7 @@ export function ProjectNotebookBlock({
       textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease',
     }),
-    [fontStack, writingSurfaceBackground, notebookInk.primary],
+    [context, fontStack, writingSurfaceBackground, notebookInk.primary],
   );
 
   const updateBlockText = useCallback(
@@ -1400,6 +1500,16 @@ export function ProjectNotebookBlock({
   100% { box-shadow: none; }
 }
 [data-nb-surface-block][data-nb-pulse="1"] { animation: nbMorphGlow 0.44s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+[data-nb-body-scroll] {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.14) transparent;
+}
+[data-nb-body-scroll]::-webkit-scrollbar { width: 5px; height: 5px; }
+[data-nb-body-scroll]::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 99px;
+}
+[data-nb-body-scroll]::-webkit-scrollbar-track { background: transparent; }
 `;
 
   // Host notification: when running inside Free Space, surface edit vs preview to the canvas host.
@@ -1414,7 +1524,15 @@ export function ProjectNotebookBlock({
       <div
         style={{
           padding: '18px 24px 28px',
-          minHeight: '420px',
+          ...(context === 'free-space'
+            ? {
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                minHeight: 0,
+                boxSizing: 'border-box',
+              }
+            : { minHeight: '420px' }),
           borderRadius: '20px',
           position: 'relative',
           backgroundColor: tokens.cardBg,
@@ -1436,6 +1554,7 @@ export function ProjectNotebookBlock({
           paddingBottom: '10px',
           marginBottom: '10px',
           borderBottom: '1px solid rgba(255,255,255,0.06)',
+          ...(context === 'free-space' ? { flexShrink: 0 } : {}),
         }}
       >
         <div style={{ minWidth: 0, flex: '1 1 200px' }}>
@@ -1714,6 +1833,7 @@ export function ProjectNotebookBlock({
           )
         : null}
 
+      <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
       {editorMode === 'edit' ? (
         <div
           ref={editorRootRef}
@@ -1808,7 +1928,7 @@ export function ProjectNotebookBlock({
                     placeholder="Untitled"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
-                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
+                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
@@ -1847,7 +1967,7 @@ export function ProjectNotebookBlock({
                     placeholder="Section label…"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
-                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
+                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
@@ -1948,7 +2068,7 @@ export function ProjectNotebookBlock({
                       placeholder="Checklist line…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
-                      onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
+                      onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                       style={{
                         width: '100%',
                         border: 'none',
@@ -1992,7 +2112,7 @@ export function ProjectNotebookBlock({
                     placeholder="Pull quote…"
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
-                    onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
+                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                     style={{
                       width: '100%',
                       border: 'none',
@@ -2044,7 +2164,7 @@ export function ProjectNotebookBlock({
                   placeholder={paragraphPlaceholder}
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
-                  onAfterInput={(el) => syncSlashFromParagraph(block.id, el)}
+                  onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                   style={{
                     width: '100%',
                     border: 'none',
@@ -2255,6 +2375,7 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       )}
+      </NotebookBodyScroll>
     </div>
     </Fragment>
   );

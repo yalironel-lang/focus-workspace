@@ -4,7 +4,11 @@
  *
  * Supports: + - * / ^ ( ) decimals, pi, e,
  * functions sqrt sin cos tan log ln abs exp (one argument each).
+ *
+ * Graph input is normalized first (see graphExprNormalize) for human-style syntax.
  */
+
+import { normalizeGraphExpression } from './graphExprNormalize';
 
 export type EvalResult = { ok: true; value: number } | { ok: false; error: string };
 
@@ -15,6 +19,25 @@ type Tok =
   | { k: 'lp' }
   | { k: 'rp' }
   | { k: 'eof' };
+
+function tokSnippet(t: Tok): string {
+  switch (t.k) {
+    case 'num':
+      return String(t.v);
+    case 'op':
+      return t.v;
+    case 'name':
+      return t.v;
+    case 'lp':
+      return '(';
+    case 'rp':
+      return ')';
+    case 'eof':
+      return 'end';
+    default:
+      return '?';
+  }
+}
 
 function lex(input: string): Tok[] {
   const s = input.trim();
@@ -31,7 +54,7 @@ function lex(input: string): Tok[] {
       while (j < s.length && /[0-9.]/.test(s[j]!)) j++;
       const raw = s.slice(i, j);
       const v = Number(raw);
-      if (!Number.isFinite(v)) throw new Error('Bad number');
+      if (!Number.isFinite(v)) throw new Error('BAD_NUMBER');
       out.push({ k: 'num', v });
       i = j;
       continue;
@@ -63,7 +86,8 @@ function lex(input: string): Tok[] {
       i++;
       continue;
     }
-    throw new Error(`Unexpected “${c}”`);
+    const near = s.slice(Math.max(0, i - 6), Math.min(s.length, i + 7));
+    throw new Error(`UNEXPECTED_SYMBOL:${c}:${near}`);
   }
   out.push({ k: 'eof' });
   return out;
@@ -94,7 +118,10 @@ class Parser {
 
   parse(): Node {
     const n = this.parseAdd();
-    if (this.peek().k !== 'eof') throw new Error('Extra input');
+    if (this.peek().k !== 'eof') {
+      const t = this.peek();
+      throw new Error(`EXTRA_INPUT:${tokSnippet(t)}`);
+    }
     return n;
   }
 
@@ -173,7 +200,7 @@ class Parser {
             } else break;
           }
         }
-        if (this.peek().k !== 'rp') throw new Error('Missing )');
+        if (this.peek().k !== 'rp') throw new Error('MISSING_PAREN');
         this.advance();
         return { t: 'call', fn: name, args };
       }
@@ -184,11 +211,11 @@ class Parser {
     if (t.k === 'lp') {
       this.advance();
       const inner = this.parseAdd();
-      if (this.peek().k !== 'rp') throw new Error('Missing )');
+      if (this.peek().k !== 'rp') throw new Error('MISSING_PAREN');
       this.advance();
       return inner;
     }
-    throw new Error('Expected value');
+    throw new Error('EXPECTED_VALUE');
   }
 }
 
@@ -197,7 +224,7 @@ function evalNode(n: Node, vars: Record<string, number>): number {
     case 'num':
       return n.v;
     case 'var': {
-      if (!(n.name in vars)) throw new Error(`Unknown “${n.name}”`);
+      if (!(n.name in vars)) throw new Error(`UNKNOWN_VAR:${n.name}`);
       return vars[n.name]!;
     }
     case 'neg':
@@ -206,32 +233,107 @@ function evalNode(n: Node, vars: Record<string, number>): number {
       const L = evalNode(n.a, vars);
       const R = evalNode(n.b, vars);
       switch (n.op) {
-        case '+': return L + R;
-        case '-': return L - R;
-        case '*': return L * R;
-        case '/': if (R === 0) throw new Error('÷0'); return L / R;
-        case '^': return L ** R;
-        default: throw new Error('Bad op');
+        case '+':
+          return L + R;
+        case '-':
+          return L - R;
+        case '*':
+          return L * R;
+        case '/':
+          if (R === 0) throw new Error('DIV0');
+          return L / R;
+        case '^':
+          return L ** R;
+        default:
+          throw new Error('BAD_OP');
       }
     }
     case 'call': {
-      const args = n.args.map(a => evalNode(a, vars));
-      if (args.length !== 1) throw new Error('One argument only');
+      const args = n.args.map((a) => evalNode(a, vars));
+      if (args.length !== 1) throw new Error('BAD_ARG_COUNT');
       const x = args[0]!;
       switch (n.fn) {
-        case 'sqrt': return Math.sqrt(x);
-        case 'sin': return Math.sin(x);
-        case 'cos': return Math.cos(x);
-        case 'tan': return Math.tan(x);
-        case 'log': return Math.log10(x);
-        case 'ln': return Math.log(x);
-        case 'abs': return Math.abs(x);
-        case 'exp': return Math.exp(x);
-        default: throw new Error(`Unknown “${n.fn}”`);
+        case 'sqrt':
+          return Math.sqrt(x);
+        case 'sin':
+          return Math.sin(x);
+        case 'cos':
+          return Math.cos(x);
+        case 'tan':
+          return Math.tan(x);
+        case 'log':
+          return Math.log10(x);
+        case 'ln':
+          return Math.log(x);
+        case 'abs':
+          return Math.abs(x);
+        case 'exp':
+          return Math.exp(x);
+        default:
+          throw new Error(`UNKNOWN_FN:${n.fn}`);
       }
     }
     default:
-      throw new Error('Bad node');
+      throw new Error('BAD_NODE');
+  }
+}
+
+function humanizeExprError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : '';
+  if (raw.startsWith('UNEXPECTED_SYMBOL:')) {
+    const parts = raw.split(':');
+    const sym = parts[1] ?? '';
+    const near = parts[2] ?? '';
+    return `Unexpected symbol “${sym}” near “${near}”. Check parentheses or spacing.`;
+  }
+  if (raw.startsWith('EXTRA_INPUT:')) {
+    const bit = raw.slice('EXTRA_INPUT:'.length);
+    return `Unexpected extra text after a complete expression (near “${bit}”). Try adding an operator or removing “${bit}”.`;
+  }
+  if (raw === 'MISSING_PAREN') {
+    return 'Missing closing parenthesis — add ) where the grouping ends.';
+  }
+  if (raw === 'EXPECTED_VALUE') {
+    return 'Incomplete expression — add a number, x, or parentheses.';
+  }
+  if (raw === 'BAD_NUMBER') {
+    return 'That number could not be read — try 0.2 or 2 instead of ambiguous decimals.';
+  }
+  if (raw.startsWith('UNKNOWN_VAR:')) {
+    const name = raw.slice('UNKNOWN_VAR:'.length);
+    return `Unknown symbol “${name}”. Use x as the variable, or try 2*x if you meant multiply.`;
+  }
+  if (raw.startsWith('UNKNOWN_FN:')) {
+    const name = raw.slice('UNKNOWN_FN:'.length);
+    return `Unsupported function “${name}”. Use sqrt, sin, cos, tan, log, ln, abs, or exp.`;
+  }
+  if (raw === 'DIV0') {
+    return 'Division by zero — adjust the expression or graph range.';
+  }
+  if (raw === 'BAD_ARG_COUNT') {
+    return 'Functions need exactly one argument, e.g. sin(x).';
+  }
+  return 'Could not read that expression — try simpler steps or explicit * between parts.';
+}
+
+function parseNormalized(normalized: string): Node {
+  const toks = lex(normalized);
+  return new Parser(toks).parse();
+}
+
+/**
+ * Returns normalized form if the expression parses; otherwise a calm error string.
+ */
+export function validateGraphExpression(raw: string): { ok: true; normalized: string } | { ok: false; error: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Type an expression using x (for example 2*x+1).' };
+  try {
+    const normalized = normalizeGraphExpression(trimmed);
+    if (!normalized) return { ok: false, error: 'Expression is empty after cleaning — try y = … or a formula in x.' };
+    parseNormalized(normalized);
+    return { ok: true, normalized };
+  } catch (e) {
+    return { ok: false, error: humanizeExprError(e) };
   }
 }
 
@@ -239,14 +341,14 @@ export function safeEvaluateExpression(expr: string, vars: Record<string, number
   const trimmed = expr.trim();
   if (!trimmed) return { ok: false, error: 'Empty' };
   try {
-    const toks = lex(trimmed);
-    const ast = new Parser(toks).parse();
+    const normalized = normalizeGraphExpression(trimmed);
+    if (!normalized) return { ok: false, error: 'Empty' };
+    const ast = parseNormalized(normalized);
     const v = evalNode(ast, vars);
-    if (!Number.isFinite(v)) return { ok: false, error: 'Not a finite number' };
+    if (!Number.isFinite(v)) return { ok: false, error: 'Not a finite number for this x — try another window or check log/sqrt/tan.' };
     return { ok: true, value: v };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Invalid';
-    return { ok: false, error: msg };
+    return { ok: false, error: humanizeExprError(e) };
   }
 }
 
