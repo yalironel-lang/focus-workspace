@@ -77,6 +77,8 @@ import type { BlockPos, PositionMap } from '../../hooks/useBlockPositions';
 import { FreeformBlock } from './FreeformBlock';
 import { CustomToolBlock } from './CustomToolBlock';
 import { FreeSpaceSpatialAmbient } from './FreeSpaceSpatialAmbient';
+import { FreeSpaceConnectionsLayer } from './FreeSpaceConnectionsLayer';
+import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -112,7 +114,7 @@ interface DragState {
 interface Props {
   tokens:       AtmosphereTokens;
   modules:      ModuleConfig[];
-  blocks:       Array<{ id: string }>;
+  blocks:       Array<{ id: string; connections?: string[] }>;
   tools:        CustomTool[];
   positions:    PositionMap;
   canvasState:  {
@@ -147,6 +149,15 @@ interface Props {
   renderModuleContent: (id: string) => React.ReactNode | null;
   /** Label for a given module/block ID */
   getLabel:     (id: string) => string;
+  /** Section Free Space: render connection lines + connect affordances */
+  freeSpaceConnectionsEnabled?: boolean;
+  /** Source object id while in lightweight “connect to…” mode */
+  connectModeSourceId?: string | null;
+  connectHoverTargetId?: string | null;
+  onConnectHoverTargetChange?: (id: string | null) => void;
+  onBeginConnectFromBlock?: (id: string) => void;
+  onConnectPairComplete?: (fromId: string, toId: string) => void;
+  onCancelConnectMode?: () => void;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -312,6 +323,13 @@ export function FreeformCanvas({
   onOpenAdd,
   renderModuleContent,
   getLabel,
+  freeSpaceConnectionsEnabled = false,
+  connectModeSourceId = null,
+  connectHoverTargetId = null,
+  onConnectHoverTargetChange,
+  onBeginConnectFromBlock,
+  onConnectPairComplete,
+  onCancelConnectMode,
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -469,7 +487,43 @@ export function FreeformCanvas({
   const hasDeepFocus = !!focusEditingId;
   const deepFocusAtmosphere = hasDeepFocus && !designMode;
 
-  // All item IDs in render order (modules → blocks → tools)
+  const [hoveredConnectionEdgeKey, setHoveredConnectionEdgeKey] = useState<string | null>(null);
+
+  const relatedToSelection = useMemo(() => {
+    if (!freeSpaceConnectionsEnabled || !selectedId || connectModeSourceId) return null;
+    const rel = new Set<string>([selectedId]);
+    const sel = blocks.find(b => b.id === selectedId);
+    coerceFreeSpaceConnectionIds(sel?.connections).forEach(c => rel.add(c));
+    blocks.forEach(b => {
+      if (coerceFreeSpaceConnectionIds(b.connections).includes(selectedId)) rel.add(b.id);
+    });
+    return rel;
+  }, [freeSpaceConnectionsEnabled, blocks, selectedId, connectModeSourceId]);
+
+  const lineHoverEndpointIds = useMemo(() => {
+    if (!hoveredConnectionEdgeKey) return null;
+    const i = hoveredConnectionEdgeKey.indexOf('|');
+    if (i < 0) return null;
+    const a = hoveredConnectionEdgeKey.slice(0, i);
+    const b = hoveredConnectionEdgeKey.slice(i + 1);
+    if (!a || !b) return null;
+    return new Set<string>([a, b]);
+  }, [hoveredConnectionEdgeKey]);
+
+  const handleBlockSelect = useCallback(
+    (blockId: string) => {
+      if (connectModeSourceId && connectModeSourceId !== blockId) {
+        onConnectPairComplete?.(connectModeSourceId, blockId);
+        return;
+      }
+      onSelect(blockId);
+    },
+    [connectModeSourceId, onConnectPairComplete, onSelect],
+  );
+
+  useEffect(() => {
+    if (!connectModeSourceId) setHoveredConnectionEdgeKey(null);
+  }, [connectModeSourceId]);
   type CanvasItem =
     | { kind: 'module'; id: string }
     | { kind: 'block';  id: string }
@@ -592,6 +646,7 @@ export function FreeformCanvas({
       zoomRafRef.current = 0;
       velRef.current = { vx: 0, vy: 0 };
       onSelect(null);
+      onCancelConnectMode?.();
       dragRef.current = {
         type: 'canvas',
         startMouseX: e.clientX,
@@ -604,6 +659,10 @@ export function FreeformCanvas({
     }
     e.preventDefault();
     e.stopPropagation();
+    if (connectModeSourceId && connectModeSourceId !== blockId && type === 'move' && onConnectPairComplete) {
+      onConnectPairComplete(connectModeSourceId, blockId);
+      return;
+    }
     // Cancel any running momentum or zoom lerp so a fresh drag starts clean
     cancelAnimationFrame(rafRef.current);
     cancelAnimationFrame(zoomRafRef.current);
@@ -618,7 +677,7 @@ export function FreeformCanvas({
     // Record touch — this thought is active again
     activityRef.current[blockId] = Date.now();
     try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
-    onSelect(blockId);
+    handleBlockSelect(blockId);
     const pos = positions[blockId] ?? { x: 0, y: 0, w: 340, h: 0 };
     dragRef.current = {
       type:        type === 'move' ? 'block-move' : 'block-resize',
@@ -634,7 +693,14 @@ export function FreeformCanvas({
     };
     setDraggingId(blockId);
     setActiveDragKind(type === 'resize' ? 'resize' : 'move');
-  }, [positions, onSelect, panX, panY]);
+  }, [
+    positions,
+    panX,
+    panY,
+    handleBlockSelect,
+    connectModeSourceId,
+    onConnectPairComplete,
+  ]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     // Left-click panning is only for empty canvas. Space+drag and middle-click
@@ -650,6 +716,7 @@ export function FreeformCanvas({
     zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
     onSelect(null);
+    onCancelConnectMode?.();
     dragRef.current = {
       type:        'canvas',
       startMouseX: e.clientX,
@@ -658,7 +725,7 @@ export function FreeformCanvas({
       startPanY:   panY,
       panStarted:  forcePan ? true : false,
     };
-  }, [onSelect, panX, panY]);
+  }, [onSelect, onCancelConnectMode, panX, panY]);
 
   useEffect(() => {
     const isEditingTarget = (el: EventTarget | null): boolean => {
@@ -1017,7 +1084,11 @@ export function FreeformCanvas({
         right:      0,
         bottom:     0,
         overflow:   'hidden',
-        cursor:     draggingId || dragRef.current?.type === 'canvas' ? 'grabbing' : (spaceHeld ? 'grab' : 'grab'),
+        cursor:     connectModeSourceId
+          ? 'crosshair'
+          : draggingId || dragRef.current?.type === 'canvas'
+            ? 'grabbing'
+            : (spaceHeld ? 'grab' : 'grab'),
         userSelect: draggingId ? 'none' : undefined,
         backgroundColor: tokens.pageBg,
       }}
@@ -1064,6 +1135,17 @@ export function FreeformCanvas({
         }}
       >
         {spatialAmbient && tokens ? <FreeSpaceSpatialAmbient tokens={tokens} /> : null}
+
+        {freeSpaceConnectionsEnabled && (
+          <FreeSpaceConnectionsLayer
+            tokens={tokens}
+            blocks={blocks}
+            positions={positions}
+            animateFocusId={selectedId}
+            hoveredEdgeKey={hoveredConnectionEdgeKey}
+            onHoveredEdgeChange={setHoveredConnectionEdgeKey}
+          />
+        )}
 
         {/* ── Region warmth — the canvas surface develops memory ─── */}
         {warmthRef.current.filter(p => p.age < 30).map((point, i) => {
@@ -1309,6 +1391,23 @@ export function FreeformCanvas({
             ? ', filter 1.4s cubic-bezier(0.4,0,0.2,1)'
             : '';
 
+          let connectionChrome: 'neutral' | 'dim' | 'emphasis' | 'connect-target' = 'neutral';
+          if (item.kind === 'block' && freeSpaceConnectionsEnabled) {
+            if (connectModeSourceId) {
+              if (item.id !== connectModeSourceId && connectHoverTargetId === item.id) {
+                connectionChrome = 'connect-target';
+              }
+            } else if (lineHoverEndpointIds?.has(item.id)) {
+              connectionChrome = 'emphasis';
+            } else if (relatedToSelection && selectedId && relatedToSelection.size > 1) {
+              if (relatedToSelection.has(item.id)) {
+                connectionChrome = item.id === selectedId ? 'neutral' : 'emphasis';
+              } else {
+                connectionChrome = 'dim';
+              }
+            }
+          }
+
           return (
             <div key={item.id}>
               <div
@@ -1379,9 +1478,17 @@ export function FreeformCanvas({
                   activeGesture={draggingId === item.id ? activeDragKind : null}
                   deepFocusAnchor={deepFocusAtmosphere && focusEditingId === item.id}
                   onBlockMouseDown={onBlockMouseDown}
-                  onSelect={onSelect}
+                  onSelect={handleBlockSelect}
                   onRemove={handleRemove}
                   onDuplicate={handleDuplicate}
+                  {...(item.kind === 'block' && freeSpaceConnectionsEnabled
+                    ? {
+                        onBeginConnect: onBeginConnectFromBlock,
+                        connectionChrome,
+                        connectModeSourceId,
+                        onConnectHoverTarget: onConnectHoverTargetChange,
+                      }
+                    : {})}
                 >
                   {content}
                 </FreeformBlock>

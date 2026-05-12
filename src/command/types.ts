@@ -27,4 +27,10 @@ export interface FreeSpaceCommandHandlers {
   addTextCard: () => void;
   addCalculator: () => void;
   addGraph: () => void;
+  /** Current selected Free Space object id, if any */
+  getFreeSpaceSelectedId?: () => string | null;
+  /** Enter connect mode from the selected object (requires Free Space tab + selection) */
+  startConnectFromSelected?: () => void;
+  /** Remove all connections involving the selected object */
+  clearConnectionsForSelected?: () => void;
 }

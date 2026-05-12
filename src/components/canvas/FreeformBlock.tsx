@@ -9,7 +9,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { GripHorizontal, X, Copy } from 'lucide-react';
+import { GripHorizontal, X, Copy, Link2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
 
@@ -32,6 +32,13 @@ interface Props {
   onSelect: (id: string) => void;
   onRemove?: (id: string) => void;
   onDuplicate?: (id: string) => void;
+  /** Free Space: enter “connect to…” mode from this object */
+  onBeginConnect?: (id: string) => void;
+  /** Visual emphasis for connection graph (dim / highlight / connect-target hover) */
+  connectionChrome?: 'neutral' | 'dim' | 'emphasis' | 'connect-target';
+  /** When set, hovering this block (if not source) signals a valid connect target */
+  connectModeSourceId?: string | null;
+  onConnectHoverTarget?: (targetId: string | null) => void;
 }
 
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
@@ -52,6 +59,10 @@ export function FreeformBlock({
   onSelect,
   onRemove,
   onDuplicate,
+  onBeginConnect,
+  connectionChrome = 'neutral',
+  connectModeSourceId = null,
+  onConnectHoverTarget,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -67,10 +78,15 @@ export function FreeformBlock({
   const showActions = (selected || designMode) && (onDuplicate || onRemove);
   const actionOpacity = headerHot ? 1 : designMode ? 0.28 : 0;
 
+  const showConnectAction = !!onBeginConnect && designMode && (headerHot || selected);
+  const isConnectTargetHover =
+    !!connectModeSourceId && connectModeSourceId !== id && connectionChrome === 'connect-target';
+
   const anchorNudge = deepFocusAnchor && !isDragging ? ' translateY(-1px)' : '';
 
   let transform = `translate3d(0,0,0) scale(1)${anchorNudge}`;
-  if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-3px,0) scale(1.004)${anchorNudge}`;
+  if (isConnectTargetHover) transform = `translate3d(0,-3px,0) scale(1.006)${anchorNudge}`;
+  else if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-3px,0) scale(1.004)${anchorNudge}`;
   else if (isDragging) transform = `translate3d(0,-5px,0) scale(1.01) rotate(0.28deg)${anchorNudge}`;
   else if (selected) transform = `translate3d(0,-4px,0) scale(1.003)${anchorNudge}`;
   else if (hovered) transform = `translate3d(0,-2px,0) scale(1.0018)${anchorNudge}`;
@@ -81,6 +97,15 @@ export function FreeformBlock({
   else if (selected) filter = 'brightness(1.025) saturate(1.03)';
   else if (hovered) filter = 'brightness(1.012) saturate(1.02)';
   else if (recede) filter = 'brightness(0.97) saturate(0.96)';
+  if (connectionChrome === 'dim') {
+    filter = filter === 'none'
+      ? 'brightness(0.94) saturate(0.92)'
+      : `${filter} brightness(0.96)`;
+  } else if (connectionChrome === 'emphasis') {
+    filter = filter === 'none'
+      ? 'brightness(1.04) saturate(1.04)'
+      : `${filter} brightness(1.02)`;
+  }
   if (deepFocusAnchor && !isDragging) {
     filter = filter === 'none'
       ? 'brightness(1.018) saturate(1.03)'
@@ -107,11 +132,13 @@ export function FreeformBlock({
     boxShadow = `${boxShadow}, 0 18px 48px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.05)`;
   }
 
-  const borderColor = selected
-    ? 'rgba(255,255,255,0.07)'
-    : hovered
-      ? tokens.cardBorderHover
-      : tokens.cardBorder;
+  const borderColor = isConnectTargetHover
+    ? 'rgba(251,191,36,0.35)'
+    : selected
+      ? 'rgba(255,255,255,0.07)'
+      : hovered
+        ? tokens.cardBorderHover
+        : tokens.cardBorder;
 
   const z = isDragging ? 10 : selected ? 8 : hovered ? 5 : 2;
 
@@ -123,8 +150,18 @@ export function FreeformBlock({
         e.stopPropagation();
         onSelect(id);
       }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => {
+        setHovered(true);
+        if (connectModeSourceId && connectModeSourceId !== id) {
+          onConnectHoverTarget?.(id);
+        }
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        if (connectModeSourceId && connectModeSourceId !== id) {
+          onConnectHoverTarget?.(null);
+        }
+      }}
       style={{
         position: 'absolute',
         left: pos.x,
@@ -205,7 +242,7 @@ export function FreeformBlock({
             transition: `background 0.35s ${chromeEase}, border-color 0.35s ${chromeEase}`,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
             <GripHorizontal
               style={{
                 width: '12px',
@@ -237,6 +274,48 @@ export function FreeformBlock({
               </span>
             )}
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+            {showConnectAction && (
+              <button
+                type="button"
+                title="Connect to…"
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation();
+                  onBeginConnect?.(id);
+                }}
+                style={{
+                  width: '24px',
+                  height: '22px',
+                  borderRadius: '7px',
+                  border: '1px solid transparent',
+                  background: 'rgba(251,191,36,0.06)',
+                  cursor: 'pointer',
+                  color: 'rgba(251,191,36,0.55)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: headerHot ? 1 : 0,
+                  pointerEvents: headerHot ? 'auto' : 'none',
+                  transition: `opacity 0.32s ${chromeEase}, color 0.2s ease, background 0.2s ease`,
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'rgba(251,191,36,0.12)';
+                  el.style.color = 'rgba(253,186,116,0.95)';
+                  el.style.borderColor = 'rgba(251,191,36,0.2)';
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'rgba(251,191,36,0.06)';
+                  el.style.color = 'rgba(251,191,36,0.55)';
+                  el.style.borderColor = 'transparent';
+                }}
+              >
+                <Link2 style={{ width: '11px', height: '11px' }} strokeWidth={2} />
+              </button>
+            )}
 
           {showActions && (
             <div
@@ -328,6 +407,7 @@ export function FreeformBlock({
               )}
             </div>
           )}
+          </div>
         </div>
 
         <div style={{ padding: '12px 14px 14px', overflow: 'hidden', flex: 1, minHeight: 0 }}>{children}</div>

@@ -14,6 +14,8 @@ import {
   StickyNote,
   Calculator,
   LineChart,
+  Link2,
+  Unlink,
   X,
   Zap,
 } from 'lucide-react';
@@ -294,6 +296,46 @@ export function GlobalCommandPalette() {
             if (!h?.addGraph) return;
             closePalette();
             h.addGraph();
+          },
+        },
+        {
+          id: 'fs-connect-selected',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Connect selected object…',
+          subtitle: 'Pick another object to link',
+          keywords: ['link', 'relate', 'edge', 'join'],
+          icon: Link2,
+          priority: 16,
+          disabled: !hasFs || !fs?.getFreeSpaceSelectedId?.() || !fs.getFreeSpaceSelectedId(),
+          disabledHint: !fs?.getFreeSpaceSelectedId?.()
+            ? 'Select an object on Free Space first'
+            : 'Switch to Free Space and select an object',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.startConnectFromSelected) return;
+            closePalette();
+            h.startConnectFromSelected();
+          },
+        },
+        {
+          id: 'fs-clear-connections',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Clear connections',
+          subtitle: 'Remove links for selected object',
+          keywords: ['unlink', 'disconnect', 'remove links'],
+          icon: Unlink,
+          priority: 17,
+          disabled: !hasFs || !fs?.getFreeSpaceSelectedId?.() || !fs.getFreeSpaceSelectedId(),
+          disabledHint: !fs?.getFreeSpaceSelectedId?.()
+            ? 'Select an object on Free Space first'
+            : 'Switch to Free Space and select an object',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.clearConnectionsForSelected) return;
+            closePalette();
+            h.clearConnectionsForSelected();
           },
         },
       );

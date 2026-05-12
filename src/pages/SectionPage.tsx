@@ -412,6 +412,8 @@ export function SectionPage() {
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
+  const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -602,6 +604,62 @@ export function SectionPage() {
     handleAddToSpace(pending);
   }, [sectionViewMode, handleAddToSpace]);
 
+  const cancelConnectMode = useCallback(() => {
+    setConnectSourceId(null);
+    setConnectHoverId(null);
+  }, []);
+
+  const completeFreeSpaceConnect = useCallback(
+    (from: string, to: string) => {
+      sectionObjects.addConnection(from, to);
+      cancelConnectMode();
+      toast.success('Connected');
+    },
+    [sectionObjects, cancelConnectMode],
+  );
+
+  const startConnectFromSelected = useCallback(() => {
+    if (sectionViewMode !== 'free-space') {
+      toast('Open the Free Space tab first');
+      return;
+    }
+    if (!spaceSelectedId) {
+      toast.error('Select a Free Space object first');
+      return;
+    }
+    setConnectSourceId(spaceSelectedId);
+  }, [sectionViewMode, spaceSelectedId]);
+
+  const clearConnectionsForSelected = useCallback(() => {
+    if (sectionViewMode !== 'free-space') {
+      toast('Open the Free Space tab first');
+      return;
+    }
+    if (!spaceSelectedId) return;
+    sectionObjects.clearConnectionsForObject(spaceSelectedId);
+    toast.success('Connections cleared');
+  }, [sectionViewMode, spaceSelectedId, sectionObjects]);
+
+  useEffect(() => {
+    if (!connectSourceId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelConnectMode();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [connectSourceId, cancelConnectMode]);
+
+  useEffect(() => {
+    if (sectionViewMode !== 'free-space') cancelConnectMode();
+  }, [sectionViewMode, cancelConnectMode]);
+
+  useEffect(() => {
+    cancelConnectMode();
+  }, [id, cancelConnectMode]);
+
   useEffect(() => {
     if (!id) {
       registerFreeSpace(null);
@@ -612,9 +670,19 @@ export function SectionPage() {
       addTextCard: () => requestFreeSpaceAdd('note'),
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
+      getFreeSpaceSelectedId: () => spaceSelectedId,
+      startConnectFromSelected,
+      clearConnectionsForSelected,
     });
     return () => registerFreeSpace(null);
-  }, [id, registerFreeSpace, requestFreeSpaceAdd]);
+  }, [
+    id,
+    registerFreeSpace,
+    requestFreeSpaceAdd,
+    spaceSelectedId,
+    startConnectFromSelected,
+    clearConnectionsForSelected,
+  ]);
 
   useEffect(() => {
     installFwFreeSpaceDevTools();
@@ -637,7 +705,8 @@ export function SectionPage() {
     const valid = new Set(sectionObjects.objects.map(o => o.id));
     if (spaceSelectedId && !valid.has(spaceSelectedId)) setSpaceSelectedId(null);
     if (spaceEditingId && !valid.has(spaceEditingId)) setSpaceEditingId(null);
-  }, [sectionObjects.objects, spaceSelectedId, spaceEditingId]);
+    if (connectSourceId && !valid.has(connectSourceId)) setConnectSourceId(null);
+  }, [sectionObjects.objects, spaceSelectedId, spaceEditingId, connectSourceId]);
 
   if (loading) {
     return (
@@ -845,6 +914,13 @@ export function SectionPage() {
               onOpenAdd={() => setShowSpaceAdd(v => !v)}
               renderModuleContent={renderSpaceObject}
               getLabel={getSpaceLabel}
+              freeSpaceConnectionsEnabled
+              connectModeSourceId={connectSourceId}
+              connectHoverTargetId={connectHoverId}
+              onConnectHoverTargetChange={setConnectHoverId}
+              onBeginConnectFromBlock={sid => setConnectSourceId(sid)}
+              onConnectPairComplete={completeFreeSpaceConnect}
+              onCancelConnectMode={cancelConnectMode}
             />
           </FreeSpaceCanvasErrorBoundary>
 
