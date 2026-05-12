@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useCommandPalette } from '../command/CommandPaletteContext';
+import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
@@ -35,6 +36,17 @@ import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectS
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
 import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
 import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
+import { isAcceptablePdfFile, savePdfBlob } from '../lib/freeSpacePdfIdb';
+import { aiComplete } from '../lib/ai/client';
+import type { ChatMessage } from '../lib/ai/types';
+import {
+  promptSummarizeNote,
+  promptExplainMistakeSimple,
+  promptPracticeQuestions,
+  promptRephraseConcept,
+  promptSuggestRelatedMistakes,
+} from '../lib/ai/prompts';
+import { AIAssistanceResultModal } from '../components/ai/AIAssistanceResultModal';
 import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
@@ -408,7 +420,9 @@ export function SectionPage() {
   const sectionCanvas = useSectionCanvasMode(sectionId);
   const sectionPositions = useSectionBlockPositions(sectionId);
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
-  const { registerFreeSpace, paletteOpen, sessionModalOpen } = useCommandPalette();
+  const sectionObjectsRef = useRef(sectionObjects);
+  sectionObjectsRef.current = sectionObjects;
+  const { registerFreeSpace, registerAIWorkspace, paletteOpen, sessionModalOpen } = useCommandPalette();
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
   const pendingQuickCaptureRef = useRef<{ kind: 'note' | 'mistake'; text: string } | null>(null);
   const quickCaptureStackRef = useRef(0);
@@ -429,6 +443,8 @@ export function SectionPage() {
   const [mistakeReviewOpen, setMistakeReviewOpen] = useState(false);
   const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
+  const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
+  const aiRunRef = useRef<AbortController | null>(null);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -598,7 +614,9 @@ export function SectionPage() {
               ? { w: 300, h: 420 }
               : type === 'mistake'
                 ? { w: 380, h: 320 }
-                : { w: 360, h: 280 };
+                : type === 'pdf'
+                  ? { w: 520, h: 460 }
+                  : { w: 360, h: 280 };
     sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
@@ -612,6 +630,40 @@ export function SectionPage() {
     pendingFreeSpaceType.current = type;
     setSectionViewMode('free-space');
   }, [sectionViewMode, handleAddToSpace]);
+
+  const handlePdfDroppedOnCanvas = useCallback(
+    async (file: File, worldX: number, worldY: number) => {
+      if (!isAcceptablePdfFile(file)) {
+        toast.error('Only PDF files are supported for now.');
+        return;
+      }
+      const obj = sectionObjects.addObject('pdf');
+      const x = Math.max(20, Math.round(worldX - 260));
+      const y = Math.max(20, Math.round(worldY - 230));
+      sectionPositions.initPos(obj.id, { x, y, w: 520, h: 460 });
+      setSpaceSelectedId(obj.id);
+      try {
+        await savePdfBlob(sectionId, obj.id, file);
+        sectionObjects.updateObjectFields(obj.id, {
+          title: file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name,
+          content: {
+            type: 'pdf',
+            fileName: file.name,
+            fileType: file.type || 'application/pdf',
+            fileSize: file.size,
+            lastOpenedAt: Date.now(),
+            page: 1,
+            zoom: 1,
+          },
+        });
+      } catch {
+        toast.error('Could not store this PDF on this device.');
+        sectionObjects.removeObject(obj.id);
+        sectionPositions.removePos(obj.id);
+      }
+    },
+    [sectionId, sectionObjects, sectionPositions],
+  );
 
   const createQuickCaptureNote = useCallback(
     (text: string) => {
@@ -791,6 +843,25 @@ export function SectionPage() {
     toast.success('Captured as mistake');
   }, [sectionViewMode, spaceSelectedId, sectionObjects]);
 
+  const runAiAsync = useCallback(async (resultTitle: string, messages: ChatMessage[]) => {
+    aiRunRef.current?.abort();
+    const ac = new AbortController();
+    aiRunRef.current = ac;
+    const tid = toast.loading('Asking your model…', { id: 'fw-ai-toast' });
+    try {
+      const r = await aiComplete({ messages, signal: ac.signal });
+      toast.dismiss(tid);
+      if (!r.ok) {
+        if (r.code !== 'abort') toast.error(r.error, { duration: 4500 });
+        return;
+      }
+      setAiAssistResult({ title: resultTitle, body: r.text });
+    } catch {
+      toast.dismiss(tid);
+      toast.error('Could not reach the model.', { duration: 4500 });
+    }
+  }, []);
+
   const markMistakeReviewedInSession = useCallback(
     (mistakeId: string) => {
       const o = sectionObjects.getObject(mistakeId);
@@ -837,6 +908,7 @@ export function SectionPage() {
       addMistake: () => requestFreeSpaceAdd('mistake'),
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
+      addPdf: () => requestFreeSpaceAdd('pdf'),
       getFreeSpaceSelectedId: () => spaceSelectedId,
       startConnectFromSelected,
       clearConnectionsForSelected,
@@ -884,6 +956,145 @@ export function SectionPage() {
   const freeSpaceObjectIdsKey = sectionObjects.objects.map(o => o.id).join('|');
   const freeSpaceObjectsRef = useRef(sectionObjects.objects);
   freeSpaceObjectsRef.current = sectionObjects.objects;
+
+  useEffect(() => {
+    if (!id) {
+      registerAIWorkspace(null);
+      return;
+    }
+    const handlers: AIWorkspaceHandlers = {
+      getSelectionKind: () => {
+        if (!spaceSelectedId) return 'none';
+        const o = sectionObjectsRef.current.getObject(spaceSelectedId);
+        if (!o) return 'none';
+        if (o.type === 'note') return 'note';
+        if (o.type === 'notebook') return 'notebook';
+        if (o.type === 'mistake') return 'mistake';
+        return 'other';
+      },
+      summarizeSelection: async () => {
+        if (sectionViewMode !== 'free-space') {
+          toast('Open the Free Space tab first');
+          return;
+        }
+        const sid = spaceSelectedId;
+        if (!sid) return;
+        const o = sectionObjectsRef.current.getObject(sid);
+        if (!o || (o.type !== 'note' && o.type !== 'notebook')) return;
+        const c = ensureProjectObjectContent(o.type, o.content);
+        const body = c.type === 'note' || c.type === 'notebook' ? c.body : '';
+        if (!body.trim()) {
+          toast.error('Nothing to summarize yet.');
+          return;
+        }
+        await runAiAsync('Summary (cloud)', promptSummarizeNote(o.title, body));
+      },
+      explainMistakeSelection: async () => {
+        if (sectionViewMode !== 'free-space') {
+          toast('Open the Free Space tab first');
+          return;
+        }
+        const sid = spaceSelectedId;
+        if (!sid) return;
+        const o = sectionObjectsRef.current.getObject(sid);
+        if (!o || o.type !== 'mistake') return;
+        const c = ensureProjectObjectContent('mistake', o.content);
+        if (c.type !== 'mistake') return;
+        const mistakeText = [c.whatWrong, c.correction].filter(Boolean).join('\n') || o.title;
+        const context = c.whyConfused.trim() ? `Learner note: ${c.whyConfused}` : undefined;
+        if (!mistakeText.trim()) {
+          toast.error('Add what went wrong on the card first.');
+          return;
+        }
+        await runAiAsync('Plain explanation (cloud)', promptExplainMistakeSimple(mistakeText, context));
+      },
+      practiceQuestionsSelection: async () => {
+        if (sectionViewMode !== 'free-space') {
+          toast('Open the Free Space tab first');
+          return;
+        }
+        const sid = spaceSelectedId;
+        if (!sid) return;
+        const o = sectionObjectsRef.current.getObject(sid);
+        if (!o) return;
+        let source = '';
+        if (o.type === 'note' || o.type === 'notebook') {
+          const c = ensureProjectObjectContent(o.type, o.content);
+          source = c.type === 'note' || c.type === 'notebook' ? c.body : '';
+        } else if (o.type === 'mistake') {
+          const c = ensureProjectObjectContent('mistake', o.content);
+          if (c.type === 'mistake') {
+            source = [c.whatWrong, c.correction, c.whyConfused].filter(Boolean).join('\n');
+          }
+        }
+        if (!source.trim()) {
+          toast.error('Add some text to this object first.');
+          return;
+        }
+        await runAiAsync('Practice questions (cloud)', promptPracticeQuestions(o.title, source));
+      },
+      rephraseSelection: async () => {
+        if (sectionViewMode !== 'free-space') {
+          toast('Open the Free Space tab first');
+          return;
+        }
+        const sid = spaceSelectedId;
+        if (!sid) return;
+        const o = sectionObjectsRef.current.getObject(sid);
+        if (!o) return;
+        let concept = '';
+        if (o.type === 'note' || o.type === 'notebook') {
+          const c = ensureProjectObjectContent(o.type, o.content);
+          concept = c.type === 'note' || c.type === 'notebook' ? c.body : '';
+        } else if (o.type === 'mistake') {
+          const c = ensureProjectObjectContent('mistake', o.content);
+          if (c.type === 'mistake') {
+            concept = [c.whatWrong, c.correction, c.whyConfused].filter(Boolean).join('\n');
+          }
+        }
+        if (!concept.trim()) {
+          toast.error('Nothing to rephrase yet.');
+          return;
+        }
+        await runAiAsync('Rephrased concept (cloud)', promptRephraseConcept(concept));
+      },
+      suggestRelatedMistakesSelection: async () => {
+        if (sectionViewMode !== 'free-space') {
+          toast('Open the Free Space tab first');
+          return;
+        }
+        const sid = spaceSelectedId;
+        if (!sid) return;
+        const o = sectionObjectsRef.current.getObject(sid);
+        if (!o || o.type !== 'mistake') return;
+        const c = ensureProjectObjectContent('mistake', o.content);
+        if (c.type !== 'mistake') return;
+        const mistakeText = [c.whatWrong, c.correction].filter(Boolean).join('\n') || o.title;
+        if (!mistakeText.trim()) {
+          toast.error('Add what went wrong on the card first.');
+          return;
+        }
+        const others = sectionObjectsRef.current.objects
+          .filter(x => x.type === 'mistake' && x.id !== sid)
+          .map(x => {
+            const m = ensureProjectObjectContent('mistake', x.content);
+            return m.type === 'mistake' ? (m.whatWrong.trim() || x.title) : x.title;
+          })
+          .filter(Boolean);
+        await runAiAsync('Related slips (cloud)', promptSuggestRelatedMistakes(mistakeText, others));
+      },
+    };
+    registerAIWorkspace(handlers);
+    return () => registerAIWorkspace(null);
+  }, [
+    id,
+    registerAIWorkspace,
+    spaceSelectedId,
+    sectionViewMode,
+    freeSpaceObjectIdsKey,
+    runAiAsync,
+  ]);
+
   useEffect(() => {
     if (!id) return;
     sectionPositions.seedMissingPositions(freeSpaceObjectsRef.current.map(o => o.id));
@@ -994,9 +1205,10 @@ export function SectionPage() {
       <ProjectSpaceObjectRenderer
         object={obj}
         tokens={tokens}
+        freeSpaceSectionId={sectionId}
         onChange={content => sectionObjects.updateObjectContent(id, content)}
         onTitleChange={
-          obj.type === 'mistake'
+          obj.type === 'mistake' || obj.type === 'pdf'
             ? t => sectionObjects.updateObjectFields(id, { title: t })
             : undefined
         }
@@ -1138,6 +1350,7 @@ export function SectionPage() {
               onConnectPairComplete={completeFreeSpaceConnect}
               onCancelConnectMode={cancelConnectMode}
               spatialMinimapEnabled
+              onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
             />
           </FreeSpaceCanvasErrorBoundary>
 
@@ -1170,6 +1383,7 @@ export function SectionPage() {
                 { type: 'image', label: 'Image', hint: 'Visual reference' },
                 { type: 'calculator', label: 'Calculator', hint: 'Safe math scratchpad' },
                 { type: 'graph', label: 'Graph', hint: 'Plot y = f(x)' },
+                { type: 'pdf', label: 'PDF', hint: 'Local file window' },
               ] as const).map(item => (
                 <button
                   key={item.type}
@@ -1519,6 +1733,15 @@ export function SectionPage() {
             </div>
           </main>
         </div>
+      )}
+
+      {aiAssistResult && (
+        <AIAssistanceResultModal
+          title={aiAssistResult.title}
+          body={aiAssistResult.body}
+          onClose={() => setAiAssistResult(null)}
+          tokens={tokens}
+        />
       )}
 
       {showCustomize && (

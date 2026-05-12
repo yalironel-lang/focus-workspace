@@ -21,11 +21,21 @@ import {
   Brain,
   Sparkles,
   History,
+  ClipboardList,
+  RefreshCw,
+  GitBranch,
+  File,
 } from 'lucide-react';
 import { SessionModal } from '../components/SessionModal';
+import { IntelligenceModal } from '../components/ai/IntelligenceModal';
 import { isCommandPaletteBlockedTarget } from './isBlockedTarget';
 import { filterAndSortCommands } from './matchCommands';
-import { useCommandPalette, getFreeSpaceHandlersSnapshot } from './CommandPaletteContext';
+import {
+  useCommandPalette,
+  getFreeSpaceHandlersSnapshot,
+  getAIWorkspaceHandlersSnapshot,
+} from './CommandPaletteContext';
+import { useAIAvailability } from '../hooks/useAIAvailability';
 import { LIBRARY_OPEN_CREATE_FLAG } from './constants';
 import type { CommandItem } from './types';
 
@@ -61,8 +71,13 @@ export function GlobalCommandPalette() {
     openSessionModal,
     sessionModalOpen,
     setSessionModalOpen,
+    intelligenceModalOpen,
+    setIntelligenceModalOpen,
+    openIntelligenceModal,
+    aiWorkspaceVersion,
   } = ctx;
 
+  const aiAvail = useAIAvailability();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +86,10 @@ export function GlobalCommandPalette() {
   const commands = useMemo((): CommandItem[] => {
     const list: CommandItem[] = [];
     const fs = getFreeSpaceHandlersSnapshot();
+    const ai = getAIWorkspaceHandlersSnapshot();
     const inSection = !!sectionIdFromRoute;
+    const cloudConfigured = aiAvail.configured;
+    const sk = ai?.getSelectionKind() ?? 'none';
 
     list.push(
       {
@@ -130,6 +148,21 @@ export function GlobalCommandPalette() {
         },
       },
     );
+
+    list.push({
+      id: 'intelligence-settings',
+      group: 'intelligence',
+      groupLabel: 'Intelligence',
+      label: 'Intelligence…',
+      subtitle: 'Local tools first; optional cloud model',
+      keywords: ['intelligence', 'local', 'mistakes', 'canvas', 'review', 'optional', 'cloud', 'openai', 'openrouter'],
+      icon: Sparkles,
+      priority: 6.5,
+      run: () => {
+        closePalette();
+        openIntelligenceModal();
+      },
+    });
 
     list.push(
       {
@@ -230,6 +263,60 @@ export function GlobalCommandPalette() {
       const hasFs = !!fs;
       list.push(
         {
+          id: 'intel-review-mistakes',
+          group: 'intelligence',
+          groupLabel: 'Intelligence',
+          label: 'Review mistakes',
+          subtitle: 'Local · on your canvas',
+          keywords: ['review', 'mistake', 'reflect', 'local'],
+          icon: Sparkles,
+          priority: 11.5,
+          disabled: !hasFs || !fs?.openMistakeReviewAll,
+          disabledHint: 'Open Free Space in this workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewAll) return;
+            closePalette();
+            h.openMistakeReviewAll();
+          },
+        },
+        {
+          id: 'intel-neglected-mistakes',
+          group: 'intelligence',
+          groupLabel: 'Intelligence',
+          label: 'Show neglected mistakes',
+          subtitle: 'Local · quiet for a while',
+          keywords: ['stale', 'old', 'forgot', 'local'],
+          icon: History,
+          priority: 11.55,
+          disabled: !hasFs || !fs?.openMistakeReviewNeglected,
+          disabledHint: 'Open Free Space in this workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewNeglected) return;
+            closePalette();
+            h.openMistakeReviewNeglected();
+          },
+        },
+        {
+          id: 'intel-low-confidence-mistakes',
+          group: 'intelligence',
+          groupLabel: 'Intelligence',
+          label: 'Show low-confidence mistakes',
+          subtitle: 'Local · still fragile',
+          keywords: ['uncertain', 'weak', 'local'],
+          icon: Hash,
+          priority: 11.58,
+          disabled: !hasFs || !fs?.openMistakeReviewLowConfidence,
+          disabledHint: 'Open Free Space in this workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewLowConfidence) return;
+            closePalette();
+            h.openMistakeReviewLowConfidence();
+          },
+        },
+        {
           id: 'fs-notebook',
           group: 'free-space',
           groupLabel: 'Free Space',
@@ -299,6 +386,24 @@ export function GlobalCommandPalette() {
             if (!h?.addGraph) return;
             closePalette();
             h.addGraph();
+          },
+        },
+        {
+          id: 'fs-pdf',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Add PDF window',
+          subtitle: 'Local file on your canvas',
+          keywords: ['pdf', 'file', 'document', 'read', 'study'],
+          icon: File,
+          priority: 15.25,
+          disabled: !hasFs || !fs?.addPdf,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.addPdf) return;
+            closePalette();
+            h.addPdf();
           },
         },
         {
@@ -433,6 +538,120 @@ export function GlobalCommandPalette() {
             h.clearConnectionsForSelected();
           },
         },
+        ...(cloudConfigured
+          ? ([
+              {
+                id: 'cloud-summarize-note',
+                group: 'advanced-cloud-ai',
+                groupLabel: 'Advanced cloud model',
+                label: 'Summarize note (cloud)',
+                subtitle: 'Uses your connected provider',
+                keywords: ['summary', 'tl dr', 'compress', 'cloud'],
+                icon: FileText,
+                priority: 44,
+                disabled: !hasFs || !ai || (sk !== 'note' && sk !== 'notebook'),
+                disabledHint: !hasFs
+                  ? 'Open Free Space in a workspace'
+                  : !ai
+                    ? 'Open this workspace on the canvas'
+                    : 'Select a note or notebook on the canvas',
+                run: () => {
+                  const h = getAIWorkspaceHandlersSnapshot();
+                  if (!h?.summarizeSelection) return;
+                  closePalette();
+                  void h.summarizeSelection();
+                },
+              },
+              {
+                id: 'cloud-explain-mistake',
+                group: 'advanced-cloud-ai',
+                groupLabel: 'Advanced cloud model',
+                label: 'Explain mistake simply (cloud)',
+                subtitle: 'Uses your connected provider',
+                keywords: ['why', 'wrong', 'learn', 'cloud'],
+                icon: Brain,
+                priority: 45,
+                disabled: !hasFs || !ai || sk !== 'mistake',
+                disabledHint: !hasFs
+                  ? 'Open Free Space in a workspace'
+                  : !ai
+                    ? 'Open this workspace on the canvas'
+                    : 'Select a mistake card on the canvas',
+                run: () => {
+                  const h = getAIWorkspaceHandlersSnapshot();
+                  if (!h?.explainMistakeSelection) return;
+                  closePalette();
+                  void h.explainMistakeSelection();
+                },
+              },
+              {
+                id: 'cloud-practice',
+                group: 'advanced-cloud-ai',
+                groupLabel: 'Advanced cloud model',
+                label: 'Generate practice questions (cloud)',
+                subtitle: 'Uses your connected provider',
+                keywords: ['quiz', 'drill', 'study', 'cloud'],
+                icon: ClipboardList,
+                priority: 46,
+                disabled: !hasFs || !ai || (sk !== 'note' && sk !== 'notebook' && sk !== 'mistake'),
+                disabledHint: !hasFs
+                  ? 'Open Free Space in a workspace'
+                  : !ai
+                    ? 'Open this workspace on the canvas'
+                    : 'Select a note, notebook, or mistake',
+                run: () => {
+                  const h = getAIWorkspaceHandlersSnapshot();
+                  if (!h?.practiceQuestionsSelection) return;
+                  closePalette();
+                  void h.practiceQuestionsSelection();
+                },
+              },
+              {
+                id: 'cloud-rephrase',
+                group: 'advanced-cloud-ai',
+                groupLabel: 'Advanced cloud model',
+                label: 'Rephrase concept (cloud)',
+                subtitle: 'Uses your connected provider',
+                keywords: ['rewrite', 'clarify', 'cloud'],
+                icon: RefreshCw,
+                priority: 47,
+                disabled: !hasFs || !ai || (sk !== 'note' && sk !== 'notebook' && sk !== 'mistake'),
+                disabledHint: !hasFs
+                  ? 'Open Free Space in a workspace'
+                  : !ai
+                    ? 'Open this workspace on the canvas'
+                    : 'Select a note, notebook, or mistake',
+                run: () => {
+                  const h = getAIWorkspaceHandlersSnapshot();
+                  if (!h?.rephraseSelection) return;
+                  closePalette();
+                  void h.rephraseSelection();
+                },
+              },
+              {
+                id: 'cloud-related-mistakes',
+                group: 'advanced-cloud-ai',
+                groupLabel: 'Advanced cloud model',
+                label: 'Suggest related mistakes (cloud)',
+                subtitle: 'Uses your connected provider',
+                keywords: ['links', 'patterns', 'review', 'cloud'],
+                icon: GitBranch,
+                priority: 48,
+                disabled: !hasFs || !ai || sk !== 'mistake',
+                disabledHint: !hasFs
+                  ? 'Open Free Space in a workspace'
+                  : !ai
+                    ? 'Open this workspace on the canvas'
+                    : 'Select a mistake card on the canvas',
+                run: () => {
+                  const h = getAIWorkspaceHandlersSnapshot();
+                  if (!h?.suggestRelatedMistakesSelection) return;
+                  closePalette();
+                  void h.suggestRelatedMistakesSelection();
+                },
+              },
+            ] as CommandItem[])
+          : []),
       );
     }
 
@@ -447,6 +666,9 @@ export function GlobalCommandPalette() {
     navigate,
     openSessionModal,
     freeSpaceVersion,
+    aiAvail,
+    aiWorkspaceVersion,
+    openIntelligenceModal,
   ]);
 
   const filtered = useMemo(() => filterAndSortCommands(query, commands), [commands, query]);
@@ -669,6 +891,10 @@ export function GlobalCommandPalette() {
 
       {sessionModalOpen && (
         <SessionModal sections={sections} onClose={() => setSessionModalOpen(false)} />
+      )}
+
+      {intelligenceModalOpen && (
+        <IntelligenceModal tokens={tokens} onClose={() => setIntelligenceModalOpen(false)} />
       )}
     </>
   );

@@ -161,6 +161,8 @@ interface Props {
   onCancelConnectMode?: () => void;
   /** Premium spatial minimap (Section Free Space only by default). */
   spatialMinimapEnabled?: boolean;
+  /** Section Free Space: drop a PDF onto empty canvas → new PDF window at world coordinates. */
+  onPdfDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -334,6 +336,7 @@ export function FreeformCanvas({
   onConnectPairComplete,
   onCancelConnectMode,
   spatialMinimapEnabled = false,
+  onPdfDroppedOnCanvas,
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -1107,6 +1110,31 @@ export function FreeformCanvas({
         userSelect: draggingId ? 'none' : undefined,
         backgroundColor: tokens.pageBg,
       }}
+      onDragOver={
+        onPdfDroppedOnCanvas
+          ? e => {
+              if (![...e.dataTransfer.types].includes('Files')) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }
+          : undefined
+      }
+      onDrop={
+        onPdfDroppedOnCanvas
+          ? e => {
+              e.preventDefault();
+              const f = e.dataTransfer.files?.[0];
+              if (!f) return;
+              const rect = viewportRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              const lx = e.clientX - rect.left;
+              const ly = e.clientY - rect.top;
+              const worldX = (lx - safePanX) / safeZoom;
+              const worldY = (ly - safePanY) / safeZoom;
+              onPdfDroppedOnCanvas(f, worldX, worldY);
+            }
+          : undefined
+      }
       onMouseDown={onCanvasMouseDown}
       onMouseMove={e => {
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();

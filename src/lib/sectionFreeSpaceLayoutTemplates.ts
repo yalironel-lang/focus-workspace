@@ -41,6 +41,7 @@ const DEFAULT_W: Record<ProjectObjectType, number> = {
   image: 460,
   calculator: 300,
   graph: 400,
+  pdf: 520,
 };
 
 const DEFAULT_H: Record<ProjectObjectType, number> = {
@@ -52,6 +53,7 @@ const DEFAULT_H: Record<ProjectObjectType, number> = {
   image: 360,
   calculator: 420,
   graph: 360,
+  pdf: 460,
 };
 
 function effDims(type: ProjectObjectType, p: BlockPos | undefined): { w: number; h: number } {
@@ -119,7 +121,7 @@ function place(
 }
 
 function columnForType(t: ProjectObjectType): 0 | 1 | 2 {
-  if (t === 'notebook' || t === 'note' || t === 'mistake') return 0;
+  if (t === 'notebook' || t === 'note' || t === 'mistake' || t === 'pdf') return 0;
   if (t === 'link') return 1;
   return 2;
 }
@@ -171,12 +173,14 @@ export function computeFreeSpaceTemplateLayout(
         image: [],
         calculator: [],
         graph: [],
+        pdf: [],
       };
       for (const o of sorted) buckets[o.type].push(o);
       const typeOrder: ProjectObjectType[] = [
         'notebook',
         'note',
         'mistake',
+        'pdf',
         'link',
         'checklist',
         'image',

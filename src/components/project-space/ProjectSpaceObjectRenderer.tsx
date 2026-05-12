@@ -13,10 +13,13 @@ import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
 
 import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
+import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 
 interface Props {
   object: ProjectSpaceObject;
   tokens: AtmosphereTokens;
+  /** Section id for Free Space PDF IndexedDB persistence */
+  freeSpaceSectionId?: string;
   onChange: (content: ProjectObjectContent) => void;
   /** Optional: notify host when this notebook enters or exits edit mode (Free Space focus). */
   onNotebookEditingChange?: (id: string, isEditing: boolean) => void;
@@ -27,6 +30,7 @@ interface Props {
 export function ProjectSpaceObjectRenderer({
   object,
   tokens,
+  freeSpaceSectionId,
   onChange,
   onNotebookEditingChange,
   onTitleChange,
@@ -114,6 +118,24 @@ export function ProjectSpaceObjectRenderer({
           content={content}
           tokens={tokens}
           onChange={c => onChange(c)}
+        />
+      );
+    case 'pdf':
+      if (!freeSpaceSectionId) {
+        return (
+          <div className="p-4 text-xs" style={{ color: tokens.textMuted }}>
+            PDF objects need a workspace context.
+          </div>
+        );
+      }
+      return (
+        <FreeSpacePdfCard
+          objectId={object.id}
+          content={content}
+          tokens={tokens}
+          sectionId={freeSpaceSectionId}
+          onChange={c => onChange(c)}
+          onTitleChange={onTitleChange}
         />
       );
     default:

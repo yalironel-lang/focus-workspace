@@ -7,15 +7,22 @@ import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useAtmosphere } from '../hooks/useAtmosphere';
 import { useWorkspaceTheme, mergeAccent } from '../hooks/useWorkspaceTheme';
 import type { FreeSpaceCommandHandlers } from './types';
+import type { AIWorkspaceHandlers } from './aiWorkspaceHandlersRef';
 
 const freeHandlersRef = { current: null as FreeSpaceCommandHandlers | null };
+const aiWorkspaceRef = { current: null as AIWorkspaceHandlers | null };
 
 export function getFreeSpaceHandlersSnapshot(): FreeSpaceCommandHandlers | null {
   return freeHandlersRef.current;
 }
 
+export function getAIWorkspaceHandlersSnapshot(): AIWorkspaceHandlers | null {
+  return aiWorkspaceRef.current;
+}
+
 export interface CommandPaletteContextValue {
   registerFreeSpace: (handlers: FreeSpaceCommandHandlers | null) => void;
+  registerAIWorkspace: (handlers: AIWorkspaceHandlers | null) => void;
   paletteOpen: boolean;
   openPalette: () => void;
   closePalette: () => void;
@@ -34,6 +41,10 @@ export interface CommandPaletteContextValue {
   sessionModalOpen: boolean;
   setSessionModalOpen: (v: boolean) => void;
   createSection: ReturnType<typeof useSections>['createSection'];
+  intelligenceModalOpen: boolean;
+  setIntelligenceModalOpen: (v: boolean) => void;
+  openIntelligenceModal: () => void;
+  aiWorkspaceVersion: number;
 }
 
 const CommandPaletteContext = createContext<CommandPaletteContextValue | null>(null);
@@ -51,11 +62,18 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
+  const [intelligenceModalOpen, setIntelligenceModalOpen] = useState(false);
   const [freeSpaceVersion, setFreeSpaceVersion] = useState(0);
+  const [aiWorkspaceVersion, setAiWorkspaceVersion] = useState(0);
 
   const registerFreeSpace = useCallback((handlers: FreeSpaceCommandHandlers | null) => {
     freeHandlersRef.current = handlers;
     setFreeSpaceVersion(v => v + 1);
+  }, []);
+
+  const registerAIWorkspace = useCallback((handlers: AIWorkspaceHandlers | null) => {
+    aiWorkspaceRef.current = handlers;
+    setAiWorkspaceVersion(v => v + 1);
   }, []);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
@@ -67,6 +85,11 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     setSessionModalOpen(true);
   }, []);
 
+  const openIntelligenceModal = useCallback(() => {
+    setPaletteOpen(false);
+    setIntelligenceModalOpen(true);
+  }, []);
+
   const sectionIdFromRoute = useMemo(() => {
     const m = location.pathname.match(/^\/section\/([^/]+)/);
     return m?.[1];
@@ -75,6 +98,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const value = useMemo(
     (): CommandPaletteContextValue => ({
       registerFreeSpace,
+      registerAIWorkspace,
       paletteOpen,
       openPalette,
       closePalette,
@@ -93,9 +117,14 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       sessionModalOpen,
       setSessionModalOpen,
       createSection,
+      intelligenceModalOpen,
+      setIntelligenceModalOpen,
+      openIntelligenceModal,
+      aiWorkspaceVersion,
     }),
     [
       registerFreeSpace,
+      registerAIWorkspace,
       paletteOpen,
       freeSpaceVersion,
       sections,
@@ -110,6 +139,9 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       openSessionModal,
       sessionModalOpen,
       createSection,
+      intelligenceModalOpen,
+      openIntelligenceModal,
+      aiWorkspaceVersion,
     ],
   );
 

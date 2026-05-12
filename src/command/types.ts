@@ -5,6 +5,8 @@ export type CommandGroupId =
   | 'quick'
   | 'workspace'
   | 'free-space'
+  | 'intelligence'
+  | 'advanced-cloud-ai'
   | 'search';
 
 export interface CommandItem {
@@ -28,6 +30,7 @@ export interface FreeSpaceCommandHandlers {
   addMistake?: () => void;
   addCalculator: () => void;
   addGraph: () => void;
+  addPdf?: () => void;
   /** Current selected Free Space object id, if any */
   getFreeSpaceSelectedId?: () => string | null;
   /** Enter connect mode from the selected object (requires Free Space tab + selection) */

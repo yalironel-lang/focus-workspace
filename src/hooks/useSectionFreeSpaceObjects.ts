@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn } from '../lib/freeSpacePersistence';
+import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
 
 export type ProjectObjectType =
   | 'notebook'
@@ -10,7 +11,8 @@ export type ProjectObjectType =
   | 'checklist'
   | 'image'
   | 'calculator'
-  | 'graph';
+  | 'graph'
+  | 'pdf';
 
 export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
 
@@ -40,6 +42,17 @@ export type ProjectObjectContent =
       xmax: number;
       ymin: number;
       ymax: number;
+    }
+  | {
+      type: 'pdf';
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+      lastOpenedAt: number | null;
+      /** 1-based page for viewer hash */
+      page: number;
+      /** Display scale (1 = 100%) */
+      zoom: number;
     };
 
 export interface ProjectSpaceObject {
@@ -62,6 +75,7 @@ const OBJECT_TYPES = new Set<ProjectObjectType>([
   'image',
   'calculator',
   'graph',
+  'pdf',
 ]);
 
 function key(sectionId: string): string {
@@ -105,6 +119,19 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
           xmax: 6,
           ymin: -4,
           ymax: 8,
+        },
+      };
+    case 'pdf':
+      return {
+        title: 'PDF',
+        content: {
+          type: 'pdf',
+          fileName: '',
+          fileType: '',
+          fileSize: 0,
+          lastOpenedAt: null,
+          page: 1,
+          zoom: 1,
         },
       };
   }
@@ -210,6 +237,26 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         xmax: numOr(r.xmax, g.xmax),
         ymin: numOr(r.ymin, g.ymin),
         ymax: numOr(r.ymax, g.ymax),
+      };
+    }
+    case 'pdf': {
+      const d = makeDefaults('pdf').content as Extract<ProjectObjectContent, { type: 'pdf' }>;
+      const fileName = typeof r.fileName === 'string' ? r.fileName : d.fileName;
+      const fileType = typeof r.fileType === 'string' ? r.fileType : d.fileType;
+      const fileSize = Math.max(0, Math.floor(numOr(r.fileSize, d.fileSize)));
+      const last = r.lastOpenedAt;
+      const lastOpenedAt =
+        typeof last === 'number' && Number.isFinite(last) ? last : null;
+      const page = Math.max(1, Math.floor(numOr(r.page, d.page)));
+      const zoom = Math.min(2.5, Math.max(0.5, numOr(r.zoom, d.zoom)));
+      return {
+        type: 'pdf',
+        fileName,
+        fileType,
+        fileSize,
+        lastOpenedAt,
+        page,
+        zoom,
       };
     }
   }
@@ -564,6 +611,8 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
 
   const removeObject = useCallback((id: string) => {
     setObjects(prev => {
+      const victim = prev.find(o => o.id === id);
+      if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
       persist(sectionId, next);
@@ -586,6 +635,9 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       updatedAt: now,
       connections: dupConnections.length ? dupConnections : undefined,
     };
+    if (source.type === 'pdf') {
+      void copyPdfBlob(sectionId, source.id, copy.id);
+    }
     setObjects(prev => {
       const next = [...prev, copy];
       persist(sectionId, next);
