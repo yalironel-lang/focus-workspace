@@ -25,15 +25,20 @@ import {
   RefreshCw,
   GitBranch,
   File,
+  HardDrive,
+  ScanLine,
+  BookMarked,
 } from 'lucide-react';
 import { SessionModal } from '../components/SessionModal';
 import { IntelligenceModal } from '../components/ai/IntelligenceModal';
+import { WorkspaceRecoveryModal } from '../components/recovery/WorkspaceRecoveryModal';
 import { isCommandPaletteBlockedTarget } from './isBlockedTarget';
 import { filterAndSortCommands } from './matchCommands';
 import {
   useCommandPalette,
   getFreeSpaceHandlersSnapshot,
   getAIWorkspaceHandlersSnapshot,
+  getFocusModeHandlersSnapshot,
 } from './CommandPaletteContext';
 import { useAIAvailability } from '../hooks/useAIAvailability';
 import { LIBRARY_OPEN_CREATE_FLAG } from './constants';
@@ -75,11 +80,13 @@ export function GlobalCommandPalette() {
     setIntelligenceModalOpen,
     openIntelligenceModal,
     aiWorkspaceVersion,
+    focusModeVersion,
   } = ctx;
 
   const aiAvail = useAIAvailability();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [workspaceRecoveryOpen, setWorkspaceRecoveryOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -148,6 +155,105 @@ export function GlobalCommandPalette() {
         },
       },
     );
+
+    list.push({
+      id: 'workspace-recovery',
+      group: 'recovery',
+      groupLabel: 'Recovery',
+      label: 'Workspace recovery…',
+      subtitle: sectionIdFromRoute
+        ? 'Export, import, repair — this workspace'
+        : 'Open a workspace to use recovery tools',
+      keywords: ['backup', 'import', 'export', 'repair', 'reset', 'corrupt', 'json', 'free space'],
+      icon: HardDrive,
+      priority: 5.35,
+      disabled: !sectionIdFromRoute,
+      disabledHint: 'Open a workspace from the library first',
+      run: () => {
+        closePalette();
+        setWorkspaceRecoveryOpen(true);
+      },
+    });
+
+    const fmSnap = getFocusModeHandlersSnapshot();
+    const fmActive = fmSnap?.getMode() ?? null;
+
+    if (inSection) {
+      list.push(
+        {
+          id: 'focus-review',
+          group: 'focus-modes',
+          groupLabel: 'Focus Modes',
+          label: 'Review Focus',
+          subtitle: 'Mistakes and linked notes come forward',
+          keywords: ['review', 'reflect', 'mistake', 'focus mode', 'cognitive', 'slips'],
+          icon: ScanLine,
+          priority: 5.4,
+          run: () => {
+            getFocusModeHandlersSnapshot()?.setMode('review');
+            closePalette();
+          },
+        },
+        {
+          id: 'focus-reading',
+          group: 'focus-modes',
+          groupLabel: 'Focus Modes',
+          label: 'Reading Focus',
+          subtitle: 'PDFs and notebooks settle into view',
+          keywords: ['read', 'pdf', 'document', 'focus mode'],
+          icon: BookMarked,
+          priority: 5.41,
+          run: () => {
+            getFocusModeHandlersSnapshot()?.setMode('reading');
+            closePalette();
+          },
+        },
+        {
+          id: 'focus-solving',
+          group: 'focus-modes',
+          groupLabel: 'Focus Modes',
+          label: 'Solving Focus',
+          subtitle: 'Calculator, graph, and notes feel active',
+          keywords: ['solve', 'math', 'graph', 'problem', 'focus mode'],
+          icon: Calculator,
+          priority: 5.42,
+          run: () => {
+            getFocusModeHandlersSnapshot()?.setMode('solving');
+            closePalette();
+          },
+        },
+        {
+          id: 'focus-thinking',
+          group: 'focus-modes',
+          groupLabel: 'Focus Modes',
+          label: 'Thinking Focus',
+          subtitle: 'Connections and space widen slightly',
+          keywords: ['think', 'spatial', 'links', 'explore', 'focus mode'],
+          icon: GitBranch,
+          priority: 5.43,
+          run: () => {
+            getFocusModeHandlersSnapshot()?.setMode('thinking');
+            closePalette();
+          },
+        },
+        {
+          id: 'focus-exit',
+          group: 'focus-modes',
+          groupLabel: 'Focus Modes',
+          label: 'Exit Focus',
+          subtitle: 'Return to neutral presentation',
+          keywords: ['exit', 'clear', 'off', 'normal', 'focus mode'],
+          icon: X,
+          priority: 5.44,
+          disabled: !fmActive,
+          disabledHint: 'No focus mode is active',
+          run: () => {
+            getFocusModeHandlersSnapshot()?.setMode(null);
+            closePalette();
+          },
+        },
+      );
+    }
 
     list.push({
       id: 'intelligence-settings',
@@ -668,6 +774,7 @@ export function GlobalCommandPalette() {
     freeSpaceVersion,
     aiAvail,
     aiWorkspaceVersion,
+    focusModeVersion,
     openIntelligenceModal,
   ]);
 
@@ -895,6 +1002,16 @@ export function GlobalCommandPalette() {
 
       {intelligenceModalOpen && (
         <IntelligenceModal tokens={tokens} onClose={() => setIntelligenceModalOpen(false)} />
+      )}
+
+      {workspaceRecoveryOpen && sectionIdFromRoute && (
+        <WorkspaceRecoveryModal
+          open={workspaceRecoveryOpen}
+          onClose={() => setWorkspaceRecoveryOpen(false)}
+          tokens={tokens}
+          sectionId={sectionIdFromRoute}
+          sectionTitle={sections.find(s => s.id === sectionIdFromRoute)?.title}
+        />
       )}
     </>
   );

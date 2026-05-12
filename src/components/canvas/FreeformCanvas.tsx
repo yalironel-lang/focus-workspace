@@ -79,8 +79,12 @@ import { CustomToolBlock } from './CustomToolBlock';
 import { FreeSpaceSpatialAmbient } from './FreeSpaceSpatialAmbient';
 import { FreeSpaceConnectionsLayer } from './FreeSpaceConnectionsLayer';
 import { FreeSpaceMiniMap } from './FreeSpaceMiniMap';
+import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
+import type { FocusMode } from '../../focusMode/focusModeTypes';
+import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
+import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -115,7 +119,7 @@ interface DragState {
 interface Props {
   tokens:       AtmosphereTokens;
   modules:      ModuleConfig[];
-  blocks:       Array<{ id: string; connections?: string[] }>;
+  blocks:       FreeSpaceBlockLite[];
   tools:        CustomTool[];
   positions:    PositionMap;
   canvasState:  {
@@ -163,6 +167,8 @@ interface Props {
   spatialMinimapEnabled?: boolean;
   /** Section Free Space: drop a PDF onto empty canvas → new PDF window at world coordinates. */
   onPdfDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
+  /** Cognitive Focus Mode — presentation only; does not move objects or change persistence layout. */
+  focusMode?: FocusMode | null;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -337,6 +343,7 @@ export function FreeformCanvas({
   onCancelConnectMode,
   spatialMinimapEnabled = false,
   onPdfDroppedOnCanvas,
+  focusMode = null,
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -504,6 +511,17 @@ export function FreeformCanvas({
   // Deep-focus: notebook editor is active on Free Space (viewport + chrome breathe with it).
   const hasDeepFocus = !!focusEditingId;
   const deepFocusAtmosphere = hasDeepFocus && !designMode;
+
+  const focusAtm = useMemo(() => focusCanvasAtmosphere(focusMode), [focusMode]);
+  const focusTierById = useMemo(() => {
+    if (!focusMode || !spatialAmbient) return null;
+    const bl = blocks as FreeSpaceBlockLite[];
+    const m = new Map<string, ReturnType<typeof getFocusTier>>();
+    for (const b of bl) {
+      m.set(b.id, getFocusTier(focusMode, b, bl, selectedId));
+    }
+    return m;
+  }, [focusMode, blocks, selectedId, spatialAmbient]);
 
   const [hoveredConnectionEdgeKey, setHoveredConnectionEdgeKey] = useState<string | null>(null);
 
@@ -1160,7 +1178,13 @@ export function FreeformCanvas({
               cx={dotSpacing / 2}
               cy={dotSpacing / 2}
               r={safeZoom > 0.5 ? 0.8 : 0.4}
-              fill={deepFocusAtmosphere ? `${tokens.accent}07` : `${tokens.accent}0c`}
+              fill={
+                deepFocusAtmosphere
+                  ? `${tokens.accent}07`
+                  : focusMode && spatialAmbient
+                    ? `${tokens.accent}${focusAtm.dotGridAccentAlpha}`
+                    : `${tokens.accent}0c`
+              }
             />
           </pattern>
         </defs>
@@ -1177,7 +1201,12 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
-        {spatialAmbient && tokens ? <FreeSpaceSpatialAmbient tokens={tokens} /> : null}
+        {spatialAmbient && tokens ? (
+          <FreeSpaceSpatialAmbient
+            tokens={tokens}
+            opacityScale={focusMode && spatialAmbient ? focusAtm.spatialAmbientOpacity : 1}
+          />
+        ) : null}
 
         {freeSpaceConnectionsEnabled && (
           <FreeSpaceConnectionsLayer
@@ -1187,12 +1216,13 @@ export function FreeformCanvas({
             animateFocusId={selectedId}
             hoveredEdgeKey={hoveredConnectionEdgeKey}
             onHoveredEdgeChange={setHoveredConnectionEdgeKey}
+            lineEmphasisMul={focusMode && spatialAmbient ? focusAtm.connectionLineMul : 1}
           />
         )}
 
         {/* ── Region warmth — the canvas surface develops memory ─── */}
         {warmthRef.current.filter(p => p.age < 30).map((point, i) => {
-          const intensity = Math.max(0, (1 - point.age / 30)) * 0.042;
+          const intensity = Math.max(0, (1 - point.age / 30)) * 0.014;
           const hex = Math.round(intensity * 255).toString(16).padStart(2, '0');
           return (
             <div
@@ -1237,7 +1267,7 @@ export function FreeformCanvas({
                 borderRadius:   '50%',
                 background:     `radial-gradient(ellipse 52% 50% at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 34%, transparent 72%)`,
                 filter:         'blur(52px)',
-                opacity:        0.9,
+                opacity:        0.38,
                 pointerEvents:  'none',
                 zIndex:         0,
                 transition:     'opacity 0.55s cubic-bezier(0.4,0,0.2,1)',
@@ -1255,7 +1285,7 @@ export function FreeformCanvas({
               inset:          0,
               pointerEvents:  'none',
               zIndex:         0,
-              opacity:        0.22,
+              opacity:        0.1,
               backgroundImage: `
                 repeating-linear-gradient(90deg, transparent 0px, transparent 199px, rgba(255,255,255,0.011) 199px, rgba(255,255,255,0.011) 200px),
                 repeating-linear-gradient(0deg, transparent 0px, transparent 319px, rgba(255,255,255,0.008) 319px, rgba(255,255,255,0.008) 320px)
@@ -1285,8 +1315,8 @@ export function FreeformCanvas({
                 width:            box.w,
                 height:           box.h,
                 borderRadius:    '22px',
-                backgroundColor: `${tokens.accent}${isStable ? '07' : '05'}`,
-                border:          `1px ${isStable ? 'solid' : 'dashed'} ${tokens.accent}${isStable ? '10' : '08'}`,
+                backgroundColor: `${tokens.accent}${isStable ? '04' : '03'}`,
+                border:          `1px ${isStable ? 'solid' : 'dashed'} ${tokens.accent}${isStable ? '08' : '06'}`,
                 pointerEvents:   'none',
                 zIndex:          0,
                 transition:      'all 0.6s cubic-bezier(0.32,0.72,0,1), border-style 1s ease, border-color 1s ease',
@@ -1346,8 +1376,8 @@ export function FreeformCanvas({
                 width:          R * 2,
                 height:         R * 1.5,
                 borderRadius:  '50%',
-                background:    `radial-gradient(ellipse, ${tokens.accent}0d 0%, transparent 65%)`,
-                filter:        'blur(24px)',
+                background:    `radial-gradient(ellipse, ${tokens.accent}08 0%, transparent 65%)`,
+                filter:        'blur(18px)',
                 pointerEvents: 'none',
                 zIndex:        0,
                 animation:     'canvasBreath 7s ease-in-out infinite',
@@ -1413,6 +1443,14 @@ export function FreeformCanvas({
             : sessionDim    ? Math.min(lifecycle.opacity, 0.38)
             : lifecycle.opacity;
 
+          const tier = item.kind === 'block' ? focusTierById?.get(item.id) : undefined;
+          const fp = tier != null ? tierToPresentation(tier) : null;
+          const combinedOpacity = Math.min(1, baseOpacity * (fp?.opacityMul ?? 1));
+          const focusFilterExtra =
+            fp?.filterExtra && fp.filterExtra !== 'none' ? fp.filterExtra : '';
+          const focusScale = fp?.scale ?? 1;
+          const zBoost = fp?.zIndexBoost ?? 0;
+
           // Asymmetric opacity transition:
           // — Coming alive (active) snaps quickly so freshly-touched thoughts
           //   feel immediately responsive.
@@ -1430,9 +1468,14 @@ export function FreeformCanvas({
               ? 'saturate(0.9) brightness(0.96)'
               : 'none';
 
-          const filterTransition = (sessionDim || deepInactive || isRevisiting || isReturning)
+          const filterTransition = (sessionDim || deepInactive || isRevisiting || isReturning || focusFilterExtra)
             ? ', filter 1.4s cubic-bezier(0.4,0,0.2,1)'
             : '';
+
+          const transformTransition =
+            focusMode && spatialAmbient && item.kind === 'block'
+              ? `, transform ${focusAtm.transition}`
+              : '';
 
           let connectionChrome: 'neutral' | 'dim' | 'emphasis' | 'connect-target' = 'neutral';
           if (item.kind === 'block' && freeSpaceConnectionsEnabled) {
@@ -1451,6 +1494,16 @@ export function FreeformCanvas({
             }
           }
 
+          let displayFilter: string;
+          if (isRevisiting) displayFilter = 'drop-shadow(0 0 10px rgba(245,158,11,0.22))';
+          else if (isReturning) displayFilter = `drop-shadow(0 0 12px ${tokens.accent}18)`;
+          else {
+            const parts: string[] = [];
+            if (sessionFilter !== 'none') parts.push(sessionFilter);
+            if (focusFilterExtra) parts.push(focusFilterExtra);
+            displayFilter = parts.length ? parts.join(' ') : 'none';
+          }
+
           return (
             <div key={item.id}>
               <div
@@ -1466,36 +1519,30 @@ export function FreeformCanvas({
                   zIndex: 1,
                   opacity: hasDeepFocus ? 1 : 0,
                   background: focusSurfaceActive
-                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}10 0%, transparent 68%)`
+                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}05 0%, transparent 72%)`
                     : deepInactive
-                      ? 'radial-gradient(120% 95% at 50% 36%, rgba(5,10,18,0.2) 0%, transparent 74%)'
-                      : 'radial-gradient(120% 95% at 50% 36%, rgba(3,8,16,0.34) 0%, transparent 70%)',
+                      ? 'radial-gradient(120% 95% at 50% 36%, rgba(5,10,18,0.12) 0%, transparent 76%)'
+                      : 'radial-gradient(120% 95% at 50% 36%, rgba(3,8,16,0.18) 0%, transparent 74%)',
                   border: focusSurfaceActive
-                    ? `1px solid ${tokens.accent}14`
+                    ? `1px solid ${tokens.accent}0d`
                     : deepInactive
-                      ? '1px solid rgba(12,18,28,0.35)'
-                      : '1px solid rgba(9,14,24,0.5)',
+                      ? '1px solid rgba(12,18,28,0.28)'
+                      : '1px solid rgba(9,14,24,0.4)',
                   boxShadow: focusSurfaceActive
-                    ? `0 22px 52px rgba(0,0,0,0.38), 0 0 28px ${tokens.accentGlow}18, inset 0 1px 0 rgba(255,255,255,0.055)`
+                    ? `0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04)`
                     : deepInactive
-                      ? '0 12px 32px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.02)'
-                      : '0 16px 42px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.02)',
+                      ? '0 10px 26px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.02)'
+                      : '0 12px 30px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.02)',
                   transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1), background 0.6s cubic-bezier(0.4,0,0.2,1), border-color 0.5s cubic-bezier(0.4,0,0.2,1), box-shadow 0.55s cubic-bezier(0.4,0,0.2,1)',
                 }}
               />
               <div
                 style={{
-                  opacity:    baseOpacity,
-                  transition: opacityTransition + filterTransition,
-                  // Revisit — a dormant thought returning to life: warm amber flash
-                  // Return ritual — most recent block on open: soft accent pulse
-                  filter: isRevisiting
-                    ? `drop-shadow(0 0 18px rgba(245,158,11,0.4))`
-                    : isReturning
-                      ? `drop-shadow(0 0 22px ${tokens.accent}30)`
-                      : sessionDim
-                        ? sessionFilter
-                        : 'none',
+                  opacity: combinedOpacity,
+                  transition: opacityTransition + filterTransition + transformTransition,
+                  transform: focusScale !== 1 ? `scale(${focusScale})` : undefined,
+                  transformOrigin: 'center center',
+                  filter: displayFilter,
                 }}
                 onClickCapture={() => {
                   // Pure clicks (no drag) must also record activity + trigger revisit.
@@ -1532,6 +1579,7 @@ export function FreeformCanvas({
                         onConnectHoverTarget: onConnectHoverTargetChange,
                       }
                     : {})}
+                  presentationZBoost={item.kind === 'block' ? zBoost : 0}
                 >
                   {content}
                 </FreeformBlock>
@@ -1613,8 +1661,10 @@ export function FreeformCanvas({
             ? `radial-gradient(ellipse at 50% 44%, transparent 46%, ${tokens.pageBg}7a 100%)`
             : activeSession && !designMode
               ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
-              : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
-          transition:  'background 1.8s cubic-bezier(0.4,0,0.2,1)',
+              : focusMode && spatialAmbient
+                ? `radial-gradient(ellipse at 50% 42%, transparent ${focusAtm.vignetteInnerPct}%, ${tokens.pageBg}${focusAtm.vignetteEdgeAlpha} 100%)`
+                : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
+          transition: 'background 1.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
       {/* Layer 2: edge continuation — linear gradients on all four sides */}
@@ -1626,8 +1676,14 @@ export function FreeformCanvas({
           inset:         0,
           pointerEvents: 'none',
           zIndex:        1,
-          opacity:       deepFocusAtmosphere ? 0.55 : 1,
-          transition:    'opacity 0.6s ease',
+          opacity: deepFocusAtmosphere
+            ? 0.55
+            : focusMode && spatialAmbient
+              ? focusAtm.edgeFadeOpacity
+              : 1,
+          transition: focusMode && spatialAmbient
+            ? `opacity ${focusAtm.transition}`
+            : 'opacity 0.6s ease',
           background: `
             linear-gradient(180deg, ${tokens.pageBg}28 0%, transparent 5%, transparent 93%, ${tokens.pageBg}28 100%),
             linear-gradient(90deg,  ${tokens.pageBg}20 0%, transparent 4%, transparent 96%, ${tokens.pageBg}20 100%)
@@ -1642,10 +1698,14 @@ export function FreeformCanvas({
           inset:         0,
           pointerEvents: 'none',
           zIndex:        1,
-          boxShadow:     deepFocusAtmosphere
+          boxShadow: deepFocusAtmosphere
             ? `inset 0 0 96px rgba(7,11,20,0.32)`
-            : `inset 0 0 80px rgba(7,11,20,0.5)`,
-          transition:    'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',
+            : focusMode && spatialAmbient
+              ? focusAtm.insetShadow
+              : `inset 0 0 80px rgba(7,11,20,0.5)`,
+          transition: focusMode && spatialAmbient
+            ? `box-shadow ${focusAtm.transition}`
+            : 'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
 
@@ -1785,19 +1845,23 @@ export function FreeformCanvas({
       )}
 
       {spatialMinimapEnabled && (
-        <FreeSpaceMiniMap
-          tokens={tokens}
-          blocks={blocks}
-          positions={positions}
-          zoom={safeZoom}
-          panX={safePanX}
-          panY={safePanY}
-          viewportWidth={viewportSize.w}
-          viewportHeight={viewportSize.h}
-          selectedId={selectedId}
-          connectionsEnabled={!!freeSpaceConnectionsEnabled}
-          setViewport={setViewport}
-        />
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Minimap">
+          <FreeSpaceMiniMap
+            tokens={tokens}
+            blocks={blocks}
+            positions={positions}
+            zoom={safeZoom}
+            panX={safePanX}
+            panY={safePanY}
+            viewportWidth={viewportSize.w}
+            viewportHeight={viewportSize.h}
+            selectedId={selectedId}
+            connectionsEnabled={!!freeSpaceConnectionsEnabled}
+            setViewport={setViewport}
+            presentationOpacityMul={focusMode && spatialAmbient ? focusAtm.minimapOpacityMul : 1}
+            presentationScale={focusMode && spatialAmbient ? focusAtm.minimapScale : 1}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       )}
 
       {/* ── Add button (bottom-right) ───────────────────────────── */}
@@ -1821,8 +1885,8 @@ export function FreeformCanvas({
           alignItems:      'center',
           justifyContent:  'center',
           boxShadow:       deepFocusAtmosphere && !addChromeHovered
-            ? `0 3px 14px ${tokens.accentGlow}88, 0 0 0 1px ${tokens.accent}30`
-            : `0 4px 20px ${tokens.accentGlow}, 0 0 0 1px ${tokens.accent}40`,
+            ? `0 2px 10px rgba(0,0,0,0.35), 0 0 0 1px ${tokens.accent}22`
+            : `0 3px 14px rgba(0,0,0,0.32), 0 0 0 1px ${tokens.accent}28`,
           opacity:         deepFocusAtmosphere && !addChromeHovered ? 0.52 : 1,
           transform:       'scale(1)',
           transition:      'opacity 0.35s ease, box-shadow 0.35s ease, transform 0.3s cubic-bezier(0.34,1.2,0.64,1), background-color 0.25s ease',

@@ -14,6 +14,7 @@ import { FreeSpaceGraph } from './FreeSpaceGraph';
 
 import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
+import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 
 interface Props {
   object: ProjectSpaceObject;
@@ -40,85 +41,101 @@ export function ProjectSpaceObjectRenderer({
   switch (content.type) {
     case 'notebook':
       return (
-        <ProjectNotebookBlock
-          content={content}
-          tokens={tokens}
-          onChange={onChange}
-          context="free-space"
-          onEditingChange={
-            onNotebookEditingChange
-              ? (editing) => onNotebookEditingChange(object.id, editing)
-              : undefined
-          }
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Notebook">
+          <ProjectNotebookBlock
+            content={content}
+            tokens={tokens}
+            onChange={onChange}
+            context="free-space"
+            onEditingChange={
+              onNotebookEditingChange
+                ? (editing) => onNotebookEditingChange(object.id, editing)
+                : undefined
+            }
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'note':
       return (
-        <NoteBlock
-          content={{ type: 'note', body: content.body }}
-          tokens={tokens}
-          onChange={c => onChange({ type: 'note', body: c.body })}
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Note">
+          <NoteBlock
+            content={{ type: 'note', body: content.body }}
+            tokens={tokens}
+            onChange={c => onChange({ type: 'note', body: c.body })}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'mistake':
       return (
-        <FreeSpaceMistakeCard
-          title={object.title}
-          content={content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-          onTitleChange={onTitleChange}
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Mistake card">
+          <FreeSpaceMistakeCard
+            title={object.title}
+            content={content}
+            tokens={tokens}
+            onChange={c => onChange(c)}
+            onTitleChange={onTitleChange}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'link':
       return (
-        <div>
-          <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
-            Click to open. Double-click to edit.
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Link">
+          <div>
+            <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+              Click to open. Double-click to edit.
+            </div>
+            <LinkBlock
+              content={content}
+              tokens={tokens}
+              onChange={c => onChange(c)}
+            />
           </div>
-          <LinkBlock
-            content={content}
-            tokens={tokens}
-            onChange={c => onChange(c)}
-          />
-        </div>
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'checklist':
       return (
-        <ChecklistBlock
-          content={content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-        />
-      );
-    case 'image':
-      return (
-        <div>
-          <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
-            Hover image to change source.
-          </div>
-          <ImageBlock
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Checklist">
+          <ChecklistBlock
             content={content}
             tokens={tokens}
             onChange={c => onChange(c)}
           />
-        </div>
+        </WorkspaceSurfaceErrorBoundary>
+      );
+    case 'image':
+      return (
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Image">
+          <div>
+            <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+              Hover image to change source.
+            </div>
+            <ImageBlock
+              content={content}
+              tokens={tokens}
+              onChange={c => onChange(c)}
+            />
+          </div>
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'calculator':
       return (
-        <FreeSpaceCalculator
-          content={content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Calculator">
+          <FreeSpaceCalculator
+            content={content}
+            tokens={tokens}
+            onChange={c => onChange(c)}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'graph':
       return (
-        <FreeSpaceGraph
-          content={content}
-          tokens={tokens}
-          onChange={c => onChange(c)}
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Graph">
+          <FreeSpaceGraph
+            content={content}
+            tokens={tokens}
+            onChange={c => onChange(c)}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     case 'pdf':
       if (!freeSpaceSectionId) {
@@ -129,14 +146,16 @@ export function ProjectSpaceObjectRenderer({
         );
       }
       return (
-        <FreeSpacePdfCard
-          objectId={object.id}
-          content={content}
-          tokens={tokens}
-          sectionId={freeSpaceSectionId}
-          onChange={c => onChange(c)}
-          onTitleChange={onTitleChange}
-        />
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="PDF">
+          <FreeSpacePdfCard
+            objectId={object.id}
+            content={content}
+            tokens={tokens}
+            sectionId={freeSpaceSectionId}
+            onChange={c => onChange(c)}
+            onTitleChange={onTitleChange}
+          />
+        </WorkspaceSurfaceErrorBoundary>
       );
     default:
       return (

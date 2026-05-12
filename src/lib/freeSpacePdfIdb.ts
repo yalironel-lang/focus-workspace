@@ -84,6 +84,75 @@ export async function copyPdfBlob(sectionId: string, fromObjectId: string, toObj
   }
 }
 
+export async function listPdfBlobKeys(): Promise<string[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = () => {
+      db.close();
+      const keys = req.result;
+      resolve(keys.filter((k): k is string => typeof k === 'string'));
+    };
+    req.onerror = () => {
+      db.close();
+      reject(req.error);
+    };
+  });
+}
+
+/** Removes every PDF blob whose store key starts with `${sectionId}::`. */
+export async function deleteAllPdfBlobsForSection(sectionId: string): Promise<void> {
+  if (!sectionId) return;
+  const prefix = `${sectionId}::`;
+  const keys = await listPdfBlobKeys();
+  const targets = keys.filter(k => k.startsWith(prefix));
+  if (targets.length === 0) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    const store = tx.objectStore(STORE);
+    for (const k of targets) store.delete(k);
+  });
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = fr.result;
+      if (typeof s !== 'string') {
+        reject(new Error('Unexpected FileReader result'));
+        return;
+      }
+      const comma = s.indexOf(',');
+      resolve(comma >= 0 ? s.slice(comma + 1) : s);
+    };
+    fr.onerror = () => reject(fr.error ?? new Error('FileReader failed'));
+    fr.readAsDataURL(blob);
+  });
+}
+
+export async function pdfBlobToBase64(blob: Blob): Promise<string> {
+  return blobToBase64(blob);
+}
+
+export function base64ToPdfBlob(base64: string, mime = 'application/pdf'): Blob {
+  const bin = atob(base64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 /** Phase 1: PDF only. Validates without reading bytes. */
 export function isAcceptablePdfFile(file: File): boolean {
   const name = file.name.trim().toLowerCase();

@@ -347,43 +347,59 @@ function pruneConnectionsFromObjects(objects: ProjectSpaceObject[], removedId: s
   });
 }
 
+/**
+ * Normalize Free Space objects from parsed JSON (storage or import).
+ * Returns repaired=true when rows were dropped or coerced so callers may persist.
+ */
+export function repairFreeSpaceObjectList(
+  parsed: unknown,
+  sectionId: string,
+): { objects: ProjectSpaceObject[]; repaired: boolean } {
+  if (!sectionId) return { objects: [], repaired: false };
+  if (!Array.isArray(parsed)) {
+    fwPersistWarn(
+      `Free Space objects for section "${sectionId}" were not a JSON array; using empty list until storage is fixed (key: ${key(sectionId)}).`,
+    );
+    return { objects: [], repaired: true };
+  }
+
+  const staged: ProjectSpaceObject[] = [];
+  const rawRows: unknown[] = [];
+  let repaired = false;
+  for (const item of parsed) {
+    const n = normalizeProjectSpaceObject(item);
+    if (!n) {
+      repaired = true;
+      continue;
+    }
+    staged.push(n);
+    rawRows.push(item);
+  }
+  const validIds = new Set(staged.map(o => o.id));
+  const normalized: ProjectSpaceObject[] = staged.map((o, i) => {
+    const rawConn = (rawRows[i] && typeof rawRows[i] === 'object')
+      ? (rawRows[i] as Record<string, unknown>).connections
+      : undefined;
+    const connections = normalizeConnectionsField(o.id, rawConn, validIds);
+    const merged = { ...o, connections };
+    if (JSON.stringify(merged) !== JSON.stringify(staged[i])) repaired = true;
+    return merged;
+  });
+  if (parsed.length !== normalized.length) repaired = true;
+  return { objects: normalized, repaired };
+}
+
 function load(sectionId: string): ProjectSpaceObject[] {
   if (!sectionId) return [];
   try {
     const raw = localStorage.getItem(key(sectionId));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
+    const { objects: normalized, repaired } = repairFreeSpaceObjectList(parsed, sectionId);
+    if (repaired) {
       fwPersistWarn(
-        `Free Space objects for section "${sectionId}" were not a JSON array; showing an empty canvas until storage is fixed (key: ${key(sectionId)}). Use __FW_RESET_FREE_SPACE__() after backing up if needed.`,
+        `Repaired Free Space objects for section "${sectionId}"; rewriting storage (${Array.isArray(parsed) ? parsed.length : 0} rows → ${normalized.length} valid).`,
       );
-      return [];
-    }
-
-    const staged: ProjectSpaceObject[] = [];
-    const rawRows: unknown[] = [];
-    let needsWrite = false;
-    for (const item of parsed) {
-      const n = normalizeProjectSpaceObject(item);
-      if (!n) {
-        needsWrite = true;
-        continue;
-      }
-      staged.push(n);
-      rawRows.push(item);
-    }
-    const validIds = new Set(staged.map(o => o.id));
-    const normalized: ProjectSpaceObject[] = staged.map((o, i) => {
-      const rawConn = (rawRows[i] && typeof rawRows[i] === 'object')
-        ? (rawRows[i] as Record<string, unknown>).connections
-        : undefined;
-      const connections = normalizeConnectionsField(o.id, rawConn, validIds);
-      const merged = { ...o, connections };
-      if (JSON.stringify(merged) !== JSON.stringify(staged[i])) needsWrite = true;
-      return merged;
-    });
-    if (needsWrite) {
-      fwPersistWarn(`Repaired Free Space objects for section "${sectionId}" (${parsed.length} rows → ${normalized.length} valid); rewriting storage.`);
       try {
         localStorage.setItem(key(sectionId), JSON.stringify(normalized));
       } catch { /* quota */ }

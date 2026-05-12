@@ -5,8 +5,10 @@ export type CommandGroupId =
   | 'quick'
   | 'workspace'
   | 'free-space'
+  | 'focus-modes'
   | 'intelligence'
   | 'advanced-cloud-ai'
+  | 'recovery'
   | 'search';
 
 export interface CommandItem {

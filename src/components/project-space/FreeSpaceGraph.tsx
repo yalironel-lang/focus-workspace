@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type PointerEvent as GraphPointerEvent } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { safeEvaluateAtX, validateGraphExpression } from '../../lib/safeMathExpr';
@@ -15,6 +15,15 @@ const PRESETS: { label: string; expression: string }[] = [
 const W = 300;
 const H = 176;
 const PAD = 28;
+const PLOT_W = W - PAD * 2;
+const PLOT_H = H - PAD * 2;
+
+/** Matches `makeDefaults('graph')` in useSectionFreeSpaceObjects. */
+const DEFAULT_GRAPH_VIEW = { xmin: -6, xmax: 6, ymin: -4, ymax: 8 } as const;
+const MIN_AXIS_SPAN = 1e-10;
+const MAX_AXIS_SPAN = 1e5;
+const ZOOM_STEP_BUTTON = 1.2;
+const ZOOM_STEP_WHEEL = 1.08;
 
 interface Props {
   content: GraphContent;
@@ -30,6 +39,89 @@ function clampRange(xmin: number, xmax: number, ymin: number, ymax: number) {
   if (xb <= xa) xb = xa + 0.01;
   if (yb <= ya) yb = ya + 0.01;
   return { xmin: xa, xmax: xb, ymin: ya, ymax: yb };
+}
+
+/** Hard limits so zoom/pan cannot produce unusable or unstable ranges. */
+function clampViewport(xmin: number, xmax: number, ymin: number, ymax: number) {
+  let { xmin: xa, xmax: xb, ymin: ya, ymax: yb } = clampRange(xmin, xmax, ymin, ymax);
+  let xw = xb - xa;
+  let yh = yb - ya;
+  if (xw > MAX_AXIS_SPAN) {
+    const m = (xa + xb) / 2;
+    xa = m - MAX_AXIS_SPAN / 2;
+    xb = m + MAX_AXIS_SPAN / 2;
+    xw = MAX_AXIS_SPAN;
+  }
+  if (yh > MAX_AXIS_SPAN) {
+    const m = (ya + yb) / 2;
+    ya = m - MAX_AXIS_SPAN / 2;
+    yb = m + MAX_AXIS_SPAN / 2;
+    yh = MAX_AXIS_SPAN;
+  }
+  if (xw < MIN_AXIS_SPAN) {
+    const m = (xa + xb) / 2;
+    xa = m - MIN_AXIS_SPAN / 2;
+    xb = m + MIN_AXIS_SPAN / 2;
+  }
+  if (yh < MIN_AXIS_SPAN) {
+    const m = (ya + yb) / 2;
+    ya = m - MIN_AXIS_SPAN / 2;
+    yb = m + MIN_AXIS_SPAN / 2;
+  }
+  return { xmin: xa, xmax: xb, ymin: ya, ymax: yb };
+}
+
+/** `factor` &lt; 1 zooms in (smaller window). Fixed point (cx, cy) in data space. */
+function zoomAround(xmin: number, xmax: number, ymin: number, ymax: number, cx: number, cy: number, factor: number) {
+  return {
+    xmin: cx + (xmin - cx) * factor,
+    xmax: cx + (xmax - cx) * factor,
+    ymin: cy + (ymin - cy) * factor,
+    ymax: cy + (ymax - cy) * factor,
+  };
+}
+
+/** Map client coords to data (x,y) using plot inner area mapping. */
+function clientToData(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  xmin: number,
+  xmax: number,
+  ymin: number,
+  ymax: number,
+): { cx: number; cy: number } {
+  const lx = rect.left + (PAD / W) * rect.width;
+  const rx = rect.left + ((W - PAD) / W) * rect.width;
+  const ty = rect.top + (PAD / H) * rect.height;
+  const by = rect.top + ((H - PAD) / H) * rect.height;
+  const u = Math.min(1, Math.max(0, (clientX - lx) / Math.max(1e-9, rx - lx)));
+  const v = Math.min(1, Math.max(0, (clientY - ty) / Math.max(1e-9, by - ty)));
+  const cx = xmin + u * (xmax - xmin);
+  const cy = ymax - v * (ymax - ymin);
+  return { cx, cy };
+}
+
+function fitYToCurve(
+  expression: string,
+  xmin: number,
+  xmax: number,
+  steps: number,
+): { ymin: number; ymax: number } | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  const dx = (xmax - xmin) / Math.max(2, steps - 1);
+  for (let i = 0; i < steps; i++) {
+    const x = xmin + dx * i;
+    const r = safeEvaluateAtX(expression, x);
+    if (!r.ok || !Number.isFinite(r.value)) continue;
+    lo = Math.min(lo, r.value);
+    hi = Math.max(hi, r.value);
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  const span = hi - lo;
+  const pad = span > 1e-12 ? span * 0.12 : Math.max(Math.abs(lo), Math.abs(hi), 1) * 0.15 + 1e-6;
+  return { ymin: lo - pad, ymax: hi + pad };
 }
 
 function buildPathD(
@@ -184,7 +276,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
       const n = Number.parseFloat(s);
       return Number.isFinite(n) ? n : fallback;
     };
-    const c = clampRange(
+    const c = clampViewport(
       p(rangeDraft.xmin, content.xmin),
       p(rangeDraft.xmax, content.xmax),
       p(rangeDraft.ymin, content.ymin),
@@ -198,6 +290,142 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
       ymax: String(c.ymax),
     });
   }, [rangeDraft, content, patch]);
+
+  const plotInteractRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    xmin: number;
+    xmax: number;
+    ymin: number;
+    ymax: number;
+  } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const commitViewport = useCallback(
+    (r: { xmin: number; xmax: number; ymin: number; ymax: number }) => {
+      const c = clampViewport(r.xmin, r.xmax, r.ymin, r.ymax);
+      patch(c);
+      setRangeDraft({
+        xmin: String(c.xmin),
+        xmax: String(c.xmax),
+        ymin: String(c.ymin),
+        ymax: String(c.ymax),
+      });
+    },
+    [patch],
+  );
+
+  const viewCenterData = useCallback(
+    () => ({
+      cx: (content.xmin + content.xmax) / 2,
+      cy: (content.ymin + content.ymax) / 2,
+    }),
+    [content.xmin, content.xmax, content.ymin, content.ymax],
+  );
+
+  const zoomInCenter = useCallback(() => {
+    const { cx, cy } = viewCenterData();
+    const f = 1 / ZOOM_STEP_BUTTON;
+    commitViewport(zoomAround(content.xmin, content.xmax, content.ymin, content.ymax, cx, cy, f));
+  }, [commitViewport, viewCenterData, content.xmin, content.xmax, content.ymin, content.ymax]);
+
+  const zoomOutCenter = useCallback(() => {
+    const { cx, cy } = viewCenterData();
+    const f = ZOOM_STEP_BUTTON;
+    commitViewport(zoomAround(content.xmin, content.xmax, content.ymin, content.ymax, cx, cy, f));
+  }, [commitViewport, viewCenterData, content.xmin, content.xmax, content.ymin, content.ymax]);
+
+  const resetView = useCallback(() => {
+    commitViewport({ ...DEFAULT_GRAPH_VIEW });
+  }, [commitViewport]);
+
+  const fitCurve = useCallback(() => {
+    const expr = content.expression;
+    const mid = (content.xmin + content.xmax) / 2;
+    if (!safeEvaluateAtX(expr, mid).ok) return;
+    const yfit = fitYToCurve(expr, content.xmin, content.xmax, 280);
+    if (!yfit) return;
+    commitViewport({
+      xmin: content.xmin,
+      xmax: content.xmax,
+      ymin: yfit.ymin,
+      ymax: yfit.ymax,
+    });
+  }, [content.expression, content.xmin, content.xmax, content.ymin, content.ymax, commitViewport]);
+
+  useEffect(() => {
+    const el = plotInteractRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el.getBoundingClientRect();
+      const { cx, cy } = clientToData(e.clientX, e.clientY, rect, content.xmin, content.xmax, content.ymin, content.ymax);
+      const zoomIn = e.deltaY < 0;
+      const factor = zoomIn ? 1 / ZOOM_STEP_WHEEL : ZOOM_STEP_WHEEL;
+      const next = zoomAround(content.xmin, content.xmax, content.ymin, content.ymax, cx, cy, factor);
+      commitViewport(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [content.xmin, content.xmax, content.ymin, content.ymax, commitViewport]);
+
+  const onPlotPointerDown = useCallback(
+    (e: GraphPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      setIsPanning(true);
+      panRef.current = {
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        xmin: content.xmin,
+        xmax: content.xmax,
+        ymin: content.ymin,
+        ymax: content.ymax,
+      };
+    },
+    [content.xmin, content.xmax, content.ymin, content.ymax],
+  );
+
+  const onPlotPointerMove = useCallback(
+    (e: GraphPointerEvent<HTMLDivElement>) => {
+      const p = panRef.current;
+      if (!p || p.pointerId !== e.pointerId) return;
+      const el = plotInteractRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const dx = e.clientX - p.startClientX;
+      const dy = e.clientY - p.startClientY;
+      const innerW = (PLOT_W / W) * rect.width;
+      const innerH = (PLOT_H / H) * rect.height;
+      const xw = p.xmax - p.xmin;
+      const yh = p.ymax - p.ymin;
+      const dxa = (-dx / Math.max(1e-9, innerW)) * xw;
+      const dya = (dy / Math.max(1e-9, innerH)) * yh;
+      commitViewport({
+        xmin: p.xmin + dxa,
+        xmax: p.xmax + dxa,
+        ymin: p.ymin + dya,
+        ymax: p.ymax + dya,
+      });
+    },
+    [commitViewport],
+  );
+
+  const onPlotPointerEnd = useCallback((e: GraphPointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId !== e.pointerId) return;
+    panRef.current = null;
+    setIsPanning(false);
+    try {
+      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  }, []);
 
   return (
     <div
@@ -285,7 +513,84 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
           ))}
         </div>
 
-        <div className="rounded-lg overflow-hidden" style={{ backgroundColor: tokens.wellBg }}>
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: tokens.textGhost }}>
+              View
+            </span>
+            <button
+              type="button"
+              title="Zoom out"
+              onClick={zoomOutCenter}
+              className="text-[11px] font-bold px-2 py-0.5 rounded-md leading-none"
+              style={{
+                backgroundColor: tokens.wellBg,
+                color: tokens.textSecondary,
+                border: `1px solid ${tokens.cardBorder}`,
+              }}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              title="Zoom in"
+              onClick={zoomInCenter}
+              className="text-[11px] font-bold px-2 py-0.5 rounded-md leading-none"
+              style={{
+                backgroundColor: tokens.wellBg,
+                color: tokens.textSecondary,
+                border: `1px solid ${tokens.cardBorder}`,
+              }}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              title="Reset axes to default window"
+              onClick={resetView}
+              className="text-[9px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-wide"
+              style={{
+                backgroundColor: tokens.wellBg,
+                color: tokens.textMuted,
+                border: `1px solid ${tokens.cardBorder}`,
+              }}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              title="Fit vertical range to the curve in the current X window"
+              onClick={fitCurve}
+              disabled={!!err || !!draftErr}
+              className="text-[9px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-wide disabled:opacity-35"
+              style={{
+                backgroundColor: tokens.wellBg,
+                color: tokens.textMuted,
+                border: `1px solid ${tokens.cardBorder}`,
+              }}
+            >
+              Fit Y
+            </button>
+          </div>
+          <span className="text-[9px] leading-tight" style={{ color: tokens.textGhost, opacity: 0.72 }}>
+            Scroll wheel zooms · drag plot to pan
+          </span>
+        </div>
+
+        <div
+          ref={plotInteractRef}
+          data-fw-graph-plot="1"
+          className="rounded-lg overflow-hidden select-none"
+          style={{
+            backgroundColor: tokens.wellBg,
+            cursor: isPanning ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+          onPointerDown={onPlotPointerDown}
+          onPointerMove={onPlotPointerMove}
+          onPointerUp={onPlotPointerEnd}
+          onPointerCancel={onPlotPointerEnd}
+        >
           <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
             {axes}
             {d && (

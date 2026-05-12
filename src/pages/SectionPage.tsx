@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
+import { useFocusMode } from '../hooks/useFocusMode';
+import { FOCUS_MODE_BADGE } from '../focusMode/focusModeTypes';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
@@ -422,7 +424,11 @@ export function SectionPage() {
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
   const sectionObjectsRef = useRef(sectionObjects);
   sectionObjectsRef.current = sectionObjects;
-  const { registerFreeSpace, registerAIWorkspace, paletteOpen, sessionModalOpen } = useCommandPalette();
+  const { registerFreeSpace, registerAIWorkspace, registerFocusMode, paletteOpen, sessionModalOpen } = useCommandPalette();
+  const { focusMode, setFocusMode } = useFocusMode(sectionId);
+  const focusModeLiveRef = useRef(focusMode);
+  focusModeLiveRef.current = focusMode;
+
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
   const pendingQuickCaptureRef = useRef<{ kind: 'note' | 'mistake'; text: string } | null>(null);
   const quickCaptureStackRef = useRef(0);
@@ -949,6 +955,18 @@ export function SectionPage() {
   }, []);
 
   useEffect(() => {
+    if (!id) {
+      registerFocusMode(null);
+      return;
+    }
+    registerFocusMode({
+      getMode: () => focusModeLiveRef.current,
+      setMode: setFocusMode,
+    });
+    return () => registerFocusMode(null);
+  }, [id, registerFocusMode, setFocusMode, focusMode]);
+
+  useEffect(() => {
     setFwFreeSpaceDevSectionContext(id ?? null);
     return () => setFwFreeSpaceDevSectionContext(null);
   }, [id]);
@@ -1264,8 +1282,31 @@ export function SectionPage() {
           alignItems: 'center',
           padding: '0 20px',
           backgroundColor: '#070b14',
+          position: 'relative',
+          opacity: focusMode && sectionViewMode === 'free-space' ? 0.9 : 1,
+          transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
+        {focusMode ? (
+          <div
+            title="Cognitive focus is active on this workspace"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              fontSize: '10px',
+              fontWeight: 600,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: 'rgba(148,163,184,0.85)',
+              pointerEvents: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Focus · {FOCUS_MODE_BADGE[focusMode]}
+          </div>
+        ) : null}
         <div
           style={{
             display: 'inline-flex',
@@ -1351,6 +1392,7 @@ export function SectionPage() {
               onCancelConnectMode={cancelConnectMode}
               spatialMinimapEnabled
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
+              focusMode={sectionViewMode === 'free-space' ? focusMode : null}
             />
           </FreeSpaceCanvasErrorBoundary>
 

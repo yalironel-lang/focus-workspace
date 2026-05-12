@@ -44,6 +44,8 @@ export interface FreeSpaceConnectionsLayerProps {
   animateFocusId?: string | null;
   hoveredEdgeKey: string | null;
   onHoveredEdgeChange: (key: string | null) => void;
+  /** Focus Mode: multiply base stroke presence (1 = default). */
+  lineEmphasisMul?: number;
 }
 
 function FreeSpaceConnectionsLayerInner({
@@ -53,6 +55,7 @@ function FreeSpaceConnectionsLayerInner({
   animateFocusId,
   hoveredEdgeKey,
   onHoveredEdgeChange,
+  lineEmphasisMul = 1,
 }: FreeSpaceConnectionsLayerProps) {
   const fid = useId().replace(/:/g, '');
   const filterId = `fw-conn-glow-${fid}`;
@@ -114,6 +117,7 @@ function FreeSpaceConnectionsLayerInner({
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
         const stroke = hovered ? `${accent}aa` : `${accent}38`;
         const width = hovered ? 1.35 : 0.85;
+        const em = Math.max(0.35, Math.min(1.6, lineEmphasisMul));
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
             <path
@@ -129,12 +133,12 @@ function FreeSpaceConnectionsLayerInner({
               d={d}
               fill="none"
               stroke={stroke}
-              strokeWidth={width}
+              strokeWidth={width * (0.85 + em * 0.15)}
               strokeLinecap="round"
               filter={hovered || pulse ? `url(#${filterId})` : undefined}
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
-                opacity: pulse && !hovered ? 0.72 : 1,
+                opacity: (pulse && !hovered ? 0.72 : 1) * em,
                 animation: pulse ? 'fwConnPulse 2.6s ease-in-out infinite' : undefined,
               }}
             />

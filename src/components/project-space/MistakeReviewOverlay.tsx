@@ -3,6 +3,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent, coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import type { MistakeInsight } from '../../lib/mistakeIntelligence';
+import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 
 interface Props {
   open: boolean;
@@ -129,78 +130,80 @@ export function MistakeReviewOverlay({
               Nothing in this queue right now.
             </p>
           ) : (
-            <>
-              <h2 className="text-base font-semibold mb-3" style={{ color: tokens.textPrimary }}>
-                {obj.title}
-              </h2>
-              <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: `${tokens.accent}aa` }}>
-                    What went wrong
+            <WorkspaceSurfaceErrorBoundary key={id ?? '_'} tokens={tokens} label="Mistake review">
+              <>
+                <h2 className="text-base font-semibold mb-3" style={{ color: tokens.textPrimary }}>
+                  {obj.title}
+                </h2>
+                <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: `${tokens.accent}aa` }}>
+                      What went wrong
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.whatWrong || '—'}</div>
                   </div>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{m.whatWrong || '—'}</div>
+                  {m.correction ? (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
+                        Correct understanding
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{m.correction}</div>
+                    </div>
+                  ) : null}
+                  {m.whyConfused ? (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
+                        Why it confused me
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{m.whyConfused}</div>
+                    </div>
+                  ) : null}
                 </div>
-                {m.correction ? (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
-                      Correct understanding
-                    </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.correction}</div>
-                  </div>
-                ) : null}
-                {m.whyConfused ? (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
-                      Why it confused me
-                    </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.whyConfused}</div>
-                  </div>
-                ) : null}
-              </div>
 
-              {relatedMistakeIds.length > 0 ? (
-                <div className="mt-6 pt-4" style={{ borderTop: `1px solid rgba(255,255,255,0.06)` }}>
-                  <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: tokens.textGhost }}>
-                    Nearby in memory
+                {relatedMistakeIds.length > 0 ? (
+                  <div className="mt-6 pt-4" style={{ borderTop: `1px solid rgba(255,255,255,0.06)` }}>
+                    <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: tokens.textGhost }}>
+                      Nearby in memory
+                    </div>
+                    <div className="relative h-[72px] rounded-xl overflow-hidden" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+                      <div
+                        className="absolute rounded-full"
+                        style={{
+                          width: 10,
+                          height: 10,
+                          left: '50%',
+                          top: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          backgroundColor: tokens.accent,
+                          opacity: 0.85,
+                          boxShadow: `0 0 12px ${tokens.accent}66`,
+                        }}
+                      />
+                      {relatedMistakeIds.map((rid, i) => {
+                        const ang = (i / relatedMistakeIds.length) * Math.PI * 2;
+                        const r = 26;
+                        const cx = 50 + Math.cos(ang) * r;
+                        const cy = 50 + Math.sin(ang) * r;
+                        return (
+                          <div
+                            key={rid}
+                            className="absolute rounded-full"
+                            style={{
+                              width: 6,
+                              height: 6,
+                              left: `${cx}%`,
+                              top: `${cy}%`,
+                              transform: 'translate(-50%, -50%)',
+                              backgroundColor: 'rgba(255,255,255,0.25)',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="relative h-[72px] rounded-xl overflow-hidden" style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
-                    <div
-                      className="absolute rounded-full"
-                      style={{
-                        width: 10,
-                        height: 10,
-                        left: '50%',
-                        top: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        backgroundColor: tokens.accent,
-                        opacity: 0.85,
-                        boxShadow: `0 0 12px ${tokens.accent}66`,
-                      }}
-                    />
-                    {relatedMistakeIds.map((rid, i) => {
-                      const ang = (i / relatedMistakeIds.length) * Math.PI * 2;
-                      const r = 26;
-                      const cx = 50 + Math.cos(ang) * r;
-                      const cy = 50 + Math.sin(ang) * r;
-                      return (
-                        <div
-                          key={rid}
-                          className="absolute rounded-full"
-                          style={{
-                            width: 6,
-                            height: 6,
-                            left: `${cx}%`,
-                            top: `${cy}%`,
-                            transform: 'translate(-50%, -50%)',
-                            backgroundColor: 'rgba(255,255,255,0.25)',
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-            </>
+                ) : null}
+              </>
+            </WorkspaceSurfaceErrorBoundary>
           )}
         </div>
 

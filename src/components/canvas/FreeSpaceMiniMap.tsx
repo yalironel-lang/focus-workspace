@@ -128,6 +128,10 @@ export interface FreeSpaceMiniMapProps {
   selectedId: string | null;
   connectionsEnabled: boolean;
   setViewport: (zoom: number, panX: number, panY: number) => void;
+  /** Focus Mode: multiplies base minimap opacity curve. */
+  presentationOpacityMul?: number;
+  /** Focus Mode: scales the minimap panel. */
+  presentationScale?: number;
 }
 
 function FreeSpaceMiniMapInner({
@@ -142,6 +146,8 @@ function FreeSpaceMiniMapInner({
   selectedId,
   connectionsEnabled,
   setViewport,
+  presentationOpacityMul = 1,
+  presentationScale = 1,
 }: FreeSpaceMiniMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -376,8 +382,10 @@ function FreeSpaceMiniMapInner({
         boxShadow: `0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)`,
         backdropFilter: 'blur(14px) saturate(1.2)',
         WebkitBackdropFilter: 'blur(14px) saturate(1.2)',
-        opacity: hovered ? 0.94 : 0.78,
-        transition: 'opacity 0.35s ease, box-shadow 0.4s ease',
+        opacity: (hovered ? 0.94 : 0.78) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
+        transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
+        transformOrigin: 'bottom right',
+        transition: 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         pointerEvents: 'auto',
         overflow: 'hidden',
       }}

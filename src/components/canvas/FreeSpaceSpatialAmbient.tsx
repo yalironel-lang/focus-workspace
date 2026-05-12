@@ -8,6 +8,8 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 
 interface Props {
   tokens: AtmosphereTokens | null | undefined;
+  /** Focus Mode: scales overall ambient presence (1 = default). */
+  opacityScale?: number;
 }
 
 /** Deterministic pseudo-random 0..1 from index (stable layout). */
@@ -16,7 +18,7 @@ function hash01(i: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-export function FreeSpaceSpatialAmbient({ tokens }: Props) {
+export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
   const rid = useId().replace(/:/g, '');
   const idCore = `fwAmbientCore-${rid}`;
   const idSide = `fwAmbientSide-${rid}`;
@@ -82,7 +84,8 @@ export function FreeSpaceSpatialAmbient({ tokens }: Props) {
         height: 3800,
         pointerEvents: 'none',
         zIndex: 0,
-        opacity: 1,
+        opacity: Math.max(0.35, Math.min(1.35, opacityScale)),
+        transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         animation: 'fwSpatialDrift 140s linear infinite alternate',
       }}
     >

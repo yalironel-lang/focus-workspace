@@ -39,6 +39,8 @@ interface Props {
   /** When set, hovering this block (if not source) signals a valid connect target */
   connectModeSourceId?: string | null;
   onConnectHoverTarget?: (targetId: string | null) => void;
+  /** Focus Mode: added to stacking order for emphasized cards. */
+  presentationZBoost?: number;
 }
 
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
@@ -63,6 +65,7 @@ export function FreeformBlock({
   connectionChrome = 'neutral',
   connectModeSourceId = null,
   onConnectHoverTarget,
+  presentationZBoost = 0,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -120,16 +123,16 @@ export function FreeformBlock({
       : '';
   let boxShadow = `${innerRim}, 0 1px 2px rgba(0,0,0,0.16), 0 10px 28px rgba(0,0,0,0.14)`;
   if (isDragging && activeGesture === 'resize') {
-    boxShadow = `${innerRim}${innerHighlight}, 0 4px 6px rgba(0,0,0,0.18), 0 22px 48px rgba(0,0,0,0.38), 0 0 40px ${tokens.accentGlow}33`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 4px 6px rgba(0,0,0,0.2), 0 18px 40px rgba(0,0,0,0.32)`;
   } else if (isDragging) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 6px 10px rgba(0,0,0,0.22), 0 28px 56px rgba(0,0,0,0.42), 0 0 52px ${tokens.accentGlow}40`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 6px 10px rgba(0,0,0,0.22), 0 22px 48px rgba(0,0,0,0.36)`;
   } else if (selected) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 4px 8px rgba(0,0,0,0.2), 0 18px 44px rgba(0,0,0,0.32), 0 0 36px ${tokens.accentGlow}38`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 4px 8px rgba(0,0,0,0.2), 0 16px 38px rgba(0,0,0,0.3)`;
   } else if (hovered) {
     boxShadow = `${innerRim}, 0 3px 6px rgba(0,0,0,0.16), 0 14px 36px rgba(0,0,0,0.26)`;
   }
   if (deepFocusAnchor && !isDragging) {
-    boxShadow = `${boxShadow}, 0 18px 48px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.05)`;
+    boxShadow = `${boxShadow}, 0 12px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.04)`;
   }
 
   const borderColor = isConnectTargetHover
@@ -140,7 +143,7 @@ export function FreeformBlock({
         ? tokens.cardBorderHover
         : tokens.cardBorder;
 
-  const z = isDragging ? 10 : selected ? 8 : hovered ? 5 : 2;
+  const z = (isDragging ? 10 : selected ? 8 : hovered ? 5 : 2) + presentationZBoost;
 
   return (
     <div
@@ -187,28 +190,6 @@ export function FreeformBlock({
           : `transform 0.42s ${liftEase}, box-shadow 0.38s ${chromeEase}, filter 0.38s ${chromeEase}, border-color 0.32s ${chromeEase}`,
       }}
     >
-      {/* Soft spatial halo — selected / hover only; passive, no layout thrash */}
-      {(selected || hovered) && (
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '42%',
-            width: '118%',
-            height: '92%',
-            transform: 'translate(-50%, -50%)',
-            borderRadius: '22px',
-            background: `radial-gradient(ellipse at 50% 35%, ${tokens.accentGlow}22 0%, transparent 62%)`,
-            opacity: deepFocusAnchor ? Math.min(selected ? 0.55 : 0.28, 0.22) : selected ? 0.55 : 0.28,
-            pointerEvents: 'none',
-            zIndex: 0,
-            transition: `opacity 0.45s ${chromeEase}`,
-            filter: 'blur(10px)',
-          }}
-        />
-      )}
-
       <div
         style={{
           position: 'relative',
@@ -441,7 +422,7 @@ export function FreeformBlock({
               width: '11px',
               height: '11px',
               borderRadius: '3px',
-              boxShadow: `0 0 12px ${tokens.accentGlow}55, inset 0 0 0 1px ${tokens.accent}35`,
+              boxShadow: `0 1px 4px rgba(0,0,0,0.2), inset 0 0 0 1px ${tokens.accent}28`,
               background: `linear-gradient(135deg, ${tokens.accent}40 0%, transparent 55%)`,
               position: 'relative',
             }}
