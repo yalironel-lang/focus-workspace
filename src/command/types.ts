@@ -6,6 +6,7 @@ export type CommandGroupId =
   | 'workspace'
   | 'free-space'
   | 'focus-modes'
+  | 'workspace-starters'
   | 'intelligence'
   | 'advanced-cloud-ai'
   | 'recovery'

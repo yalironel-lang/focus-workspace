@@ -28,6 +28,7 @@ import {
   HardDrive,
   ScanLine,
   BookMarked,
+  LayoutGrid,
 } from 'lucide-react';
 import { SessionModal } from '../components/SessionModal';
 import { IntelligenceModal } from '../components/ai/IntelligenceModal';
@@ -39,6 +40,7 @@ import {
   getFreeSpaceHandlersSnapshot,
   getAIWorkspaceHandlersSnapshot,
   getFocusModeHandlersSnapshot,
+  getWorkspaceStarterHandlersSnapshot,
 } from './CommandPaletteContext';
 import { useAIAvailability } from '../hooks/useAIAvailability';
 import { LIBRARY_OPEN_CREATE_FLAG } from './constants';
@@ -81,6 +83,7 @@ export function GlobalCommandPalette() {
     openIntelligenceModal,
     aiWorkspaceVersion,
     focusModeVersion,
+    workspaceStarterVersion,
   } = ctx;
 
   const aiAvail = useAIAvailability();
@@ -249,6 +252,74 @@ export function GlobalCommandPalette() {
           disabledHint: 'No focus mode is active',
           run: () => {
             getFocusModeHandlersSnapshot()?.setMode(null);
+            closePalette();
+          },
+        },
+      );
+
+      const ws = getWorkspaceStarterHandlersSnapshot();
+      list.push(
+        {
+          id: 'starter-exam-prep',
+          group: 'workspace-starters',
+          groupLabel: 'Workspace starters',
+          label: 'Apply Exam Prep starter',
+          subtitle: 'Notebook, mistakes, review note, PDF, tools',
+          keywords: ['starter', 'exam', 'prep', 'layout', 'template', 'desk'],
+          icon: LayoutGrid,
+          priority: 5.45,
+          disabled: !ws,
+          disabledHint: 'Open a workspace to apply starters',
+          run: () => {
+            getWorkspaceStarterHandlersSnapshot()?.applyStarter('exam-prep');
+            closePalette();
+          },
+        },
+        {
+          id: 'starter-deep-reading',
+          group: 'workspace-starters',
+          groupLabel: 'Workspace starters',
+          label: 'Apply Reading starter',
+          subtitle: 'Large PDF, margin notebook, quotes card',
+          keywords: ['starter', 'reading', 'pdf', 'deep', 'layout', 'template'],
+          icon: LayoutGrid,
+          priority: 5.46,
+          disabled: !ws,
+          disabledHint: 'Open a workspace to apply starters',
+          run: () => {
+            getWorkspaceStarterHandlersSnapshot()?.applyStarter('deep-reading');
+            closePalette();
+          },
+        },
+        {
+          id: 'starter-problem-solving',
+          group: 'workspace-starters',
+          groupLabel: 'Workspace starters',
+          label: 'Apply Solving starter',
+          subtitle: 'Notebook, calculator, graph, scratch, slips',
+          keywords: ['starter', 'solve', 'math', 'problem', 'layout', 'template'],
+          icon: LayoutGrid,
+          priority: 5.47,
+          disabled: !ws,
+          disabledHint: 'Open a workspace to apply starters',
+          run: () => {
+            getWorkspaceStarterHandlersSnapshot()?.applyStarter('problem-solving');
+            closePalette();
+          },
+        },
+        {
+          id: 'starter-research-thinking',
+          group: 'workspace-starters',
+          groupLabel: 'Workspace starters',
+          label: 'Apply Thinking starter',
+          subtitle: 'Connected notes in a wide map',
+          keywords: ['starter', 'research', 'thinking', 'ideas', 'layout', 'template'],
+          icon: LayoutGrid,
+          priority: 5.48,
+          disabled: !ws,
+          disabledHint: 'Open a workspace to apply starters',
+          run: () => {
+            getWorkspaceStarterHandlersSnapshot()?.applyStarter('research-thinking');
             closePalette();
           },
         },
@@ -775,6 +846,7 @@ export function GlobalCommandPalette() {
     aiAvail,
     aiWorkspaceVersion,
     focusModeVersion,
+    workspaceStarterVersion,
     openIntelligenceModal,
   ]);
 

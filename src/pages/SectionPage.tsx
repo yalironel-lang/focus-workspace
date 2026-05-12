@@ -5,6 +5,11 @@ import { FOCUS_MODE_BADGE } from '../focusMode/focusModeTypes';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
+import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
+import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
+import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
+import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
+import { WorkspaceStarterHints } from '../components/workspace-starter/WorkspaceStarterHints';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -424,7 +429,7 @@ export function SectionPage() {
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
   const sectionObjectsRef = useRef(sectionObjects);
   sectionObjectsRef.current = sectionObjects;
-  const { registerFreeSpace, registerAIWorkspace, registerFocusMode, paletteOpen, sessionModalOpen } = useCommandPalette();
+  const { registerFreeSpace, registerAIWorkspace, registerFocusMode, registerWorkspaceStarter, paletteOpen, sessionModalOpen } = useCommandPalette();
   const { focusMode, setFocusMode } = useFocusMode(sectionId);
   const focusModeLiveRef = useRef(focusMode);
   focusModeLiveRef.current = focusMode;
@@ -448,6 +453,8 @@ export function SectionPage() {
   const [quickCaptureVariant, setQuickCaptureVariant] = useState<'note' | 'mistake'>('note');
   const [mistakeReviewOpen, setMistakeReviewOpen] = useState(false);
   const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
+  const [starterDismissed, setStarterDismissed] = useState(false);
+  const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
@@ -967,6 +974,75 @@ export function SectionPage() {
   }, [id, registerFocusMode, setFocusMode, focusMode]);
 
   useEffect(() => {
+    if (!sectionId) {
+      setStarterDismissed(false);
+      return;
+    }
+    try {
+      setStarterDismissed(localStorage.getItem(starterDismissStorageKey(sectionId)) === '1');
+    } catch {
+      setStarterDismissed(false);
+    }
+  }, [sectionId]);
+
+  const clearStarterHints = useCallback(() => setStarterHints(null), []);
+
+  const dismissWorkspaceStarterOverlay = useCallback(() => {
+    if (!sectionId) return;
+    try {
+      localStorage.setItem(starterDismissStorageKey(sectionId), '1');
+    } catch {
+      /* ignore */
+    }
+    setStarterDismissed(true);
+  }, [sectionId]);
+
+  const applyWorkspaceStarter = useCallback(
+    (starterId: WorkspaceStarterId) => {
+      const pack = buildWorkspaceStarterPack(starterId);
+      let positions = { ...pack.positions };
+      if (sectionObjects.objects.length > 0) {
+        const ids = pack.objects.map(o => o.id);
+        const refId = ids[0];
+        const refPos = refId ? positions[refId] : undefined;
+        if (refPos) {
+          const nf = sectionPositions.nextFreePos(sectionPositions.positions);
+          const dx = nf.x - refPos.x;
+          const dy = nf.y - refPos.y;
+          for (const oid of ids) {
+            const p = positions[oid];
+            if (p) positions[oid] = { ...p, x: Math.max(24, p.x + dx), y: Math.max(24, p.y + dy) };
+          }
+        }
+      }
+      sectionObjects.appendObjects(pack.objects);
+      sectionPositions.applyPositions(positions);
+      setFocusMode(pack.focusSuggestion);
+      setStarterHints(pack.hints);
+      setSectionViewMode('free-space');
+      setSpaceSelectedId(pack.objects[0]?.id ?? null);
+      toast.success(`${WORKSPACE_STARTER_LABEL[starterId]} desk ready`);
+    },
+    [
+      sectionObjects.appendObjects,
+      sectionObjects.objects.length,
+      sectionPositions.applyPositions,
+      sectionPositions.nextFreePos,
+      sectionPositions.positions,
+      setFocusMode,
+    ],
+  );
+
+  useEffect(() => {
+    if (!id) {
+      registerWorkspaceStarter(null);
+      return;
+    }
+    registerWorkspaceStarter({ applyStarter: applyWorkspaceStarter });
+    return () => registerWorkspaceStarter(null);
+  }, [id, registerWorkspaceStarter, applyWorkspaceStarter]);
+
+  useEffect(() => {
     setFwFreeSpaceDevSectionContext(id ?? null);
     return () => setFwFreeSpaceDevSectionContext(null);
   }, [id]);
@@ -1154,6 +1230,11 @@ export function SectionPage() {
 
   const examDays = section.exam_date ? daysUntil(section.exam_date) : null;
 
+  const showWorkspaceStarter =
+    sectionViewMode === 'free-space' &&
+    sectionObjects.objects.length === 0 &&
+    !starterDismissed;
+
   const progressColor = allDone || progress >= 70 ? '#10b981'
                       : progress >= 30             ? '#f59e0b'
                       :                              '#ef4444';
@@ -1263,6 +1344,8 @@ export function SectionPage() {
         onMarkReviewed={markMistakeReviewedInSession}
       />
 
+      <WorkspaceStarterHints hints={starterHints} tokens={tokens} onClear={clearStarterHints} />
+
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
       <SpaceNav
         title={section.title}
@@ -1344,7 +1427,7 @@ export function SectionPage() {
 
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
       {sectionViewMode === 'free-space' ? (
-        <>
+        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <FreeSpaceArrangeControl
             tokens={tokens}
             topOffset={84}
@@ -1395,6 +1478,16 @@ export function SectionPage() {
               focusMode={sectionViewMode === 'free-space' ? focusMode : null}
             />
           </FreeSpaceCanvasErrorBoundary>
+
+          {showWorkspaceStarter && (
+            <WorkspaceStarterOverlay
+              tokens={tokens}
+              onChoose={sid => {
+                applyWorkspaceStarter(sid);
+              }}
+              onDismiss={dismissWorkspaceStarterOverlay}
+            />
+          )}
 
           {showSpaceAdd && (
             <div
@@ -1447,7 +1540,7 @@ export function SectionPage() {
               ))}
             </div>
           )}
-        </>
+        </div>
       ) : designMode ? (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ maxWidth: '896px', margin: '0 auto', padding: '24px 24px 64px' }}>

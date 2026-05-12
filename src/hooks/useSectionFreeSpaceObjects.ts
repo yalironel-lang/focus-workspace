@@ -420,6 +420,8 @@ function persist(sectionId: string, objects: ProjectSpaceObject[]): void {
 
 export interface SectionFreeSpaceObjectsState {
   objects: ProjectSpaceObject[];
+  /** Single persist write; use for workspace starters and batched inserts. */
+  appendObjects: (incoming: ProjectSpaceObject[]) => void;
   addObject: (type: ProjectObjectType) => ProjectSpaceObject;
   /** One persist write: new note with title + body (avoids batched add+patch races). */
   addQuickCaptureNote: (body: string) => ProjectSpaceObject;
@@ -442,6 +444,15 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
 
   useEffect(() => {
     setObjects(load(sectionId));
+  }, [sectionId]);
+
+  const appendObjects = useCallback((incoming: ProjectSpaceObject[]) => {
+    if (!incoming.length) return;
+    setObjects(prev => {
+      const next = [...prev, ...incoming];
+      persist(sectionId, next);
+      return next;
+    });
   }, [sectionId]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
@@ -666,6 +677,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
 
   return {
     objects,
+    appendObjects,
     addObject,
     addQuickCaptureNote,
     addQuickCaptureMistake,

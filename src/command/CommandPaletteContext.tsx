@@ -9,10 +9,12 @@ import { useWorkspaceTheme, mergeAccent } from '../hooks/useWorkspaceTheme';
 import type { FreeSpaceCommandHandlers } from './types';
 import type { AIWorkspaceHandlers } from './aiWorkspaceHandlersRef';
 import type { FocusMode } from '../focusMode/focusModeTypes';
+import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 
 const freeHandlersRef = { current: null as FreeSpaceCommandHandlers | null };
 const aiWorkspaceRef = { current: null as AIWorkspaceHandlers | null };
 const focusModeRef = { current: null as FocusModeHandlers | null };
+const workspaceStarterRef = { current: null as WorkspaceStarterHandlers | null };
 
 export interface FocusModeHandlers {
   getMode: () => FocusMode | null;
@@ -21,6 +23,14 @@ export interface FocusModeHandlers {
 
 export function getFocusModeHandlersSnapshot(): FocusModeHandlers | null {
   return focusModeRef.current;
+}
+
+export interface WorkspaceStarterHandlers {
+  applyStarter: (id: WorkspaceStarterId) => void;
+}
+
+export function getWorkspaceStarterHandlersSnapshot(): WorkspaceStarterHandlers | null {
+  return workspaceStarterRef.current;
 }
 
 export function getFreeSpaceHandlersSnapshot(): FreeSpaceCommandHandlers | null {
@@ -35,6 +45,7 @@ export interface CommandPaletteContextValue {
   registerFreeSpace: (handlers: FreeSpaceCommandHandlers | null) => void;
   registerAIWorkspace: (handlers: AIWorkspaceHandlers | null) => void;
   registerFocusMode: (handlers: FocusModeHandlers | null) => void;
+  registerWorkspaceStarter: (handlers: WorkspaceStarterHandlers | null) => void;
   paletteOpen: boolean;
   openPalette: () => void;
   closePalette: () => void;
@@ -58,6 +69,7 @@ export interface CommandPaletteContextValue {
   openIntelligenceModal: () => void;
   aiWorkspaceVersion: number;
   focusModeVersion: number;
+  workspaceStarterVersion: number;
 }
 
 const CommandPaletteContext = createContext<CommandPaletteContextValue | null>(null);
@@ -79,6 +91,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const [freeSpaceVersion, setFreeSpaceVersion] = useState(0);
   const [aiWorkspaceVersion, setAiWorkspaceVersion] = useState(0);
   const [focusModeVersion, setFocusModeVersion] = useState(0);
+  const [workspaceStarterVersion, setWorkspaceStarterVersion] = useState(0);
 
   const registerFreeSpace = useCallback((handlers: FreeSpaceCommandHandlers | null) => {
     freeHandlersRef.current = handlers;
@@ -93,6 +106,11 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const registerFocusMode = useCallback((handlers: FocusModeHandlers | null) => {
     focusModeRef.current = handlers;
     setFocusModeVersion(v => v + 1);
+  }, []);
+
+  const registerWorkspaceStarter = useCallback((handlers: WorkspaceStarterHandlers | null) => {
+    workspaceStarterRef.current = handlers;
+    setWorkspaceStarterVersion(v => v + 1);
   }, []);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
@@ -119,6 +137,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       registerFreeSpace,
       registerAIWorkspace,
       registerFocusMode,
+      registerWorkspaceStarter,
       paletteOpen,
       openPalette,
       closePalette,
@@ -142,11 +161,13 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       openIntelligenceModal,
       aiWorkspaceVersion,
       focusModeVersion,
+      workspaceStarterVersion,
     }),
     [
       registerFreeSpace,
       registerAIWorkspace,
       registerFocusMode,
+      registerWorkspaceStarter,
       paletteOpen,
       freeSpaceVersion,
       sections,
@@ -165,6 +186,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       openIntelligenceModal,
       aiWorkspaceVersion,
       focusModeVersion,
+      workspaceStarterVersion,
     ],
   );
 
