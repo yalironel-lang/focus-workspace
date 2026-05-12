@@ -5,17 +5,30 @@ import { fwPersistWarn } from '../lib/freeSpacePersistence';
 export type ProjectObjectType =
   | 'notebook'
   | 'note'
+  | 'mistake'
   | 'link'
   | 'checklist'
   | 'image'
   | 'calculator'
   | 'graph';
 
+export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
+
 export type CalculatorHistoryEntry = { expr: string; result: string };
 
 export type ProjectObjectContent =
   | { type: 'notebook'; body: string; paperStyle: 'blank' | 'ruled' | 'grid' }
   | { type: 'note'; body: string }
+  | {
+      type: 'mistake';
+      whatWrong: string;
+      correction: string;
+      whyConfused: string;
+      tags: string[];
+      confidence: MistakeConfidence;
+      timesReviewed: number;
+      lastReviewedAt: number | null;
+    }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
   | { type: 'image'; url: string; alt?: string; caption?: string }
@@ -43,6 +56,7 @@ export interface ProjectSpaceObject {
 const OBJECT_TYPES = new Set<ProjectObjectType>([
   'notebook',
   'note',
+  'mistake',
   'link',
   'checklist',
   'image',
@@ -62,6 +76,20 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
   switch (type) {
     case 'notebook': return { title: 'Notebook', content: { type: 'notebook', body: '', paperStyle: 'ruled' } };
     case 'note': return { title: 'Note', content: { type: 'note', body: '' } };
+    case 'mistake':
+      return {
+        title: 'Mistake',
+        content: {
+          type: 'mistake',
+          whatWrong: '',
+          correction: '',
+          whyConfused: '',
+          tags: [],
+          confidence: 'low',
+          timesReviewed: 0,
+          lastReviewedAt: null,
+        },
+      };
     case 'link': return { title: 'Reference Link', content: { type: 'link', title: 'Untitled link', url: '' } };
     case 'checklist': return { title: 'Checklist', content: { type: 'checklist', items: [] } };
     case 'image': return { title: 'Image', content: { type: 'image', url: '' } };
@@ -125,6 +153,28 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
     }
     case 'note':
       return { type: 'note', body: typeof r.body === 'string' ? r.body : '' };
+    case 'mistake': {
+      const tagsRaw = Array.isArray(r.tags) ? r.tags : [];
+      const tags = tagsRaw
+        .map((t: unknown) => (typeof t === 'string' ? t.trim() : ''))
+        .filter(Boolean);
+      const conf = r.confidence;
+      const confidence: MistakeConfidence =
+        conf === 'medium' || conf === 'high' || conf === 'mastered' ? conf : 'low';
+      const last = r.lastReviewedAt;
+      const lastReviewedAt =
+        typeof last === 'number' && Number.isFinite(last) ? last : null;
+      return {
+        type: 'mistake',
+        whatWrong: typeof r.whatWrong === 'string' ? r.whatWrong : '',
+        correction: typeof r.correction === 'string' ? r.correction : '',
+        whyConfused: typeof r.whyConfused === 'string' ? r.whyConfused : '',
+        tags,
+        confidence,
+        timesReviewed: Math.max(0, Math.floor(numOr(r.timesReviewed, 0))),
+        lastReviewedAt,
+      };
+    }
     case 'link': {
       const title = typeof r.title === 'string' ? r.title : 'Untitled link';
       const url = typeof r.url === 'string' ? r.url : '';
@@ -310,6 +360,10 @@ export interface SectionFreeSpaceObjectsState {
   addObject: (type: ProjectObjectType) => ProjectSpaceObject;
   /** One persist write: new note with title + body (avoids batched add+patch races). */
   addQuickCaptureNote: (body: string) => ProjectSpaceObject;
+  /** Fast mistake capture: title from first line, body maps to “what went wrong”. */
+  addQuickCaptureMistake: (rawBody: string) => ProjectSpaceObject;
+  /** Turn selected note into a mistake card (preserves note body as whatWrong). */
+  convertNoteToMistake: (id: string) => ProjectSpaceObject | null;
   updateObjectContent: (id: string, content: ProjectObjectContent) => void;
   /** Update title and/or content in one persist write (e.g. quick capture). */
   updateObjectFields: (id: string, fields: { title?: string; content?: ProjectObjectContent }) => void;
@@ -365,6 +419,73 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       return next;
     });
     return obj;
+  }, [sectionId]);
+
+  const addQuickCaptureMistake = useCallback((rawBody: string): ProjectSpaceObject => {
+    const trimmed = rawBody.trim();
+    const firstLine = trimmed.split(/\n/)[0]?.trim() ?? trimmed;
+    const title = firstLine.length > 56 ? `${firstLine.slice(0, 54)}…` : (firstLine || 'Mistake');
+    const now = Date.now();
+    const obj: ProjectSpaceObject = {
+      id: uid('mistake'),
+      type: 'mistake',
+      title,
+      content: {
+        type: 'mistake',
+        whatWrong: trimmed || 'What went wrong',
+        correction: '',
+        whyConfused: '',
+        tags: [],
+        confidence: 'low',
+        timesReviewed: 0,
+        lastReviewedAt: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    setObjects(prev => {
+      const next = [...prev, obj];
+      persist(sectionId, next);
+      return next;
+    });
+    return obj;
+  }, [sectionId]);
+
+  const convertNoteToMistake = useCallback((objectId: string): ProjectSpaceObject | null => {
+    let out: ProjectSpaceObject | null = null;
+    setObjects(prev => {
+      const o = prev.find(x => x.id === objectId);
+      if (!o || o.type !== 'note') return prev;
+      const noteBody = ensureProjectObjectContent('note', o.content);
+      const body = noteBody.type === 'note' ? noteBody.body : '';
+      const trimmed = body.trim();
+      const firstLine = trimmed.split(/\n/)[0]?.trim() ?? trimmed;
+      const title =
+        (o.title && o.title !== 'Note' ? o.title : firstLine) ||
+        firstLine ||
+        'Mistake';
+      const nextObj: ProjectSpaceObject = {
+        ...o,
+        type: 'mistake',
+        title: title.length > 80 ? `${title.slice(0, 78)}…` : title,
+        content: {
+          type: 'mistake',
+          whatWrong: trimmed || 'What went wrong',
+          correction: '',
+          whyConfused: '',
+          tags: [],
+          confidence: 'low',
+          timesReviewed: 0,
+          lastReviewedAt: null,
+        },
+        updatedAt: Date.now(),
+      };
+      out = nextObj;
+      const next = prev.map(x => (x.id === objectId ? nextObj : x));
+      persist(sectionId, next);
+      return next;
+    });
+    return out;
   }, [sectionId]);
 
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
@@ -479,6 +600,8 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     objects,
     addObject,
     addQuickCaptureNote,
+    addQuickCaptureMistake,
+    convertNoteToMistake,
     updateObjectContent,
     updateObjectFields,
     addConnection,

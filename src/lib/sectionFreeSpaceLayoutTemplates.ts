@@ -35,6 +35,7 @@ const GUTTER = 34;
 const DEFAULT_W: Record<ProjectObjectType, number> = {
   notebook: 620,
   note: 360,
+  mistake: 380,
   link: 360,
   checklist: 360,
   image: 460,
@@ -45,6 +46,7 @@ const DEFAULT_W: Record<ProjectObjectType, number> = {
 const DEFAULT_H: Record<ProjectObjectType, number> = {
   notebook: 520,
   note: 280,
+  mistake: 320,
   link: 240,
   checklist: 300,
   image: 360,
@@ -117,7 +119,7 @@ function place(
 }
 
 function columnForType(t: ProjectObjectType): 0 | 1 | 2 {
-  if (t === 'notebook' || t === 'note') return 0;
+  if (t === 'notebook' || t === 'note' || t === 'mistake') return 0;
   if (t === 'link') return 1;
   return 2;
 }
@@ -163,6 +165,7 @@ export function computeFreeSpaceTemplateLayout(
       const buckets: Record<ProjectObjectType, ProjectSpaceObject[]> = {
         notebook: [],
         note: [],
+        mistake: [],
         link: [],
         checklist: [],
         image: [],
@@ -173,6 +176,7 @@ export function computeFreeSpaceTemplateLayout(
       const typeOrder: ProjectObjectType[] = [
         'notebook',
         'note',
+        'mistake',
         'link',
         'checklist',
         'image',

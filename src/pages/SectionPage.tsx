@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
@@ -10,7 +10,11 @@ import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useW
 import { useAtmosphere } from '../hooks/useAtmosphere';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
-import { useSectionFreeSpaceObjects, type ProjectObjectType } from '../hooks/useSectionFreeSpaceObjects';
+import {
+  useSectionFreeSpaceObjects,
+  type ProjectObjectType,
+  ensureProjectObjectContent,
+} from '../hooks/useSectionFreeSpaceObjects';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
@@ -29,6 +33,8 @@ import {
 import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
+import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
+import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
 import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
@@ -404,7 +410,7 @@ export function SectionPage() {
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
   const { registerFreeSpace, paletteOpen, sessionModalOpen } = useCommandPalette();
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
-  const pendingQuickCaptureRef = useRef<string | null>(null);
+  const pendingQuickCaptureRef = useRef<{ kind: 'note' | 'mistake'; text: string } | null>(null);
   const quickCaptureStackRef = useRef(0);
 
   const [showAddLane,     setShowAddLane]     = useState(false);
@@ -419,6 +425,10 @@ export function SectionPage() {
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
+  const [quickCaptureVariant, setQuickCaptureVariant] = useState<'note' | 'mistake'>('note');
+  const [mistakeReviewOpen, setMistakeReviewOpen] = useState(false);
+  const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
+  const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -586,7 +596,9 @@ export function SectionPage() {
             ? { w: 400, h: 360 }
             : type === 'calculator'
               ? { w: 300, h: 420 }
-              : { w: 360, h: 280 };
+              : type === 'mistake'
+                ? { w: 380, h: 320 }
+                : { w: 360, h: 280 };
     sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
@@ -619,19 +631,40 @@ export function SectionPage() {
     [sectionObjects, sectionPositions, viewportCenterWorld],
   );
 
+  const createQuickCaptureMistake = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const obj = sectionObjects.addQuickCaptureMistake(trimmed);
+      const stack = quickCaptureStackRef.current++;
+      const staggerX = (stack % 7) * 34 - 102;
+      const staggerY = (stack % 5) * 28 - 56;
+      const base = viewportCenterWorld(
+        staggerX + (Math.random() - 0.5) * 20,
+        staggerY + (Math.random() - 0.5) * 16,
+      );
+      sectionPositions.initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
+      setSpaceSelectedId(obj.id);
+    },
+    [sectionObjects, sectionPositions, viewportCenterWorld],
+  );
+
   const handleQuickCaptureCommit = useCallback(
     (raw: string) => {
       const t = raw.trim();
+      const kind = quickCaptureVariant;
       setQuickCaptureOpen(false);
+      setQuickCaptureVariant('note');
       if (!t) return;
       if (sectionViewMode === 'free-space') {
-        createQuickCaptureNote(t);
+        if (kind === 'mistake') createQuickCaptureMistake(t);
+        else createQuickCaptureNote(t);
         return;
       }
-      pendingQuickCaptureRef.current = t;
+      pendingQuickCaptureRef.current = { kind, text: t };
       setSectionViewMode('free-space');
     },
-    [sectionViewMode, createQuickCaptureNote],
+    [sectionViewMode, createQuickCaptureNote, createQuickCaptureMistake, quickCaptureVariant],
   );
 
   useLayoutEffect(() => {
@@ -639,23 +672,35 @@ export function SectionPage() {
     const qc = pendingQuickCaptureRef.current;
     if (qc) {
       pendingQuickCaptureRef.current = null;
-      createQuickCaptureNote(qc);
+      if (qc.kind === 'mistake') createQuickCaptureMistake(qc.text);
+      else createQuickCaptureNote(qc.text);
       return;
     }
     const pending = pendingFreeSpaceType.current;
     if (!pending) return;
     pendingFreeSpaceType.current = null;
     handleAddToSpace(pending);
-  }, [sectionViewMode, createQuickCaptureNote, handleAddToSpace]);
+  }, [sectionViewMode, createQuickCaptureNote, createQuickCaptureMistake, handleAddToSpace]);
 
   useEffect(() => {
     if (!id || !section) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (quickCaptureOpen) return;
+      if (mistakeReviewOpen) return;
       if (paletteOpen || sessionModalOpen) return;
       if (connectSourceId) return;
       if (isQuickCaptureBlockedTarget(e.target)) return;
+
+      const altMistake =
+        (e.key === 'c' || e.key === 'C') && e.altKey && !e.metaKey && !e.ctrlKey;
+      if (altMistake) {
+        if (e.repeat) return;
+        e.preventDefault();
+        setQuickCaptureVariant('mistake');
+        setQuickCaptureOpen(true);
+        return;
+      }
 
       const letterC =
         (e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !e.altKey;
@@ -664,11 +709,20 @@ export function SectionPage() {
       if (e.repeat) return;
 
       e.preventDefault();
+      setQuickCaptureVariant('note');
       setQuickCaptureOpen(true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [id, section, quickCaptureOpen, paletteOpen, sessionModalOpen, connectSourceId]);
+  }, [
+    id,
+    section,
+    quickCaptureOpen,
+    mistakeReviewOpen,
+    paletteOpen,
+    sessionModalOpen,
+    connectSourceId,
+  ]);
 
   const cancelConnectMode = useCallback(() => {
     setConnectSourceId(null);
@@ -706,6 +760,52 @@ export function SectionPage() {
     toast.success('Connections cleared');
   }, [sectionViewMode, spaceSelectedId, sectionObjects]);
 
+  const openMistakeReview = useCallback(
+    (mode: 'all' | 'neglected' | 'low' = 'all') => {
+      if (sectionViewMode !== 'free-space') {
+        setSectionViewMode('free-space');
+      }
+      const q = buildMistakeReviewQueueFiltered(sectionObjects.objects, mode);
+      setMistakeReviewQueue(q);
+      setMistakeReviewIndex(0);
+      setMistakeReviewOpen(true);
+    },
+    [sectionViewMode, sectionObjects.objects],
+  );
+
+  const convertSelectedNoteToMistake = useCallback(() => {
+    if (sectionViewMode !== 'free-space') {
+      toast('Open the Free Space tab first');
+      return;
+    }
+    if (!spaceSelectedId) {
+      toast.error('Select a note first');
+      return;
+    }
+    const o = sectionObjects.getObject(spaceSelectedId);
+    if (!o || o.type !== 'note') {
+      toast.error('Select a text note to convert');
+      return;
+    }
+    sectionObjects.convertNoteToMistake(spaceSelectedId);
+    toast.success('Captured as mistake');
+  }, [sectionViewMode, spaceSelectedId, sectionObjects]);
+
+  const markMistakeReviewedInSession = useCallback(
+    (mistakeId: string) => {
+      const o = sectionObjects.getObject(mistakeId);
+      if (!o || o.type !== 'mistake') return;
+      const c = ensureProjectObjectContent('mistake', o.content);
+      if (c.type !== 'mistake') return;
+      sectionObjects.updateObjectContent(mistakeId, {
+        ...c,
+        timesReviewed: c.timesReviewed + 1,
+        lastReviewedAt: Date.now(),
+      });
+    },
+    [sectionObjects],
+  );
+
   useEffect(() => {
     if (!connectSourceId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -734,11 +834,16 @@ export function SectionPage() {
     registerFreeSpace({
       addNotebook: () => requestFreeSpaceAdd('notebook'),
       addTextCard: () => requestFreeSpaceAdd('note'),
+      addMistake: () => requestFreeSpaceAdd('mistake'),
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
       getFreeSpaceSelectedId: () => spaceSelectedId,
       startConnectFromSelected,
       clearConnectionsForSelected,
+      openMistakeReviewAll: () => openMistakeReview('all'),
+      openMistakeReviewNeglected: () => openMistakeReview('neglected'),
+      openMistakeReviewLowConfidence: () => openMistakeReview('low'),
+      convertSelectedNoteToMistake,
     });
     return () => registerFreeSpace(null);
   }, [
@@ -748,7 +853,24 @@ export function SectionPage() {
     spaceSelectedId,
     startConnectFromSelected,
     clearConnectionsForSelected,
+    openMistakeReview,
+    convertSelectedNoteToMistake,
   ]);
+
+  const mistakeInsights = useMemo(
+    () => computeMistakeInsights(sectionObjects.objects),
+    [sectionObjects.objects],
+  );
+
+  useEffect(() => {
+    if (mistakeReviewQueue.length === 0) {
+      if (mistakeReviewIndex !== 0) setMistakeReviewIndex(0);
+      return;
+    }
+    if (mistakeReviewIndex >= mistakeReviewQueue.length) {
+      setMistakeReviewIndex(0);
+    }
+  }, [mistakeReviewQueue, mistakeReviewIndex]);
 
   useEffect(() => {
     installFwFreeSpaceDevTools();
@@ -873,6 +995,11 @@ export function SectionPage() {
         object={obj}
         tokens={tokens}
         onChange={content => sectionObjects.updateObjectContent(id, content)}
+        onTitleChange={
+          obj.type === 'mistake'
+            ? t => sectionObjects.updateObjectFields(id, { title: t })
+            : undefined
+        }
         onNotebookEditingChange={(objectId, isEditing) => {
           setSpaceEditingId(prev => (isEditing ? objectId : prev === objectId ? null : prev));
         }}
@@ -886,8 +1013,24 @@ export function SectionPage() {
       <QuickCaptureOverlay
         open={quickCaptureOpen}
         tokens={tokens}
-        onClose={() => setQuickCaptureOpen(false)}
+        variant={quickCaptureVariant}
+        onClose={() => {
+          setQuickCaptureOpen(false);
+          setQuickCaptureVariant('note');
+        }}
         onCommit={handleQuickCaptureCommit}
+      />
+
+      <MistakeReviewOverlay
+        open={mistakeReviewOpen}
+        tokens={tokens}
+        objects={sectionObjects.objects}
+        queueIds={mistakeReviewQueue}
+        index={mistakeReviewIndex}
+        setIndex={setMistakeReviewIndex}
+        insights={mistakeInsights}
+        onClose={() => setMistakeReviewOpen(false)}
+        onMarkReviewed={markMistakeReviewedInSession}
       />
 
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
@@ -1021,6 +1164,7 @@ export function SectionPage() {
               {([
                 { type: 'notebook', label: 'Notebook', hint: 'Large writing surface' },
                 { type: 'note', label: 'Note', hint: 'Quick capture' },
+                { type: 'mistake', label: 'Mistake', hint: 'Learn from slips' },
                 { type: 'link', label: 'Link', hint: 'Reference URL' },
                 { type: 'checklist', label: 'Checklist', hint: 'Action list' },
                 { type: 'image', label: 'Image', hint: 'Visual reference' },

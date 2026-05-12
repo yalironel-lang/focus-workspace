@@ -25,6 +25,7 @@ export interface CommandItem {
 export interface FreeSpaceCommandHandlers {
   addNotebook: () => void;
   addTextCard: () => void;
+  addMistake?: () => void;
   addCalculator: () => void;
   addGraph: () => void;
   /** Current selected Free Space object id, if any */
@@ -33,4 +34,8 @@ export interface FreeSpaceCommandHandlers {
   startConnectFromSelected?: () => void;
   /** Remove all connections involving the selected object */
   clearConnectionsForSelected?: () => void;
+  openMistakeReviewAll?: () => void;
+  openMistakeReviewNeglected?: () => void;
+  openMistakeReviewLowConfidence?: () => void;
+  convertSelectedNoteToMistake?: () => void;
 }

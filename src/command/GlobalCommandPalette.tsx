@@ -18,6 +18,9 @@ import {
   Unlink,
   X,
   Zap,
+  Brain,
+  Sparkles,
+  History,
 } from 'lucide-react';
 import { SessionModal } from '../components/SessionModal';
 import { isCommandPaletteBlockedTarget } from './isBlockedTarget';
@@ -296,6 +299,98 @@ export function GlobalCommandPalette() {
             if (!h?.addGraph) return;
             closePalette();
             h.addGraph();
+          },
+        },
+        {
+          id: 'fs-mistake',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Add mistake',
+          subtitle: 'Capture what went wrong',
+          keywords: ['error', 'wrong', 'learn', 'slip'],
+          icon: Brain,
+          priority: 15.5,
+          disabled: !hasFs || !fs?.addMistake,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.addMistake) return;
+            closePalette();
+            h.addMistake();
+          },
+        },
+        {
+          id: 'fs-mistake-review',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Review mistakes',
+          subtitle: 'Calm pass through your slips',
+          keywords: ['review', 'mistake', 'reflect'],
+          icon: Sparkles,
+          priority: 15.6,
+          disabled: !hasFs || !fs?.openMistakeReviewAll,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewAll) return;
+            closePalette();
+            h.openMistakeReviewAll();
+          },
+        },
+        {
+          id: 'fs-mistake-neglected',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Show neglected mistakes',
+          subtitle: 'Quiet for a while',
+          keywords: ['stale', 'old', 'forgot'],
+          icon: History,
+          priority: 15.65,
+          disabled: !hasFs || !fs?.openMistakeReviewNeglected,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewNeglected) return;
+            closePalette();
+            h.openMistakeReviewNeglected();
+          },
+        },
+        {
+          id: 'fs-mistake-low',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Show low-confidence mistakes',
+          subtitle: 'Still fragile',
+          keywords: ['uncertain', 'weak'],
+          icon: Hash,
+          priority: 15.7,
+          disabled: !hasFs || !fs?.openMistakeReviewLowConfidence,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.openMistakeReviewLowConfidence) return;
+            closePalette();
+            h.openMistakeReviewLowConfidence();
+          },
+        },
+        {
+          id: 'fs-note-to-mistake',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Convert note to mistake',
+          subtitle: 'Uses selected text card',
+          keywords: ['transform', 'capture'],
+          icon: StickyNote,
+          priority: 15.75,
+          disabled: !hasFs || !fs?.convertSelectedNoteToMistake || !fs.getFreeSpaceSelectedId?.(),
+          disabledHint: !fs?.getFreeSpaceSelectedId?.()
+            ? 'Select a note on Free Space first'
+            : 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.convertSelectedNoteToMistake) return;
+            closePalette();
+            h.convertSelectedNoteToMistake();
           },
         },
         {

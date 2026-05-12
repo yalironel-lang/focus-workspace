@@ -4,12 +4,14 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 interface Props {
   open: boolean;
   tokens: AtmosphereTokens;
+  /** Note vs mistake quick capture */
+  variant?: 'note' | 'mistake';
   onClose: () => void;
   /** Trimmed non-empty text, or empty string if user submitted blank */
   onCommit: (text: string) => void;
 }
 
-export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) {
+export function QuickCaptureOverlay({ open, tokens, variant = 'note', onClose, onCommit }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState('');
   const [visible, setVisible] = useState(false);
@@ -52,7 +54,7 @@ export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) 
       className="fixed inset-x-0 top-0 z-[280] flex justify-center pointer-events-none px-4 pt-[min(12vh,120px)]"
       aria-modal
       role="dialog"
-      aria-label="Quick capture"
+      aria-label={variant === 'mistake' ? 'Quick capture mistake' : 'Quick capture'}
     >
       <div
         data-fw-quick-capture-root="1"
@@ -61,7 +63,8 @@ export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) 
           opacity: visible ? 1 : 0,
           transform: visible ? 'translateY(0)' : 'translateY(-10px)',
           transition: 'opacity 0.15s ease-out, transform 0.15s ease-out',
-          backgroundColor: 'rgba(10,14,24,0.72)',
+          backgroundColor:
+            variant === 'mistake' ? 'rgba(24,10,12,0.78)' : 'rgba(10,14,24,0.72)',
           border: `1px solid ${tokens.cardBorder}`,
           boxShadow: `0 16px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 1px 0 rgba(255,255,255,0.06) inset`,
           backdropFilter: 'blur(16px) saturate(1.15)',
@@ -73,7 +76,7 @@ export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) 
             className="text-[11px] font-medium tracking-wide"
             style={{ color: tokens.textGhost }}
           >
-            Quick capture…
+            {variant === 'mistake' ? 'Capture mistake…' : 'Quick capture…'}
           </span>
           <input
             ref={inputRef}
@@ -86,7 +89,7 @@ export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) 
                 submit();
               }
             }}
-            placeholder="One thought…"
+            placeholder={variant === 'mistake' ? 'What went wrong…' : 'One thought…'}
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
@@ -102,7 +105,7 @@ export function QuickCaptureOverlay({ open, tokens, onClose, onCommit }: Props) 
               Enter to save · Esc to cancel
             </span>
             <span className="text-[10px] tabular-nums" style={{ color: tokens.textGhost }}>
-              C · ⇧Space
+              {variant === 'mistake' ? '⌥C · note: C' : 'C · ⇧Space'}
             </span>
           </div>
         </div>

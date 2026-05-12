@@ -12,12 +12,16 @@ import { ProjectNotebookBlock } from './ProjectNotebookBlock';
 import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
 
+import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
+
 interface Props {
   object: ProjectSpaceObject;
   tokens: AtmosphereTokens;
   onChange: (content: ProjectObjectContent) => void;
   /** Optional: notify host when this notebook enters or exits edit mode (Free Space focus). */
   onNotebookEditingChange?: (id: string, isEditing: boolean) => void;
+  /** Mistake cards: sync title to object.title */
+  onTitleChange?: (title: string) => void;
 }
 
 export function ProjectSpaceObjectRenderer({
@@ -25,6 +29,7 @@ export function ProjectSpaceObjectRenderer({
   tokens,
   onChange,
   onNotebookEditingChange,
+  onTitleChange,
 }: Props) {
   const content = ensureProjectObjectContent(object.type, object.content);
 
@@ -49,6 +54,16 @@ export function ProjectSpaceObjectRenderer({
           content={{ type: 'note', body: content.body }}
           tokens={tokens}
           onChange={c => onChange({ type: 'note', body: c.body })}
+        />
+      );
+    case 'mistake':
+      return (
+        <FreeSpaceMistakeCard
+          title={object.title}
+          content={content}
+          tokens={tokens}
+          onChange={c => onChange(c)}
+          onTitleChange={onTitleChange}
         />
       );
     case 'link':
