@@ -27,3 +27,15 @@ export function isCommandPaletteBlockedTarget(target: EventTarget | null): boole
 
   return false;
 }
+
+/**
+ * When true, global “quick capture” shortcuts (e.g. C, Shift+Space) must not fire —
+ * same editor/input rules as the command palette, plus palette UI and quick-capture UI.
+ */
+export function isQuickCaptureBlockedTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) return false;
+  const el = target;
+  if (el.closest('[data-fw-quick-capture-root="1"]')) return true;
+  if (el.closest('[data-fw-command-palette-root="1"]')) return true;
+  return isCommandPaletteBlockedTarget(target);
+}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useCommandPalette } from '../command/CommandPaletteContext';
+import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -27,6 +28,7 @@ import {
 } from '../lib/freeSpacePersistence';
 import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
+import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
 import type { GroupWithItems } from '../types';
 import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
@@ -400,8 +402,10 @@ export function SectionPage() {
   const sectionCanvas = useSectionCanvasMode(sectionId);
   const sectionPositions = useSectionBlockPositions(sectionId);
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
-  const { registerFreeSpace } = useCommandPalette();
+  const { registerFreeSpace, paletteOpen, sessionModalOpen } = useCommandPalette();
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
+  const pendingQuickCaptureRef = useRef<string | null>(null);
+  const quickCaptureStackRef = useRef(0);
 
   const [showAddLane,     setShowAddLane]     = useState(false);
   const [newLaneTitle,    setNewLaneTitle]     = useState('');
@@ -414,6 +418,7 @@ export function SectionPage() {
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -596,13 +601,74 @@ export function SectionPage() {
     setSectionViewMode('free-space');
   }, [sectionViewMode, handleAddToSpace]);
 
+  const createQuickCaptureNote = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const obj = sectionObjects.addQuickCaptureNote(trimmed);
+      const stack = quickCaptureStackRef.current++;
+      const staggerX = (stack % 7) * 34 - 102;
+      const staggerY = (stack % 5) * 28 - 56;
+      const base = viewportCenterWorld(
+        staggerX + (Math.random() - 0.5) * 20,
+        staggerY + (Math.random() - 0.5) * 16,
+      );
+      sectionPositions.initPos(obj.id, { x: base.x, y: base.y, w: 360, h: 280 });
+      setSpaceSelectedId(obj.id);
+    },
+    [sectionObjects, sectionPositions, viewportCenterWorld],
+  );
+
+  const handleQuickCaptureCommit = useCallback(
+    (raw: string) => {
+      const t = raw.trim();
+      setQuickCaptureOpen(false);
+      if (!t) return;
+      if (sectionViewMode === 'free-space') {
+        createQuickCaptureNote(t);
+        return;
+      }
+      pendingQuickCaptureRef.current = t;
+      setSectionViewMode('free-space');
+    },
+    [sectionViewMode, createQuickCaptureNote],
+  );
+
   useLayoutEffect(() => {
     if (sectionViewMode !== 'free-space') return;
+    const qc = pendingQuickCaptureRef.current;
+    if (qc) {
+      pendingQuickCaptureRef.current = null;
+      createQuickCaptureNote(qc);
+      return;
+    }
     const pending = pendingFreeSpaceType.current;
     if (!pending) return;
     pendingFreeSpaceType.current = null;
     handleAddToSpace(pending);
-  }, [sectionViewMode, handleAddToSpace]);
+  }, [sectionViewMode, createQuickCaptureNote, handleAddToSpace]);
+
+  useEffect(() => {
+    if (!id || !section) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      if (quickCaptureOpen) return;
+      if (paletteOpen || sessionModalOpen) return;
+      if (connectSourceId) return;
+      if (isQuickCaptureBlockedTarget(e.target)) return;
+
+      const letterC =
+        (e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !e.altKey;
+      const shiftSpace = e.key === ' ' && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
+      if (!letterC && !shiftSpace) return;
+      if (e.repeat) return;
+
+      e.preventDefault();
+      setQuickCaptureOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [id, section, quickCaptureOpen, paletteOpen, sessionModalOpen, connectSourceId]);
 
   const cancelConnectMode = useCallback(() => {
     setConnectSourceId(null);
@@ -817,6 +883,13 @@ export function SectionPage() {
   return (
     <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
 
+      <QuickCaptureOverlay
+        open={quickCaptureOpen}
+        tokens={tokens}
+        onClose={() => setQuickCaptureOpen(false)}
+        onCommit={handleQuickCaptureCommit}
+      />
+
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
       <SpaceNav
         title={section.title}
@@ -921,6 +994,7 @@ export function SectionPage() {
               onBeginConnectFromBlock={sid => setConnectSourceId(sid)}
               onConnectPairComplete={completeFreeSpaceConnect}
               onCancelConnectMode={cancelConnectMode}
+              spatialMinimapEnabled
             />
           </FreeSpaceCanvasErrorBoundary>
 

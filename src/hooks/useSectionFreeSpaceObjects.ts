@@ -308,7 +308,11 @@ function persist(sectionId: string, objects: ProjectSpaceObject[]): void {
 export interface SectionFreeSpaceObjectsState {
   objects: ProjectSpaceObject[];
   addObject: (type: ProjectObjectType) => ProjectSpaceObject;
+  /** One persist write: new note with title + body (avoids batched add+patch races). */
+  addQuickCaptureNote: (body: string) => ProjectSpaceObject;
   updateObjectContent: (id: string, content: ProjectObjectContent) => void;
+  /** Update title and/or content in one persist write (e.g. quick capture). */
+  updateObjectFields: (id: string, fields: { title?: string; content?: ProjectObjectContent }) => void;
   addConnection: (fromId: string, toId: string) => void;
   clearConnectionsForObject: (id: string) => void;
   removeObject: (id: string) => void;
@@ -342,6 +346,27 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     return obj;
   }, [sectionId]);
 
+  const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
+    const trimmed = rawBody.trim();
+    const firstLine = trimmed.split(/\n/)[0]?.trim() ?? trimmed;
+    const title = firstLine.length > 56 ? `${firstLine.slice(0, 54)}…` : (firstLine || 'Note');
+    const now = Date.now();
+    const obj: ProjectSpaceObject = {
+      id: uid('note'),
+      type: 'note',
+      title,
+      content: { type: 'note', body: trimmed },
+      createdAt: now,
+      updatedAt: now,
+    };
+    setObjects(prev => {
+      const next = [...prev, obj];
+      persist(sectionId, next);
+      return next;
+    });
+    return obj;
+  }, [sectionId]);
+
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
@@ -349,6 +374,26 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       return next;
     });
   }, [sectionId]);
+
+  const updateObjectFields = useCallback(
+    (objectId: string, fields: { title?: string; content?: ProjectObjectContent }) => {
+      setObjects(prev => {
+        const i = prev.findIndex(o => o.id === objectId);
+        if (i === -1) return prev;
+        const o = prev[i];
+        const nextObj: ProjectSpaceObject = {
+          ...o,
+          ...(fields.title !== undefined ? { title: fields.title } : {}),
+          ...(fields.content !== undefined ? { content: fields.content } : {}),
+          updatedAt: Date.now(),
+        };
+        const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];
+        persist(sectionId, next);
+        return next;
+      });
+    },
+    [sectionId],
+  );
 
   const addConnection = useCallback((fromId: string, toId: string) => {
     if (!fromId || !toId || fromId === toId) return;
@@ -433,7 +478,9 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
   return {
     objects,
     addObject,
+    addQuickCaptureNote,
     updateObjectContent,
+    updateObjectFields,
     addConnection,
     clearConnectionsForObject,
     removeObject,

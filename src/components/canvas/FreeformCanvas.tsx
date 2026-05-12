@@ -78,6 +78,7 @@ import { FreeformBlock } from './FreeformBlock';
 import { CustomToolBlock } from './CustomToolBlock';
 import { FreeSpaceSpatialAmbient } from './FreeSpaceSpatialAmbient';
 import { FreeSpaceConnectionsLayer } from './FreeSpaceConnectionsLayer';
+import { FreeSpaceMiniMap } from './FreeSpaceMiniMap';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 
@@ -158,6 +159,8 @@ interface Props {
   onBeginConnectFromBlock?: (id: string) => void;
   onConnectPairComplete?: (fromId: string, toId: string) => void;
   onCancelConnectMode?: () => void;
+  /** Premium spatial minimap (Section Free Space only by default). */
+  spatialMinimapEnabled?: boolean;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -330,6 +333,7 @@ export function FreeformCanvas({
   onBeginConnectFromBlock,
   onConnectPairComplete,
   onCancelConnectMode,
+  spatialMinimapEnabled = false,
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -341,8 +345,19 @@ export function FreeformCanvas({
   // Controls bar is ambient — only surfaces near the bottom edge
   const [controlsNear,   setControlsNear]    = useState(false);
   const [addChromeHovered, setAddChromeHovered] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ w: 800, h: 600 });
 
-  // ── Momentum / inertia refs ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!spatialMinimapEnabled) return;
+    const el = viewportRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      setViewportSize({ w: el.clientWidth, h: el.clientHeight });
+    });
+    ro.observe(el);
+    setViewportSize({ w: el.clientWidth, h: el.clientHeight });
+    return () => ro.disconnect();
+  }, [spatialMinimapEnabled]);
   const velRef     = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
   const rafRef     = useRef(0);                   // pan momentum RAF handle
   const zoomRafRef = useRef(0);                   // zoom lerp RAF handle
@@ -1739,6 +1754,22 @@ export function FreeformCanvas({
             </button>
           </div>
         </div>
+      )}
+
+      {spatialMinimapEnabled && (
+        <FreeSpaceMiniMap
+          tokens={tokens}
+          blocks={blocks}
+          positions={positions}
+          zoom={safeZoom}
+          panX={safePanX}
+          panY={safePanY}
+          viewportWidth={viewportSize.w}
+          viewportHeight={viewportSize.h}
+          selectedId={selectedId}
+          connectionsEnabled={!!freeSpaceConnectionsEnabled}
+          setViewport={setViewport}
+        />
       )}
 
       {/* ── Add button (bottom-right) ───────────────────────────── */}
