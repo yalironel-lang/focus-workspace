@@ -1304,6 +1304,7 @@ export function SectionPage() {
     return (
       <ProjectSpaceObjectRenderer
         object={obj}
+        allObjects={sectionObjects.objects}
         tokens={tokens}
         freeSpaceSectionId={sectionId}
         onChange={content => sectionObjects.updateObjectContent(id, content)}
@@ -1315,6 +1316,7 @@ export function SectionPage() {
         onNotebookEditingChange={(objectId, isEditing) => {
           setSpaceEditingId(prev => (isEditing ? objectId : prev === objectId ? null : prev));
         }}
+        onRequestSelectObject={setSpaceSelectedId}
       />
     );
   };

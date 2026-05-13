@@ -18,6 +18,7 @@ import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBo
 
 interface Props {
   object: ProjectSpaceObject;
+  allObjects?: ProjectSpaceObject[];
   tokens: AtmosphereTokens;
   /** Section id for Free Space PDF IndexedDB persistence */
   freeSpaceSectionId?: string;
@@ -26,15 +27,19 @@ interface Props {
   onNotebookEditingChange?: (id: string, isEditing: boolean) => void;
   /** Mistake cards: sync title to object.title */
   onTitleChange?: (title: string) => void;
+  /** Optional: focus/select another object from contextual notebook references. */
+  onRequestSelectObject?: (id: string) => void;
 }
 
 export function ProjectSpaceObjectRenderer({
   object,
+  allObjects,
   tokens,
   freeSpaceSectionId,
   onChange,
   onNotebookEditingChange,
   onTitleChange,
+  onRequestSelectObject,
 }: Props) {
   const content = ensureProjectObjectContent(object.type, object.content);
 
@@ -47,6 +52,10 @@ export function ProjectSpaceObjectRenderer({
             tokens={tokens}
             onChange={onChange}
             context="free-space"
+            objectId={object.id}
+            objectTitle={object.title}
+            allObjects={allObjects}
+            onRequestSelectObject={onRequestSelectObject}
             onEditingChange={
               onNotebookEditingChange
                 ? (editing) => onNotebookEditingChange(object.id, editing)

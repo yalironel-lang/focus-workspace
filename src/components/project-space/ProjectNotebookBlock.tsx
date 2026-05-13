@@ -15,11 +15,13 @@ import type {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
+import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
+import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
 type ParagraphVariant = 'muted' | 'fine';
+type CalloutTone = 'summary' | 'concept' | 'review';
 
 type NotebookLine =
   | { kind: 'blank' }
@@ -28,6 +30,8 @@ type NotebookLine =
   | { kind: 'divider' }
   | { kind: 'task'; checked: boolean; text: string }
   | { kind: 'quote'; text: string }
+  | { kind: 'callout'; tone: CalloutTone; text: string }
+  | { kind: 'math'; text: string }
   | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
@@ -65,6 +69,18 @@ function parseNotebookLine(raw: string): NotebookLine {
   const quoteMatch = trimmed.match(/^>\s?(.*)$/);
   if (quoteMatch && trimmed.startsWith('>')) return { kind: 'quote', text: (quoteMatch[1] ?? '').trimEnd() };
 
+  const calloutMatch = trimmed.match(/^!(summary|concept|review)\s*(.*)$/i);
+  if (calloutMatch) {
+    return {
+      kind: 'callout',
+      tone: calloutMatch[1]!.toLowerCase() as CalloutTone,
+      text: (calloutMatch[2] ?? '').trimEnd(),
+    };
+  }
+
+  const mathMatch = trimmed.match(/^\$\$\s*(.*)$/);
+  if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
+
   /** Pilcrow prefixes — editorial tone scale (not shown in contenteditable; storage + paste only). */
   if (trimmed.startsWith('\u00b6\u00b6')) {
     const rest = trimmed.slice(2).trimStart();
@@ -83,6 +99,8 @@ type Block =
   | { id: string; kind: 'section'; text: string }
   | { id: string; kind: 'task'; text: string; checked: boolean }
   | { id: string; kind: 'quote'; text: string }
+  | { id: string; kind: 'callout'; tone: CalloutTone; text: string }
+  | { id: string; kind: 'math'; text: string }
   | { id: string; kind: 'divider' }
   | { id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
@@ -90,6 +108,12 @@ let blockIdSeq = 0;
 function newBlockId(): string {
   blockIdSeq += 1;
   return `nb-${blockIdSeq}`;
+}
+
+function calloutLabel(tone: CalloutTone): string {
+  if (tone === 'summary') return 'Summary';
+  if (tone === 'concept') return 'Key idea';
+  return 'Review';
 }
 
 function lineToBlock(line: string): Block {
@@ -108,6 +132,10 @@ function lineToBlock(line: string): Block {
       return { id, kind: 'task', text: parsed.text, checked: parsed.checked };
     case 'quote':
       return { id, kind: 'quote', text: parsed.text };
+    case 'callout':
+      return { id, kind: 'callout', tone: parsed.tone, text: parsed.text };
+    case 'math':
+      return { id, kind: 'math', text: parsed.text };
     case 'paragraph':
       return {
         id,
@@ -139,6 +167,10 @@ function blockToLine(b: Block): string {
       return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
     case 'quote':
       return `> ${b.text}`;
+    case 'callout':
+      return `!${b.tone} ${b.text}`;
+    case 'math':
+      return `$$ ${b.text}`;
     case 'divider':
       return '---';
     case 'paragraph':
@@ -189,6 +221,8 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
     if (parsed.kind === 'task')
       return { id: blockId, kind: 'task', text: parsed.text, checked: parsed.checked };
     if (parsed.kind === 'quote') return { id: blockId, kind: 'quote', text: parsed.text };
+    if (parsed.kind === 'callout') return { id: blockId, kind: 'callout', tone: parsed.tone, text: parsed.text };
+    if (parsed.kind === 'math') return { id: blockId, kind: 'math', text: parsed.text };
     return { id: blockId, kind: 'paragraph', text: normalized };
   }
   return normalized.split(/\r?\n/).map((ln) => lineToBlock(ln));
@@ -210,6 +244,21 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
   }
   if (block.kind === 'quote') {
     const m = trimmed.match(/^>\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'callout') {
+    const m = trimmed.match(/^!(summary|concept|review)\s*(.*)$/i);
+    if (m) {
+      return {
+        ...block,
+        tone: m[1]!.toLowerCase() as CalloutTone,
+        text: (m[2] ?? '').trimEnd(),
+      };
+    }
+    return { ...block, text: line.trimEnd() };
+  }
+  if (block.kind === 'math') {
+    const m = trimmed.match(/^\$\$\s*(.*)$/);
     return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
   }
   if (block.kind === 'task') {
@@ -350,6 +399,10 @@ function mergeBlocks(prev: Block, next: Block): Block {
       return { id: prev.id, kind: 'section', text: mergedText };
     case 'quote':
       return { id: prev.id, kind: 'quote', text: mergedText };
+    case 'callout':
+      return { id: prev.id, kind: 'callout', tone: prev.tone, text: mergedText };
+    case 'math':
+      return { id: prev.id, kind: 'math', text: mergedText };
     case 'task':
       return { id: prev.id, kind: 'task', text: mergedText, checked: prev.checked };
     case 'paragraph':
@@ -432,11 +485,26 @@ function fuzzySlashScore(query: string, label: string, hint: string): number {
   return j === q.length ? 2 + 1 / hay.length : 0;
 }
 
-type SlashCommandId = 'title' | 'section' | 'task' | 'quote' | 'divider' | 'muted' | 'fine';
+type SlashCommandId =
+  | 'title'
+  | 'section'
+  | 'task'
+  | 'quote'
+  | 'divider'
+  | 'muted'
+  | 'fine'
+  | 'summary'
+  | 'concept'
+  | 'review'
+  | 'formula';
 
 const SLASH_COMMAND_META: { id: SlashCommandId; label: string; hint: string }[] = [
   { id: 'title', label: 'Title', hint: 'Level 1 — focal heading' },
   { id: 'section', label: 'Section', hint: 'Level 2 — structure' },
+  { id: 'summary', label: 'Summary', hint: 'Study callout' },
+  { id: 'concept', label: 'Concept', hint: 'Key idea callout' },
+  { id: 'review', label: 'Review', hint: 'Quick revision prompt' },
+  { id: 'formula', label: 'Formula', hint: 'Highlight a line of math' },
   { id: 'muted', label: 'Subtle', hint: 'Level 4 — softer body' },
   { id: 'fine', label: 'Fine', hint: 'Level 5 — caption / aside' },
   { id: 'task', label: 'Task', hint: 'Checklist' },
@@ -609,6 +677,10 @@ interface Props {
   content: NotebookContent;
   tokens: AtmosphereTokens;
   onChange: (content: NotebookContent) => void;
+  objectId?: string;
+  objectTitle?: string;
+  allObjects?: ProjectSpaceObject[];
+  onRequestSelectObject?: (id: string) => void;
   /**
    * Optional host context (e.g. Free Space canvas) so the notebook can expose a richer focus state.
    * When set to "free-space", edit/preview transitions can drive ambient canvas lighting.
@@ -622,6 +694,10 @@ export function ProjectNotebookBlock({
   content,
   tokens,
   onChange,
+  objectId,
+  objectTitle,
+  allObjects,
+  onRequestSelectObject,
   context = 'inline',
   onEditingChange,
 }: Props) {
@@ -638,6 +714,8 @@ export function ProjectNotebookBlock({
   const [focusedDividerId, setFocusedDividerId] = useState<string | null>(null);
   const [surfaceFocusBlockId, setSurfaceFocusBlockId] = useState<string | null>(null);
   const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
+  const [surfaceWidth, setSurfaceWidth] = useState(0);
+  const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [typoRail, setTypoRail] = useState<{
     top: number;
     left: number;
@@ -645,6 +723,7 @@ export function ProjectNotebookBlock({
     level: 1 | 2 | 3 | 4 | 5;
   } | null>(null);
 
+  const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const notebookBodyScrollRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
@@ -653,6 +732,28 @@ export function ProjectNotebookBlock({
   slashMenuRef.current = slashMenu;
   const focusIndexRef = useRef(0);
   const pendingCaretRef = useRef<{ id: string; offset: number } | null>(null);
+
+  const contextData = useMemo(
+    () => deriveNotebookContextData(objectId, allObjects),
+    [objectId, allObjects],
+  );
+  const hasNotebookContext = contextData.totalCount > 0;
+  const canDockContext = surfaceWidth >= 640;
+  const showNotebookContext = context === 'free-space' && hasNotebookContext && contextPanelOpen;
+
+  useLayoutEffect(() => {
+    const el = shellRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => setSurfaceWidth(el.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!hasNotebookContext && contextPanelOpen) setContextPanelOpen(false);
+  }, [hasNotebookContext, contextPanelOpen]);
 
   const persist = useCallback(
     (next: Block[]) => {
@@ -942,6 +1043,18 @@ export function ProjectNotebookBlock({
           case 'quote':
             next = [...prev.slice(0, i), { id, kind: 'quote', text: rest }, ...prev.slice(i + 1)];
             break;
+          case 'summary':
+            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'summary', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'concept':
+            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'concept', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'review':
+            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'review', text: rest }, ...prev.slice(i + 1)];
+            break;
+          case 'formula':
+            next = [...prev.slice(0, i), { id, kind: 'math', text: rest }, ...prev.slice(i + 1)];
+            break;
           case 'muted':
             next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'muted' }, ...prev.slice(i + 1)];
             break;
@@ -1024,11 +1137,11 @@ export function ProjectNotebookBlock({
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: 'min(656px, 100%)',
+      maxWidth: 'min(560px, 100%)',
       margin: '0 auto',
       width: '100%',
-      paddingLeft: 'clamp(22px, 4.2vw, 52px)',
-      paddingRight: 'clamp(22px, 4.2vw, 52px)',
+      paddingLeft: 'clamp(20px, 4vw, 44px)',
+      paddingRight: 'clamp(20px, 4vw, 44px)',
     }),
     [],
   );
@@ -1039,24 +1152,37 @@ export function ProjectNotebookBlock({
       width: '100%',
       ...(context === 'free-space' ? {} : { minHeight: '420px' }),
       boxSizing: 'border-box',
-      backgroundColor: 'transparent',
+      backgroundColor: 'rgba(255,255,255,0.018)',
       backgroundImage: writingSurfaceBackground.image,
       backgroundSize: writingSurfaceBackground.size,
       color: notebookInk.primary,
       fontSize: '17px',
-      lineHeight: 1.86,
+      lineHeight: 1.92,
       letterSpacing: '0.005em',
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
-      paddingTop: '12px',
-      paddingBottom: '72px',
+      border: '1px solid rgba(255,255,255,0.055)',
+      borderRadius: 22,
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
+      paddingTop: '18px',
+      paddingBottom: '88px',
       outline: 'none',
       WebkitFontSmoothing: 'antialiased',
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
-      transition: 'color 0.22s ease, background-image 0.28s ease',
+      transition: 'color 0.22s ease, background-image 0.28s ease, border-color 0.24s ease, box-shadow 0.24s ease',
     }),
     [context, fontStack, writingSurfaceBackground, notebookInk.primary],
+  );
+
+  const contextSummaryChips = useMemo(
+    () =>
+      [
+        contextData.linkedNotes.length ? `${contextData.linkedNotes.length} notes` : null,
+        contextData.connectedMistakes.length ? `${contextData.connectedMistakes.length} mistakes` : null,
+        contextData.references.length ? `${contextData.references.length} refs` : null,
+      ].filter(Boolean) as string[],
+    [contextData],
   );
 
   const updateBlockText = useCallback(
@@ -1367,7 +1493,11 @@ export function ProjectNotebookBlock({
                 ? { id: block.id, kind: 'section', text: nextText }
                 : block.kind === 'quote'
                   ? { id: block.id, kind: 'quote', text: nextText }
-                  : { id: block.id, kind: 'task', text: nextText, checked: block.checked };
+                  : block.kind === 'task'
+                    ? { id: block.id, kind: 'task', text: nextText, checked: block.checked }
+                    : block.kind === 'callout'
+                      ? { id: block.id, kind: 'callout', tone: block.tone, text: nextText }
+                      : { id: block.id, kind: 'math', text: nextText };
         const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
         persist(next);
         pendingCaretRef.current = { id: block.id, offset: offset + 1 };
@@ -1382,7 +1512,9 @@ export function ProjectNotebookBlock({
           (block.kind === 'title' ||
             block.kind === 'section' ||
             block.kind === 'quote' ||
-            block.kind === 'task') &&
+            block.kind === 'task' ||
+            block.kind === 'callout' ||
+            block.kind === 'math') &&
           text.trim() === ''
         ) {
           e.preventDefault();
@@ -1403,7 +1535,14 @@ export function ProjectNotebookBlock({
           return;
         }
 
-        if (block.kind === 'title' || block.kind === 'section' || block.kind === 'quote' || block.kind === 'task') {
+        if (
+          block.kind === 'title' ||
+          block.kind === 'section' ||
+          block.kind === 'quote' ||
+          block.kind === 'task' ||
+          block.kind === 'callout' ||
+          block.kind === 'math'
+        ) {
           const before = text.slice(0, offset);
           const after = text.slice(offset);
           const updated = { ...block, text: before } as Block;
@@ -1450,7 +1589,9 @@ export function ProjectNotebookBlock({
           (block.kind === 'title' ||
             block.kind === 'section' ||
             block.kind === 'quote' ||
-            block.kind === 'task') &&
+            block.kind === 'task' ||
+            block.kind === 'callout' ||
+            block.kind === 'math') &&
           offset === 0 &&
           text.length === 0
         ) {
@@ -1522,8 +1663,9 @@ export function ProjectNotebookBlock({
     <Fragment>
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
       <div
+        ref={shellRef}
         style={{
-          padding: '18px 24px 28px',
+          padding: context === 'free-space' ? '18px 18px 18px' : '18px 24px 28px',
           ...(context === 'free-space'
             ? {
                 display: 'flex',
@@ -1533,67 +1675,129 @@ export function ProjectNotebookBlock({
                 boxSizing: 'border-box',
               }
             : { minHeight: '420px' }),
-          borderRadius: '20px',
+          borderRadius: '22px',
           position: 'relative',
-          backgroundColor: tokens.cardBg,
-          backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.028) 0%, transparent 36%)`,
+          backgroundColor: `${tokens.cardBg}f2`,
+          backgroundImage: `
+            radial-gradient(circle at 50% 0%, rgba(255,255,255,0.05), transparent 36%),
+            linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 34%)
+          `,
           boxShadow: `
-            0 28px 80px rgba(0,0,0,0.38),
-            0 0 0 1px rgba(255,255,255,0.06),
-            inset 0 1px 0 rgba(255,255,255,0.05)
+            0 26px 72px rgba(0,0,0,0.34),
+            0 0 0 1px rgba(255,255,255,0.075),
+            inset 0 1px 0 rgba(255,255,255,0.06)
           `,
         }}
       >
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-end',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: '16px',
+          gap: '18px',
           flexWrap: 'wrap',
-          paddingBottom: '10px',
-          marginBottom: '10px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          padding: '4px 6px 14px',
+          marginBottom: '8px',
+          borderBottom: '1px solid rgba(255,255,255,0.055)',
           ...(context === 'free-space' ? { flexShrink: 0 } : {}),
         }}
       >
-        <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+        <div style={{ minWidth: 0, flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div
             style={{
-              fontSize: '9px',
-              fontWeight: 600,
+              fontSize: '10px',
+              fontWeight: 700,
               letterSpacing: '0.14em',
               textTransform: 'uppercase',
               color: notebookInk.ghost,
-              opacity: 0.85,
-              marginBottom: '4px',
+              opacity: 0.92,
             }}
           >
-            Notebook
+            Thinking surface
           </div>
 
           <div
             style={{
-              fontSize: '11px',
-              color: notebookInk.muted,
+              fontSize: '13px',
+              color: notebookInk.secondary,
               letterSpacing: '0.01em',
-              lineHeight: 1.45,
-              maxWidth: '340px',
+              lineHeight: 1.55,
+              maxWidth: '420px',
             }}
           >
-            Slash commands · <span style={{ opacity: 0.9 }}>Alt</span> + ↑↓ for levels
+            {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}{hasNotebookContext
+              ? ` · ${contextData.totalCount} connected`
+              : ''}{' '}
+            <span style={{ color: notebookInk.muted }}>
+              Slash commands · Alt + ↑↓ for levels
+            </span>
           </div>
+
+          {contextSummaryChips.length ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {contextSummaryChips.map(chip => (
+                <div
+                  key={chip}
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    letterSpacing: '0.02em',
+                    color: notebookInk.secondary,
+                    padding: '6px 9px',
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    background: 'rgba(255,255,255,0.035)',
+                  }}
+                >
+                  {chip}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
+            flexDirection: 'row',
             alignItems: 'flex-end',
             gap: '8px',
             flexShrink: 0,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
           }}
         >
+          {context === 'free-space' ? (
+            <button
+              type="button"
+              disabled={!hasNotebookContext}
+              onClick={() => setContextPanelOpen(v => !v)}
+              style={{
+                border: '1px solid rgba(255,255,255,0.06)',
+                background: !hasNotebookContext
+                  ? 'rgba(255,255,255,0.02)'
+                  : showNotebookContext
+                    ? 'rgba(255,255,255,0.08)'
+                    : 'rgba(255,255,255,0.03)',
+                color: !hasNotebookContext
+                  ? notebookInk.ghost
+                  : showNotebookContext
+                    ? notebookInk.primary
+                    : notebookInk.secondary,
+                borderRadius: '10px',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                padding: '7px 10px',
+                cursor: !hasNotebookContext ? 'default' : 'pointer',
+                opacity: !hasNotebookContext ? 0.62 : 1,
+                transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease',
+              }}
+            >
+              {!hasNotebookContext ? 'No context yet' : showNotebookContext ? 'Hide context' : 'Show context'}
+            </button>
+          ) : null}
           <div
             style={{
               display: 'inline-flex',
@@ -1834,6 +2038,15 @@ export function ProjectNotebookBlock({
         : null}
 
       <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
+      <div
+        style={{
+          position: 'relative',
+          display: showNotebookContext && canDockContext ? 'grid' : 'block',
+          gridTemplateColumns: showNotebookContext && canDockContext ? 'minmax(0, 1fr) 232px' : undefined,
+          gap: showNotebookContext && canDockContext ? '16px' : undefined,
+          minHeight: context === 'free-space' ? '100%' : undefined,
+        }}
+      >
       {editorMode === 'edit' ? (
         <div
           ref={editorRootRef}
@@ -2133,6 +2346,126 @@ export function ProjectNotebookBlock({
               );
             }
 
+            if (block.kind === 'callout') {
+              const toneColor =
+                block.tone === 'concept'
+                  ? tokens.accent
+                  : block.tone === 'summary'
+                    ? notebookInk.secondary
+                    : notebookInk.muted;
+              return (
+                <div
+                  key={block.id}
+                  data-nb-surface-block
+                  data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
+                  style={{
+                    ...blockSurfaceChrome(block.id),
+                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
+                    padding: '14px 16px 14px',
+                    borderRadius: '16px',
+                    border: `1px solid ${tokens.cardBorder}`,
+                    background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: toneColor,
+                      marginBottom: '8px',
+                    }}
+                  >
+                    {calloutLabel(block.tone)}
+                  </div>
+                  <EditableLine
+                    id={block.id}
+                    text={block.text}
+                    tokens={tokens}
+                    placeholder={`${calloutLabel(block.tone)}…`}
+                    onUpdate={updateBlockText}
+                    onFocusIndex={setFocusIndexById}
+                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+                    style={{
+                      width: '100%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: notebookInk.primary,
+                      fontSize: '16.25px',
+                      fontWeight: 500,
+                      lineHeight: 1.72,
+                      margin: 0,
+                      caretColor: tokens.accent,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  />
+                </div>
+              );
+            }
+
+            if (block.kind === 'math') {
+              return (
+                <div
+                  key={block.id}
+                  data-nb-surface-block
+                  data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
+                  style={{
+                    ...blockSurfaceChrome(block.id),
+                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
+                    padding: '14px 18px',
+                    borderRadius: '16px',
+                    border: `1px solid ${tokens.cardBorder}`,
+                    background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: notebookInk.ghost,
+                      marginBottom: '8px',
+                    }}
+                  >
+                    Formula
+                  </div>
+                  <EditableLine
+                    id={block.id}
+                    text={block.text}
+                    tokens={tokens}
+                    placeholder="x = ..."
+                    onUpdate={updateBlockText}
+                    onFocusIndex={setFocusIndexById}
+                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+                    style={{
+                      width: '100%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: notebookInk.headline,
+                      fontSize: '18px',
+                      fontWeight: 500,
+                      lineHeight: 1.7,
+                      letterSpacing: '0.02em',
+                      fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
+                      margin: 0,
+                      caretColor: tokens.accent,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  />
+                </div>
+              );
+            }
+
             const paraMuted = block.variant === 'muted';
             const paraFine = block.variant === 'fine';
             const paraTop =
@@ -2348,6 +2681,92 @@ export function ProjectNotebookBlock({
                 </blockquote>
               );
             }
+            if (line.kind === 'callout') {
+              const toneColor =
+                line.tone === 'concept'
+                  ? tokens.accent
+                  : line.tone === 'summary'
+                    ? notebookInk.secondary
+                    : notebookInk.muted;
+              return (
+                <div
+                  key={index}
+                  style={{
+                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
+                    padding: '14px 16px 14px',
+                    borderRadius: '16px',
+                    border: `1px solid ${tokens.cardBorder}`,
+                    background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: toneColor,
+                      marginBottom: '8px',
+                    }}
+                  >
+                    {calloutLabel(line.tone)}
+                  </div>
+                  <div
+                    style={{
+                      color: notebookInk.primary,
+                      fontSize: '16.25px',
+                      fontWeight: 500,
+                      lineHeight: 1.72,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {line.text}
+                  </div>
+                </div>
+              );
+            }
+            if (line.kind === 'math') {
+              return (
+                <div
+                  key={index}
+                  style={{
+                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
+                    padding: '14px 18px',
+                    borderRadius: '16px',
+                    border: `1px solid ${tokens.cardBorder}`,
+                    background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase',
+                      color: notebookInk.ghost,
+                      marginBottom: '8px',
+                    }}
+                  >
+                    Formula
+                  </div>
+                  <div
+                    style={{
+                      color: notebookInk.headline,
+                      fontSize: '18px',
+                      fontWeight: 500,
+                      lineHeight: 1.7,
+                      letterSpacing: '0.02em',
+                      fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {line.text}
+                  </div>
+                </div>
+              );
+            }
             if (line.kind === 'paragraph') {
               const fine = line.variant === 'fine';
               const muted = line.variant === 'muted';
@@ -2375,6 +2794,36 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       )}
+      {showNotebookContext ? (
+        canDockContext ? (
+          <NotebookContextSidebar
+            tokens={tokens}
+            title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+            data={contextData}
+            onSelectObject={onRequestSelectObject}
+          />
+        ) : (
+          <div
+            style={{
+              position: 'absolute',
+              top: 14,
+              right: 12,
+              zIndex: 4,
+              maxWidth: 'calc(100% - 24px)',
+            }}
+          >
+            <NotebookContextSidebar
+              tokens={tokens}
+              title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+              data={contextData}
+              floating
+              onClose={() => setContextPanelOpen(false)}
+              onSelectObject={onRequestSelectObject}
+            />
+          </div>
+        )
+      ) : null}
+      </div>
       </NotebookBodyScroll>
     </div>
     </Fragment>
