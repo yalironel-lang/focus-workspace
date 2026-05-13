@@ -26,11 +26,11 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
 
   const stars = useMemo(() => {
     const out: { x: number; y: number; r: number; o: number }[] = [];
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 92; i++) {
       const x = hash01(i, 1) * 4200 - 400;
       const y = hash01(i, 2) * 3200 - 300;
       const r = 0.35 + hash01(i, 3) * 0.85;
-      const o = 0.04 + hash01(i, 4) * 0.1;
+      const o = 0.035 + hash01(i, 4) * 0.075;
       out.push({ x, y, r, o });
     }
     return out;
@@ -59,12 +59,12 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
             y1: pi.y,
             x2: pj.x,
             y2: pj.y,
-            o: 0.03 + hash01(i * j, 8) * 0.04,
+            o: 0.02 + hash01(i * j, 8) * 0.028,
           });
         }
       }
     }
-    return segs.slice(0, 36);
+    return segs.slice(0, 26);
   }, []);
 
   if (!tokens || typeof tokens !== 'object' || typeof tokens.accent !== 'string') {
@@ -84,7 +84,7 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
         height: 3800,
         pointerEvents: 'none',
         zIndex: 0,
-        opacity: Math.max(0.35, Math.min(1.35, opacityScale)),
+        opacity: Math.max(0.24, Math.min(1.2, opacityScale)),
         transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         animation: 'fwSpatialDrift 140s linear infinite alternate',
       }}
@@ -98,18 +98,18 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
       <svg width="100%" height="100%" viewBox="0 0 4800 3800" preserveAspectRatio="xMidYMid slice">
         <defs>
           <radialGradient id={idCore} cx="42%" cy="38%" r="55%">
-            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.07" />
-            <stop offset="45%" stopColor="#4f46e5" stopOpacity="0.03" />
-            <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+            <stop offset="0%" stopColor={tokens.accent} stopOpacity="0.055" />
+            <stop offset="45%" stopColor={tokens.textSecondary} stopOpacity="0.028" />
+            <stop offset="100%" stopColor={tokens.pageBg} stopOpacity="0" />
           </radialGradient>
           <radialGradient id={idSide} cx="78%" cy="62%" r="40%">
-            <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.055" />
-            <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+            <stop offset="0%" stopColor={tokens.textSecondary} stopOpacity="0.05" />
+            <stop offset="100%" stopColor={tokens.pageBg} stopOpacity="0" />
           </radialGradient>
           <linearGradient id={idOrbital} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#a78bfa" stopOpacity="0" />
-            <stop offset="50%" stopColor="#818cf8" stopOpacity="0.04" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+            <stop offset="0%" stopColor={tokens.accent} stopOpacity="0" />
+            <stop offset="50%" stopColor={tokens.accent} stopOpacity="0.05" />
+            <stop offset="100%" stopColor={tokens.textSecondary} stopOpacity="0" />
           </linearGradient>
         </defs>
 
@@ -133,9 +133,9 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
           rx={920}
           ry={640}
           fill="none"
-          stroke="#94a3b8"
+          stroke={tokens.textGhost}
           strokeWidth={0.9}
-          opacity={0.04}
+          opacity={0.055}
           transform="rotate(14 2480 2100)"
         />
 
@@ -146,18 +146,18 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
             y1={ln.y1}
             x2={ln.x2}
             y2={ln.y2}
-            stroke="#c4b5fd"
+            stroke={tokens.textSecondary}
             strokeWidth={0.55}
             opacity={ln.o}
           />
         ))}
 
         {stars.map((s, i) => (
-          <circle key={`st-${rid}-${i}`} cx={s.x} cy={s.y} r={s.r} fill="#e2e8f0" opacity={s.o} />
+          <circle key={`st-${rid}-${i}`} cx={s.x} cy={s.y} r={s.r} fill={tokens.textPrimary} opacity={s.o} />
         ))}
 
-        <circle cx={3200} cy={900} r={340} fill={accentFill} opacity={0.018} filter="blur(80px)" />
-        <circle cx={1200} cy={2600} r={420} fill="#6366f1" opacity={0.022} filter="blur(90px)" />
+        <circle cx={3200} cy={900} r={340} fill={accentFill} opacity={0.028} filter="blur(80px)" />
+        <circle cx={1200} cy={2600} r={420} fill={tokens.textSecondary} opacity={0.024} filter="blur(90px)" />
       </svg>
     </div>
   );

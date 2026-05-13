@@ -142,9 +142,10 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 // ── SpaceNav ──────────────────────────────────────────────────────────────────
 
-function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
   isCustomizing: boolean;
   onBack: () => void;
   onCustomize: () => void;
@@ -153,20 +154,20 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
 }) {
   return (
     <nav style={{
-      height: '44px', backgroundColor: 'rgba(7,11,20,0.92)',
-      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      height: '44px', backgroundColor: tokens.navBg,
+      borderBottom: `1px solid ${tokens.divider}`,
       backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <button onClick={onBack} style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
+        <button onClick={onBack} style={{ color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = tokens.textSecondary)}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = tokens.textMuted)}>
           <ArrowLeft className="w-3.5 h-3.5" />
         </button>
-        <span style={{ width: '1px', height: '14px', backgroundColor: 'rgba(255,255,255,0.05)', flexShrink: 0 }} />
-        <span style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+        <span style={{ width: '1px', height: '14px', backgroundColor: tokens.divider, flexShrink: 0 }} />
+        <span style={{ fontSize: '12px', fontWeight: 500, color: tokens.textSecondary, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
           {title}
         </span>
         <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0, opacity: 0.6 }} />
@@ -174,9 +175,9 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
         {isCustomizing ? (
           <>
-            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: '#374151', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}>
+            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = tokens.textSecondary)}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = tokens.textMuted)}>
               Reset
             </button>
             <button onClick={onExitCustomize} style={{ fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', border: 'none', cursor: 'pointer', padding: '4px 12px', borderRadius: '8px' }}
@@ -186,9 +187,9 @@ function SpaceNav({ title, accent, isCustomizing, onBack, onCustomize, onExitCus
             </button>
           </>
         ) : (
-          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; }}>
+          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}>
             <Sliders className="w-3 h-3" />
           </button>
         )}
@@ -1203,15 +1204,15 @@ export function SectionPage() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Loader2 className="w-5 h-5 animate-spin" style={{ color: '#263043' }} />
+      <div style={{ minHeight: '100dvh', backgroundColor: tokens.pageBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.textMuted }} />
       </div>
     );
   }
 
   if (!section) {
     return (
-      <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+      <div style={{ minHeight: '100dvh', backgroundColor: tokens.pageBg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
         <h2 className="text-lg font-semibold" style={{ color: '#f8fafc' }}>
           Workspace not found
         </h2>
@@ -1319,7 +1320,20 @@ export function SectionPage() {
   };
 
   return (
-    <div style={{ minHeight: '100dvh', backgroundColor: '#070b14', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        minHeight: '100dvh',
+        color: '#f8fafc',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: tokens.pageBg,
+        backgroundImage: `
+          radial-gradient(circle at 24% 16%, ${tokens.ambientGlow1} 0%, transparent 34%),
+          radial-gradient(circle at 78% 14%, ${tokens.ambientGlow2} 0%, transparent 30%),
+          linear-gradient(180deg, ${tokens.pageBg} 0%, ${tokens.pageBg} 100%)
+        `,
+      }}
+    >
 
       <QuickCaptureOverlay
         open={quickCaptureOpen}
@@ -1350,6 +1364,7 @@ export function SectionPage() {
       <SpaceNav
         title={section.title}
         accent={accentColor}
+        tokens={tokens}
         isCustomizing={designMode}
         onBack={() => navigate('/dashboard')}
         onCustomize={enterDesignMode}
@@ -1360,11 +1375,11 @@ export function SectionPage() {
       <div
         style={{
           height: '40px',
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          borderBottom: `1px solid ${tokens.divider}`,
           display: 'flex',
           alignItems: 'center',
           padding: '0 20px',
-          backgroundColor: '#070b14',
+          backgroundColor: tokens.navBg,
           position: 'relative',
           opacity: focusMode && sectionViewMode === 'free-space' ? 0.9 : 1,
           transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -1382,7 +1397,7 @@ export function SectionPage() {
               fontWeight: 600,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
-              color: 'rgba(148,163,184,0.85)',
+              color: tokens.textSecondary,
               pointerEvents: 'none',
               whiteSpace: 'nowrap',
             }}
@@ -1394,10 +1409,10 @@ export function SectionPage() {
           style={{
             display: 'inline-flex',
             borderRadius: '8px',
-            border: '1px solid #1a2230',
+            border: `1px solid ${tokens.cardBorder}`,
             padding: '2px',
             gap: '2px',
-            backgroundColor: '#0b1019',
+            backgroundColor: `${tokens.wellBg}f2`,
           }}
         >
           {([
@@ -1415,8 +1430,8 @@ export function SectionPage() {
                 borderRadius: '6px',
                 padding: '5px 10px',
                 cursor: 'pointer',
-                backgroundColor: sectionViewMode === opt.id ? '#f59e0b' : 'transparent',
-                color: sectionViewMode === opt.id ? '#000' : '#4b5563',
+                backgroundColor: sectionViewMode === opt.id ? tokens.accent : 'transparent',
+                color: sectionViewMode === opt.id ? '#000' : tokens.textSecondary,
               }}
             >
               {opt.label}

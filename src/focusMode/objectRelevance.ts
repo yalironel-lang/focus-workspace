@@ -88,12 +88,12 @@ export interface FocusObjectPresentation {
 export function tierToPresentation(tier: FocusTier): FocusObjectPresentation {
   switch (tier) {
     case 1:
-      return { opacityMul: 1, scale: 1.006, filterExtra: 'saturate(1.03) brightness(1.02)', zIndexBoost: 1 };
+      return { opacityMul: 1, scale: 1.005, filterExtra: 'saturate(1.03) brightness(1.025)', zIndexBoost: 1 };
     case 2:
-      return { opacityMul: 0.96, scale: 1.002, filterExtra: 'saturate(0.99) brightness(0.99)', zIndexBoost: 0 };
+      return { opacityMul: 0.98, scale: 1.002, filterExtra: 'saturate(1) brightness(1)', zIndexBoost: 0 };
     case 3:
-      return { opacityMul: 0.82, scale: 0.998, filterExtra: 'saturate(0.9) brightness(0.93)', zIndexBoost: 0 };
+      return { opacityMul: 0.9, scale: 0.999, filterExtra: 'saturate(0.95) brightness(0.97)', zIndexBoost: 0 };
     default:
-      return { opacityMul: 0.62, scale: 0.994, filterExtra: 'saturate(0.78) brightness(0.87)', zIndexBoost: 0 };
+      return { opacityMul: 0.78, scale: 0.997, filterExtra: 'saturate(0.88) brightness(0.94)', zIndexBoost: 0 };
   }
 }

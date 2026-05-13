@@ -115,9 +115,9 @@ function FreeSpaceConnectionsLayerInner({
       {edges.map(({ key, d, from, to }) => {
         const hovered = hoveredEdgeKey === key;
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
-        const stroke = hovered ? `${accent}aa` : `${accent}38`;
-        const width = hovered ? 1.35 : 0.85;
-        const em = Math.max(0.35, Math.min(1.6, lineEmphasisMul));
+        const stroke = hovered ? `${accent}bf` : `${accent}52`;
+        const width = hovered ? 1.5 : 1.02;
+        const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul));
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
             <path
@@ -138,7 +138,7 @@ function FreeSpaceConnectionsLayerInner({
               filter={hovered || pulse ? `url(#${filterId})` : undefined}
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
-                opacity: (pulse && !hovered ? 0.72 : 1) * em,
+                opacity: (pulse && !hovered ? 0.8 : 1) * em,
                 animation: pulse ? 'fwConnPulse 2.6s ease-in-out infinite' : undefined,
               }}
             />
@@ -146,10 +146,10 @@ function FreeSpaceConnectionsLayerInner({
               <path
                 d={d}
                 fill="none"
-                stroke={`${accent}55`}
-                strokeWidth={5}
+                stroke={`${accent}66`}
+                strokeWidth={5.5}
                 strokeLinecap="round"
-                opacity={0.4}
+                opacity={0.5}
                 style={{ pointerEvents: 'none' }}
               />
             )}

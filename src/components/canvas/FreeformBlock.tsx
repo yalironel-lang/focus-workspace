@@ -93,17 +93,17 @@ export function FreeformBlock({
   else if (isDragging) transform = `translate3d(0,-5px,0) scale(1.01) rotate(0.28deg)${anchorNudge}`;
   else if (selected) transform = `translate3d(0,-4px,0) scale(1.003)${anchorNudge}`;
   else if (hovered) transform = `translate3d(0,-2px,0) scale(1.0018)${anchorNudge}`;
-  else if (recede) transform = `translate3d(0,1px,0) scale(0.996)${anchorNudge}`;
+  else if (recede) transform = `translate3d(0,0,0) scale(0.999)${anchorNudge}`;
 
   let filter = 'none';
   if (isDragging) filter = 'brightness(1.04) saturate(1.05)';
   else if (selected) filter = 'brightness(1.025) saturate(1.03)';
   else if (hovered) filter = 'brightness(1.012) saturate(1.02)';
-  else if (recede) filter = 'brightness(0.97) saturate(0.96)';
+  else if (recede) filter = 'brightness(1.01) saturate(1.01)';
   if (connectionChrome === 'dim') {
     filter = filter === 'none'
-      ? 'brightness(0.94) saturate(0.92)'
-      : `${filter} brightness(0.96)`;
+      ? 'brightness(0.97) saturate(0.95)'
+      : `${filter} brightness(0.985)`;
   } else if (connectionChrome === 'emphasis') {
     filter = filter === 'none'
       ? 'brightness(1.04) saturate(1.04)'
@@ -115,21 +115,22 @@ export function FreeformBlock({
       : `saturate(1.03) ${filter}`;
   }
 
-  const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.045)';
+  const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.065)';
+  const outerRim = ', 0 0 0 1px rgba(255,255,255,0.025)';
   const innerHighlight = selected
     ? `, inset 0 0 0 1px ${tokens.accent}14`
     : hovered
-      ? ', inset 0 0 0 1px rgba(255,255,255,0.06)'
+      ? ', inset 0 0 0 1px rgba(255,255,255,0.08)'
       : '';
-  let boxShadow = `${innerRim}, 0 1px 2px rgba(0,0,0,0.16), 0 10px 28px rgba(0,0,0,0.14)`;
+  let boxShadow = `${innerRim}${outerRim}, ${tokens.shadowMd}`;
   if (isDragging && activeGesture === 'resize') {
-    boxShadow = `${innerRim}${innerHighlight}, 0 4px 6px rgba(0,0,0,0.2), 0 18px 40px rgba(0,0,0,0.32)`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.04), ${tokens.shadowLg}`;
   } else if (isDragging) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 6px 10px rgba(0,0,0,0.22), 0 22px 48px rgba(0,0,0,0.36)`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.05), 0 10px 18px rgba(0,0,0,0.24), 0 26px 56px rgba(0,0,0,0.34)`;
   } else if (selected) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 4px 8px rgba(0,0,0,0.2), 0 16px 38px rgba(0,0,0,0.3)`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.04), ${tokens.shadowLg}`;
   } else if (hovered) {
-    boxShadow = `${innerRim}, 0 3px 6px rgba(0,0,0,0.16), 0 14px 36px rgba(0,0,0,0.26)`;
+    boxShadow = `${innerRim}${outerRim}, 0 8px 18px rgba(0,0,0,0.22), 0 20px 42px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.07)`;
   }
   if (deepFocusAnchor && !isDragging) {
     boxShadow = `${boxShadow}, 0 12px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.04)`;
@@ -138,7 +139,7 @@ export function FreeformBlock({
   const borderColor = isConnectTargetHover
     ? 'rgba(251,191,36,0.35)'
     : selected
-      ? 'rgba(255,255,255,0.07)'
+      ? tokens.cardBorderHover
       : hovered
         ? tokens.cardBorderHover
         : tokens.cardBorder;

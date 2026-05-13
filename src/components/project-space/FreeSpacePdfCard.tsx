@@ -143,9 +143,9 @@ export function FreeSpacePdfCard({
     <div
       className="flex flex-col h-full min-h-[200px] rounded-xl overflow-hidden"
       style={{
-        backgroundColor: 'rgba(6,10,18,0.96)',
-        border: `1px solid ${border}`,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        backgroundColor: `${tokens.cardBg}f2`,
+        border: `1px solid ${tokens.cardBorderHover}`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
       }}
       onDragOver={e => {
         e.preventDefault();
@@ -208,7 +208,7 @@ export function FreeSpacePdfCard({
 
       <div
         className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"
-        style={{ borderBottom: `1px solid ${border}`, backgroundColor: 'rgba(0,0,0,0.2)' }}
+        style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.wellBg}dd` }}
       >
         <button
           type="button"
@@ -220,7 +220,7 @@ export function FreeSpacePdfCard({
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textGhost }}>
+        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
           Page {content.page}
         </span>
         <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
@@ -230,7 +230,7 @@ export function FreeSpacePdfCard({
         <button type="button" title="Zoom out" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(-0.1)}>
           <Minus className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textGhost }}>
+        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
           {Math.round(content.zoom * 100)}%
         </span>
         <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
@@ -238,10 +238,10 @@ export function FreeSpacePdfCard({
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 relative" style={{ backgroundColor: '#050810' }}>
+      <div className="flex-1 min-h-0 relative" style={{ backgroundColor: tokens.wellBg }}>
         {loadState === 'loading' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10" style={{ backgroundColor: 'rgba(5,8,16,0.75)' }}>
-            <Loader2 className="w-7 h-7 animate-spin" style={{ color: tokens.textGhost }} />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10" style={{ backgroundColor: `${tokens.pageBg}cc` }}>
+            <Loader2 className="w-7 h-7 animate-spin" style={{ color: tokens.textMuted }} />
             <span className="text-[11px]" style={{ color: tokens.textMuted }}>
               Loading…
             </span>
@@ -257,7 +257,7 @@ export function FreeSpacePdfCard({
               margin: '8px',
             }}
           >
-            <FolderOpen className="w-8 h-8" strokeWidth={1.25} style={{ color: tokens.textGhost }} />
+            <FolderOpen className="w-8 h-8" strokeWidth={1.25} style={{ color: tokens.textMuted }} />
             {loadState === 'recover' || loadState === 'error' ? (
               <>
                 <p className="text-[12px] leading-relaxed max-w-[220px]" style={{ color: tokens.textMuted }}>
@@ -296,13 +296,14 @@ export function FreeSpacePdfCard({
           <iframe
             title={content.fileName || 'PDF'}
             src={iframeSrc}
-            className="border-0 bg-black"
+            className="border-0"
             style={
               {
                 zoom: content.zoom,
                 width: '100%',
                 height: '100%',
                 minHeight: '420px',
+                backgroundColor: tokens.wellBg,
               } as CSSProperties
             }
             onError={() => {

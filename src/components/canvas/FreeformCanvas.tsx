@@ -58,13 +58,13 @@ type LifecycleState = 'active' | 'warm' | 'dormant' | 'fading' | 'deep';
 interface LifecycleResult { state: LifecycleState; opacity: number; }
 
 function computeLifecycle(lastActive: number | undefined): LifecycleResult {
-  if (!lastActive) return { state: 'warm', opacity: 0.88 };
+  if (!lastActive) return { state: 'warm', opacity: 0.92 };
   const hrs = (Date.now() - lastActive) / 3_600_000;
   if (hrs < 2)   return { state: 'active',  opacity: 1.0  };
-  if (hrs < 24)  return { state: 'warm',    opacity: 0.92 - (hrs / 24)        * 0.06 };
-  if (hrs < 72)  return { state: 'dormant', opacity: 0.84 - ((hrs - 24)  / 48) * 0.12 };
-  if (hrs < 168) return { state: 'fading',  opacity: 0.72 - ((hrs - 72)  / 96) * 0.10 };
-  return { state: 'deep', opacity: 0.60 };
+  if (hrs < 24)  return { state: 'warm',    opacity: 0.96 - (hrs / 24)         * 0.04 };
+  if (hrs < 72)  return { state: 'dormant', opacity: 0.90 - ((hrs - 24) / 48)  * 0.06 };
+  if (hrs < 168) return { state: 'fading',  opacity: 0.84 - ((hrs - 72) / 96)  * 0.06 };
+  return { state: 'deep', opacity: 0.76 };
 }
 
 // ── Region warmth helpers ─────────────────────────────────────────────────────
@@ -1180,10 +1180,10 @@ export function FreeformCanvas({
               r={safeZoom > 0.5 ? 0.8 : 0.4}
               fill={
                 deepFocusAtmosphere
-                  ? `${tokens.accent}07`
+                  ? `${tokens.textGhost}10`
                   : focusMode && spatialAmbient
                     ? `${tokens.accent}${focusAtm.dotGridAccentAlpha}`
-                    : `${tokens.accent}0c`
+                    : `${tokens.textGhost}18`
               }
             />
           </pattern>
@@ -1658,12 +1658,12 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           background: deepFocusAtmosphere
-            ? `radial-gradient(ellipse at 50% 44%, transparent 46%, ${tokens.pageBg}7a 100%)`
+            ? `radial-gradient(ellipse at 50% 44%, transparent 50%, ${tokens.pageBg}56 100%)`
             : activeSession && !designMode
               ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
               : focusMode && spatialAmbient
                 ? `radial-gradient(ellipse at 50% 42%, transparent ${focusAtm.vignetteInnerPct}%, ${tokens.pageBg}${focusAtm.vignetteEdgeAlpha} 100%)`
-                : `radial-gradient(ellipse at 50% 42%, transparent 38%, ${tokens.pageBg}90 100%)`,
+                : `radial-gradient(ellipse at 50% 42%, transparent 46%, ${tokens.pageBg}72 100%)`,
           transition: 'background 1.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
@@ -1677,16 +1677,16 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           opacity: deepFocusAtmosphere
-            ? 0.55
+            ? 0.42
             : focusMode && spatialAmbient
               ? focusAtm.edgeFadeOpacity
-              : 1,
+              : 0.74,
           transition: focusMode && spatialAmbient
             ? `opacity ${focusAtm.transition}`
             : 'opacity 0.6s ease',
           background: `
-            linear-gradient(180deg, ${tokens.pageBg}28 0%, transparent 5%, transparent 93%, ${tokens.pageBg}28 100%),
-            linear-gradient(90deg,  ${tokens.pageBg}20 0%, transparent 4%, transparent 96%, ${tokens.pageBg}20 100%)
+            linear-gradient(180deg, ${tokens.pageBg}18 0%, transparent 6%, transparent 94%, ${tokens.pageBg}18 100%),
+            linear-gradient(90deg,  ${tokens.pageBg}14 0%, transparent 5%, transparent 95%, ${tokens.pageBg}14 100%)
           `,
         }}
       />
@@ -1699,10 +1699,10 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           boxShadow: deepFocusAtmosphere
-            ? `inset 0 0 96px rgba(7,11,20,0.32)`
+            ? `inset 0 0 84px rgba(7,11,20,0.2)`
             : focusMode && spatialAmbient
               ? focusAtm.insetShadow
-              : `inset 0 0 80px rgba(7,11,20,0.5)`,
+              : `inset 0 0 68px rgba(7,11,20,0.24)`,
           transition: focusMode && spatialAmbient
             ? `box-shadow ${focusAtm.transition}`
             : 'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',

@@ -99,7 +99,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
           className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
           style={{
             color: tokens.textPrimary,
-            border: `1px solid rgba(255,255,255,0.06)`,
+            border: `1px solid ${tokens.cardBorderHover}`,
             fontFamily: "'Space Grotesk', system-ui, sans-serif",
           }}
         />,
@@ -109,7 +109,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
         type="button"
         onClick={() => setOpen(o => !o)}
         className="text-[10px] font-semibold mb-2"
-        style={{ color: tokens.textGhost, letterSpacing: '0.06em' }}
+        style={{ color: tokens.textMuted, letterSpacing: '0.06em' }}
       >
         {open ? '− Fewer details' : '+ Correct understanding & why'}
       </button>
@@ -126,7 +126,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
               className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
               style={{
                 color: tokens.textSecondary,
-                border: `1px solid rgba(255,255,255,0.05)`,
+                border: `1px solid ${tokens.cardBorder}`,
                 fontFamily: "'Space Grotesk', system-ui, sans-serif",
               }}
             />,
@@ -141,7 +141,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
               className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
               style={{
                 color: tokens.textMuted,
-                border: `1px solid rgba(255,255,255,0.05)`,
+                border: `1px solid ${tokens.cardBorder}`,
                 fontFamily: "'Space Grotesk', system-ui, sans-serif",
               }}
             />,
@@ -157,7 +157,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
           onChange={e => patch({ tags: parseTags(e.target.value) })}
           placeholder="elasticity, units, sign…"
           className="w-full bg-transparent outline-none text-[12px] rounded-lg px-2 py-1"
-          style={{ color: tokens.textSecondary, border: `1px solid rgba(255,255,255,0.05)` }}
+          style={{ color: tokens.textSecondary, border: `1px solid ${tokens.cardBorder}` }}
         />,
       )}
 
@@ -184,9 +184,9 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
                 onClick={() => patch({ confidence: id })}
                 className="px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors"
                 style={{
-                  border: `1px solid ${on ? `${tokens.accent}55` : 'rgba(255,255,255,0.08)'}`,
+                  border: `1px solid ${on ? `${tokens.accent}55` : tokens.cardBorderHover}`,
                   backgroundColor: on ? `${tokens.accent}22` : 'transparent',
-                  color: on ? tokens.textPrimary : tokens.textGhost,
+                  color: on ? tokens.textPrimary : tokens.textMuted,
                 }}
               >
                 {label}
@@ -198,9 +198,9 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
 
       <div
         className="flex items-center justify-between gap-2 pt-1"
-        style={{ borderTop: `1px solid rgba(255,255,255,0.05)` }}
+        style={{ borderTop: `1px solid ${tokens.divider}` }}
       >
-        <div style={{ fontSize: '10px', color: tokens.textGhost }}>
+        <div style={{ fontSize: '10px', color: tokens.textMuted }}>
           Seen {content.timesReviewed}× · last {formatAgo(content.lastReviewedAt)}
         </div>
         <button

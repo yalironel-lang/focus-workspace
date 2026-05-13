@@ -377,12 +377,12 @@ function FreeSpaceMiniMapInner({
         height: H,
         zIndex: 32,
         borderRadius: 14,
-        backgroundColor: 'rgba(8, 12, 22, 0.55)',
-        border: `1px solid rgba(255,255,255,0.06)`,
-        boxShadow: `0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05)`,
+        backgroundColor: `${tokens.cardBg}de`,
+        border: `1px solid ${tokens.cardBorderHover}`,
+        boxShadow: `0 10px 36px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07)`,
         backdropFilter: 'blur(14px) saturate(1.2)',
         WebkitBackdropFilter: 'blur(14px) saturate(1.2)',
-        opacity: (hovered ? 0.94 : 0.78) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
+        opacity: (hovered ? 0.97 : 0.88) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
         transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
         transformOrigin: 'bottom right',
         transition: 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -424,8 +424,8 @@ function FreeSpaceMiniMapInner({
               x2={b.x}
               y2={b.y}
               stroke={amber}
-              strokeOpacity={0.14}
-              strokeWidth={0.85}
+              strokeOpacity={0.24}
+              strokeWidth={0.95}
               vectorEffect="non-scaling-stroke"
             />
           );
@@ -440,8 +440,8 @@ function FreeSpaceMiniMapInner({
           const rh = Math.max(2, Math.abs(p1.y - p0.y));
           const sel = id === selectedId;
           const inCluster = cluster.has(id);
-          const fill = sel || inCluster ? amber : 'rgba(255,255,255,0.1)';
-          const fillOp = sel ? 0.45 : inCluster ? 0.28 : 1;
+          const fill = sel || inCluster ? amber : tokens.textPrimary;
+          const fillOp = sel ? 0.5 : inCluster ? 0.34 : 0.16;
           return (
             <rect
               key={id}
@@ -453,9 +453,9 @@ function FreeSpaceMiniMapInner({
               ry={1.8}
               fill={fill}
               fillOpacity={fillOp}
-              stroke={sel ? amber : 'rgba(255,255,255,0.08)'}
-              strokeOpacity={sel ? 0.55 : 0.35}
-              strokeWidth={sel ? 0.9 : 0.45}
+              stroke={sel ? amber : tokens.textGhost}
+              strokeOpacity={sel ? 0.68 : 0.48}
+              strokeWidth={sel ? 1 : 0.58}
               vectorEffect="non-scaling-stroke"
               style={
                 sel
@@ -475,8 +475,8 @@ function FreeSpaceMiniMapInner({
           height={vpSvg.h}
           fill="none"
           stroke={amber}
-          strokeOpacity={0.52}
-          strokeWidth={1.1}
+          strokeOpacity={0.72}
+          strokeWidth={1.2}
           rx={2}
           ry={2}
           filter="url(#fwMiniMapVpGlow)"
@@ -491,7 +491,7 @@ function FreeSpaceMiniMapInner({
           width={vpSvg.w}
           height={vpSvg.h}
           fill={amber}
-          fillOpacity={0.07}
+          fillOpacity={0.12}
           stroke="none"
           rx={2}
           ry={2}

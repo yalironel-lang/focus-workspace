@@ -81,7 +81,7 @@ export function ProjectSpaceObjectRenderer({
       return (
         <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Link">
           <div>
-            <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+            <div style={{ fontSize: '10px', color: tokens.textMuted, padding: '10px 14px 0' }}>
               Click to open. Double-click to edit.
             </div>
             <LinkBlock
@@ -106,7 +106,7 @@ export function ProjectSpaceObjectRenderer({
       return (
         <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Image">
           <div>
-            <div style={{ fontSize: '10px', color: tokens.textGhost, padding: '10px 14px 0' }}>
+            <div style={{ fontSize: '10px', color: tokens.textMuted, padding: '10px 14px 0' }}>
               Hover image to change source.
             </div>
             <ImageBlock

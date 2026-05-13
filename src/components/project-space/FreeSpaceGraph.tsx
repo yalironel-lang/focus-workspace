@@ -240,8 +240,8 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
     const plotW = W - PAD * 2;
     const plotH = H - PAD * 2;
     const lines: ReactNode[] = [];
-    const gridColor = `${tokens.textGhost}22`;
-    const axisColor = `${tokens.textMuted}55`;
+    const gridColor = `${tokens.textGhost}32`;
+    const axisColor = `${tokens.textSecondary}78`;
 
     for (let g = 0; g <= 4; g++) {
       const gy = PAD + (plotH / 4) * g;
@@ -440,7 +440,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
         className="px-3 py-2 flex items-center justify-between gap-2"
         style={{ borderBottom: `1px solid ${tokens.cardBorder}` }}
       >
-        <span className="text-[10px] font-bold tracking-[0.14em] uppercase" style={{ color: tokens.textGhost }}>
+        <span className="text-[10px] font-bold tracking-[0.14em] uppercase" style={{ color: tokens.textMuted }}>
           Graph
         </span>
         <div className="flex flex-wrap gap-1 justify-end">
@@ -467,7 +467,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
       </div>
 
       <div className="p-3 flex flex-col gap-2">
-        <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: tokens.textGhost }}>
+        <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: tokens.textMuted }}>
           y = … (x or X)
         </label>
         <input
@@ -494,7 +494,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
         <div className="grid grid-cols-4 gap-1.5">
           {(['xmin', 'xmax', 'ymin', 'ymax'] as const).map(key => (
             <div key={key} className="flex flex-col gap-0.5">
-              <span className="text-[9px] uppercase" style={{ color: tokens.textGhost }}>
+              <span className="text-[9px] uppercase" style={{ color: tokens.textMuted }}>
                 {key}
               </span>
               <input
@@ -515,7 +515,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
 
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: tokens.textGhost }}>
+            <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: tokens.textMuted }}>
               View
             </span>
             <button
@@ -572,7 +572,7 @@ export function FreeSpaceGraph({ content, tokens, onChange }: Props) {
               Fit Y
             </button>
           </div>
-          <span className="text-[9px] leading-tight" style={{ color: tokens.textGhost, opacity: 0.72 }}>
+          <span className="text-[9px] leading-tight" style={{ color: tokens.textMuted, opacity: 0.9 }}>
             Scroll wheel zooms · drag plot to pan
           </span>
         </div>
