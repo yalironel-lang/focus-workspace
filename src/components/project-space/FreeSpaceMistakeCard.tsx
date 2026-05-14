@@ -29,6 +29,8 @@ function formatAgo(ts: number | null): string {
 
 export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitleChange }: Props) {
   const [open, setOpen] = useState(false);
+  const variant = content.variant === 'recall' ? 'recall' : 'mistake';
+  const isRecall = variant === 'recall';
 
   const patch = useCallback((p: Partial<MistakeBody>) => {
     onChange({ ...content, ...p });
@@ -77,29 +79,45 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
       style={{
         padding: '14px 16px 12px',
         minHeight: 120,
-        background: `linear-gradient(165deg, rgba(180,40,40,0.06) 0%, transparent 42%), ${tokens.cardBg}`,
-        borderTop: `1px solid rgba(248,113,113,0.12)`,
+        background: isRecall
+          ? `linear-gradient(165deg, ${tokens.accent}14 0%, transparent 44%), ${tokens.cardBg}`
+          : `linear-gradient(165deg, rgba(180,40,40,0.06) 0%, transparent 42%), ${tokens.cardBg}`,
+        borderTop: isRecall
+          ? `1px solid ${tokens.accent}26`
+          : `1px solid rgba(248,113,113,0.12)`,
       }}
     >
+      <div
+        style={{
+          fontSize: '9px',
+          fontWeight: 700,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: isRecall ? `${tokens.accent}b5` : `${tokens.accent}99`,
+          marginBottom: 6,
+        }}
+      >
+        {isRecall ? 'Recall item' : 'Mistake'}
+      </div>
       <input
         value={title}
         onChange={e => onTitleChange?.(e.target.value)}
-        placeholder="Mistake title"
+        placeholder={isRecall ? 'Recall prompt' : 'Mistake title'}
         className="w-full bg-transparent outline-none font-semibold text-sm mb-2"
         style={{ color: tokens.textPrimary, caretColor: tokens.accent }}
       />
 
       {field(
-        'What went wrong',
+        isRecall ? 'Prompt' : 'What went wrong',
         <textarea
           value={content.whatWrong}
           onChange={e => patch({ whatWrong: e.target.value })}
           rows={3}
-          placeholder="The slip-up…"
+          placeholder={isRecall ? 'What do you want to remember or answer?' : 'The slip-up…'}
           className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
           style={{
             color: tokens.textPrimary,
-            border: `1px solid ${tokens.cardBorderHover}`,
+            border: `1px solid ${isRecall ? tokens.cardBorder : tokens.cardBorderHover}`,
             fontFamily: "'Space Grotesk', system-ui, sans-serif",
           }}
         />,
@@ -111,18 +129,22 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
         className="text-[10px] font-semibold mb-2"
         style={{ color: tokens.textMuted, letterSpacing: '0.06em' }}
       >
-        {open ? '− Fewer details' : '+ Correct understanding & why'}
+        {open
+          ? '− Fewer details'
+          : isRecall
+            ? '+ Answer & notes'
+            : '+ Correct understanding & why'}
       </button>
 
       {open ? (
         <>
           {field(
-            'Correct understanding',
+            isRecall ? 'Answer' : 'Correct understanding',
             <textarea
               value={content.correction}
               onChange={e => patch({ correction: e.target.value })}
               rows={2}
-              placeholder="What is actually true…"
+              placeholder={isRecall ? 'What should you recall?' : 'What is actually true…'}
               className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
               style={{
                 color: tokens.textSecondary,
@@ -132,12 +154,12 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
             />,
           )}
           {field(
-            'Why it confused me',
+            isRecall ? 'Notes' : 'Why it confused me',
             <textarea
               value={content.whyConfused}
               onChange={e => patch({ whyConfused: e.target.value })}
               rows={2}
-              placeholder="The mix-up in your own words…"
+              placeholder={isRecall ? 'Optional connection or context…' : 'The mix-up in your own words…'}
               className="w-full resize-none bg-transparent outline-none text-[13px] leading-relaxed rounded-lg px-2 py-1.5"
               style={{
                 color: tokens.textMuted,
@@ -201,7 +223,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
         style={{ borderTop: `1px solid ${tokens.divider}` }}
       >
         <div style={{ fontSize: '10px', color: tokens.textMuted }}>
-          Seen {content.timesReviewed}× · last {formatAgo(content.lastReviewedAt)}
+          {isRecall ? 'Revisited' : 'Seen'} {content.timesReviewed}× · last {formatAgo(content.lastReviewedAt)}
         </div>
         <button
           type="button"
@@ -213,7 +235,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
             border: `1px solid ${tokens.accent}35`,
           }}
         >
-          Reviewed now
+          {isRecall ? 'Recalled now' : 'Reviewed now'}
         </button>
       </div>
     </div>

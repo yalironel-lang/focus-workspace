@@ -645,6 +645,26 @@ export function SectionPage() {
     setSectionViewMode('free-space');
   }, [sectionViewMode, handleAddToSpace]);
 
+  const createNotebookRecallItem = useCallback(
+    (notebookId: string, rawPrompt: string) => {
+      const prompt = rawPrompt.trim();
+      if (!prompt) {
+        toast.error('Focus a notebook block with text first.');
+        return;
+      }
+      const obj = sectionObjects.addRecallItem(prompt);
+      const anchor = sectionPositions.positions[notebookId];
+      const fallback = viewportCenterWorld(120, 32);
+      const x = anchor ? anchor.x + Math.max(48, Math.min(anchor.w + 28, 420)) : fallback.x;
+      const y = anchor ? anchor.y + 24 : fallback.y;
+      sectionPositions.initPos(obj.id, { x, y, w: 380, h: 320 });
+      sectionObjects.addConnection(notebookId, obj.id);
+      setSpaceSelectedId(obj.id);
+      toast.success('Recall item created');
+    },
+    [sectionObjects, sectionPositions, viewportCenterWorld],
+  );
+
   const handlePdfDroppedOnCanvas = useCallback(
     async (file: File, worldX: number, worldY: number) => {
       if (!isAcceptablePdfFile(file)) {
@@ -1317,6 +1337,7 @@ export function SectionPage() {
           setSpaceEditingId(prev => (isEditing ? objectId : prev === objectId ? null : prev));
         }}
         onRequestSelectObject={setSpaceSelectedId}
+        onCreateNotebookRecall={createNotebookRecallItem}
       />
     );
   };

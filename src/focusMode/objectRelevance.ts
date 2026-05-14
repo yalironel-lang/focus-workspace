@@ -14,15 +14,24 @@ function asType(b: FreeSpaceBlockLite): string {
   return typeof b.type === 'string' ? b.type : '';
 }
 
-function touchesMistake(block: FreeSpaceBlockLite, mistakeIds: Set<string>): boolean {
-  for (const tid of coerceFreeSpaceConnectionIds(block.connections)) {
+function undirectedNeighborIds(block: FreeSpaceBlockLite, blocks: FreeSpaceBlockLite[]): Set<string> {
+  const out = new Set<string>(coerceFreeSpaceConnectionIds(block.connections));
+  for (const other of blocks) {
+    if (other.id === block.id) continue;
+    if (coerceFreeSpaceConnectionIds(other.connections).includes(block.id)) out.add(other.id);
+  }
+  return out;
+}
+
+function touchesMistake(block: FreeSpaceBlockLite, blocks: FreeSpaceBlockLite[], mistakeIds: Set<string>): boolean {
+  for (const tid of undirectedNeighborIds(block, blocks)) {
     if (mistakeIds.has(tid)) return true;
   }
   return false;
 }
 
-function connectionDegree(block: FreeSpaceBlockLite): number {
-  return coerceFreeSpaceConnectionIds(block.connections).length;
+function connectionDegree(block: FreeSpaceBlockLite, blocks: FreeSpaceBlockLite[]): number {
+  return undirectedNeighborIds(block, blocks).size;
 }
 
 /**
@@ -43,7 +52,7 @@ export function getFocusTier(
   switch (mode) {
     case 'review': {
       if (t === 'mistake') tier = 1;
-      else if (touchesMistake(block, mistakeIds)) tier = 2;
+      else if (touchesMistake(block, blocks, mistakeIds)) tier = 2;
       else if (t === 'notebook' || t === 'note') tier = 3;
       else tier = 4;
       break;
@@ -63,7 +72,7 @@ export function getFocusTier(
       break;
     }
     case 'thinking': {
-      const deg = connectionDegree(block);
+      const deg = connectionDegree(block, blocks);
       if (deg >= 2) tier = 1;
       else if (deg === 1) tier = 2;
       else if (t === 'notebook') tier = 3;

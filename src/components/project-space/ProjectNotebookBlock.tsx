@@ -28,6 +28,7 @@ type NotebookLine =
   | { kind: 'title'; text: string }
   | { kind: 'section'; text: string }
   | { kind: 'divider' }
+  | { kind: 'ordered'; number: number; text: string }
   | { kind: 'task'; checked: boolean; text: string }
   | { kind: 'quote'; text: string }
   | { kind: 'callout'; tone: CalloutTone; text: string }
@@ -54,6 +55,15 @@ function parseNotebookLine(raw: string): NotebookLine {
 
   const titleMatch = trimmed.match(/^#(?!\#)\s*(.*)$/);
   if (titleMatch) return { kind: 'title', text: (titleMatch[1] ?? '').trimEnd() };
+
+  const orderedMatch = trimmed.match(/^(\d+)\.\s*(.*)$/);
+  if (orderedMatch) {
+    return {
+      kind: 'ordered',
+      number: Math.max(1, Number(orderedMatch[1] ?? 1) || 1),
+      text: (orderedMatch[2] ?? '').trimEnd(),
+    };
+  }
 
   const taskMatch = trimmed.match(/^- \[\s*([xX ])\s*\]\s*(.*)$/);
   if (taskMatch) {
@@ -97,6 +107,7 @@ function parseNotebookLine(raw: string): NotebookLine {
 type Block =
   | { id: string; kind: 'title'; text: string }
   | { id: string; kind: 'section'; text: string }
+  | { id: string; kind: 'ordered'; number: number; text: string }
   | { id: string; kind: 'task'; text: string; checked: boolean }
   | { id: string; kind: 'quote'; text: string }
   | { id: string; kind: 'callout'; tone: CalloutTone; text: string }
@@ -116,6 +127,48 @@ function calloutLabel(tone: CalloutTone): string {
   return 'Review';
 }
 
+function looksCodeLikeStart(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (!trimmed) return false;
+  return /^(`|\$|#|\(|\[|\{)/.test(trimmed)
+    || /^\d+\./.test(trimmed)
+    || /^[a-zA-Z_]+\s*(=|:|\(|\[|\{)/.test(trimmed)
+    || /^[a-zA-Z]\s*([+\-*/^<>=]|:)/.test(trimmed)
+    || /^[a-zA-Z]\d/.test(trimmed);
+}
+
+function autoCapitalizeParagraphStart(text: string): string {
+  const leading = text.match(/^\s*/)?.[0] ?? '';
+  const body = text.slice(leading.length);
+  if (!body || !/^[a-z]/.test(body) || looksCodeLikeStart(body)) return text;
+  return `${leading}${body[0]!.toUpperCase()}${body.slice(1)}`;
+}
+
+function normalizeRecallPromptText(text: string): string {
+  return text.replace(/\u2028/g, '\n').trim();
+}
+
+function normalizeOrderedSequences(blocks: Block[]): Block[] {
+  let changed = false;
+  const out: Block[] = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    const block = blocks[i]!;
+    if (block.kind !== 'ordered') {
+      out.push(block);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    const nextNumber = prev?.kind === 'ordered' ? prev.number + 1 : Math.max(1, block.number);
+    if (block.number !== nextNumber) {
+      changed = true;
+      out.push({ ...block, number: nextNumber });
+    } else {
+      out.push(block);
+    }
+  }
+  return changed ? out : blocks;
+}
+
 function lineToBlock(line: string): Block {
   const id = newBlockId();
   const parsed = parseNotebookLine(line);
@@ -126,6 +179,8 @@ function lineToBlock(line: string): Block {
       return { id, kind: 'title', text: parsed.text };
     case 'section':
       return { id, kind: 'section', text: parsed.text };
+    case 'ordered':
+      return { id, kind: 'ordered', number: parsed.number, text: parsed.text };
     case 'divider':
       return { id, kind: 'divider' };
     case 'task':
@@ -163,6 +218,8 @@ function blockToLine(b: Block): string {
       return `# ${b.text}`;
     case 'section':
       return `## ${b.text}`;
+    case 'ordered':
+      return `${b.number}. ${b.text}`;
     case 'task':
       return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
     case 'quote':
@@ -181,26 +238,27 @@ function blockToLine(b: Block): string {
 }
 
 function serializeBlocks(blocks: Block[]): string {
+  const normalized = normalizeOrderedSequences(blocks);
   // Canonical empty document: persist as "" (no placeholder strings; parse maps back to title + body).
   if (
-    blocks.length === 2 &&
-    blocks[0]?.kind === 'title' &&
-    blocks[0].text === '' &&
-    blocks[1]?.kind === 'paragraph' &&
-    blocks[1].text === '' &&
-    !blocks[1].variant
+    normalized.length === 2 &&
+    normalized[0]?.kind === 'title' &&
+    normalized[0].text === '' &&
+    normalized[1]?.kind === 'paragraph' &&
+    normalized[1].text === '' &&
+    !normalized[1].variant
   ) {
     return '';
   }
   if (
-    blocks.length === 1 &&
-    blocks[0]?.kind === 'paragraph' &&
-    blocks[0].text === '' &&
-    !blocks[0].variant
+    normalized.length === 1 &&
+    normalized[0]?.kind === 'paragraph' &&
+    normalized[0].text === '' &&
+    !normalized[0].variant
   ) {
     return '';
   }
-  return blocks.map(blockToLine).join('\n');
+  return normalized.map(blockToLine).join('\n');
 }
 
 function morphParagraphLine(text: string, blockId: string): Block | Block[] {
@@ -218,6 +276,7 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
       };
     if (parsed.kind === 'title') return { id: blockId, kind: 'title', text: parsed.text };
     if (parsed.kind === 'section') return { id: blockId, kind: 'section', text: parsed.text };
+    if (parsed.kind === 'ordered') return { id: blockId, kind: 'ordered', number: parsed.number, text: parsed.text };
     if (parsed.kind === 'task')
       return { id: blockId, kind: 'task', text: parsed.text, checked: parsed.checked };
     if (parsed.kind === 'quote') return { id: blockId, kind: 'quote', text: parsed.text };
@@ -241,6 +300,17 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
   if (block.kind === 'section') {
     const m = trimmed.match(/^##\s*(.*)$/);
     return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'ordered') {
+    const m = trimmed.match(/^(\d+)\.\s*(.*)$/);
+    if (m) {
+      return {
+        ...block,
+        number: Math.max(1, Number(m[1] ?? block.number) || block.number),
+        text: (m[2] ?? '').trimEnd(),
+      };
+    }
+    return { ...block, text: line.trimEnd() };
   }
   if (block.kind === 'quote') {
     const m = trimmed.match(/^>\s?(.*)$/);
@@ -397,6 +467,8 @@ function mergeBlocks(prev: Block, next: Block): Block {
       return { id: prev.id, kind: 'title', text: mergedText };
     case 'section':
       return { id: prev.id, kind: 'section', text: mergedText };
+    case 'ordered':
+      return { id: prev.id, kind: 'ordered', number: prev.number, text: mergedText };
     case 'quote':
       return { id: prev.id, kind: 'quote', text: mergedText };
     case 'callout':
@@ -681,6 +753,7 @@ interface Props {
   objectTitle?: string;
   allObjects?: ProjectSpaceObject[];
   onRequestSelectObject?: (id: string) => void;
+  onCreateRecallItem?: (prompt: string) => void;
   /**
    * Optional host context (e.g. Free Space canvas) so the notebook can expose a richer focus state.
    * When set to "free-space", edit/preview transitions can drive ambient canvas lighting.
@@ -698,6 +771,7 @@ export function ProjectNotebookBlock({
   objectTitle,
   allObjects,
   onRequestSelectObject,
+  onCreateRecallItem,
   context = 'inline',
   onEditingChange,
 }: Props) {
@@ -737,6 +811,19 @@ export function ProjectNotebookBlock({
     () => deriveNotebookContextData(objectId, allObjects),
     [objectId, allObjects],
   );
+  const activeNotebookBlock = useMemo(
+    () => (surfaceFocusBlockId ? blocks.find((b) => b.id === surfaceFocusBlockId) ?? null : null),
+    [blocks, surfaceFocusBlockId],
+  );
+  const activeRecallPrompt = useMemo(() => {
+    const focused = activeNotebookBlock && activeNotebookBlock.kind !== 'divider'
+      ? activeNotebookBlock
+      : null;
+    const fallback = blocks[focusIndexRef.current];
+    const source = focused ?? (fallback && fallback.kind !== 'divider' ? fallback : null);
+    if (!source) return '';
+    return normalizeRecallPromptText(source.text);
+  }, [activeNotebookBlock, blocks]);
   const hasNotebookContext = contextData.totalCount > 0;
   const canDockContext = surfaceWidth >= 640;
   const showNotebookContext = context === 'free-space' && hasNotebookContext && contextPanelOpen;
@@ -757,8 +844,9 @@ export function ProjectNotebookBlock({
 
   const persist = useCallback(
     (next: Block[]) => {
-      setBlocks(next);
-      onChange({ ...content, body: serializeBlocks(next) });
+      const normalized = normalizeOrderedSequences(next);
+      setBlocks(normalized);
+      onChange({ ...content, body: serializeBlocks(normalized) });
     },
     [content, onChange],
   );
@@ -1134,10 +1222,28 @@ export function ProjectNotebookBlock({
   }, [content.body]);
 
   const fontStack = "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
+  const typeScale = useMemo(() => {
+    const ratio = 1.25;
+    const level3 = 18;
+    const step = (delta: number) => Number((level3 * Math.pow(ratio, delta)).toFixed(2));
+    return {
+      ratio,
+      l1: step(2),
+      l2: step(1),
+      l3: step(0),
+      l4: step(-1),
+      l5: step(-2),
+      s1: 32,
+      s2: 24,
+      s3: 18,
+      s4: 14,
+      s5: 10,
+    };
+  }, []);
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: 'min(560px, 100%)',
+      maxWidth: 'min(600px, 100%)',
       margin: '0 auto',
       width: '100%',
       paddingLeft: 'clamp(20px, 4vw, 44px)',
@@ -1156,8 +1262,8 @@ export function ProjectNotebookBlock({
       backgroundImage: writingSurfaceBackground.image,
       backgroundSize: writingSurfaceBackground.size,
       color: notebookInk.primary,
-      fontSize: '17px',
-      lineHeight: 1.92,
+      fontSize: `${typeScale.l3}px`,
+      lineHeight: 1.88,
       letterSpacing: '0.005em',
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
@@ -1172,7 +1278,7 @@ export function ProjectNotebookBlock({
       textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease, border-color 0.24s ease, box-shadow 0.24s ease',
     }),
-    [context, fontStack, writingSurfaceBackground, notebookInk.primary],
+    [context, fontStack, writingSurfaceBackground, notebookInk.primary, typeScale.l3],
   );
 
   const contextSummaryChips = useMemo(
@@ -1247,7 +1353,8 @@ export function ProjectNotebookBlock({
         const same =
           edited.kind === block.kind &&
           edited.text === block.text &&
-          (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked));
+          (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked)) &&
+          (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
         if (same) return prev;
         const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
         onChange({ ...content, body: serializeBlocks(next) });
@@ -1422,6 +1529,15 @@ export function ProjectNotebookBlock({
       if (index === -1) return;
       const block = blocks[index]!;
 
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
+        if (block.kind === 'divider') return;
+        const prompt = normalizeRecallPromptText(block.text);
+        if (!prompt || !onCreateRecallItem) return;
+        e.preventDefault();
+        onCreateRecallItem(prompt);
+        return;
+      }
+
       if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.repeat) {
         const lv = getBlockLevel(block);
         if (lv !== null) {
@@ -1491,6 +1607,8 @@ export function ProjectNotebookBlock({
               ? { id: block.id, kind: 'title', text: nextText }
               : block.kind === 'section'
                 ? { id: block.id, kind: 'section', text: nextText }
+                : block.kind === 'ordered'
+                  ? { id: block.id, kind: 'ordered', number: block.number, text: nextText }
                 : block.kind === 'quote'
                   ? { id: block.id, kind: 'quote', text: nextText }
                   : block.kind === 'task'
@@ -1511,6 +1629,7 @@ export function ProjectNotebookBlock({
         if (
           (block.kind === 'title' ||
             block.kind === 'section' ||
+            block.kind === 'ordered' ||
             block.kind === 'quote' ||
             block.kind === 'task' ||
             block.kind === 'callout' ||
@@ -1538,15 +1657,19 @@ export function ProjectNotebookBlock({
         if (
           block.kind === 'title' ||
           block.kind === 'section' ||
+          block.kind === 'ordered' ||
           block.kind === 'quote' ||
           block.kind === 'task' ||
           block.kind === 'callout' ||
           block.kind === 'math'
         ) {
           const before = text.slice(0, offset);
-          const after = text.slice(offset);
+          const after = autoCapitalizeParagraphStart(text.slice(offset));
           const updated = { ...block, text: before } as Block;
-          const nextBlock: Block = { id: newBlockId(), kind: 'paragraph', text: after };
+          const nextBlock: Block =
+            block.kind === 'ordered' && before.trim() !== ''
+              ? { id: newBlockId(), kind: 'ordered', number: block.number + 1, text: after }
+              : { id: newBlockId(), kind: 'paragraph', text: after };
           const next = [...blocks.slice(0, index), updated, nextBlock, ...blocks.slice(index + 1)];
           persist(next);
           pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
@@ -1554,7 +1677,7 @@ export function ProjectNotebookBlock({
         }
 
         const before = text.slice(0, offset);
-        const after = text.slice(offset);
+        const after = autoCapitalizeParagraphStart(text.slice(offset));
         const updated: Block = { ...block, text: before };
         const nextBlock: Block = { id: newBlockId(), kind: 'paragraph', text: after };
         const next = [...blocks.slice(0, index), updated, nextBlock, ...blocks.slice(index + 1)];
@@ -1588,6 +1711,7 @@ export function ProjectNotebookBlock({
         if (
           (block.kind === 'title' ||
             block.kind === 'section' ||
+            block.kind === 'ordered' ||
             block.kind === 'quote' ||
             block.kind === 'task' ||
             block.kind === 'callout' ||
@@ -1626,6 +1750,7 @@ export function ProjectNotebookBlock({
       applyBlockLevel,
       content,
       onChange,
+      onCreateRecallItem,
       focusEditableBlock,
     ],
   );
@@ -1729,7 +1854,7 @@ export function ProjectNotebookBlock({
               ? ` · ${contextData.totalCount} connected`
               : ''}{' '}
             <span style={{ color: notebookInk.muted }}>
-              Slash commands · Alt + ↑↓ for levels
+              Slash commands · Alt + ↑↓ for levels · Cmd/Ctrl + Shift + R for recall
             </span>
           </div>
 
@@ -1767,6 +1892,35 @@ export function ProjectNotebookBlock({
             justifyContent: 'flex-end',
           }}
         >
+          {context === 'free-space' ? (
+            <button
+              type="button"
+              disabled={!onCreateRecallItem || !activeRecallPrompt}
+              onClick={() => {
+                if (!onCreateRecallItem || !activeRecallPrompt) return;
+                onCreateRecallItem(activeRecallPrompt);
+              }}
+              style={{
+                border: '1px solid rgba(255,255,255,0.06)',
+                background: onCreateRecallItem && activeRecallPrompt
+                  ? `${tokens.accent}16`
+                  : 'rgba(255,255,255,0.02)',
+                color: onCreateRecallItem && activeRecallPrompt ? tokens.accent : notebookInk.ghost,
+                borderRadius: '10px',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                padding: '7px 10px',
+                cursor: onCreateRecallItem && activeRecallPrompt ? 'pointer' : 'default',
+                opacity: onCreateRecallItem && activeRecallPrompt ? 1 : 0.62,
+                transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease',
+              }}
+              title="Create a connected recall item from the active block"
+            >
+              Create recall
+            </button>
+          ) : null}
           {context === 'free-space' ? (
             <button
               type="button"
@@ -2125,7 +2279,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'title') {
-              const titleMarginTop = index === 0 ? 0 : 32;
+              const titleMarginTop = index === 0 ? 0 : typeScale.s1;
               return (
                 <div
                   key={block.id}
@@ -2148,11 +2302,11 @@ export function ProjectNotebookBlock({
                       outline: 'none',
                       background: 'transparent',
                       color: notebookInk.headline,
-                      fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
+                      fontSize: `${typeScale.l1}px`,
                       fontWeight: 700,
                       letterSpacing: '-0.03em',
-                      lineHeight: 1.08,
-                      margin: `${titleMarginTop}px 0 20px`,
+                      lineHeight: 1.16,
+                      margin: `${titleMarginTop}px 0 ${typeScale.s2}px`,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
@@ -2164,7 +2318,7 @@ export function ProjectNotebookBlock({
 
             if (block.kind === 'section') {
               const secTop =
-                index === 0 ? 8 : prevKind === 'title' ? 18 : prevKind === 'section' ? 24 : 28;
+                index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2;
               return (
                 <div
                   key={block.id}
@@ -2187,16 +2341,75 @@ export function ProjectNotebookBlock({
                       outline: 'none',
                       background: 'transparent',
                       color: notebookInk.section,
-                      fontSize: 'clamp(1.125rem, 0.95rem + 0.55vw, 1.4375rem)',
+                      fontSize: `${typeScale.l2}px`,
                       fontWeight: 600,
                       letterSpacing: '-0.02em',
-                      lineHeight: 1.28,
-                      margin: `${secTop}px 0 16px`,
+                      lineHeight: 1.32,
+                      margin: `${secTop}px 0 ${typeScale.s3}px`,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}
                   />
+                </div>
+              );
+            }
+
+            if (block.kind === 'ordered') {
+              return (
+                <div
+                  key={block.id}
+                  data-nb-surface-block
+                  data-block-id={block.id}
+                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
+                  style={{
+                    ...blockSurfaceChrome(block.id),
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    margin: `${prevKind === 'title' ? typeScale.s4 : typeScale.s3}px 0`,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(26, String(block.number).length * 10 + 8)}px`,
+                      flexShrink: 0,
+                      textAlign: 'right',
+                      color: notebookInk.muted,
+                      fontSize: `${typeScale.l4}px`,
+                      fontWeight: 600,
+                      lineHeight: 1.8,
+                      paddingTop: '1px',
+                      letterSpacing: '0.01em',
+                    }}
+                  >
+                    {block.number}.
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <EditableLine
+                      id={block.id}
+                      text={block.text}
+                      tokens={tokens}
+                      placeholder="List item…"
+                      onUpdate={updateBlockText}
+                      onFocusIndex={setFocusIndexById}
+                      onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+                      style={{
+                        width: '100%',
+                        border: 'none',
+                        outline: 'none',
+                        background: 'transparent',
+                        color: notebookInk.primary,
+                        fontSize: `${typeScale.l3}px`,
+                        fontWeight: 400,
+                        lineHeight: 1.84,
+                        margin: 0,
+                        caretColor: tokens.accent,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    />
+                  </div>
                 </div>
               );
             }
@@ -2288,9 +2501,9 @@ export function ProjectNotebookBlock({
                         outline: 'none',
                         background: 'transparent',
                         color: notebookInk.primary,
-                        fontSize: '17px',
+                      fontSize: `${typeScale.l3}px`,
                         fontWeight: 400,
-                        lineHeight: 1.86,
+                      lineHeight: 1.84,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',
@@ -2311,7 +2524,7 @@ export function ProjectNotebookBlock({
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={{
                     ...blockSurfaceChrome(block.id),
-                    margin: '24px 0',
+                    margin: `${typeScale.s3 + 6}px 0`,
                     paddingLeft: '26px',
                     borderLeft: `1px solid rgba(255,255,255,0.1)`,
                     boxShadow: `-6px 0 24px rgba(0,0,0,0.12)`,
@@ -2332,10 +2545,10 @@ export function ProjectNotebookBlock({
                       outline: 'none',
                       background: 'transparent',
                       color: notebookInk.secondary,
-                      fontSize: '17px',
+                      fontSize: `${typeScale.l3}px`,
                       fontStyle: 'italic',
                       fontWeight: 400,
-                      lineHeight: 1.86,
+                      lineHeight: 1.84,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -2361,8 +2574,8 @@ export function ProjectNotebookBlock({
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={{
                     ...blockSurfaceChrome(block.id),
-                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
-                    padding: '14px 16px 14px',
+                    margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
+                    padding: '15px 16px 15px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
                     background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
@@ -2371,12 +2584,12 @@ export function ProjectNotebookBlock({
                 >
                   <div
                     style={{
-                      fontSize: '10px',
+                      fontSize: `${typeScale.l5}px`,
                       fontWeight: 700,
                       letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: toneColor,
-                      marginBottom: '8px',
+                      marginBottom: `${typeScale.s5 - 2}px`,
                     }}
                   >
                     {calloutLabel(block.tone)}
@@ -2395,9 +2608,9 @@ export function ProjectNotebookBlock({
                       outline: 'none',
                       background: 'transparent',
                       color: notebookInk.primary,
-                      fontSize: '16.25px',
+                      fontSize: `${typeScale.l3}px`,
                       fontWeight: 500,
-                      lineHeight: 1.72,
+                      lineHeight: 1.78,
                       margin: 0,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -2417,8 +2630,8 @@ export function ProjectNotebookBlock({
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={{
                     ...blockSurfaceChrome(block.id),
-                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
-                    padding: '14px 18px',
+                    margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
+                    padding: '15px 18px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
                     background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
@@ -2427,12 +2640,12 @@ export function ProjectNotebookBlock({
                 >
                   <div
                     style={{
-                      fontSize: '10px',
+                      fontSize: `${typeScale.l5}px`,
                       fontWeight: 700,
                       letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: notebookInk.ghost,
-                      marginBottom: '8px',
+                      marginBottom: `${typeScale.s5 - 2}px`,
                     }}
                   >
                     Formula
@@ -2451,9 +2664,9 @@ export function ProjectNotebookBlock({
                       outline: 'none',
                       background: 'transparent',
                       color: notebookInk.headline,
-                      fontSize: '18px',
+                      fontSize: `${typeScale.l3}px`,
                       fontWeight: 500,
-                      lineHeight: 1.7,
+                      lineHeight: 1.78,
                       letterSpacing: '0.02em',
                       fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
                       margin: 0,
@@ -2469,7 +2682,7 @@ export function ProjectNotebookBlock({
             const paraMuted = block.variant === 'muted';
             const paraFine = block.variant === 'fine';
             const paraTop =
-              index === 0 ? 0 : prevKind === 'title' ? 8 : prevKind === 'section' ? 10 : 10;
+              index === 0 ? 0 : prevKind === 'title' ? typeScale.s5 : prevKind === 'section' ? typeScale.s5 : typeScale.s5;
             const useStartWritingPlaceholder =
               block.text === '' &&
               !paraFine &&
@@ -2504,11 +2717,11 @@ export function ProjectNotebookBlock({
                     outline: 'none',
                     background: 'transparent',
                     color: paraFine ? notebookInk.muted : paraMuted ? notebookInk.secondary : notebookInk.primary,
-                    fontSize: paraFine ? '14.5px' : paraMuted ? '15.875px' : '17px',
-                    fontWeight: 400,
-                    lineHeight: 1.86,
-                    letterSpacing: paraFine ? '0.028em' : '0.005em',
-                    margin: `${paraTop}px 0 12px`,
+                    fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
+                    fontWeight: paraMuted ? 500 : 400,
+                    lineHeight: paraFine ? 1.7 : 1.84,
+                    letterSpacing: paraFine ? '0.024em' : '0.004em',
+                    margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
                     opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
                     caretColor: tokens.accent,
                     whiteSpace: 'pre-wrap',
@@ -2527,11 +2740,11 @@ export function ProjectNotebookBlock({
             <>
               <div
                 style={{
-                  fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
+                  fontSize: `${typeScale.l1}px`,
                   fontWeight: 700,
                   letterSpacing: '-0.03em',
-                  lineHeight: 1.08,
-                  margin: '0 0 20px',
+                  lineHeight: 1.16,
+                  margin: `0 0 ${typeScale.s2}px`,
                   color: notebookInk.headline,
                 }}
               >
@@ -2540,8 +2753,8 @@ export function ProjectNotebookBlock({
               <p
                 style={{
                   margin: 0,
-                  fontSize: '17px',
-                  lineHeight: 1.86,
+                  fontSize: `${typeScale.l3}px`,
+                  lineHeight: 1.84,
                   color: notebookInk.muted,
                   letterSpacing: '0.005em',
                 }}
@@ -2560,17 +2773,17 @@ export function ProjectNotebookBlock({
               return <div key={index} style={{ height: '14px' }} />;
             }
             if (line.kind === 'title') {
-              const titleMarginTop = index === 0 ? 0 : 32;
+              const titleMarginTop = index === 0 ? 0 : typeScale.s1;
               const showPreviewUntitled = line.text.trim() === '';
               return (
                 <div
                   key={index}
                   style={{
-                    fontSize: 'clamp(2.125rem, 1.65rem + 1.25vw, 3.25rem)',
+                    fontSize: `${typeScale.l1}px`,
                     fontWeight: 700,
                     letterSpacing: '-0.03em',
-                    lineHeight: 1.08,
-                    margin: `${titleMarginTop}px 0 20px`,
+                    lineHeight: 1.16,
+                    margin: `${titleMarginTop}px 0 ${typeScale.s2}px`,
                     color: notebookInk.headline,
                   }}
                 >
@@ -2584,16 +2797,16 @@ export function ProjectNotebookBlock({
             }
             if (line.kind === 'section') {
               const secTop =
-                index === 0 ? 10 : prevKind === 'title' ? 18 : prevKind === 'section' ? 24 : 28;
+                index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2;
               return (
                 <div
                   key={index}
                   style={{
-                    fontSize: 'clamp(1.125rem, 0.95rem + 0.55vw, 1.4375rem)',
+                    fontSize: `${typeScale.l2}px`,
                     fontWeight: 600,
-                    lineHeight: 1.28,
+                    lineHeight: 1.32,
                     letterSpacing: '-0.02em',
-                    margin: `${secTop}px 0 16px`,
+                    margin: `${secTop}px 0 ${typeScale.s3}px`,
                     color: notebookInk.section,
                   }}
                 >
@@ -2615,6 +2828,46 @@ export function ProjectNotebookBlock({
                 />
               );
             }
+            if (line.kind === 'ordered') {
+              return (
+                <div
+                  key={index}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '12px',
+                    margin: `${prevKind === 'title' ? typeScale.s4 : typeScale.s3}px 0`,
+                    color: notebookInk.primary,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: `${Math.max(26, String(line.number).length * 10 + 8)}px`,
+                      flexShrink: 0,
+                      textAlign: 'right',
+                      color: notebookInk.muted,
+                      fontSize: `${typeScale.l4}px`,
+                      fontWeight: 600,
+                      lineHeight: 1.8,
+                      paddingTop: '1px',
+                      letterSpacing: '0.01em',
+                    }}
+                  >
+                    {line.number}.
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      whiteSpace: 'pre-wrap',
+                      fontSize: `${typeScale.l3}px`,
+                      lineHeight: 1.84,
+                    }}
+                  >
+                    {line.text}
+                  </span>
+                </div>
+              );
+            }
             if (line.kind === 'task') {
               return (
                 <div
@@ -2623,7 +2876,7 @@ export function ProjectNotebookBlock({
                     display: 'flex',
                     alignItems: 'baseline',
                     gap: '12px',
-                    margin: `${prevKind === 'title' ? 12 : 14}px 0`,
+                    margin: `${prevKind === 'title' ? typeScale.s4 : typeScale.s3}px 0`,
                     color: notebookInk.primary,
                   }}
                 >
@@ -2654,7 +2907,7 @@ export function ProjectNotebookBlock({
                   >
                     {line.checked ? '✓' : ''}
                   </span>
-                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: '17px', lineHeight: 1.86 }}>
+                  <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: `${typeScale.l3}px`, lineHeight: 1.84 }}>
                     {line.text}
                   </span>
                 </div>
@@ -2665,14 +2918,14 @@ export function ProjectNotebookBlock({
                 <blockquote
                   key={index}
                   style={{
-                    margin: '24px 0',
+                    margin: `${typeScale.s3 + 6}px 0`,
                     paddingLeft: '26px',
                     borderLeft: `1px solid rgba(255,255,255,0.1)`,
                     boxShadow: `-6px 0 24px rgba(0,0,0,0.12)`,
                     color: notebookInk.secondary,
                     fontStyle: 'italic',
-                    fontSize: '17px',
-                    lineHeight: 1.86,
+                    fontSize: `${typeScale.l3}px`,
+                    lineHeight: 1.84,
                     fontWeight: 400,
                     whiteSpace: 'pre-wrap',
                   }}
@@ -2692,8 +2945,8 @@ export function ProjectNotebookBlock({
                 <div
                   key={index}
                   style={{
-                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
-                    padding: '14px 16px 14px',
+                    margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
+                    padding: '15px 16px 15px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
                     background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
@@ -2702,12 +2955,12 @@ export function ProjectNotebookBlock({
                 >
                   <div
                     style={{
-                      fontSize: '10px',
+                      fontSize: `${typeScale.l5}px`,
                       fontWeight: 700,
                       letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: toneColor,
-                      marginBottom: '8px',
+                      marginBottom: `${typeScale.s5 - 2}px`,
                     }}
                   >
                     {calloutLabel(line.tone)}
@@ -2715,9 +2968,9 @@ export function ProjectNotebookBlock({
                   <div
                     style={{
                       color: notebookInk.primary,
-                      fontSize: '16.25px',
+                      fontSize: `${typeScale.l3}px`,
                       fontWeight: 500,
-                      lineHeight: 1.72,
+                      lineHeight: 1.78,
                       whiteSpace: 'pre-wrap',
                     }}
                   >
@@ -2731,8 +2984,8 @@ export function ProjectNotebookBlock({
                 <div
                   key={index}
                   style={{
-                    margin: `${prevKind === 'title' ? 16 : 18}px 0`,
-                    padding: '14px 18px',
+                    margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
+                    padding: '15px 18px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
                     background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
@@ -2741,12 +2994,12 @@ export function ProjectNotebookBlock({
                 >
                   <div
                     style={{
-                      fontSize: '10px',
+                      fontSize: `${typeScale.l5}px`,
                       fontWeight: 700,
                       letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: notebookInk.ghost,
-                      marginBottom: '8px',
+                      marginBottom: `${typeScale.s5 - 2}px`,
                     }}
                   >
                     Formula
@@ -2754,9 +3007,9 @@ export function ProjectNotebookBlock({
                   <div
                     style={{
                       color: notebookInk.headline,
-                      fontSize: '18px',
+                      fontSize: `${typeScale.l3}px`,
                       fontWeight: 500,
-                      lineHeight: 1.7,
+                      lineHeight: 1.78,
                       letterSpacing: '0.02em',
                       fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
                       whiteSpace: 'pre-wrap',
@@ -2771,16 +3024,16 @@ export function ProjectNotebookBlock({
               const fine = line.variant === 'fine';
               const muted = line.variant === 'muted';
               const paraTop =
-                index === 0 ? 0 : prevKind === 'title' ? 8 : prevKind === 'section' ? 10 : 10;
+                index === 0 ? 0 : prevKind === 'title' ? typeScale.s5 : prevKind === 'section' ? typeScale.s5 : typeScale.s5;
               return (
                 <p
                   key={index}
                   style={{
-                    margin: `${paraTop}px 0 12px`,
+                    margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
                     color: fine ? notebookInk.muted : muted ? notebookInk.secondary : notebookInk.primary,
-                    fontSize: fine ? '14.5px' : muted ? '15.875px' : '17px',
-                    lineHeight: 1.86,
-                    letterSpacing: fine ? '0.028em' : '0.005em',
+                    fontSize: fine ? `${typeScale.l5}px` : muted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
+                    lineHeight: fine ? 1.7 : 1.84,
+                    letterSpacing: fine ? '0.024em' : '0.005em',
                     opacity: fine ? 0.9 : muted ? 0.94 : 1,
                     whiteSpace: 'pre-wrap',
                   }}

@@ -29,6 +29,8 @@ interface Props {
   onTitleChange?: (title: string) => void;
   /** Optional: focus/select another object from contextual notebook references. */
   onRequestSelectObject?: (id: string) => void;
+  /** Optional: create a connected recall item from notebook content. */
+  onCreateNotebookRecall?: (sourceObjectId: string, prompt: string) => void;
 }
 
 export function ProjectSpaceObjectRenderer({
@@ -40,6 +42,7 @@ export function ProjectSpaceObjectRenderer({
   onNotebookEditingChange,
   onTitleChange,
   onRequestSelectObject,
+  onCreateNotebookRecall,
 }: Props) {
   const content = ensureProjectObjectContent(object.type, object.content);
 
@@ -56,6 +59,11 @@ export function ProjectSpaceObjectRenderer({
             objectTitle={object.title}
             allObjects={allObjects}
             onRequestSelectObject={onRequestSelectObject}
+            onCreateRecallItem={
+              onCreateNotebookRecall
+                ? (prompt) => onCreateNotebookRecall(object.id, prompt)
+                : undefined
+            }
             onEditingChange={
               onNotebookEditingChange
                 ? (editing) => onNotebookEditingChange(object.id, editing)

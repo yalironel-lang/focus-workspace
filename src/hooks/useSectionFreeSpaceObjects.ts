@@ -15,6 +15,7 @@ export type ProjectObjectType =
   | 'pdf';
 
 export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
+export type MistakeVariant = 'mistake' | 'recall';
 
 export type CalculatorHistoryEntry = { expr: string; result: string };
 
@@ -23,6 +24,7 @@ export type ProjectObjectContent =
   | { type: 'note'; body: string }
   | {
       type: 'mistake';
+      variant?: MistakeVariant;
       whatWrong: string;
       correction: string;
       whyConfused: string;
@@ -95,6 +97,7 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
         title: 'Mistake',
         content: {
           type: 'mistake',
+          variant: 'mistake',
           whatWrong: '',
           correction: '',
           whyConfused: '',
@@ -188,11 +191,13 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const conf = r.confidence;
       const confidence: MistakeConfidence =
         conf === 'medium' || conf === 'high' || conf === 'mastered' ? conf : 'low';
+      const variant: MistakeVariant = r.variant === 'recall' ? 'recall' : 'mistake';
       const last = r.lastReviewedAt;
       const lastReviewedAt =
         typeof last === 'number' && Number.isFinite(last) ? last : null;
       return {
         type: 'mistake',
+        variant,
         whatWrong: typeof r.whatWrong === 'string' ? r.whatWrong : '',
         correction: typeof r.correction === 'string' ? r.correction : '',
         whyConfused: typeof r.whyConfused === 'string' ? r.whyConfused : '',
@@ -427,6 +432,8 @@ export interface SectionFreeSpaceObjectsState {
   addQuickCaptureNote: (body: string) => ProjectSpaceObject;
   /** Fast mistake capture: title from first line, body maps to “what went wrong”. */
   addQuickCaptureMistake: (rawBody: string) => ProjectSpaceObject;
+  /** Lightweight recall capture from an existing notebook block or concept. */
+  addRecallItem: (prompt: string) => ProjectSpaceObject;
   /** Turn selected note into a mistake card (preserves note body as whatWrong). */
   convertNoteToMistake: (id: string) => ProjectSpaceObject | null;
   updateObjectContent: (id: string, content: ProjectObjectContent) => void;
@@ -506,11 +513,43 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       title,
       content: {
         type: 'mistake',
+        variant: 'mistake',
         whatWrong: trimmed || 'What went wrong',
         correction: '',
         whyConfused: '',
         tags: [],
         confidence: 'low',
+        timesReviewed: 0,
+        lastReviewedAt: null,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    setObjects(prev => {
+      const next = [...prev, obj];
+      persist(sectionId, next);
+      return next;
+    });
+    return obj;
+  }, [sectionId]);
+
+  const addRecallItem = useCallback((rawPrompt: string): ProjectSpaceObject => {
+    const trimmed = rawPrompt.trim();
+    const firstLine = trimmed.split(/\n/)[0]?.trim() ?? trimmed;
+    const title = firstLine.length > 56 ? `${firstLine.slice(0, 54)}…` : (firstLine || 'Recall');
+    const now = Date.now();
+    const obj: ProjectSpaceObject = {
+      id: uid('mistake'),
+      type: 'mistake',
+      title,
+      content: {
+        type: 'mistake',
+        variant: 'recall',
+        whatWrong: trimmed || 'Recall prompt',
+        correction: '',
+        whyConfused: '',
+        tags: [],
+        confidence: 'medium',
         timesReviewed: 0,
         lastReviewedAt: null,
       },
@@ -544,6 +583,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
         title: title.length > 80 ? `${title.slice(0, 78)}…` : title,
         content: {
           type: 'mistake',
+          variant: 'mistake',
           whatWrong: trimmed || 'What went wrong',
           correction: '',
           whyConfused: '',
@@ -681,6 +721,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     addObject,
     addQuickCaptureNote,
     addQuickCaptureMistake,
+    addRecallItem,
     convertNoteToMistake,
     updateObjectContent,
     updateObjectFields,

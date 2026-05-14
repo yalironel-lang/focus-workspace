@@ -39,6 +39,10 @@ export function MistakeReviewOverlay({
       const t = objects.find(o => o.id === nid);
       if (t?.type === 'mistake' && nid !== id) set.add(nid);
     }
+    for (const other of objects) {
+      if (other.id === id || other.type !== 'mistake') continue;
+      if (coerceFreeSpaceConnectionIds(other.connections).includes(id)) set.add(other.id);
+    }
     for (const ins of insights) {
       if (ins.relatedIds.includes(id)) {
         for (const r of ins.relatedIds) {
@@ -86,6 +90,7 @@ export function MistakeReviewOverlay({
       ? ensureProjectObjectContent('mistake', obj.content)
       : null;
   const m = body?.type === 'mistake' ? body : null;
+  const isRecall = m?.variant === 'recall';
 
   return (
     <div
@@ -109,7 +114,7 @@ export function MistakeReviewOverlay({
           style={{ borderBottom: `1px solid rgba(255,255,255,0.06)` }}
         >
           <span className="text-[11px] font-semibold tracking-widest uppercase" style={{ color: tokens.textGhost }}>
-            Mistake review
+            {isRecall ? 'Connected recall' : 'Mistake review'}
           </span>
           <span className="text-[10px] tabular-nums" style={{ color: tokens.textMuted }}>
             {queueIds.length ? index + 1 : 0} / {queueIds.length}
@@ -138,14 +143,14 @@ export function MistakeReviewOverlay({
                 <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: `${tokens.accent}aa` }}>
-                      What went wrong
+                      {isRecall ? 'Prompt' : 'What went wrong'}
                     </div>
                     <div style={{ whiteSpace: 'pre-wrap' }}>{m.whatWrong || '—'}</div>
                   </div>
                   {m.correction ? (
                     <div>
                       <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
-                        Correct understanding
+                        {isRecall ? 'Answer' : 'Correct understanding'}
                       </div>
                       <div style={{ whiteSpace: 'pre-wrap' }}>{m.correction}</div>
                     </div>
@@ -153,7 +158,7 @@ export function MistakeReviewOverlay({
                   {m.whyConfused ? (
                     <div>
                       <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: tokens.textGhost }}>
-                        Why it confused me
+                        {isRecall ? 'Notes' : 'Why it confused me'}
                       </div>
                       <div style={{ whiteSpace: 'pre-wrap' }}>{m.whyConfused}</div>
                     </div>
@@ -242,7 +247,7 @@ export function MistakeReviewOverlay({
                 border: `1px solid ${tokens.accent}40`,
               }}
             >
-              Mark reviewed
+              {isRecall ? 'Mark recalled' : 'Mark reviewed'}
             </button>
           ) : null}
         </div>

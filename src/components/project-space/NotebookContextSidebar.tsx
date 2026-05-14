@@ -43,7 +43,7 @@ function previewForObject(obj: ProjectSpaceObject): string {
     case 'note':
       return content.body.trim() || 'Quick note';
     case 'mistake':
-      return content.whatWrong.trim() || 'Mistake reference';
+      return content.whatWrong.trim() || (content.variant === 'recall' ? 'Recall prompt' : 'Mistake reference');
     case 'pdf':
       return content.fileName ? `PDF · page ${content.page}` : 'PDF reference';
     case 'graph':
