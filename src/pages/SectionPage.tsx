@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useFocusMode } from '../hooks/useFocusMode';
+import { useWorkspaceContinuity } from '../hooks/useWorkspaceContinuity';
 import { FOCUS_MODE_BADGE } from '../focusMode/focusModeTypes';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
@@ -10,12 +11,14 @@ import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTyp
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
+import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { useAtmosphere } from '../hooks/useAtmosphere';
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
 import {
@@ -65,6 +68,7 @@ import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
 import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
 import type { CompanionPanelContentFields } from '../lib/companionPanels';
+import type { WorkspaceContinuitySuggestion } from '../lib/workspaceContinuity';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -427,6 +431,7 @@ export function SectionPage() {
   const sectionId = id ?? '';
   const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
   const { tokens } = useAtmosphere();
+  const prefersReducedMotion = usePrefersReducedMotion();
   const sectionCanvas = useSectionCanvasMode(sectionId);
   const sectionPositions = useSectionBlockPositions(sectionId);
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
@@ -464,6 +469,10 @@ export function SectionPage() {
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
+  const [resumeVisible, setResumeVisible] = useState(false);
+  const resumeSeedKeyRef = useRef('');
+  const cameraRestoreRafRef = useRef(0);
+  const pendingResumeSuggestionRef = useRef<WorkspaceContinuitySuggestion | null>(null);
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
@@ -473,6 +482,18 @@ export function SectionPage() {
   const [dragId,     setDragId]     = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
+
+  const workspaceContinuity = useWorkspaceContinuity({
+    sectionId,
+    objects: sectionObjects.objects,
+    positions: sectionPositions.positions,
+    selectedId: spaceSelectedId,
+    editingId: spaceEditingId,
+    focusMode,
+    zoom: sectionCanvas.zoom,
+    panX: sectionCanvas.panX,
+    panY: sectionCanvas.panY,
+  });
 
   const enterDesignMode = () => {
     designSnapshot.current = { ...customization };
@@ -686,6 +707,78 @@ export function SectionPage() {
     [sectionObjects, sectionPositions, viewportCenterWorld],
   );
 
+  const animateToContinuityViewport = useCallback(
+    (target: { zoom: number; panX: number; panY: number } | null) => {
+      if (!target) return;
+      cancelAnimationFrame(cameraRestoreRafRef.current);
+      if (prefersReducedMotion) {
+        sectionCanvas.setViewport(target.zoom, target.panX, target.panY);
+        return;
+      }
+      const start = {
+        zoom: Math.max(0.55, target.zoom * 0.94),
+        panX: target.panX + 48,
+        panY: target.panY + 28,
+      };
+      sectionCanvas.setViewport(start.zoom, start.panX, start.panY);
+      const startedAt = performance.now();
+      const durationMs = 820;
+      const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+      const tick = (now: number) => {
+        const progress = Math.min(1, (now - startedAt) / durationMs);
+        const eased = easeOut(progress);
+        sectionCanvas.setViewport(
+          start.zoom + (target.zoom - start.zoom) * eased,
+          start.panX + (target.panX - start.panX) * eased,
+          start.panY + (target.panY - start.panY) * eased,
+        );
+        if (progress < 1) cameraRestoreRafRef.current = requestAnimationFrame(tick);
+      };
+      cameraRestoreRafRef.current = requestAnimationFrame(tick);
+    },
+    [prefersReducedMotion, sectionCanvas],
+  );
+
+  const applyWorkspaceResumeSuggestion = useCallback(
+    (suggestion: WorkspaceContinuitySuggestion) => {
+      const targetId = suggestion.objectId ?? workspaceContinuity.restoreSelectionId;
+      if (suggestion.focusMode !== undefined) setFocusMode(suggestion.focusMode ?? null);
+
+      if (suggestion.openCompanion && targetId) {
+        const object = sectionObjects.getObject(targetId);
+        if (object?.type === 'companion') {
+          const content = ensureProjectObjectContent('companion', object.content);
+          if (content.type === 'companion' && content.url) {
+            window.open(content.url, '_blank', 'noopener,noreferrer');
+            sectionObjects.updateObjectContent(targetId, {
+              ...content,
+              lastOpenedAt: Date.now(),
+            });
+          }
+        }
+      }
+
+      setResumeVisible(false);
+
+      if (sectionViewMode !== 'free-space') {
+        pendingResumeSuggestionRef.current = suggestion;
+        setSectionViewMode('free-space');
+        return;
+      }
+
+      if (targetId) setSpaceSelectedId(targetId);
+      animateToContinuityViewport(workspaceContinuity.restoreViewport);
+    },
+    [
+      animateToContinuityViewport,
+      sectionObjects,
+      sectionViewMode,
+      setFocusMode,
+      workspaceContinuity.restoreSelectionId,
+      workspaceContinuity.restoreViewport,
+    ],
+  );
+
   const createNotebookRecallItem = useCallback(
     (notebookId: string, rawPrompt: string) => {
       const prompt = rawPrompt.trim();
@@ -813,6 +906,46 @@ export function SectionPage() {
     pendingFreeSpaceType.current = null;
     handleAddToSpace(pending);
   }, [sectionViewMode, createQuickCaptureNote, createQuickCaptureMistake, handleAddToSpace]);
+
+  useEffect(() => {
+    return () => cancelAnimationFrame(cameraRestoreRafRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const seedKey = `${sectionId}|${workspaceContinuity.continuity?.savedAt ?? 0}`;
+    if (resumeSeedKeyRef.current === seedKey) return;
+    resumeSeedKeyRef.current = seedKey;
+    setResumeVisible(
+      !!(
+        workspaceContinuity.continuityRecent &&
+        workspaceContinuity.resumeCopy &&
+        sectionObjects.objects.length > 0
+      ),
+    );
+  }, [
+    loading,
+    sectionId,
+    sectionObjects.objects.length,
+    workspaceContinuity.continuity?.savedAt,
+    workspaceContinuity.continuityRecent,
+    workspaceContinuity.resumeCopy,
+  ]);
+
+  useEffect(() => {
+    if (sectionViewMode !== 'free-space') return;
+    const pending = pendingResumeSuggestionRef.current;
+    if (!pending) return;
+    pendingResumeSuggestionRef.current = null;
+    const targetId = pending.objectId ?? workspaceContinuity.restoreSelectionId;
+    if (targetId) setSpaceSelectedId(targetId);
+    animateToContinuityViewport(workspaceContinuity.restoreViewport);
+  }, [
+    animateToContinuityViewport,
+    sectionViewMode,
+    workspaceContinuity.restoreSelectionId,
+    workspaceContinuity.restoreViewport,
+  ]);
 
   useEffect(() => {
     if (!id || !section) return;
@@ -1439,6 +1572,18 @@ export function SectionPage() {
         onCreate={createCompanionPanel}
       />
 
+      {resumeVisible && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
+        <WorkspaceResumeLayer
+          tokens={tokens}
+          topOffset={84}
+          continuity={workspaceContinuity.continuity}
+          resumeCopy={workspaceContinuity.resumeCopy}
+          suggestions={workspaceContinuity.suggestions}
+          onDismiss={() => setResumeVisible(false)}
+          onSuggestionClick={applyWorkspaceResumeSuggestion}
+        />
+      )}
+
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
       <SpaceNav
         title={section.title}
@@ -1522,7 +1667,7 @@ export function SectionPage() {
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
       {sectionViewMode === 'free-space' ? (
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {!showWorkspaceStarter && (
+          {!showWorkspaceStarter && !resumeVisible && (
             <WorkspaceGuidanceBar
               sectionId={sectionId}
               tokens={tokens}
@@ -1583,6 +1728,9 @@ export function SectionPage() {
               spatialMinimapEnabled
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
               focusMode={sectionViewMode === 'free-space' ? focusMode : null}
+              continuityObjectIds={workspaceContinuity.continuityObjectIds}
+              continuityClusterIds={workspaceContinuity.continuityClusterIds}
+              continuityEdgeKeys={workspaceContinuity.continuityEdgeKeys}
             />
           </FreeSpaceCanvasErrorBoundary>
 

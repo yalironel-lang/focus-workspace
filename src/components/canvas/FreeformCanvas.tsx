@@ -169,6 +169,12 @@ interface Props {
   onPdfDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
   /** Cognitive Focus Mode — presentation only; does not move objects or change persistence layout. */
   focusMode?: FocusMode | null;
+  /** Workspace continuity: recently used objects keep a faint presence. */
+  continuityObjectIds?: string[];
+  /** Workspace continuity: last active cluster glows slightly warmer. */
+  continuityClusterIds?: string[];
+  /** Workspace continuity: recently viewed paths stay a little brighter. */
+  continuityEdgeKeys?: string[];
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -344,6 +350,9 @@ export function FreeformCanvas({
   spatialMinimapEnabled = false,
   onPdfDroppedOnCanvas,
   focusMode = null,
+  continuityObjectIds = [],
+  continuityClusterIds = [],
+  continuityEdgeKeys = [],
 }: Props) {
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
@@ -504,6 +513,8 @@ export function FreeformCanvas({
   const deepFocusAtmosphere = hasDeepFocus && !designMode;
 
   const focusAtm = useMemo(() => focusCanvasAtmosphere(focusMode), [focusMode]);
+  const continuityObjectSet = useMemo(() => new Set(continuityObjectIds), [continuityObjectIds]);
+  const continuityClusterSet = useMemo(() => new Set(continuityClusterIds), [continuityClusterIds]);
   const focusTierById = useMemo(() => {
     if (!focusMode || !spatialAmbient) return null;
     const bl = blocks as FreeSpaceBlockLite[];
@@ -1153,6 +1164,7 @@ export function FreeformCanvas({
             blocks={blocks}
             positions={positions}
             animateFocusId={selectedId}
+            continuityEdgeKeys={continuityEdgeKeys}
             hoveredEdgeKey={hoveredConnectionEdgeKey}
             onHoveredEdgeChange={setHoveredConnectionEdgeKey}
             lineEmphasisMul={focusMode && spatialAmbient ? focusAtm.connectionLineMul : 1}
@@ -1240,6 +1252,7 @@ export function FreeformCanvas({
           if (!clusterFirstSeen.current.has(region.key)) clusterFirstSeen.current.set(region.key, Date.now());
           const seenMs = Date.now() - (clusterFirstSeen.current.get(region.key) ?? Date.now());
           const isStable = seenMs > 5 * 60 * 1000;
+          const continuityClusterHit = region.memberIds.some(id => continuityClusterSet.has(id));
           const shapeX =
             region.dominantLane === 'source' ? 1.08 :
             region.dominantLane === 'tool' ? 1.1 :
@@ -1248,7 +1261,12 @@ export function FreeformCanvas({
             region.dominantLane === 'review' ? 1.08 :
             region.dominantLane === 'support' ? 1.04 :
             0.98;
-          const ambientOpacity = Math.min(0.64, (0.24 + (region.density - 0.72) * 0.44) * (isStable ? 1 : 0.84));
+          const ambientOpacity = Math.min(
+            0.72,
+            (0.24 + (region.density - 0.72) * 0.44) *
+              (isStable ? 1 : 0.84) *
+              (continuityClusterHit ? 1.2 : 1),
+          );
           return (
             <div key={`cluster-${region.key}`} aria-hidden="true">
               <div
@@ -1264,8 +1282,8 @@ export function FreeformCanvas({
                   opacity: ambientOpacity,
                   transform: `scale(${shapeX}, ${shapeY})`,
                   transformOrigin: 'center center',
-                  filter: `blur(${isStable ? 46 : 56}px)`,
-                  background: `radial-gradient(ellipse at 50% 48%, rgba(255,255,255,${isStable ? '0.034' : '0.024'}) 0%, ${tokens.accent}${isStable ? '10' : '0c'} 20%, ${tokens.accent}${isStable ? '08' : '06'} 38%, transparent 76%)`,
+                  filter: `blur(${continuityClusterHit ? (isStable ? 42 : 48) : (isStable ? 46 : 56)}px)`,
+                  background: `radial-gradient(ellipse at 50% 48%, rgba(255,255,255,${continuityClusterHit ? (isStable ? '0.04' : '0.03') : (isStable ? '0.034' : '0.024')}) 0%, ${tokens.accent}${continuityClusterHit ? (isStable ? '16' : '12') : (isStable ? '10' : '0c')} 20%, ${tokens.accent}${continuityClusterHit ? (isStable ? '0d' : '0a') : (isStable ? '08' : '06')} 38%, transparent 76%)`,
                   transition: 'opacity 0.7s cubic-bezier(0.32,0.72,0,1), transform 0.7s cubic-bezier(0.32,0.72,0,1), filter 0.7s ease',
                 }}
               />
@@ -1280,9 +1298,9 @@ export function FreeformCanvas({
                   pointerEvents: 'none',
                   zIndex: 0,
                   opacity: ambientOpacity * (isStable ? 0.78 : 0.62),
-                  filter: `blur(${isStable ? 30 : 36}px)`,
+                  filter: `blur(${continuityClusterHit ? (isStable ? 26 : 32) : (isStable ? 30 : 36)}px)`,
                   mixBlendMode: 'screen',
-                  background: `radial-gradient(ellipse at 46% 42%, rgba(255,255,255,${isStable ? '0.036' : '0.026'}) 0%, ${tokens.accent}${isStable ? '0b' : '08'} 28%, transparent 78%)`,
+                  background: `radial-gradient(ellipse at 46% 42%, rgba(255,255,255,${continuityClusterHit ? (isStable ? '0.042' : '0.03') : (isStable ? '0.036' : '0.026')}) 0%, ${tokens.accent}${continuityClusterHit ? (isStable ? '11' : '0b') : (isStable ? '0b' : '08')} 28%, transparent 78%)`,
                   transition: 'opacity 0.7s cubic-bezier(0.32,0.72,0,1), filter 0.7s ease',
                 }}
               />
@@ -1502,12 +1520,39 @@ export function FreeformCanvas({
                 }}
               />
               <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: pos.x - 18,
+                  top: pos.y - 18,
+                  width: blockW + 36,
+                  height: blockH + 36,
+                  borderRadius: '28px',
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                  opacity:
+                    item.kind === 'block'
+                      ? continuityObjectSet.has(item.id)
+                        ? 0.78
+                        : continuityClusterSet.has(item.id)
+                          ? 0.48
+                          : 0
+                      : 0,
+                  filter: 'blur(22px)',
+                  background: `radial-gradient(ellipse at 50% 42%, ${tokens.accent}14 0%, ${tokens.accent}0a 26%, transparent 72%)`,
+                  transition: 'opacity 0.6s ease, filter 0.6s ease',
+                }}
+              />
+              <div
                 style={{
                   opacity: combinedOpacity,
                   transition: opacityTransition + filterTransition + transformTransition,
                   transform: focusScale !== 1 ? `scale(${focusScale})` : undefined,
                   transformOrigin: 'center center',
-                  filter: displayFilter,
+                  filter:
+                    item.kind === 'block' && continuityObjectSet.has(item.id) && displayFilter === 'none'
+                      ? 'brightness(1.01) saturate(1.02)'
+                      : displayFilter,
                 }}
                 onClickCapture={() => {
                   // Pure clicks (no drag) must also record activity + trigger revisit.

@@ -42,6 +42,8 @@ export interface FreeSpaceConnectionsLayerProps {
   positions: PositionMap;
   /** Lines touching this id pulse softly */
   animateFocusId?: string | null;
+  /** Continuity: recently used paths keep a faint residual brightness. */
+  continuityEdgeKeys?: string[];
   hoveredEdgeKey: string | null;
   onHoveredEdgeChange: (key: string | null) => void;
   /** Focus Mode: multiply base stroke presence (1 = default). */
@@ -53,6 +55,7 @@ function FreeSpaceConnectionsLayerInner({
   blocks,
   positions,
   animateFocusId,
+  continuityEdgeKeys = [],
   hoveredEdgeKey,
   onHoveredEdgeChange,
   lineEmphasisMul = 1,
@@ -88,6 +91,7 @@ function FreeSpaceConnectionsLayerInner({
   const onLeave = useCallback(() => onHoveredEdgeChange(null), [onHoveredEdgeChange]);
 
   const accent = tokens.accent ?? '#f59e0b';
+  const continuitySet = useMemo(() => new Set(continuityEdgeKeys), [continuityEdgeKeys]);
 
   return (
     <svg
@@ -115,8 +119,9 @@ function FreeSpaceConnectionsLayerInner({
       {edges.map(({ key, d, from, to }) => {
         const hovered = hoveredEdgeKey === key;
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
-        const stroke = hovered ? `${accent}bf` : `${accent}52`;
-        const width = hovered ? 1.5 : 1.02;
+        const lingering = continuitySet.has(key);
+        const stroke = hovered ? `${accent}bf` : lingering ? `${accent}72` : `${accent}52`;
+        const width = hovered ? 1.5 : lingering ? 1.18 : 1.02;
         const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul));
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
@@ -138,7 +143,7 @@ function FreeSpaceConnectionsLayerInner({
               filter={hovered || pulse ? `url(#${filterId})` : undefined}
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
-                opacity: (pulse && !hovered ? 0.8 : 1) * em,
+                opacity: ((pulse && !hovered ? 0.8 : lingering ? 1.08 : 1) * em),
                 animation: pulse ? 'fwConnPulse 2.6s ease-in-out infinite' : undefined,
               }}
             />
