@@ -12,6 +12,7 @@ import {
   Play,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -251,7 +252,7 @@ export function WorkspaceLibrary() {
   const continuity = useSessionContinuity();
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
   const { recentIdsOrdered, openedAt } = useRecentWorkspaces();
-  const { openSessionModal } = useCommandPalette();
+  const { openSessionModal, openArrivalExperience } = useCommandPalette();
 
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -502,7 +503,7 @@ export function WorkspaceLibrary() {
             Your spaces
           </h1>
 
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between max-w-3xl">
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between max-w-4xl">
             <div
               className="flex items-center gap-3 rounded-2xl px-4 py-2.5 flex-1 min-w-0 max-w-xl"
               style={{
@@ -521,18 +522,33 @@ export function WorkspaceLibrary() {
                 style={{ color: tokens.textPrimary }}
               />
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowNew(s => !s);
-                setNewTitle('');
-              }}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold shrink-0 transition-transform active:scale-[0.99]"
-              style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
-            >
-              <Plus className="w-4 h-4" strokeWidth={2.5} />
-              New workspace
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openArrivalExperience()}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-medium shrink-0 transition-colors"
+                style={{
+                  borderColor: tokens.cardBorder,
+                  backgroundColor: 'rgba(255,255,255,0.03)',
+                  color: tokens.textSecondary,
+                }}
+              >
+                <Sparkles className="w-4 h-4" strokeWidth={2} />
+                Arrival
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNew(s => !s);
+                  setNewTitle('');
+                }}
+                className="inline-flex min-h-11 items-center justify-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold shrink-0 transition-transform active:scale-[0.99]"
+                style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
+              >
+                <Plus className="w-4 h-4" strokeWidth={2.5} />
+                New workspace
+              </button>
+            </div>
           </div>
 
           {showNew && (

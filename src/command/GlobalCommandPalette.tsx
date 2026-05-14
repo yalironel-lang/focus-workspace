@@ -83,6 +83,8 @@ export function GlobalCommandPalette() {
     intelligenceModalOpen,
     setIntelligenceModalOpen,
     openIntelligenceModal,
+    arrivalExperienceOpen,
+    openArrivalExperience,
     aiWorkspaceVersion,
     focusModeVersion,
     workspaceStarterVersion,
@@ -399,6 +401,21 @@ export function GlobalCommandPalette() {
         }
         closePalette();
         navigate('/dashboard');
+      },
+    });
+
+    list.push({
+      id: 'ws-arrival-experience',
+      group: 'workspace',
+      groupLabel: 'Workspaces',
+      label: 'Show arrival experience',
+      subtitle: 'Reopen the calm first-launch intro',
+      keywords: ['arrival', 'welcome', 'intro', 'first launch', 'workspace'],
+      icon: Sparkles,
+      priority: 8.05,
+      run: () => {
+        closePalette();
+        openArrivalExperience();
       },
     });
 
@@ -870,6 +887,7 @@ export function GlobalCommandPalette() {
     focusModeVersion,
     workspaceStarterVersion,
     openIntelligenceModal,
+    openArrivalExperience,
   ]);
 
   const filtered = useMemo(() => filterAndSortCommands(query, commands), [commands, query]);
@@ -898,13 +916,13 @@ export function GlobalCommandPalette() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key !== 'k') return;
       if (isCommandPaletteBlockedTarget(e.target)) return;
-      if (sessionModalOpen || intelligenceModalOpen || workspaceRecoveryOpen) return;
+      if (sessionModalOpen || intelligenceModalOpen || workspaceRecoveryOpen || arrivalExperienceOpen) return;
       e.preventDefault();
       togglePalette();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePalette, sessionModalOpen, intelligenceModalOpen, workspaceRecoveryOpen]);
+  }, [togglePalette, sessionModalOpen, intelligenceModalOpen, workspaceRecoveryOpen, arrivalExperienceOpen]);
 
   useEffect(() => {
     if (!paletteOpen) return;

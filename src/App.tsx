@@ -3,6 +3,7 @@ import { CommandPaletteProvider } from './command/CommandPaletteContext';
 import { GlobalCommandPalette } from './command/GlobalCommandPalette';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Auth } from './components/Auth';
+import { ArrivalExperienceGate } from './components/arrival/ArrivalExperienceGate';
 import { Dashboard } from './pages/Dashboard';
 import { DeskPage } from './pages/DeskPage';
 import { SectionPage } from './pages/SectionPage';
@@ -82,13 +83,22 @@ function AppRoutes() {
   );
 }
 
+function AppShell() {
+  return (
+    <>
+      <AppRoutes />
+      <ArrivalExperienceGate />
+      <GlobalCommandPalette />
+    </>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <CommandPaletteProvider>
-          <AppRoutes />
-          <GlobalCommandPalette />
+          <AppShell />
         </CommandPaletteProvider>
         <Toaster
           position="top-right"

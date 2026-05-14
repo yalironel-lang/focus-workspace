@@ -67,6 +67,9 @@ export interface CommandPaletteContextValue {
   intelligenceModalOpen: boolean;
   setIntelligenceModalOpen: (v: boolean) => void;
   openIntelligenceModal: () => void;
+  arrivalExperienceOpen: boolean;
+  openArrivalExperience: () => void;
+  closeArrivalExperience: () => void;
   aiWorkspaceVersion: number;
   focusModeVersion: number;
   workspaceStarterVersion: number;
@@ -88,6 +91,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
   const [intelligenceModalOpen, setIntelligenceModalOpen] = useState(false);
+  const [arrivalExperienceOpen, setArrivalExperienceOpen] = useState(false);
   const [freeSpaceVersion, setFreeSpaceVersion] = useState(0);
   const [aiWorkspaceVersion, setAiWorkspaceVersion] = useState(0);
   const [focusModeVersion, setFocusModeVersion] = useState(0);
@@ -125,6 +129,17 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const openIntelligenceModal = useCallback(() => {
     setPaletteOpen(false);
     setIntelligenceModalOpen(true);
+  }, []);
+
+  const openArrivalExperience = useCallback(() => {
+    setPaletteOpen(false);
+    setSessionModalOpen(false);
+    setIntelligenceModalOpen(false);
+    setArrivalExperienceOpen(true);
+  }, []);
+
+  const closeArrivalExperience = useCallback(() => {
+    setArrivalExperienceOpen(false);
   }, []);
 
   const sectionIdFromRoute = useMemo(() => {
@@ -165,6 +180,9 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       intelligenceModalOpen,
       setIntelligenceModalOpen,
       openIntelligenceModal,
+      arrivalExperienceOpen,
+      openArrivalExperience,
+      closeArrivalExperience,
       aiWorkspaceVersion,
       focusModeVersion,
       workspaceStarterVersion,
@@ -190,6 +208,9 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       createSection,
       intelligenceModalOpen,
       openIntelligenceModal,
+      arrivalExperienceOpen,
+      openArrivalExperience,
+      closeArrivalExperience,
       aiWorkspaceVersion,
       focusModeVersion,
       workspaceStarterVersion,
