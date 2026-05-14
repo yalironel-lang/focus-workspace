@@ -1,12 +1,15 @@
 import type { FocusMode } from './focusModeTypes';
 import type { ProjectObjectType } from '../hooks/useSectionFreeSpaceObjects';
 import { coerceFreeSpaceConnectionIds } from '../hooks/useSectionFreeSpaceObjects';
+import { getCompanionKind } from '../lib/companionPanels';
 
 export type FocusTier = 1 | 2 | 3 | 4;
 
 export interface FreeSpaceBlockLite {
   id: string;
   type?: ProjectObjectType | string;
+  title?: string;
+  content?: unknown;
   connections?: string[];
 }
 
@@ -32,6 +35,16 @@ function touchesMistake(block: FreeSpaceBlockLite, blocks: FreeSpaceBlockLite[],
 
 function connectionDegree(block: FreeSpaceBlockLite, blocks: FreeSpaceBlockLite[]): number {
   return undirectedNeighborIds(block, blocks).size;
+}
+
+function companionKind(block: FreeSpaceBlockLite) {
+  if (asType(block) !== 'companion') return null;
+  const raw = block.content;
+  const content = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  const url = typeof content?.url === 'string' ? content.url : '';
+  const title = typeof content?.title === 'string' ? content.title : block.title;
+  const description = typeof content?.description === 'string' ? content.description : '';
+  return getCompanionKind(url, title, description);
 }
 
 /**
@@ -60,12 +73,16 @@ export function getFocusTier(
     case 'reading': {
       if (t === 'pdf') tier = 1;
       else if (t === 'notebook') tier = 2;
-      else if (t === 'note' || t === 'link') tier = 3;
+      else if (t === 'companion') {
+        const kind = companionKind(block);
+        tier = kind === 'research' || kind === 'video' || kind === 'docs' ? 2 : 4;
+      } else if (t === 'note' || t === 'link') tier = 3;
       else tier = 4;
       break;
     }
     case 'solving': {
       if (t === 'calculator' || t === 'graph') tier = 1;
+      else if (t === 'companion' && companionKind(block) === 'math') tier = 1;
       else if (t === 'notebook' || t === 'note') tier = 2;
       else if (t === 'mistake' || t === 'checklist') tier = 3;
       else tier = 4;
@@ -75,6 +92,10 @@ export function getFocusTier(
       const deg = connectionDegree(block, blocks);
       if (deg >= 2) tier = 1;
       else if (deg === 1) tier = 2;
+      else if (t === 'companion') {
+        const kind = companionKind(block);
+        tier = kind === 'ai' || kind === 'research' || kind === 'docs' ? 2 : 4;
+      }
       else if (t === 'notebook') tier = 3;
       else tier = 4;
       break;

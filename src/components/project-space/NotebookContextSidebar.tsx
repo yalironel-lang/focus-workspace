@@ -56,6 +56,8 @@ function previewForObject(obj: ProjectSpaceObject): string {
       return `${content.items.length} checklist item${content.items.length === 1 ? '' : 's'}`;
     case 'image':
       return content.caption || content.alt || 'Visual reference';
+    case 'companion':
+      return content.description || content.url || 'External companion';
   }
 }
 
@@ -135,8 +137,8 @@ export function deriveNotebookContextData(
     ...mentions.filter(item => item.type === 'mistake'),
   ]);
   const references = dedupeItems([
-    ...direct.filter(item => item.type === 'pdf' || item.type === 'link' || item.type === 'image'),
-    ...mentions.filter(item => item.type === 'pdf' || item.type === 'link' || item.type === 'image'),
+    ...direct.filter(item => item.type === 'pdf' || item.type === 'link' || item.type === 'image' || item.type === 'companion'),
+    ...mentions.filter(item => item.type === 'pdf' || item.type === 'link' || item.type === 'image' || item.type === 'companion'),
   ]);
   const tools = dedupeItems([
     ...direct.filter(item => item.type === 'graph' || item.type === 'calculator' || item.type === 'checklist'),
@@ -157,7 +159,7 @@ export function deriveNotebookContextData(
 
 function typeIcon(type: ProjectSpaceObject['type']) {
   if (type === 'notebook') return BookOpenText;
-  if (type === 'pdf' || type === 'link' || type === 'image') return FileText;
+  if (type === 'pdf' || type === 'link' || type === 'image' || type === 'companion') return FileText;
   if (type === 'mistake') return TriangleAlert;
   if (type === 'graph' || type === 'calculator') return Sigma;
   return StickyNote;

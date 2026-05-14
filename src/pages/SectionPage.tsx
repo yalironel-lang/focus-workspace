@@ -40,6 +40,7 @@ import {
 } from '../lib/freeSpacePersistence';
 import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
+import { CompanionComposerModal } from '../components/project-space/CompanionComposerModal';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
 import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
 import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
@@ -63,6 +64,7 @@ import {
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
 import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
+import type { CompanionPanelContentFields } from '../lib/companionPanels';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -436,6 +438,7 @@ export function SectionPage() {
   focusModeLiveRef.current = focusMode;
 
   const pendingFreeSpaceType = useRef<ProjectObjectType | null>(null);
+  const pendingCompanionComposerRef = useRef(false);
   const pendingQuickCaptureRef = useRef<{ kind: 'note' | 'mistake'; text: string } | null>(null);
   const quickCaptureStackRef = useRef(0);
 
@@ -446,6 +449,7 @@ export function SectionPage() {
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewMode] = useState<'work-surface' | 'free-space'>('work-surface');
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
+  const [companionComposerOpen, setCompanionComposerOpen] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
@@ -622,6 +626,8 @@ export function SectionPage() {
     const sizeHint =
       type === 'notebook'
         ? { w: 620, h: 520 }
+        : type === 'companion'
+          ? { w: 460, h: 320 }
         : type === 'image'
           ? { w: 460, h: 360 }
           : type === 'graph'
@@ -638,6 +644,16 @@ export function SectionPage() {
     setShowSpaceAdd(false);
   }, [sectionObjects, sectionPositions, viewportCenterWorld]);
 
+  const requestCompanionComposer = useCallback(() => {
+    setShowSpaceAdd(false);
+    if (sectionViewMode === 'free-space') {
+      setCompanionComposerOpen(true);
+      return;
+    }
+    pendingCompanionComposerRef.current = true;
+    setSectionViewMode('free-space');
+  }, [sectionViewMode]);
+
   const requestFreeSpaceAdd = useCallback((type: ProjectObjectType) => {
     if (sectionViewMode === 'free-space') {
       handleAddToSpace(type);
@@ -646,6 +662,29 @@ export function SectionPage() {
     pendingFreeSpaceType.current = type;
     setSectionViewMode('free-space');
   }, [sectionViewMode, handleAddToSpace]);
+
+  const createCompanionPanel = useCallback(
+    (content: CompanionPanelContentFields) => {
+      const obj = sectionObjects.addObject('companion');
+      const base = viewportCenterWorld((Math.random() - 0.5) * 72, (Math.random() - 0.5) * 56);
+      const preferred = content.preferredSize ?? { w: 460, h: 320 };
+      sectionObjects.updateObjectFields(obj.id, {
+        title: content.title,
+        content: { type: 'companion', ...content },
+      });
+      sectionPositions.initPos(obj.id, {
+        x: base.x,
+        y: base.y,
+        w: preferred.w,
+        h: preferred.h,
+      });
+      setSpaceSelectedId(obj.id);
+      setCompanionComposerOpen(false);
+      setShowSpaceAdd(false);
+      toast.success('Companion added');
+    },
+    [sectionObjects, sectionPositions, viewportCenterWorld],
+  );
 
   const createNotebookRecallItem = useCallback(
     (notebookId: string, rawPrompt: string) => {
@@ -762,6 +801,11 @@ export function SectionPage() {
       pendingQuickCaptureRef.current = null;
       if (qc.kind === 'mistake') createQuickCaptureMistake(qc.text);
       else createQuickCaptureNote(qc.text);
+      return;
+    }
+    if (pendingCompanionComposerRef.current) {
+      pendingCompanionComposerRef.current = false;
+      setCompanionComposerOpen(true);
       return;
     }
     const pending = pendingFreeSpaceType.current;
@@ -941,6 +985,7 @@ export function SectionPage() {
     registerFreeSpace({
       addNotebook: () => requestFreeSpaceAdd('notebook'),
       addTextCard: () => requestFreeSpaceAdd('note'),
+      addCompanion: requestCompanionComposer,
       addMistake: () => requestFreeSpaceAdd('mistake'),
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
@@ -958,6 +1003,7 @@ export function SectionPage() {
     id,
     registerFreeSpace,
     requestFreeSpaceAdd,
+    requestCompanionComposer,
     spaceSelectedId,
     startConnectFromSelected,
     clearConnectionsForSelected,
@@ -1331,7 +1377,7 @@ export function SectionPage() {
         freeSpaceSectionId={sectionId}
         onChange={content => sectionObjects.updateObjectContent(id, content)}
         onTitleChange={
-          obj.type === 'mistake' || obj.type === 'pdf'
+          obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
             ? t => sectionObjects.updateObjectFields(id, { title: t })
             : undefined
         }
@@ -1381,6 +1427,16 @@ export function SectionPage() {
         insights={mistakeInsights}
         onClose={() => setMistakeReviewOpen(false)}
         onMarkReviewed={markMistakeReviewedInSession}
+      />
+
+      <CompanionComposerModal
+        open={companionComposerOpen}
+        tokens={tokens}
+        onClose={() => {
+          pendingCompanionComposerRef.current = false;
+          setCompanionComposerOpen(false);
+        }}
+        onCreate={createCompanionPanel}
       />
 
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
@@ -1561,6 +1617,7 @@ export function SectionPage() {
               }}
             >
               {([
+                { type: 'companion', label: 'Companion', hint: 'Pinned external tool or source' },
                 { type: 'notebook', label: 'Notebook', hint: 'Large writing surface' },
                 { type: 'note', label: 'Note', hint: 'Quick capture' },
                 { type: 'mistake', label: 'Mistake', hint: 'Learn from slips' },
@@ -1573,7 +1630,13 @@ export function SectionPage() {
               ] as const).map(item => (
                 <button
                   key={item.type}
-                  onClick={() => handleAddToSpace(item.type)}
+                  onClick={() => {
+                    if (item.type === 'companion') {
+                      requestCompanionComposer();
+                      return;
+                    }
+                    handleAddToSpace(item.type);
+                  }}
                   style={{
                     textAlign: 'left',
                     border: 'none',

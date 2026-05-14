@@ -14,6 +14,7 @@ import { FreeSpaceGraph } from './FreeSpaceGraph';
 
 import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
+import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 
 interface Props {
@@ -169,6 +170,17 @@ export function ProjectSpaceObjectRenderer({
             content={content}
             tokens={tokens}
             sectionId={freeSpaceSectionId}
+            onChange={c => onChange(c)}
+            onTitleChange={onTitleChange}
+          />
+        </WorkspaceSurfaceErrorBoundary>
+      );
+    case 'companion':
+      return (
+        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Companion">
+          <FreeSpaceCompanionCard
+            content={content}
+            tokens={tokens}
             onChange={c => onChange(c)}
             onTitleChange={onTitleChange}
           />

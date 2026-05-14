@@ -34,6 +34,7 @@ const PROFILE_BY_TYPE: Record<ProjectObjectType, SemanticProfile> = {
   pdf: { lane: 'source', hierarchy: 'secondary', weight: 108, intimacy: 1.14 },
   image: { lane: 'source', hierarchy: 'secondary', weight: 82, intimacy: 0.94 },
   link: { lane: 'source', hierarchy: 'utility', weight: 66, intimacy: 0.8 },
+  companion: { lane: 'source', hierarchy: 'secondary', weight: 92, intimacy: 1.02 },
   graph: { lane: 'tool', hierarchy: 'secondary', weight: 86, intimacy: 0.98 },
   calculator: { lane: 'tool', hierarchy: 'utility', weight: 74, intimacy: 0.86 },
   mistake: { lane: 'review', hierarchy: 'secondary', weight: 88, intimacy: 1.05 },

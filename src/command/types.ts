@@ -30,6 +30,7 @@ export interface CommandItem {
 export interface FreeSpaceCommandHandlers {
   addNotebook: () => void;
   addTextCard: () => void;
+  addCompanion?: () => void;
   addMistake?: () => void;
   addCalculator: () => void;
   addGraph: () => void;

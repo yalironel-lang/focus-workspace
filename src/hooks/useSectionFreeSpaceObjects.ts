@@ -2,6 +2,12 @@ import { useState, useCallback, useEffect } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
+import {
+  buildCompanionContent,
+  sanitizeCompanionPreferredSize,
+  type CompanionEmbedMode,
+  type CompanionPanelContentFields,
+} from '../lib/companionPanels';
 
 export type ProjectObjectType =
   | 'notebook'
@@ -12,7 +18,8 @@ export type ProjectObjectType =
   | 'image'
   | 'calculator'
   | 'graph'
-  | 'pdf';
+  | 'pdf'
+  | 'companion';
 
 export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
 export type MistakeVariant = 'mistake' | 'recall';
@@ -55,7 +62,8 @@ export type ProjectObjectContent =
       page: number;
       /** Display scale (1 = 100%) */
       zoom: number;
-    };
+    }
+  | ({ type: 'companion' } & CompanionPanelContentFields);
 
 export interface ProjectSpaceObject {
   id: string;
@@ -78,6 +86,7 @@ const OBJECT_TYPES = new Set<ProjectObjectType>([
   'calculator',
   'graph',
   'pdf',
+  'companion',
 ]);
 
 function key(sectionId: string): string {
@@ -135,6 +144,18 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
           lastOpenedAt: null,
           page: 1,
           zoom: 1,
+        },
+      };
+    case 'companion':
+      return {
+        title: 'Companion',
+        content: {
+          type: 'companion',
+          ...buildCompanionContent({
+            url: '',
+            title: 'Companion',
+            embedMode: 'auto',
+          }),
         },
       };
   }
@@ -264,6 +285,34 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         zoom,
       };
     }
+    case 'companion': {
+      const url = typeof r.url === 'string' ? r.url : '';
+      const title = typeof r.title === 'string' ? r.title : 'Companion';
+      const favicon = typeof r.favicon === 'string' ? r.favicon : '';
+      const embedMode: CompanionEmbedMode =
+        r.embedMode === 'embedded' || r.embedMode === 'external-only' ? r.embedMode : 'auto';
+      const last = r.lastOpenedAt;
+      const lastOpenedAt =
+        typeof last === 'number' && Number.isFinite(last) ? last : null;
+      const description =
+        typeof r.description === 'string' && r.description.trim()
+          ? r.description.trim()
+          : undefined;
+      const preferredSize = sanitizeCompanionPreferredSize(r.preferredSize);
+      const companion = buildCompanionContent({
+        url,
+        title,
+        description,
+        embedMode,
+        lastOpenedAt,
+        preferredSize,
+      });
+      return {
+        type: 'companion',
+        ...companion,
+        favicon: favicon || companion.favicon,
+      };
+    }
   }
 }
 
@@ -277,8 +326,13 @@ function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
   if (!id || !type) return null;
 
   const d = makeDefaults(type);
-  const title = typeof o.title === 'string' && o.title.trim() ? o.title : d.title;
   const content = ensureProjectObjectContent(type, o.content);
+  const title =
+    typeof o.title === 'string' && o.title.trim()
+      ? o.title
+      : type === 'companion'
+        ? (content as Extract<ProjectObjectContent, { type: 'companion' }>).title
+        : d.title;
   const createdAt = typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : Date.now();
   const updatedAt = typeof o.updatedAt === 'number' && Number.isFinite(o.updatedAt) ? o.updatedAt : createdAt;
 

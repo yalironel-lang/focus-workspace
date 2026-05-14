@@ -29,6 +29,7 @@ import {
   ScanLine,
   BookMarked,
   LayoutGrid,
+  Globe,
 } from 'lucide-react';
 import { SessionModal } from '../components/SessionModal';
 import { IntelligenceModal } from '../components/ai/IntelligenceModal';
@@ -509,6 +510,24 @@ export function GlobalCommandPalette() {
             if (!h?.addNotebook) return;
             closePalette();
             h.addNotebook();
+          },
+        },
+        {
+          id: 'fs-companion',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Add companion panel',
+          subtitle: 'Pin an external study tool or source',
+          keywords: ['companion', 'website', 'url', 'claude', 'chatgpt', 'desmos', 'youtube', 'wikipedia'],
+          icon: Globe,
+          priority: 12.5,
+          disabled: !hasFs || !fs?.addCompanion,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.addCompanion) return;
+            closePalette();
+            h.addCompanion();
           },
         },
         {
