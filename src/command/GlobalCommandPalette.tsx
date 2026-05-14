@@ -74,6 +74,7 @@ export function GlobalCommandPalette() {
     lastSession,
     isRecentSession,
     tokens,
+    pathname,
     sectionIdFromRoute,
     navigate,
     openSessionModal,
@@ -91,6 +92,7 @@ export function GlobalCommandPalette() {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [workspaceRecoveryOpen, setWorkspaceRecoveryOpen] = useState(false);
+  const [workspaceRecoverySectionId, setWorkspaceRecoverySectionId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +177,7 @@ export function GlobalCommandPalette() {
       disabledHint: 'Open a workspace from the library first',
       run: () => {
         closePalette();
+        setWorkspaceRecoverySectionId(sectionIdFromRoute ?? null);
         setWorkspaceRecoveryOpen(true);
       },
     });
@@ -887,15 +890,21 @@ export function GlobalCommandPalette() {
   }, [filtered.length, query]);
 
   useEffect(() => {
+    setWorkspaceRecoveryOpen(false);
+    setWorkspaceRecoverySectionId(null);
+  }, [pathname]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key !== 'k') return;
       if (isCommandPaletteBlockedTarget(e.target)) return;
+      if (sessionModalOpen || intelligenceModalOpen || workspaceRecoveryOpen) return;
       e.preventDefault();
       togglePalette();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePalette]);
+  }, [togglePalette, sessionModalOpen, intelligenceModalOpen, workspaceRecoveryOpen]);
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -1095,13 +1104,16 @@ export function GlobalCommandPalette() {
         <IntelligenceModal tokens={tokens} onClose={() => setIntelligenceModalOpen(false)} />
       )}
 
-      {workspaceRecoveryOpen && sectionIdFromRoute && (
+      {workspaceRecoveryOpen && workspaceRecoverySectionId && (
         <WorkspaceRecoveryModal
           open={workspaceRecoveryOpen}
-          onClose={() => setWorkspaceRecoveryOpen(false)}
+          onClose={() => {
+            setWorkspaceRecoveryOpen(false);
+            setWorkspaceRecoverySectionId(null);
+          }}
           tokens={tokens}
-          sectionId={sectionIdFromRoute}
-          sectionTitle={sections.find(s => s.id === sectionIdFromRoute)?.title}
+          sectionId={workspaceRecoverySectionId}
+          sectionTitle={sections.find(s => s.id === workspaceRecoverySectionId)?.title}
         />
       )}
     </>

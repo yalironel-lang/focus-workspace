@@ -495,6 +495,45 @@ export function SectionPage() {
     panY: sectionCanvas.panY,
   });
 
+  useEffect(() => {
+    cancelAnimationFrame(cameraRestoreRafRef.current);
+    aiRunRef.current?.abort();
+    aiRunRef.current = null;
+    pendingFreeSpaceType.current = null;
+    pendingCompanionComposerRef.current = false;
+    pendingQuickCaptureRef.current = null;
+    pendingResumeSuggestionRef.current = null;
+    quickCaptureStackRef.current = 0;
+    resumeSeedKeyRef.current = '';
+    designSnapshot.current = null;
+    dragIdRef.current = null;
+
+    setShowAddLane(false);
+    setNewLaneTitle('');
+    setAddingLane(false);
+    setEditingExamDate(false);
+    setShowCustomize(false);
+    setSectionViewMode('work-surface');
+    setShowSpaceAdd(false);
+    setCompanionComposerOpen(false);
+    setSpaceSelectedId(null);
+    setSpaceEditingId(null);
+    setConnectSourceId(null);
+    setConnectHoverId(null);
+    setQuickCaptureOpen(false);
+    setQuickCaptureVariant('note');
+    setMistakeReviewOpen(false);
+    setMistakeReviewQueue([]);
+    setStarterHints(null);
+    setLastArrangeAt(null);
+    setMistakeReviewIndex(0);
+    setAiAssistResult(null);
+    setResumeVisible(false);
+    setDesignMode(false);
+    setDragId(null);
+    setDragOverId(null);
+  }, [id]);
+
   const enterDesignMode = () => {
     designSnapshot.current = { ...customization };
     setDesignMode(true);

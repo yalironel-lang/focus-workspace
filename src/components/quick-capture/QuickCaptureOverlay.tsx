@@ -52,9 +52,7 @@ export function QuickCaptureOverlay({ open, tokens, variant = 'note', onClose, o
   return (
     <div
       className="fixed inset-x-0 top-0 z-[280] flex justify-center pointer-events-none px-4 pt-[min(12vh,120px)]"
-      aria-modal
-      role="dialog"
-      aria-label={variant === 'mistake' ? 'Quick capture mistake' : 'Quick capture'}
+      role="presentation"
     >
       <div
         data-fw-quick-capture-root="1"
@@ -81,6 +79,7 @@ export function QuickCaptureOverlay({ open, tokens, variant = 'note', onClose, o
           <input
             ref={inputRef}
             type="text"
+            aria-label={variant === 'mistake' ? 'Quick capture mistake' : 'Quick capture note'}
             value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={e => {

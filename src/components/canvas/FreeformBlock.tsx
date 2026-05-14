@@ -79,7 +79,7 @@ export function FreeformBlock({
 
   const headerHot = hovered || selected || isDragging;
   const showActions = (selected || designMode) && (onDuplicate || onRemove);
-  const actionOpacity = headerHot ? 1 : designMode ? 0.28 : 0;
+  const actionOpacity = headerHot || selected ? 1 : designMode ? 0.42 : 0;
 
   const showConnectAction = !!onBeginConnect && designMode && (headerHot || selected);
   const isConnectTargetHover =
@@ -208,7 +208,7 @@ export function FreeformBlock({
             onBlockMouseDown(id, e, 'move');
           }}
           style={{
-            height: '22px',
+            height: '28px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -239,16 +239,16 @@ export function FreeformBlock({
               <span
                 style={{
                   fontFamily: "'Space Grotesk', sans-serif",
-                  fontSize: '9px',
+                  fontSize: '10px',
                   fontWeight: 700,
                   letterSpacing: '0.11em',
                   textTransform: 'uppercase' as const,
-                  color: selected ? tokens.textMuted : tokens.textGhost,
+                  color: selected ? tokens.textMuted : tokens.textSecondary,
                   maxWidth: '160px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  opacity: headerHot ? (selected ? 0.75 : 0.5) : 0,
+                  opacity: headerHot || selected ? (selected ? 0.82 : 0.62) : 0,
                   transition: `opacity 0.32s ${chromeEase}`,
                 }}
               >
@@ -261,6 +261,7 @@ export function FreeformBlock({
             {showConnectAction && (
               <button
                 type="button"
+                aria-label="Connect block"
                 title="Connect to…"
                 onMouseDown={e => e.stopPropagation()}
                 onClick={e => {
@@ -268,8 +269,8 @@ export function FreeformBlock({
                   onBeginConnect?.(id);
                 }}
                 style={{
-                  width: '24px',
-                  height: '22px',
+                  width: '30px',
+                  height: '28px',
                   borderRadius: '7px',
                   border: '1px solid transparent',
                   background: 'rgba(251,191,36,0.06)',
@@ -295,7 +296,7 @@ export function FreeformBlock({
                   el.style.borderColor = 'transparent';
                 }}
               >
-                <Link2 style={{ width: '11px', height: '11px' }} strokeWidth={2} />
+                <Link2 style={{ width: '13px', height: '13px' }} strokeWidth={2} />
               </button>
             )}
 
@@ -314,6 +315,7 @@ export function FreeformBlock({
               {onDuplicate && (
                 <button
                   type="button"
+                  aria-label="Duplicate block"
                   onMouseDown={e => e.stopPropagation()}
                   onClick={e => {
                     e.stopPropagation();
@@ -321,13 +323,13 @@ export function FreeformBlock({
                   }}
                   title="Duplicate"
                   style={{
-                    width: '26px',
-                    height: '22px',
+                    width: '30px',
+                    height: '28px',
                     borderRadius: '7px',
                     border: '1px solid transparent',
                     background: 'rgba(255,255,255,0.03)',
                     cursor: 'pointer',
-                    color: tokens.textGhost,
+                    color: tokens.textSecondary,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -342,16 +344,17 @@ export function FreeformBlock({
                   onMouseLeave={e => {
                     const el = e.currentTarget as HTMLButtonElement;
                     el.style.background = 'rgba(255,255,255,0.03)';
-                    el.style.color = tokens.textGhost;
+                    el.style.color = tokens.textSecondary;
                     el.style.borderColor = 'transparent';
                   }}
                 >
-                  <Copy style={{ width: '10px', height: '10px', opacity: 0.88 }} />
+                  <Copy style={{ width: '12px', height: '12px', opacity: 0.92 }} />
                 </button>
               )}
               {onRemove && (
                 <button
                   type="button"
+                  aria-label="Remove block"
                   onMouseDown={e => e.stopPropagation()}
                   onClick={e => {
                     e.stopPropagation();
@@ -359,13 +362,13 @@ export function FreeformBlock({
                   }}
                   title="Remove"
                   style={{
-                    width: '26px',
-                    height: '22px',
+                    width: '30px',
+                    height: '28px',
                     borderRadius: '7px',
                     border: '1px solid transparent',
                     background: 'rgba(255,255,255,0.03)',
                     cursor: 'pointer',
-                    color: tokens.textGhost,
+                    color: tokens.textSecondary,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -380,11 +383,11 @@ export function FreeformBlock({
                   onMouseLeave={e => {
                     const el = e.currentTarget as HTMLButtonElement;
                     el.style.background = 'rgba(255,255,255,0.03)';
-                    el.style.color = tokens.textGhost;
+                    el.style.color = tokens.textSecondary;
                     el.style.borderColor = 'transparent';
                   }}
                 >
-                  <X style={{ width: '10px', height: '10px', opacity: 0.88 }} />
+                  <X style={{ width: '12px', height: '12px', opacity: 0.92 }} />
                 </button>
               )}
             </div>

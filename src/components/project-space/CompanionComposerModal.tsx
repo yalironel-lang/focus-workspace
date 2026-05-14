@@ -40,10 +40,13 @@ export function CompanionComposerModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, onClose]);
 
   useEffect(() => {
@@ -117,6 +120,9 @@ export function CompanionComposerModal({
         onClick={onClose}
       >
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fw-companion-composer-title"
           className="w-full max-w-[560px] rounded-[24px] overflow-hidden"
           style={{
             background: `linear-gradient(180deg, ${tokens.cardBg}fa 0%, ${tokens.wellBg}f6 100%)`,
@@ -144,7 +150,7 @@ export function CompanionComposerModal({
                   Companion Panel
                 </span>
               </div>
-              <h2 className="mt-3 text-lg font-semibold" style={{ color: tokens.textPrimary }}>
+              <h2 id="fw-companion-composer-title" className="mt-3 text-lg font-semibold" style={{ color: tokens.textPrimary }}>
                 Pin an external tool into the workspace
               </h2>
               <p className="mt-1 text-sm leading-relaxed" style={{ color: tokens.textMuted }}>
@@ -189,6 +195,7 @@ export function CompanionComposerModal({
                   if (error) setError(null);
                 }}
                 placeholder="claude.ai, chatgpt.com, desmos.com, youtube.com"
+                className="focus:outline-none focus:ring-2 focus:ring-white/10"
                 style={inputStyle}
               />
             </label>
@@ -205,6 +212,7 @@ export function CompanionComposerModal({
                   value={title}
                   onChange={event => setTitle(event.target.value)}
                   placeholder="Optional label"
+                  className="focus:outline-none focus:ring-2 focus:ring-white/10"
                   style={inputStyle}
                 />
               </label>
@@ -219,6 +227,7 @@ export function CompanionComposerModal({
                 <select
                   value={embedMode}
                   onChange={event => setEmbedMode(event.target.value as CompanionEmbedMode)}
+                  className="focus:outline-none focus:ring-2 focus:ring-white/10"
                   style={inputStyle}
                 >
                   {MODE_OPTIONS.map(option => (
@@ -242,6 +251,7 @@ export function CompanionComposerModal({
                 onChange={event => setDescription(event.target.value)}
                 placeholder="Macro study assistant, graph sandbox, lecture companion, source context..."
                 rows={3}
+                className="focus:outline-none focus:ring-2 focus:ring-white/10"
                 style={{ ...inputStyle, resize: 'none', lineHeight: 1.5 }}
               />
             </label>

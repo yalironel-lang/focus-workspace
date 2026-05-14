@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { clearFreeSpacePersistenceForSection } from '../../lib/freeSpacePersistence';
@@ -24,6 +24,18 @@ export function WorkspaceRecoveryModal({ open, onClose, tokens, sectionId, secti
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [lastNote, setLastNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open, onClose]);
 
   const onExport = useCallback(async () => {
     if (!sectionId) return;

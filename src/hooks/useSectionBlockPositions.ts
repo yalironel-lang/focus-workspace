@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
 import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap } from '../lib/freeSpacePersistence';
@@ -57,10 +57,39 @@ export interface SectionBlockPositionsState {
 
 export function useSectionBlockPositions(sectionId: string): SectionBlockPositionsState {
   const [positions, setPositions] = useState<PositionMap>(() => load(sectionId));
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPersistRef = useRef<{ sectionId: string; positions: PositionMap } | null>(null);
+
+  const flushPersist = useCallback(() => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    const pending = pendingPersistRef.current;
+    if (!pending) return;
+    pendingPersistRef.current = null;
+    persist(pending.sectionId, pending.positions);
+  }, []);
+
+  const schedulePersist = useCallback((next: PositionMap, targetSectionId: string) => {
+    if (!targetSectionId) return;
+    pendingPersistRef.current = { sectionId: targetSectionId, positions: next };
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      const pending = pendingPersistRef.current;
+      persistTimerRef.current = null;
+      if (!pending) return;
+      pendingPersistRef.current = null;
+      persist(pending.sectionId, pending.positions);
+    }, 120);
+  }, []);
 
   useEffect(() => {
+    flushPersist();
     setPositions(load(sectionId));
-  }, [sectionId]);
+  }, [sectionId, flushPersist]);
+
+  useEffect(() => () => flushPersist(), [flushPersist]);
 
   const setPos = useCallback((id: string, patch: Partial<BlockPos>) => {
     setPositions(prev => {
@@ -69,10 +98,10 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         ...prev,
         [id]: sanitizeBlockPos(merged),
       };
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const applyPositions = useCallback((patches: Record<string, BlockPos> | null | undefined) => {
     if (!patches || typeof patches !== 'object') return;
@@ -83,19 +112,19 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         const merged = sanitizeBlockPos({ ...(prev[id] ?? makeDefault()), ...pos });
         next[id] = merged;
       }
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
     setPositions(prev => {
       if (prev[id]) return prev;
       const next: PositionMap = { ...prev, [id]: sanitizeBlockPos(makeDefault(hint)) };
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const seedMissingPositions = useCallback((ids: string[]) => {
     if (!sectionId || !ids.length) return;
@@ -122,18 +151,18 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         changed = true;
       }
       if (!changed) return prev;
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const removePos = useCallback((id: string) => {
     setPositions(prev => {
       const { [id]: _removed, ...rest } = prev;
-      persist(sectionId, rest);
+      schedulePersist(rest, sectionId);
       return rest;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const nextFreePos = useCallback((existingMap?: PositionMap): { x: number; y: number } => {
     const map = existingMap ?? positions;

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSections } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -130,6 +130,12 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const sectionIdFromRoute = useMemo(() => {
     const m = location.pathname.match(/^\/section\/([^/]+)/);
     return m?.[1];
+  }, [location.pathname]);
+
+  useEffect(() => {
+    setPaletteOpen(false);
+    setSessionModalOpen(false);
+    setIntelligenceModalOpen(false);
   }, [location.pathname]);
 
   const value = useMemo(

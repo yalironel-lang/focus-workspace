@@ -190,12 +190,11 @@ export function FreeSpaceCompanionCard({
               value={draftUrl}
               onChange={event => setDraftUrl(event.target.value)}
               placeholder="https://example.com"
-              className="w-full rounded-xl px-3 py-2.5 text-sm"
+              className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-white/10"
               style={{
                 border: `1px solid ${tokens.cardBorder}`,
                 backgroundColor: tokens.wellBg,
                 color: tokens.textPrimary,
-                outline: 'none',
               }}
             />
           </label>
@@ -211,12 +210,11 @@ export function FreeSpaceCompanionCard({
               value={draftTitle}
               onChange={event => setDraftTitle(event.target.value)}
               placeholder="Optional label"
-              className="w-full rounded-xl px-3 py-2.5 text-sm"
+              className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-white/10"
               style={{
                 border: `1px solid ${tokens.cardBorder}`,
                 backgroundColor: tokens.wellBg,
                 color: tokens.textPrimary,
-                outline: 'none',
               }}
             />
           </label>
@@ -233,12 +231,11 @@ export function FreeSpaceCompanionCard({
               value={draftDescription}
               onChange={event => setDraftDescription(event.target.value)}
               placeholder="Why this companion belongs in the room"
-              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none"
+              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-white/10"
               style={{
                 border: `1px solid ${tokens.cardBorder}`,
                 backgroundColor: tokens.wellBg,
                 color: tokens.textPrimary,
-                outline: 'none',
                 lineHeight: 1.45,
               }}
             />
@@ -254,12 +251,11 @@ export function FreeSpaceCompanionCard({
             <select
               value={draftMode}
               onChange={event => setDraftMode(event.target.value as CompanionEmbedMode)}
-              className="w-full rounded-xl px-3 py-2.5 text-sm"
+              className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-white/10"
               style={{
                 border: `1px solid ${tokens.cardBorder}`,
                 backgroundColor: tokens.wellBg,
                 color: tokens.textPrimary,
-                outline: 'none',
               }}
             >
               <option value="auto">Auto</option>

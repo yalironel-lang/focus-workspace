@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { WorkspaceStarterId } from '../../workspaceStarter/workspaceStarterTypes';
 import {
@@ -50,11 +51,25 @@ export function WorkspaceStarterOverlay({
   onChoose: (id: WorkspaceStarterId) => void;
   onDismiss: () => void;
 }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onDismiss();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onDismiss]);
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="ws-starter-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onDismiss();
+      }}
       style={{
         position: 'absolute',
         inset: 0,

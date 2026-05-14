@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
@@ -502,19 +502,48 @@ export interface SectionFreeSpaceObjectsState {
 
 export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceObjectsState {
   const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId));
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPersistRef = useRef<{ sectionId: string; objects: ProjectSpaceObject[] } | null>(null);
+
+  const flushPersist = useCallback(() => {
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    const pending = pendingPersistRef.current;
+    if (!pending) return;
+    pendingPersistRef.current = null;
+    persist(pending.sectionId, pending.objects);
+  }, []);
+
+  const schedulePersist = useCallback((next: ProjectSpaceObject[], targetSectionId: string) => {
+    if (!targetSectionId) return;
+    pendingPersistRef.current = { sectionId: targetSectionId, objects: next };
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      const pending = pendingPersistRef.current;
+      persistTimerRef.current = null;
+      if (!pending) return;
+      pendingPersistRef.current = null;
+      persist(pending.sectionId, pending.objects);
+    }, 180);
+  }, []);
 
   useEffect(() => {
+    flushPersist();
     setObjects(load(sectionId));
-  }, [sectionId]);
+  }, [sectionId, flushPersist]);
+
+  useEffect(() => () => flushPersist(), [flushPersist]);
 
   const appendObjects = useCallback((incoming: ProjectSpaceObject[]) => {
     if (!incoming.length) return;
     setObjects(prev => {
       const next = [...prev, ...incoming];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
     const d = makeDefaults(type);
@@ -529,11 +558,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return obj;
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -550,11 +579,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return obj;
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const addQuickCaptureMistake = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -581,11 +610,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return obj;
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const addRecallItem = useCallback((rawPrompt: string): ProjectSpaceObject => {
     const trimmed = rawPrompt.trim();
@@ -612,11 +641,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return obj;
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const convertNoteToMistake = useCallback((objectId: string): ProjectSpaceObject | null => {
     let out: ProjectSpaceObject | null = null;
@@ -650,19 +679,19 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       };
       out = nextObj;
       const next = prev.map(x => (x.id === objectId ? nextObj : x));
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return out;
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const updateObjectFields = useCallback(
     (objectId: string, fields: { title?: string; content?: ProjectObjectContent }) => {
@@ -677,11 +706,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
           updatedAt: Date.now(),
         };
         const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];
-        persist(sectionId, next);
+        schedulePersist(next, sectionId);
         return next;
       });
     },
-    [sectionId],
+    [schedulePersist, sectionId],
   );
 
   const addConnection = useCallback((fromId: string, toId: string) => {
@@ -702,10 +731,10 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
         if (cur.includes(toId)) return o;
         return { ...o, connections: [...cur, toId], updatedAt: Date.now() };
       });
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const clearConnectionsForObject = useCallback((id: string) => {
     if (!id) return;
@@ -725,10 +754,10 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
           updatedAt: Date.now(),
         };
       });
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const removeObject = useCallback((id: string) => {
     setObjects(prev => {
@@ -736,10 +765,10 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
-  }, [sectionId]);
+  }, [schedulePersist, sectionId]);
 
   const duplicateObject = useCallback((id: string): ProjectSpaceObject | null => {
     const source = objects.find(o => o.id === id);
@@ -761,11 +790,11 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     }
     setObjects(prev => {
       const next = [...prev, copy];
-      persist(sectionId, next);
+      schedulePersist(next, sectionId);
       return next;
     });
     return copy;
-  }, [objects, sectionId]);
+  }, [objects, schedulePersist, sectionId]);
 
   const getObject = useCallback((id: string) => objects.find(o => o.id === id), [objects]);
 

@@ -50,6 +50,7 @@ export function WorkspaceResumeLayer({
 }: Props) {
   const prefersReducedMotion = usePrefersReducedMotion();
   const [hovered, setHovered] = useState(false);
+  const [focusedWithin, setFocusedWithin] = useState(false);
   const [entered, setEntered] = useState(false);
 
   useEffect(() => {
@@ -58,10 +59,10 @@ export function WorkspaceResumeLayer({
   }, []);
 
   useEffect(() => {
-    if (hovered) return;
+    if (hovered || focusedWithin) return;
     const timer = window.setTimeout(onDismiss, prefersReducedMotion ? AUTO_DISMISS_MS * 0.7 : AUTO_DISMISS_MS);
     return () => window.clearTimeout(timer);
-  }, [hovered, onDismiss, prefersReducedMotion]);
+  }, [hovered, focusedWithin, onDismiss, prefersReducedMotion]);
 
   const variant = useMemo(() => variantForIntent(continuity.intent), [continuity.intent]);
   const primarySuggestions = suggestions.slice(0, 3);
@@ -70,6 +71,8 @@ export function WorkspaceResumeLayer({
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocusedWithin(true)}
+      onBlurCapture={() => setFocusedWithin(false)}
       style={{
         position: 'fixed',
         top: topOffset + 10,
@@ -152,7 +155,7 @@ export function WorkspaceResumeLayer({
               type="button"
               aria-label="Dismiss resume layer"
               onClick={onDismiss}
-              className="shrink-0 rounded-xl p-2 cursor-pointer"
+              className="shrink-0 rounded-xl p-2.5 cursor-pointer"
               style={{
                 backgroundColor: 'transparent',
                 border: '1px solid transparent',
@@ -170,7 +173,7 @@ export function WorkspaceResumeLayer({
                   key={suggestion.id}
                   type="button"
                   onClick={() => onSuggestionClick(suggestion)}
-                  className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-left cursor-pointer"
+                  className="inline-flex items-center gap-2 rounded-xl px-3 py-2.5 text-left cursor-pointer"
                   style={{
                     backgroundColor: suggestion.id === 'resume-anchor'
                       ? `${tokens.accent}18`

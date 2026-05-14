@@ -38,6 +38,17 @@ export function IntelligenceModal({ onClose, tokens }: IntelligenceModalProps) {
     setAdvancedOpen(!!(s.apiKey.trim() || s.enabled));
   }, []);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
   const onSave = useCallback(() => {
     saveAIUserSettings(draft);
     setTestMsg('Saved on this device.');

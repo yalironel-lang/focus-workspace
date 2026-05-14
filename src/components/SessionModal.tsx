@@ -292,6 +292,17 @@ export function SessionModal({ sections, onClose }: Props) {
     }
   }, [sections, deadlines]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
   const selectedSection = sections.find(s => s.id === selectedId) ?? null;
 
   const handleBegin = (taskIds: string[], portalIds: string[]) => {

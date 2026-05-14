@@ -197,30 +197,33 @@ function CanvasControls({
   onAutoOrganize: () => void;
 }) {
   const [barHovered, setBarHovered] = useState(false);
-  const quietOpacity = chromeQuiet && !barHovered ? 0.68 : 1;
+  const [barFocused, setBarFocused] = useState(false);
+  const quietOpacity = chromeQuiet && !barHovered && !barFocused ? 0.68 : 1;
   const btn: React.CSSProperties = {
-    width:           '30px',
-    height:          '30px',
-    borderRadius:    '8px',
-    border:          'none',
+    width:           '38px',
+    height:          '38px',
+    borderRadius:    '10px',
+    border:          '1px solid transparent',
     backgroundColor: 'transparent',
     cursor:          'pointer',
     display:         'flex',
     alignItems:      'center',
     justifyContent:  'center',
-    color:           tokens.textGhost,
+    color:           tokens.textMuted,
     transition:      'all 0.12s ease',
     flexShrink:      0,
   };
 
   const divider = (
-    <div style={{ width: '1px', height: '14px', backgroundColor: tokens.divider, margin: '0 2px' }} />
+    <div style={{ width: '1px', height: '18px', backgroundColor: tokens.divider, margin: '0 2px' }} />
   );
 
   return (
     <div
       onMouseEnter={() => setBarHovered(true)}
       onMouseLeave={() => setBarHovered(false)}
+      onFocusCapture={() => setBarFocused(true)}
+      onBlurCapture={() => setBarFocused(false)}
       style={{
         position:             'absolute',
         bottom:               '20px',
@@ -230,8 +233,8 @@ function CanvasControls({
         display:              'flex',
         alignItems:           'center',
         gap:                  '2px',
-        padding:              '4px',
-        borderRadius:         '13px',
+        padding:              '6px',
+        borderRadius:         '16px',
         backgroundColor:      `${tokens.cardBg}ee`,
         border:               `1px solid ${tokens.cardBorder}`,
         backdropFilter:       'blur(24px) saturate(1.4)',
@@ -240,14 +243,15 @@ function CanvasControls({
           ? '0 6px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03)'
           : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
         opacity:              visible ? quietOpacity : 0,
+        visibility:           visible ? 'visible' : 'hidden',
         pointerEvents:        visible ? 'auto' : 'none',
         transition:           'opacity 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1), box-shadow 0.35s ease',
       }}
     >
-      <button style={btn} title="Pull back for more context." onClick={onZoomOut}
+      <button aria-label="Zoom out" style={btn} title="Pull back for more context." onClick={onZoomOut}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
-        <ZoomOut style={{ width: '13px', height: '13px' }} />
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}>
+        <ZoomOut style={{ width: '15px', height: '15px' }} />
       </button>
 
       {/* Zoom label */}
@@ -257,9 +261,10 @@ function CanvasControls({
         style={{
           ...btn,
           width:      'auto',
-          padding:    '0 8px',
+          minWidth:   '56px',
+          padding:    '0 10px',
           fontFamily: "'Space Grotesk', monospace",
-          fontSize:   '10px',
+          fontSize:   '11px',
           fontWeight: 700,
           color:      tokens.textMuted,
           letterSpacing: '0.04em',
@@ -270,47 +275,49 @@ function CanvasControls({
         {Math.round(zoom * 100)}%
       </button>
 
-      <button style={btn} title="Lean into detail." onClick={onZoomIn}
+      <button aria-label="Zoom in" style={btn} title="Lean into detail." onClick={onZoomIn}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
-        <ZoomIn style={{ width: '13px', height: '13px' }} />
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}>
+        <ZoomIn style={{ width: '15px', height: '15px' }} />
       </button>
 
       {divider}
 
-      <button style={btn} title="Bring the current workspace back into view." onClick={onCenter}
+      <button aria-label="Center workspace" style={btn} title="Bring the current workspace back into view." onClick={onCenter}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
-        <Maximize2 style={{ width: '12px', height: '12px' }} />
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}>
+        <Maximize2 style={{ width: '14px', height: '14px' }} />
       </button>
 
       {divider}
 
       <button
+        aria-label={snapToGrid ? 'Disable snap to grid' : 'Enable snap to grid'}
         style={{
           ...btn,
           backgroundColor: snapToGrid ? `${tokens.accent}18` : 'transparent',
-          color:           snapToGrid ? tokens.accent : tokens.textGhost,
+          color:           snapToGrid ? tokens.accent : tokens.textMuted,
           border:          snapToGrid ? `1px solid ${tokens.accent}30` : '1px solid transparent',
         }}
         title={snapToGrid ? 'Keep movement aligned for a cleaner rhythm.' : 'Free movement keeps the layout looser.'}
         onClick={onToggleSnap}
         onMouseEnter={e => { if (!snapToGrid) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; } }}
-        onMouseLeave={e => { if (!snapToGrid) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; } }}
+        onMouseLeave={e => { if (!snapToGrid) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; } }}
       >
-        <Grid3x3 style={{ width: '13px', height: '13px' }} />
+        <Grid3x3 style={{ width: '15px', height: '15px' }} />
       </button>
 
       {divider}
 
       <button
+        aria-label="Auto arrange workspace"
         style={btn}
         title="Organize the workspace by thinking flow."
         onClick={onAutoOrganize}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentSubtle; (e.currentTarget as HTMLButtonElement).style.color = tokens.accent; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
       >
-        <Wand2 style={{ width: '13px', height: '13px' }} />
+        <Wand2 style={{ width: '15px', height: '15px' }} />
       </button>
     </div>
   );

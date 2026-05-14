@@ -125,9 +125,22 @@ export function useSectionDetail(sectionId: string | undefined) {
   const [loading, setLoading] = useState(true);
   // Track which sectionId we have already run ensureDefaultGroups for
   const ensuredRef = useRef<string | null>(null);
+  const requestSeqRef = useRef(0);
+
+  useEffect(() => {
+    ensuredRef.current = null;
+    setSection(null);
+    setLoading(!!user && !!sectionId);
+  }, [user, sectionId]);
 
   const fetchSection = useCallback(async () => {
-    if (!user || !sectionId) return;
+    if (!user || !sectionId) {
+      setSection(null);
+      setLoading(false);
+      return;
+    }
+    const requestId = ++requestSeqRef.current;
+    const isStale = () => requestSeqRef.current !== requestId;
     setLoading(true);
 
     const { data: sectionData, error: sectionError } = await supabase
@@ -136,7 +149,12 @@ export function useSectionDetail(sectionId: string | undefined) {
       .eq('id', sectionId)
       .single();
 
-    if (sectionError || !sectionData) { setLoading(false); return; }
+    if (isStale()) return;
+    if (sectionError || !sectionData) {
+      setSection(null);
+      setLoading(false);
+      return;
+    }
 
     let { data: groupsData } = await supabase
       .from('groups')
@@ -144,11 +162,14 @@ export function useSectionDetail(sectionId: string | undefined) {
       .eq('section_id', sectionId)
       .order('order_index');
 
+    if (isStale()) return;
+
     // Only run ensureDefaultGroups once per sectionId across the lifetime of this hook
     if (ensuredRef.current !== sectionId) {
       ensuredRef.current = sectionId;
       const existingTitles = (groupsData || []).map((g) => g.title);
       const hadMissing = await ensureDefaultGroups(sectionId, existingTitles);
+      if (isStale()) return;
       if (hadMissing) {
         const { data: refetched } = await supabase
           .from('groups')
@@ -156,6 +177,7 @@ export function useSectionDetail(sectionId: string | undefined) {
           .eq('section_id', sectionId)
           .order('order_index');
         groupsData = refetched;
+        if (isStale()) return;
       }
     }
 
@@ -164,12 +186,14 @@ export function useSectionDetail(sectionId: string | undefined) {
     const { data: allItemsData } = groupIds.length > 0
       ? await supabase.from('items').select('*').in('group_id', groupIds).order('order_index')
       : { data: [] };
+    if (isStale()) return;
 
     const groups: GroupWithItems[] = (groupsData || []).map(group => ({
       ...group,
       items: (allItemsData || []).filter(i => i.group_id === group.id),
     }));
 
+    if (isStale()) return;
     setSection({ ...sectionData, groups });
     setLoading(false);
   }, [user, sectionId]);
