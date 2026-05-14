@@ -109,9 +109,9 @@ export function buildWorkspaceStarterPack(starterId: WorkspaceStarterId): Worksp
         positions,
         focusSuggestion,
         hints: [
-          'Drop a PDF onto the reader when you are ready.',
-          'Log slips on the mistake card as you review.',
-          'Cmd+K → Review Focus quiets the periphery.',
+          'Connected review material stays easier to scan.',
+          'Mistake cards can resurface later when you want recall.',
+          'Review Focus quiets the room without hiding nearby context.',
         ],
       };
     }
@@ -145,9 +145,9 @@ export function buildWorkspaceStarterPack(starterId: WorkspaceStarterId): Worksp
         positions,
         focusSuggestion,
         hints: [
-          'Open the large PDF window first, then add your file.',
-          'Keep marginalia in the side notebook.',
-          'Reading Focus tightens the canvas around documents.',
+          'Keep the document and your notes connected as one reading space.',
+          'Marginalia works best beside the source it came from.',
+          'Reading Focus tightens the room around what you are reading.',
         ],
       };
     }
@@ -191,9 +191,9 @@ export function buildWorkspaceStarterPack(starterId: WorkspaceStarterId): Worksp
         positions,
         focusSuggestion,
         hints: [
-          'Press C for quick capture while you work.',
-          'Move recurring errors into the slip card.',
-          'Cmd+K → Solving Focus lifts tools and scratch.',
+          'Quick capture keeps scratch thoughts from interrupting the flow.',
+          'Recurring slips become more useful once they live near the work.',
+          'Solving Focus lifts tools and scratch without flattening the room.',
         ],
       };
     }
@@ -216,9 +216,9 @@ export function buildWorkspaceStarterPack(starterId: WorkspaceStarterId): Worksp
         positions,
         focusSuggestion,
         hints: [
-          'Drag from a port to link ideas across the canvas.',
-          'Cmd+K → Thinking Focus widens spatial context.',
-          'Use the minimap to jump between clusters.',
+          'Connections help related ideas stay part of the same cluster.',
+          'Thinking Focus keeps the map spacious while reducing noise.',
+          'The minimap makes distant clusters feel connected instead of lost.',
         ],
       };
     }

@@ -19,9 +19,7 @@
  */
 
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2, Move, X } from 'lucide-react';
-
-const GUIDE_KEY     = 'fw_free_canvas_guide_seen_v1';
+import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2 } from 'lucide-react';
 const ACTIVITY_KEY  = 'fw_obj_activity_v2';
 const WARMTH_KEY    = 'fw_region_warmth_v1';
 
@@ -86,6 +84,7 @@ import type { FocusMode } from '../../focusMode/focusModeTypes';
 import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
 import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
 import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
+import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -239,7 +238,7 @@ function CanvasControls({
         transition:           'opacity 0.4s cubic-bezier(0.4,0,0.2,1), transform 0.4s cubic-bezier(0.4,0,0.2,1), box-shadow 0.35s ease',
       }}
     >
-      <button style={btn} title="Zoom out" onClick={onZoomOut}
+      <button style={btn} title="Pull back for more context." onClick={onZoomOut}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
         <ZoomOut style={{ width: '13px', height: '13px' }} />
@@ -248,7 +247,7 @@ function CanvasControls({
       {/* Zoom label */}
       <button
         onClick={onReset}
-        title="Reset zoom to 100%"
+        title="Return to a balanced view."
         style={{
           ...btn,
           width:      'auto',
@@ -265,7 +264,7 @@ function CanvasControls({
         {Math.round(zoom * 100)}%
       </button>
 
-      <button style={btn} title="Zoom in" onClick={onZoomIn}
+      <button style={btn} title="Lean into detail." onClick={onZoomIn}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
         <ZoomIn style={{ width: '13px', height: '13px' }} />
@@ -273,7 +272,7 @@ function CanvasControls({
 
       {divider}
 
-      <button style={btn} title="Center view" onClick={onCenter}
+      <button style={btn} title="Bring the current workspace back into view." onClick={onCenter}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}>
         <Maximize2 style={{ width: '12px', height: '12px' }} />
@@ -288,7 +287,7 @@ function CanvasControls({
           color:           snapToGrid ? tokens.accent : tokens.textGhost,
           border:          snapToGrid ? `1px solid ${tokens.accent}30` : '1px solid transparent',
         }}
-        title={snapToGrid ? 'Snap to grid: ON' : 'Snap to grid: OFF'}
+        title={snapToGrid ? 'Keep movement aligned for a cleaner rhythm.' : 'Free movement keeps the layout looser.'}
         onClick={onToggleSnap}
         onMouseEnter={e => { if (!snapToGrid) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; (e.currentTarget as HTMLButtonElement).style.color = tokens.textMuted; } }}
         onMouseLeave={e => { if (!snapToGrid) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; } }}
@@ -300,7 +299,7 @@ function CanvasControls({
 
       <button
         style={btn}
-        title="Auto-organize"
+        title="Organize the workspace by thinking flow."
         onClick={onAutoOrganize}
         onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentSubtle; (e.currentTarget as HTMLButtonElement).style.color = tokens.accent; }}
         onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = tokens.textGhost; }}
@@ -463,15 +462,6 @@ export function FreeformCanvas({
     const timer = setTimeout(() => setReturnId(null), 1800);
     return () => clearTimeout(timer);
   }, [returnId]);
-
-  const [showGuide, setShowGuide] = useState<boolean>(() => {
-    try { return !localStorage.getItem(GUIDE_KEY); } catch { return false; }
-  });
-
-  const dismissGuide = useCallback(() => {
-    setShowGuide(false);
-    try { localStorage.setItem(GUIDE_KEY, '1'); } catch { /* quota */ }
-  }, []);
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
 
@@ -1568,13 +1558,13 @@ export function FreeformCanvas({
           <div style={{
             position:      'absolute',
             left:          '50%',
-            top:           '42%',
+            top:           '43%',
             transform:     'translate(-50%, -50%)',
             textAlign:     'center',
             pointerEvents: 'none',
             userSelect:    'none',
+            width:         'min(620px, calc(100vw - 56px))',
           }}>
-            {/* Ambient glow orb behind text */}
             <div style={{
               position:        'absolute',
               left:            '50%',
@@ -1588,6 +1578,9 @@ export function FreeformCanvas({
               filter:          'blur(32px)',
               animation:       'canvasBreath 5s ease-in-out infinite',
             }} />
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              <WorkspaceMicroScene tokens={tokens} variant="cluster-return" size="empty" />
+            </div>
             <p style={{
               fontFamily:    "'Plus Jakarta Sans', sans-serif",
               fontSize:      '20px',
@@ -1597,15 +1590,59 @@ export function FreeformCanvas({
               letterSpacing: '-0.02em',
               animation:     'fadeIn 0.8s ease both',
             }}>
-              Your thinking space.
+              A workspace that stays connected as you think.
             </p>
             <p style={{
               fontSize:   '13px',
               color:      tokens.textGhost,
-              margin:     '10px 0 0',
+              margin:     '10px auto 0',
               lineHeight: 1.5,
               animation:  'fadeIn 0.8s 0.3s ease both',
+              maxWidth:   440,
             }}>
+              Link notes, PDFs, mistakes, and tools. Arrange them visually. Return later with focus and recall still intact.
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                marginTop: 16,
+                animation: 'fadeIn 0.8s 0.4s ease both',
+              }}
+            >
+              {[
+                'Build connected study spaces',
+                'Arrange ideas by thinking flow',
+                'Create calm deep-work environments',
+                'Review concepts spatially over time',
+              ].map((line) => (
+                <span
+                  key={line}
+                  style={{
+                    fontSize: 11,
+                    color: tokens.textSecondary,
+                    padding: '6px 10px',
+                    borderRadius: 999,
+                    border: `1px solid ${tokens.cardBorder}`,
+                    backgroundColor: `${tokens.wellBg}dd`,
+                    backdropFilter: 'blur(10px)',
+                  }}
+                >
+                  {line}
+                </span>
+              ))}
+            </div>
+            <p
+              style={{
+                fontSize: 12,
+                color: tokens.textGhost,
+                margin: '16px 0 0',
+                lineHeight: 1.45,
+                animation: 'fadeIn 0.8s 0.5s ease both',
+              }}
+            >
               Press{' '}
               <kbd style={{
                 fontFamily:      'monospace',
@@ -1616,7 +1653,7 @@ export function FreeformCanvas({
                 color:           tokens.textMuted,
                 backgroundColor: tokens.wellBg,
               }}>⌘K</kbd>
-              {' '}to add something.
+              {' '}to start, or choose a starter desk when it appears.
             </p>
           </div>
         )}
@@ -1725,100 +1762,6 @@ export function FreeformCanvas({
         </div>
       )}
 
-      {/* ── First-time guide overlay ──────────────────────────────── */}
-      {showGuide && (
-        <div style={{
-          position: 'absolute', top: '16px', right: '16px', zIndex: 40,
-          width: '240px',
-          backgroundColor: `${tokens.cardBg}f4`,
-          border: `1px solid ${tokens.cardBorder}`,
-          borderRadius: `${Math.min(tokens.radius, 14)}px`,
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: tokens.shadowMd,
-          overflow: 'hidden',
-        }}>
-          {/* Header */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '10px 12px 8px',
-            borderBottom: `1px solid ${tokens.divider}`,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{
-                width: '20px', height: '20px', borderRadius: '6px',
-                backgroundColor: tokens.accentSubtle,
-                border: `1px solid ${tokens.accent}30`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Move style={{ width: '10px', height: '10px', color: tokens.accent }} />
-              </div>
-              <span style={{
-                fontSize: '11px', fontWeight: 700, color: tokens.textPrimary,
-                fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '0.01em',
-              }}>
-                Your space
-              </span>
-            </div>
-            <button
-              onClick={dismissGuide}
-              style={{
-                width: '20px', height: '20px', borderRadius: '5px', border: 'none',
-                backgroundColor: 'transparent', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: tokens.textGhost,
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.cardBorder; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
-            >
-              <X style={{ width: '11px', height: '11px' }} />
-            </button>
-          </div>
-          {/* Tips */}
-          <div style={{ padding: '8px 12px 10px' }}>
-            {([
-              ['↔', 'Drag background to pan'],
-              ['⌘+scroll', 'Zoom in/out'],
-              ['⣿', 'Drag card header to move'],
-              ['✦', 'Organize button to auto-tidy'],
-            ] as const).map(([key, label]) => (
-              <div key={key} style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                padding: '4px 0',
-              }}>
-                <span style={{
-                  fontFamily: 'monospace', fontSize: '10px', fontWeight: 600,
-                  color: tokens.accent, opacity: 0.85,
-                  minWidth: '54px', flexShrink: 0,
-                }}>
-                  {key}
-                </span>
-                <span style={{ fontSize: '11px', color: tokens.textSecondary }}>
-                  {label}
-                </span>
-              </div>
-            ))}
-            <button
-              onClick={dismissGuide}
-              style={{
-                marginTop: '8px', width: '100%',
-                padding: '5px 0',
-                borderRadius: '7px',
-                border: `1px solid ${tokens.accent}30`,
-                backgroundColor: tokens.accentSubtle,
-                color: tokens.accent,
-                fontSize: '11px', fontWeight: 600,
-                cursor: 'pointer', fontFamily: "'Space Grotesk', sans-serif",
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = `${tokens.accent}25`; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.accentSubtle; }}
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
-
       {spatialMinimapEnabled && (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Minimap">
           <FreeSpaceMiniMap
@@ -1842,7 +1785,7 @@ export function FreeformCanvas({
       {/* ── Add button (bottom-right) ───────────────────────────── */}
       <button
         onClick={onOpenAdd}
-        title="Add to canvas  ⌘K"
+        title="Bring a note, document, or tool into the workspace. ⌘K"
         style={{
           position:        'absolute',
           bottom:          '20px',

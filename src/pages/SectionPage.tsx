@@ -9,7 +9,7 @@ import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceSta
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
-import { WorkspaceStarterHints } from '../components/workspace-starter/WorkspaceStarterHints';
+import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { useDeadlines } from '../hooks/useDeadlines';
@@ -456,6 +456,7 @@ export function SectionPage() {
   const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
   const [starterDismissed, setStarterDismissed] = useState(false);
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
+  const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
@@ -592,6 +593,7 @@ export function SectionPage() {
         );
         if (!patches || Object.keys(patches).length === 0) return;
         sectionPositions.applyPositions(patches);
+        setLastArrangeAt(Date.now());
       } catch (e) {
         console.error('[FreeSpace] template apply failed', e);
         toast.error('Could not apply layout. Try again.');
@@ -1381,8 +1383,6 @@ export function SectionPage() {
         onMarkReviewed={markMistakeReviewedInSession}
       />
 
-      <WorkspaceStarterHints hints={starterHints} tokens={tokens} onClear={clearStarterHints} />
-
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
       <SpaceNav
         title={section.title}
@@ -1410,7 +1410,7 @@ export function SectionPage() {
       >
         {focusMode ? (
           <div
-            title="Cognitive focus is active on this workspace"
+            title="Reduce distraction while keeping nearby context visible."
             style={{
               position: 'absolute',
               left: '50%',
@@ -1466,6 +1466,19 @@ export function SectionPage() {
       {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
       {sectionViewMode === 'free-space' ? (
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {!showWorkspaceStarter && (
+            <WorkspaceGuidanceBar
+              sectionId={sectionId}
+              tokens={tokens}
+              topOffset={84}
+              objects={sectionObjects.objects}
+              focusMode={focusMode}
+              priorityHints={starterHints}
+              onClearPriorityHints={clearStarterHints}
+              lastArrangeAt={lastArrangeAt}
+              chromeQuiet={!!spaceEditingId}
+            />
+          )}
           <FreeSpaceArrangeControl
             tokens={tokens}
             topOffset={84}

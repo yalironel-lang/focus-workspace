@@ -10,6 +10,16 @@ import {
   FREE_SPACE_TEMPLATE_CONFIRM_MIN,
   type FreeSpaceTemplateId,
 } from '../../lib/sectionFreeSpaceLayoutTemplates';
+import { WorkspaceMicroScene, type WorkspaceMicroSceneVariant } from '../workspace-guidance/WorkspaceMicroScene';
+
+const TEMPLATE_SCENE: Record<FreeSpaceTemplateId, WorkspaceMicroSceneVariant> = {
+  'study-board': 'study-flow',
+  'exam-prep': 'review-column',
+  'research-map': 'thinking-map',
+  'course-workspace': 'course-desk',
+  'weekly-planning': 'course-desk',
+  'brainstorm-canvas': 'idea-flow',
+};
 
 interface Props {
   tokens: AtmosphereTokens | null | undefined;
@@ -71,6 +81,7 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        title="Organize the workspace by thinking flow."
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -107,11 +118,11 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
       {open && (
         <div
           role="menu"
-          aria-label="Spatial templates"
+          aria-label="Organize workspace by thinking flow"
           style={{
             marginTop: 6,
-            minWidth: 248,
-            maxWidth: 300,
+            minWidth: 320,
+            maxWidth: 360,
             padding: '6px',
             borderRadius: 12,
             border: `1px solid rgba(255,255,255,0.06)`,
@@ -129,7 +140,9 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
               onClick={() => pick(t.id)}
               disabled={objectCount === 0}
               style={{
-                display: 'block',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
                 width: '100%',
                 textAlign: 'left',
                 padding: '9px 10px',
@@ -140,9 +153,12 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
                 opacity: objectCount === 0 ? 0.45 : 1,
               }}
             >
-              <div style={{ fontSize: '12.5px', fontWeight: 600, color: tokens.textPrimary }}>{t.label}</div>
-              <div style={{ fontSize: '10.5px', color: tokens.textGhost, marginTop: 2, lineHeight: 1.35 }}>
-                {t.description}
+              <WorkspaceMicroScene tokens={tokens} variant={TEMPLATE_SCENE[t.id]} size="compact" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: tokens.textPrimary }}>{t.label}</div>
+                <div style={{ fontSize: '10.5px', color: tokens.textGhost, marginTop: 2, lineHeight: 1.35 }}>
+                  {t.description}
+                </div>
               </div>
             </button>
           ))}

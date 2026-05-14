@@ -1,70 +1,45 @@
-import type { CSSProperties } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { WorkspaceStarterId } from '../../workspaceStarter/workspaceStarterTypes';
 import {
   WORKSPACE_STARTER_IDS,
+  WORKSPACE_STARTER_FOCUS,
   WORKSPACE_STARTER_LABEL,
   WORKSPACE_STARTER_TAGLINE,
 } from '../../workspaceStarter/workspaceStarterTypes';
+import { FOCUS_MODE_LABEL } from '../../focusMode/focusModeTypes';
+import { WorkspaceMicroScene, type WorkspaceMicroSceneVariant } from '../workspace-guidance/WorkspaceMicroScene';
 
-function MicroLayoutPreview({ id }: { id: WorkspaceStarterId }) {
-  const box = (style: CSSProperties) => (
-    <span
-      style={{
-        borderRadius: 3,
-        background: 'rgba(148,163,184,0.14)',
-        border: '1px solid rgba(148,163,184,0.22)',
-        ...style,
-      }}
-    />
-  );
-  switch (id) {
-    case 'exam-prep':
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.45fr', gap: 3, width: 52, height: 36 }}>
-          {box({ gridRow: 'span 2' })}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {box({ flex: 1 })}
-            {box({ flex: 1 })}
-          </div>
-          <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2, height: 10 }}>
-            {box({})}
-            {box({})}
-            {box({})}
-          </div>
-        </div>
-      );
-    case 'deep-reading':
-      return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.75fr', gap: 3, width: 52, height: 36 }}>
-          {box({})}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {box({ flex: 1.4 })}
-            {box({ flex: 1 })}
-          </div>
-        </div>
-      );
-    case 'problem-solving':
-      return (
-        <div style={{ width: 52, height: 36, display: 'grid', gridTemplateColumns: '1fr 0.4fr 0.45fr', gridTemplateRows: '1fr 0.55fr', gap: 2 }}>
-          {box({ gridRow: 'span 1' })}
-          {box({})}
-          {box({})}
-          {box({ gridColumn: 'span 2' })}
-          {box({})}
-        </div>
-      );
-    case 'research-thinking':
-      return (
-        <div style={{ width: 52, height: 36, position: 'relative' }}>
-          {box({ position: 'absolute', left: 14, top: 10, width: 16, height: 12 })}
-          {box({ position: 'absolute', right: 8, top: 6, width: 14, height: 11 })}
-          {box({ position: 'absolute', left: 4, bottom: 6, width: 14, height: 11 })}
-          {box({ position: 'absolute', right: 10, bottom: 4, width: 16, height: 12 })}
-        </div>
-      );
-  }
-}
+const STARTER_SCENE: Record<WorkspaceStarterId, WorkspaceMicroSceneVariant> = {
+  'exam-prep': 'review-column',
+  'deep-reading': 'reading-focus',
+  'problem-solving': 'problem-tools',
+  'research-thinking': 'thinking-map',
+};
+
+const STARTER_WHY: Record<WorkspaceStarterId, string> = {
+  'exam-prep': 'Source, notes, mistakes, and recall stay readable together.',
+  'deep-reading': 'Documents and margin notes remain part of the same reading flow.',
+  'problem-solving': 'Workings, tools, and slips sit close enough to think with.',
+  'research-thinking': 'Ideas spread out just enough to connect without becoming noise.',
+};
+
+const VALUE_STRIPS: Array<{ title: string; body: string; scene: WorkspaceMicroSceneVariant }> = [
+  {
+    title: 'Connected study spaces',
+    body: 'Link notes, PDFs, mistakes, and tools into one working thought.',
+    scene: 'thinking-map',
+  },
+  {
+    title: 'Thinking flow',
+    body: 'Arrange keeps the room readable without flattening it into a grid.',
+    scene: 'study-flow',
+  },
+  {
+    title: 'Quiet focus',
+    body: 'Focus reduces distraction while nearby context stays gently visible.',
+    scene: 'reading-focus',
+  },
+];
 
 export function WorkspaceStarterOverlay({
   tokens,
@@ -129,11 +104,43 @@ export function WorkspaceStarterOverlay({
               color: tokens.textPrimary,
             }}
           >
-            Choose how you want to work.
+            Choose how you want to begin.
           </h2>
           <p style={{ margin: '8px 0 0', fontSize: 13, color: tokens.textSecondary, lineHeight: 1.45 }}>
-            A calm desk layout—no walkthrough, no checklist.
+            Start with a calm working shape, then let the workspace teach itself through use.
           </p>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 10,
+            marginBottom: 16,
+          }}
+        >
+          {VALUE_STRIPS.map((strip) => (
+            <div
+              key={strip.title}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: `1px solid ${tokens.cardBorder}`,
+                background: `${tokens.wellBg}cc`,
+              }}
+            >
+              <WorkspaceMicroScene tokens={tokens} variant={strip.scene} size="compact" />
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: tokens.textPrimary }}>{strip.title}</div>
+                <div style={{ fontSize: 10.5, lineHeight: 1.45, color: tokens.textGhost, marginTop: 2 }}>
+                  {strip.body}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
 
         <div
@@ -152,25 +159,27 @@ export function WorkspaceStarterOverlay({
                 textAlign: 'left',
                 borderRadius: 12,
                 border: `1px solid ${tokens.cardBorder}`,
-                background: tokens.wellBg,
+                background: `${tokens.wellBg}e6`,
                 padding: '14px 14px 12px',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 10,
-                transition: 'border-color 0.25s ease, background 0.25s ease, transform 0.25s ease',
+                transition: 'border-color 0.25s ease, background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease',
               }}
               onMouseEnter={e => {
                 const el = e.currentTarget;
                 el.style.borderColor = `${tokens.accent ?? '#f59e0b'}55`;
                 el.style.background = `${tokens.cardBg}f0`;
                 el.style.transform = 'translateY(-1px)';
+                el.style.boxShadow = '0 12px 30px rgba(0,0,0,0.18)';
               }}
               onMouseLeave={e => {
                 const el = e.currentTarget;
                 el.style.borderColor = tokens.cardBorder;
-                el.style.background = tokens.wellBg;
+                el.style.background = `${tokens.wellBg}e6`;
                 el.style.transform = 'none';
+                el.style.boxShadow = 'none';
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
@@ -182,7 +191,24 @@ export function WorkspaceStarterOverlay({
                     {WORKSPACE_STARTER_TAGLINE[sid]}
                   </div>
                 </div>
-                <MicroLayoutPreview id={sid} />
+                <WorkspaceMicroScene tokens={tokens} variant={STARTER_SCENE[sid]} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    color: tokens.textGhost,
+                  }}
+                >
+                  {FOCUS_MODE_LABEL[WORKSPACE_STARTER_FOCUS[sid]]} Focus
+                </span>
+                <span style={{ width: 3, height: 3, borderRadius: '50%', backgroundColor: `${tokens.accent}88` }} />
+                <span style={{ fontSize: 10.5, lineHeight: 1.45, color: tokens.textSecondary }}>
+                  {STARTER_WHY[sid]}
+                </span>
               </div>
             </button>
           ))}
