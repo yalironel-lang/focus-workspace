@@ -85,6 +85,7 @@ import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 import type { FocusMode } from '../../focusMode/focusModeTypes';
 import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
 import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
+import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -571,63 +572,11 @@ export function FreeformCanvas({
     ...tools.map(t => ({ kind: 'tool' as const, id: t.id })),
   ];
 
-  // ── Proximity clustering ──────────────────────────────────────────────────
-  // Detect groups of objects that live close together and render a shared
-  // ghost backdrop — a visual signal that these things belong in the same region.
-
-  const PROXIMITY = 80; // world-space px — how close centers must be to cluster
-
-  interface ClusterBox { x: number; y: number; w: number; h: number }
-
-  const clusters = useMemo((): ClusterBox[] => {
-    if (allItems.length < 2) return [];
-
-    // Compute bounding box center for each item
-    const centers = allItems.map(({ id }) => {
-      const p = positions[id];
-      if (!p) return null;
-      const bw = p.w > 0 ? p.w : 340;
-      const bh = p.h > 0 ? p.h : 220;
-      return { id, cx: p.x + bw / 2, cy: p.y + bh / 2, x: p.x, y: p.y, bw, bh };
-    }).filter(Boolean) as Array<{ id: string; cx: number; cy: number; x: number; y: number; bw: number; bh: number }>;
-
-    // Union-Find grouping by proximity
-    const parent: Record<string, string> = {};
-    centers.forEach(c => { parent[c.id] = c.id; });
-    const find = (id: string): string => {
-      if (parent[id] !== id) parent[id] = find(parent[id]);
-      return parent[id];
-    };
-    const union = (a: string, b: string) => { parent[find(a)] = find(b); };
-
-    for (let i = 0; i < centers.length; i++) {
-      for (let j = i + 1; j < centers.length; j++) {
-        const a = centers[i], b = centers[j];
-        const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
-        if (dist < PROXIMITY + (a.bw + b.bw) / 2) union(a.id, b.id);
-      }
-    }
-
-    // Collect groups with 2+ members
-    const groups: Record<string, typeof centers> = {};
-    centers.forEach(c => {
-      const root = find(c.id);
-      if (!groups[root]) groups[root] = [];
-      groups[root].push(c);
-    });
-
-    // Build bounding boxes with padding
-    return Object.values(groups)
-      .filter(g => g.length >= 2)
-      .map(g => {
-        const PAD = 28;
-        const minX = Math.min(...g.map(c => c.x)) - PAD;
-        const minY = Math.min(...g.map(c => c.y)) - PAD;
-        const maxX = Math.max(...g.map(c => c.x + c.bw)) + PAD;
-        const maxY = Math.max(...g.map(c => c.y + c.bh)) + PAD;
-        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-      });
-  }, [allItems, positions]);
+  const semanticClusterRegions = useMemo(() => {
+    if (!spatialAmbient || !freeSpaceConnectionsEnabled || blocks.length < 2) return [];
+    const clusters = buildSemanticClusters(blocks);
+    return buildSemanticClusterRegions(clusters, positions);
+  }, [blocks, positions, spatialAmbient, freeSpaceConnectionsEnabled]);
 
   // ── Auto-organize ─────────────────────────────────────────────────────────
 
@@ -1296,32 +1245,58 @@ export function FreeformCanvas({
           />
         )}
 
-        {/* ── Proximity cluster backdrops ─────────────────────── */}
-        {clusters.map((box, i) => {
-          // Stability key: centroid rounded to 120px grid
-          const ck = `${Math.round((box.x + box.w / 2) / 120)}_${Math.round((box.y + box.h / 2) / 120)}`;
-          if (!clusterFirstSeen.current.has(ck)) clusterFirstSeen.current.set(ck, Date.now());
-          const seenMs   = Date.now() - (clusterFirstSeen.current.get(ck) ?? Date.now());
-          // After 5 quiet minutes this grouping has "settled" — border solidifies
+        {/* ── Semantic cluster regions ─────────────────────────── */}
+        {semanticClusterRegions.map((region) => {
+          if (!clusterFirstSeen.current.has(region.key)) clusterFirstSeen.current.set(region.key, Date.now());
+          const seenMs = Date.now() - (clusterFirstSeen.current.get(region.key) ?? Date.now());
           const isStable = seenMs > 5 * 60 * 1000;
+          const shapeX =
+            region.dominantLane === 'source' ? 1.08 :
+            region.dominantLane === 'tool' ? 1.1 :
+            1.04;
+          const shapeY =
+            region.dominantLane === 'review' ? 1.08 :
+            region.dominantLane === 'support' ? 1.04 :
+            0.98;
+          const ambientOpacity = Math.min(0.64, (0.24 + (region.density - 0.72) * 0.44) * (isStable ? 1 : 0.84));
           return (
-            <div
-              key={`cluster-${i}`}
-              aria-hidden="true"
-              style={{
-                position:        'absolute',
-                left:             box.x,
-                top:              box.y,
-                width:            box.w,
-                height:           box.h,
-                borderRadius:    '22px',
-                backgroundColor: `${tokens.accent}${isStable ? '04' : '03'}`,
-                border:          `1px ${isStable ? 'solid' : 'dashed'} ${tokens.accent}${isStable ? '08' : '06'}`,
-                pointerEvents:   'none',
-                zIndex:          0,
-                transition:      'all 0.6s cubic-bezier(0.32,0.72,0,1), border-style 1s ease, border-color 1s ease',
-              }}
-            />
+            <div key={`cluster-${region.key}`} aria-hidden="true">
+              <div
+                style={{
+                  position: 'absolute',
+                  left: region.x,
+                  top: region.y,
+                  width: region.w,
+                  height: region.h,
+                  borderRadius: '50%',
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                  opacity: ambientOpacity,
+                  transform: `scale(${shapeX}, ${shapeY})`,
+                  transformOrigin: 'center center',
+                  filter: `blur(${isStable ? 46 : 56}px)`,
+                  background: `radial-gradient(ellipse at 50% 48%, rgba(255,255,255,${isStable ? '0.034' : '0.024'}) 0%, ${tokens.accent}${isStable ? '10' : '0c'} 20%, ${tokens.accent}${isStable ? '08' : '06'} 38%, transparent 76%)`,
+                  transition: 'opacity 0.7s cubic-bezier(0.32,0.72,0,1), transform 0.7s cubic-bezier(0.32,0.72,0,1), filter 0.7s ease',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  left: region.x + region.w * 0.12,
+                  top: region.y + region.h * 0.14,
+                  width: region.w * 0.76,
+                  height: region.h * 0.7,
+                  borderRadius: '50%',
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                  opacity: ambientOpacity * (isStable ? 0.78 : 0.62),
+                  filter: `blur(${isStable ? 30 : 36}px)`,
+                  mixBlendMode: 'screen',
+                  background: `radial-gradient(ellipse at 46% 42%, rgba(255,255,255,${isStable ? '0.036' : '0.026'}) 0%, ${tokens.accent}${isStable ? '0b' : '08'} 28%, transparent 78%)`,
+                  transition: 'opacity 0.7s cubic-bezier(0.32,0.72,0,1), filter 0.7s ease',
+                }}
+              />
+            </div>
           );
         })}
 
