@@ -1,5 +1,6 @@
 import { memo, useMemo, useState, useEffect } from 'react';
 import type { CosmicBackdropConfig } from '../../lib/cosmic/cosmicBackgroundTypes';
+import { normalizeConstellationStyle } from '../../lib/cosmic/cosmicBackgroundTypes';
 import {
   getConstellation,
   constellationOpacityForStyle,
@@ -49,8 +50,9 @@ function CosmicCanvasBackdropInner({
   const nearStars = useMemo(() => stars.filter(s => s.depth === 2), [stars]);
 
   const constellation = getConstellation(config.constellationId);
+  const constellationStyle = normalizeConstellationStyle(config.constellationStyle);
   const styleOpacity = constellationOpacityForStyle(
-    config.constellationStyle,
+    constellationStyle,
     config.constellationVisibility,
   );
   const lineOp = lineOpacityForLuminance(
@@ -60,7 +62,7 @@ function CosmicCanvasBackdropInner({
   );
   const showLabels =
     config.constellationLabels &&
-    config.constellationStyle === 'scientific' &&
+    constellationStyle === 'scientific' &&
     styleOpacity > 0.1 &&
     !calmEffects;
 
@@ -73,10 +75,12 @@ function CosmicCanvasBackdropInner({
   const tMid = cosmicParallaxTransform(panX, panY, zoom, 'mid', reducedMotion);
   const tNear = cosmicParallaxTransform(panX, panY, zoom, 'near', reducedMotion);
   const tConst = cosmicParallaxTransform(panX, panY, zoom, 'constellation', reducedMotion);
+  const tGrain = cosmicParallaxTransform(panX, panY, zoom, 'grain', reducedMotion);
 
   const renderStars = (layer: typeof stars, keyPrefix: string) =>
     layer.map((s, i) => {
-      const isBright = s.opacity > 0.55;
+      const isBright = s.opacity > 0.52;
+      const glow = isBright ? s.r * (s.depth === 2 ? 2.4 : 1.6) : 0;
       return (
         <circle
           key={`${keyPrefix}-${i}`}
@@ -91,8 +95,8 @@ function CosmicCanvasBackdropInner({
                   animationDelay: `${s.twinklePhase}s`,
                   animationDuration: `${4 + (i % 5)}s`,
                 }
-              : isBright
-                ? { filter: `drop-shadow(0 0 ${s.r * 1.2}px rgba(${starRgb},0.35))` }
+              : glow > 0
+                ? { filter: `drop-shadow(0 0 ${glow}px rgba(${starRgb},${isBright ? 0.28 : 0.12}))` }
                 : undefined
           }
         />
@@ -114,10 +118,25 @@ function CosmicCanvasBackdropInner({
         }}
       >
         <g opacity={lineOp}>
+          {constellationStyle === 'mythological' && constellation.stars.length >= 3 && (
+            <polygon
+              points={constellation.stars.map(st => `${st.x},${st.y}`).join(' ')}
+              fill={`rgba(${lineRgb},${config.isLight ? 0.02 : 0.035})`}
+              stroke={`rgba(${lineRgb},${config.isLight ? 0.05 : 0.08})`}
+              strokeWidth={0.04}
+              strokeLinejoin="round"
+            />
+          )}
           {constellation.edges.map(([a, b], i) => {
             const sa = constellation.stars[a];
             const sb = constellation.stars[b];
             if (!sa || !sb) return null;
+            const strokeAlpha =
+              constellationStyle === 'scientific'
+                ? config.isLight ? 0.22 : 0.32
+                : constellationStyle === 'mythological'
+                  ? config.isLight ? 0.14 : 0.22
+                  : config.isLight ? 0.16 : 0.26;
             return (
               <line
                 key={`e-${i}`}
@@ -125,8 +144,8 @@ function CosmicCanvasBackdropInner({
                 y1={sa.y}
                 x2={sb.x}
                 y2={sb.y}
-                stroke={`rgba(${lineRgb},${config.isLight ? 0.28 : 0.42})`}
-                strokeWidth={0.08}
+                stroke={`rgba(${lineRgb},${strokeAlpha})`}
+                strokeWidth={constellationStyle === 'scientific' ? 0.06 : 0.045}
                 strokeLinecap="round"
               />
             );
@@ -276,10 +295,13 @@ function CosmicCanvasBackdropInner({
         <div
           style={{
             position: 'absolute',
-            inset: 0,
-            opacity: config.grainAmount * (config.isLight ? 0.28 : 0.45),
+            inset: '-8%',
+            transform: tGrain,
+            willChange: reducedMotion ? undefined : 'transform',
+            opacity: config.grainAmount * (config.isLight ? 0.22 : 0.36),
             backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E")`,
             mixBlendMode: config.isLight ? 'multiply' : 'soft-light',
+            pointerEvents: 'none',
           }}
         />
       )}

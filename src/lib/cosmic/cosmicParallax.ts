@@ -1,13 +1,14 @@
 /** Transform-based parallax offsets for cosmic backdrop layers. */
 
-export type ParallaxLayer = 'nebula' | 'far' | 'mid' | 'near' | 'constellation';
+export type ParallaxLayer = 'nebula' | 'far' | 'mid' | 'near' | 'constellation' | 'grain';
 
 const FACTORS: Record<ParallaxLayer, number> = {
-  nebula: 0.006,
-  far: 0.014,
-  mid: 0.026,
-  near: 0.038,
-  constellation: 0.032,
+  nebula: 0.005,
+  far: 0.012,
+  mid: 0.022,
+  near: 0.034,
+  constellation: 0.028,
+  grain: 0.018,
 };
 
 export function cosmicParallaxTransform(

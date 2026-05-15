@@ -32,13 +32,20 @@ export function generateStarfield(
 
   for (let i = 0; i < count; i++) {
     const depth = (Math.floor(rand() * 3) as 0 | 1 | 2);
-    const depthMul = depth === 0 ? 0.45 : depth === 1 ? 0.72 : 1;
-    const r = (0.08 + rand() * 0.22) * scale * (depth === 2 ? 1.15 : 1);
+    const depthMul = depth === 0 ? 0.38 : depth === 1 ? 0.62 : 0.92;
+    const magRoll = rand();
+    const sizeBias = magRoll < 0.12 ? 1.35 : magRoll < 0.35 ? 1.05 : 0.82;
+    const r =
+      (depth === 0 ? 0.06 + rand() * 0.1 : depth === 1 ? 0.1 + rand() * 0.16 : 0.14 + rand() * 0.22) *
+      scale *
+      sizeBias;
+    const baseOp = 0.12 + rand() * 0.48;
+    const brightStar = magRoll > 0.88 ? 1.25 : 1;
     stars.push({
       x: rand() * 100,
       y: rand() * 100,
       r,
-      opacity: Math.min(0.95, (0.15 + rand() * 0.55) * brightness * depthMul),
+      opacity: Math.min(0.82, baseOp * brightness * depthMul * brightStar),
       depth,
       twinklePhase: rand() * 6.28,
     });

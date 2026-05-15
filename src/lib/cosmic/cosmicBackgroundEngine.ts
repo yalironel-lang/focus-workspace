@@ -2,6 +2,7 @@ import type { GlobalTheme } from '../../hooks/useWorkspaceTheme';
 import type { BackgroundPresetDefaults } from '../workspaceBackgroundStudio';
 import {
   DEFAULT_COSMIC_LAYERS,
+  normalizeConstellationStyle,
   type CosmicBackdropConfig,
   type CosmicLayerSettings,
   type ConstellationId,
@@ -30,7 +31,9 @@ export function mergeCosmicSettings(
     constellationId: (g.constellationId ?? presetCosmic?.constellationId ?? 'none') as ConstellationId,
     constellationVisibility:
       g.constellationVisibility ?? presetCosmic?.constellationVisibility ?? DEFAULT_COSMIC_LAYERS.constellationVisibility,
-    constellationStyle: g.constellationStyle ?? presetCosmic?.constellationStyle ?? DEFAULT_COSMIC_LAYERS.constellationStyle,
+    constellationStyle: normalizeConstellationStyle(
+      g.constellationStyle ?? presetCosmic?.constellationStyle,
+    ),
     constellationLineOpacity:
       g.constellationLineOpacity ?? presetCosmic?.constellationLineOpacity ?? DEFAULT_COSMIC_LAYERS.constellationLineOpacity,
     constellationStarScale:
@@ -73,10 +76,10 @@ export function resolveCosmicBackdrop(
     milkyWayCss = `linear-gradient(${angle}deg, transparent 0%, rgba(255,255,255,${o}) 48%, transparent 72%)`;
   }
 
-  const vignette = layers.vignetteStrength * (isLight ? 0.35 : 0.65);
+  const vignette = layers.vignetteStrength * (isLight ? 0.28 : 0.42);
   const depthGlowCss =
     vignette > 0.02
-      ? `radial-gradient(ellipse at 50% 45%, transparent 35%, ${isLight ? `rgba(0,0,0,${vignette * 0.08})` : `rgba(0,0,0,${vignette * 0.55})`} 100%)`
+      ? `radial-gradient(ellipse at 50% 48%, transparent 42%, ${isLight ? `rgba(0,0,0,${vignette * 0.06})` : `rgba(0,0,0,${vignette * 0.38})`} 100%)`
       : undefined;
 
   return {

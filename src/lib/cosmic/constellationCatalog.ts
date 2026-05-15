@@ -320,11 +320,11 @@ export function constellationOpacityForStyle(
   visibility: number,
 ): number {
   const styleMul =
-    style === 'minimal' ? 0.82 :
-    style === 'scientific' ? 1 :
-    style === 'mythological' ? 0.68 :
-    0.38;
-  return Math.min(1, visibility * styleMul);
+    style === 'minimal' ? 0.72 :
+    style === 'scientific' ? 0.88 :
+    style === 'mythological' ? 0.55 :
+    0.04;
+  return Math.min(0.72, visibility * styleMul);
 }
 
 export function lineOpacityForLuminance(
@@ -333,7 +333,7 @@ export function lineOpacityForLuminance(
   isLight: boolean,
 ): number {
   const lumMul = isLight ? 0.55 : 1;
-  return Math.min(0.42, baseLineOpacity * styleOpacity * lumMul);
+  return Math.min(0.28, baseLineOpacity * styleOpacity * lumMul);
 }
 
 export function starRadiusForMag(mag: number | undefined, scale: number): number {

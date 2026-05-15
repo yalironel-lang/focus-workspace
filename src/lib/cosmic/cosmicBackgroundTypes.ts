@@ -1,4 +1,6 @@
-export type ConstellationStyle = 'minimal' | 'scientific' | 'mythological' | 'ambient';
+export type ConstellationStyle = 'minimal' | 'scientific' | 'mythological' | 'hidden';
+/** @deprecated Use `hidden` — kept for persisted themes */
+export type LegacyConstellationStyle = ConstellationStyle | 'ambient';
 
 export type ConstellationId =
   | 'none'
@@ -64,5 +66,12 @@ export const DEFAULT_COSMIC_LAYERS: CosmicLayerSettings = {
   nebulaIntensity: 0,
   milkyWayIntensity: 0,
   grainAmount: 0.04,
-  vignetteStrength: 0.35,
+  vignetteStrength: 0.28,
 };
+
+export function normalizeConstellationStyle(
+  style: LegacyConstellationStyle | undefined,
+): ConstellationStyle {
+  if (!style || style === 'ambient') return 'hidden';
+  return style;
+}

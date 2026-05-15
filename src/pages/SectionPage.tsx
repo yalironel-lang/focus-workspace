@@ -13,6 +13,7 @@ import { WorkspaceStarterOverlay } from '../components/workspace-starter/Workspa
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
+import { WorkspaceBackControl } from '../components/workspace/WorkspaceBackControl';
 import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
@@ -68,7 +69,7 @@ import {
 import { AIAssistanceResultModal } from '../components/ai/AIAssistanceResultModal';
 import type { GroupWithItems } from '../types';
 import {
-  Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
+  Loader2, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
   Palette,
@@ -157,7 +158,7 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 // ── SpaceNav ──────────────────────────────────────────────────────────────────
 
-function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, onBack: _onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
@@ -173,14 +174,10 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearan
       height: '44px', backgroundColor: tokens.navBg,
       borderBottom: `1px solid ${tokens.divider}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
+      padding: '0 20px 0 60px', position: 'sticky', top: 0, zIndex: 500, flexShrink: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <button onClick={onBack} style={{ color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = tokens.textSecondary)}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = tokens.textMuted)}>
-          <ArrowLeft className="w-3.5 h-3.5" />
-        </button>
+        <span aria-hidden style={{ width: 48, height: 48, flexShrink: 0 }} />
         <span style={{ width: '1px', height: '14px', backgroundColor: tokens.divider, flexShrink: 0 }} />
         <span style={{ fontSize: '12px', fontWeight: 500, color: tokens.textSecondary, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
           {title}
@@ -1106,15 +1103,29 @@ export function SectionPage() {
     setQuickCaptureVariant('note');
     setMistakeReviewOpen(false);
     setResumeVisible(false);
+    setAppearanceOpen(false);
+    setDesignMode(false);
+    setShowCustomize(false);
+    setFocusMode(null);
     cancelConnectMode();
-  }, [cancelConnectMode]);
+  }, [cancelConnectMode, setFocusMode]);
 
   const handleWorkspaceBack = useCallback(() => {
     navDebugLog('workspace-back', { sectionId });
     dismissSectionTransientUi();
     dismissTransientUi();
     pulsePerformancePressure('route');
-    navigate('/dashboard');
+    try {
+      navigate('/dashboard', { replace: false });
+    } catch {
+      window.location.assign('/dashboard');
+      return;
+    }
+    window.setTimeout(() => {
+      if (window.location.pathname.startsWith('/section/')) {
+        window.location.assign('/dashboard');
+      }
+    }, 150);
   }, [dismissSectionTransientUi, dismissTransientUi, navigate, sectionId]);
 
   const completeFreeSpaceConnect = useCallback(
@@ -1562,6 +1573,12 @@ export function SectionPage() {
           backgroundColor: tokens.pageBg,
         }}
       >
+        <WorkspaceBackControl
+          onBack={handleWorkspaceBack}
+          color={tokens.textMuted}
+          hoverColor={tokens.textPrimary}
+          wellBg={tokens.wellBg}
+        />
         <SpaceNav
           title="Workspace"
           accent={tokens.accent}
@@ -1754,6 +1771,13 @@ export function SectionPage() {
         onClose={() => setAppearanceOpen(false)}
         onSetAtmosphere={setAtmosphere}
         onUpdateGlobal={updateGlobal}
+      />
+
+      <WorkspaceBackControl
+        onBack={handleWorkspaceBack}
+        color={tokens.textMuted}
+        hoverColor={tokens.textPrimary}
+        wellBg={tokens.wellBg}
       />
 
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
