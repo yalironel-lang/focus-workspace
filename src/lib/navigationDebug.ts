@@ -8,3 +8,17 @@ export function navDebugLog(event: string, detail?: Record<string, unknown>): vo
     console.info(`[nav-debug] ${event}`);
   }
 }
+
+export function navDebugRouteCheck(
+  pathBefore: string,
+  pathAfter: string,
+  expectedPath = '/dashboard',
+): void {
+  if (!import.meta.env.DEV) return;
+  const changed = pathBefore !== pathAfter;
+  const ok = pathAfter === expectedPath || pathAfter.startsWith(expectedPath);
+  navDebugLog('route-check', { pathBefore, pathAfter, changed, ok, expectedPath });
+  if (!ok && pathBefore.startsWith('/section/')) {
+    console.warn('[nav-debug] route did not reach dashboard after back navigation');
+  }
+}

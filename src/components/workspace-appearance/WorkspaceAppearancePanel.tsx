@@ -24,18 +24,20 @@ export function WorkspaceAppearancePanel({
 }: Props) {
   const activeBackgroundId = resolveBackgroundPresetId(global);
 
+  // Unmount when closed — no invisible backdrop left in the tree.
   if (!open) return null;
 
   return (
     <>
+      {/* z-[400]/[410] stay below SectionPage WorkspaceSectionChrome (z-index 600). */}
       <div
-        className="fixed inset-0 z-[115]"
-        style={{ backgroundColor: 'rgba(4,6,10,0.38)' }}
+        className="fixed inset-0 z-[400]"
+        style={{ backgroundColor: 'rgba(4,6,10,0.38)', pointerEvents: 'auto' }}
         onMouseDown={onClose}
         aria-hidden
       />
       <aside
-        className="fixed top-0 right-0 z-[120] h-full flex flex-col"
+        className="fixed top-0 right-0 z-[410] h-full flex flex-col"
         style={{
           width: 'min(440px, 100vw)',
           backgroundColor: tokens.cardBg,

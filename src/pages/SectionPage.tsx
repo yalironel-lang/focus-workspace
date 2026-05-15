@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useFocusMode } from '../hooks/useFocusMode';
 import { useWorkspaceContinuity } from '../hooks/useWorkspaceContinuity';
-import { FOCUS_MODE_BADGE } from '../focusMode/focusModeTypes';
+import { FOCUS_MODE_BADGE, type FocusMode } from '../focusMode/focusModeTypes';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
@@ -13,14 +13,13 @@ import { WorkspaceStarterOverlay } from '../components/workspace-starter/Workspa
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
-import { WorkspaceBackControl } from '../components/workspace/WorkspaceBackControl';
 import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
 import { surfaceShellStyle } from '../lib/surfaceShellStyle';
 import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
-import { navDebugLog } from '../lib/navigationDebug';
+import { navDebugLog, navDebugRouteCheck } from '../lib/navigationDebug';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -69,7 +68,7 @@ import {
 import { AIAssistanceResultModal } from '../components/ai/AIAssistanceResultModal';
 import type { GroupWithItems } from '../types';
 import {
-  Loader2, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
+  Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
   Palette,
@@ -156,9 +155,28 @@ function urgencyLabel(d: Deadline): { text: string; color: string } {
 const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 
-// ── SpaceNav ──────────────────────────────────────────────────────────────────
+// ── Workspace chrome (header) ─────────────────────────────────────────────────
+// Back lives in this sticky header (not a portal) so hit-testing stays predictable.
+// Chrome z-index must stay above section modals (appearance ≤410, others ≤315).
 
-function SpaceNav({ title, accent, tokens, isCustomizing, onBack: _onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
+/** Above workspace modals/drawers (≤410) so header controls stay clickable. */
+const WORKSPACE_CHROME_Z = 600;
+
+const NAV_BTN_BASE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 44,
+  minHeight: 44,
+  padding: '0 10px',
+  border: 'none',
+  borderRadius: 10,
+  cursor: 'pointer',
+  background: 'transparent',
+  transition: 'color 0.15s ease, background-color 0.15s ease, transform 0.1s ease',
+};
+
+function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
@@ -171,30 +189,73 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack: _onBack, onOpe
 }) {
   return (
     <nav style={{
-      height: '44px', backgroundColor: tokens.navBg,
+      height: '48px', backgroundColor: tokens.navBg,
       borderBottom: `1px solid ${tokens.divider}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 20px 0 60px', position: 'sticky', top: 0, zIndex: 500, flexShrink: 0,
+      padding: '0 16px', flexShrink: 0,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span aria-hidden style={{ width: 48, height: 48, flexShrink: 0 }} />
-        <span style={{ width: '1px', height: '14px', backgroundColor: tokens.divider, flexShrink: 0 }} />
-        <span style={{ fontSize: '12px', fontWeight: 500, color: tokens.textSecondary, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to Library"
+          title="Back to Library"
+          style={{
+            ...NAV_BTN_BASE,
+            gap: 6,
+            minWidth: 48,
+            minHeight: 48,
+            marginLeft: -8,
+            padding: '0 12px 0 8px',
+            color: tokens.textMuted,
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = tokens.textPrimary;
+            el.style.backgroundColor = tokens.wellBg;
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.color = tokens.textMuted;
+            el.style.backgroundColor = 'transparent';
+            el.style.transform = 'scale(1)';
+          }}
+          onMouseDown={e => {
+            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.96)';
+          }}
+          onMouseUp={e => {
+            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+          }}
+        >
+          <ArrowLeft className="w-4 h-4 shrink-0" strokeWidth={2.25} aria-hidden />
+          <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.01em' }}>Library</span>
+        </button>
+        <span style={{ width: '1px', height: '16px', backgroundColor: tokens.divider, flexShrink: 0 }} />
+        <span style={{ fontSize: '12px', fontWeight: 500, color: tokens.textSecondary, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {title}
         </span>
         <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0, opacity: 0.6 }} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
         {isCustomizing ? (
           <>
-            <button onClick={onResetCustomize} style={{ fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = tokens.textSecondary)}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = tokens.textMuted)}>
+            <button
+              type="button"
+              onClick={onResetCustomize}
+              style={{ ...NAV_BTN_BASE, fontSize: '11px', color: tokens.textMuted, minWidth: 44 }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+            >
               Reset
             </button>
-            <button onClick={onExitCustomize} style={{ fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', border: 'none', cursor: 'pointer', padding: '4px 12px', borderRadius: '8px' }}
-              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24')}
-              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b')}>
+            <button
+              type="button"
+              onClick={onExitCustomize}
+              style={{ ...NAV_BTN_BASE, fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', minWidth: 48 }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b'; }}
+            >
               Done
             </button>
           </>
@@ -205,21 +266,174 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack: _onBack, onOpe
               aria-label="Appearance"
               title="Appearance"
               onClick={onOpenAppearance}
-              style={{ display: 'flex', alignItems: 'center', padding: '4px 6px', borderRadius: '6px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}
+              style={{ ...NAV_BTN_BASE, color: tokens.textMuted }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
             >
-              <Palette className="w-3 h-3" style={{ color: tokens.accent }} />
+              <Palette className="w-4 h-4" style={{ color: tokens.accent }} />
             </button>
-            <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}>
-              <Sliders className="w-3 h-3" />
+            <button
+              type="button"
+              aria-label="Customize workspace"
+              title="Customize workspace"
+              onClick={onCustomize}
+              style={{ ...NAV_BTN_BASE, color: tokens.textMuted }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+            >
+              <Sliders className="w-4 h-4" />
             </button>
           </>
         )}
       </div>
     </nav>
+  );
+}
+
+function WorkspaceViewModeBar({
+  tokens,
+  sectionViewMode,
+  onViewModeChange,
+  focusMode,
+}: {
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
+  sectionViewMode: 'work-surface' | 'free-space';
+  onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
+  focusMode: FocusMode | null;
+}) {
+  return (
+    <div
+      style={{
+        height: '40px',
+        borderBottom: `1px solid ${tokens.divider}`,
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 20px',
+        backgroundColor: tokens.navBg,
+        position: 'relative',
+        flexShrink: 0,
+      }}
+    >
+      {focusMode ? (
+        <div
+          title="Reduce distraction while keeping nearby context visible."
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            fontSize: '10px',
+            fontWeight: 600,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: tokens.textSecondary,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Focus · {FOCUS_MODE_BADGE[focusMode as keyof typeof FOCUS_MODE_BADGE] ?? focusMode}
+        </div>
+      ) : null}
+      <div
+        style={{
+          display: 'inline-flex',
+          borderRadius: '8px',
+          border: `1px solid ${tokens.cardBorder}`,
+          padding: '2px',
+          gap: '2px',
+          backgroundColor: `${tokens.wellBg}f2`,
+        }}
+      >
+        {([
+          { id: 'work-surface' as const, label: 'Work Surface' },
+          { id: 'free-space' as const, label: 'Free Space' },
+        ]).map(opt => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onViewModeChange(opt.id)}
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              letterSpacing: '0.03em',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              minWidth: 44,
+              minHeight: 40,
+              cursor: 'pointer',
+              backgroundColor: sectionViewMode === opt.id ? tokens.accent : 'transparent',
+              color: sectionViewMode === opt.id ? '#000' : tokens.textSecondary,
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceSectionChrome({
+  title,
+  accent,
+  tokens,
+  isCustomizing,
+  onBack,
+  onOpenAppearance,
+  onCustomize,
+  onExitCustomize,
+  onResetCustomize,
+  sectionViewMode,
+  onViewModeChange,
+  focusMode,
+  showViewTabs = true,
+}: {
+  title: string;
+  accent: string;
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
+  isCustomizing: boolean;
+  onBack: () => void;
+  onOpenAppearance: () => void;
+  onCustomize: () => void;
+  onExitCustomize: () => void;
+  onResetCustomize: () => void;
+  sectionViewMode: 'work-surface' | 'free-space';
+  onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
+  focusMode: FocusMode | null;
+  showViewTabs?: boolean;
+}) {
+  return (
+    <header
+      style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: WORKSPACE_CHROME_Z,
+        flexShrink: 0,
+        isolation: 'isolate',
+        pointerEvents: 'auto', // chrome wins hit-testing over lower z-index overlays
+      }}
+    >
+      <SpaceNav
+        title={title}
+        accent={accent}
+        tokens={tokens}
+        isCustomizing={isCustomizing}
+        onBack={onBack}
+        onOpenAppearance={onOpenAppearance}
+        onCustomize={onCustomize}
+        onExitCustomize={onExitCustomize}
+        onResetCustomize={onResetCustomize}
+      />
+      {showViewTabs && (
+        <WorkspaceViewModeBar
+          tokens={tokens}
+          sectionViewMode={sectionViewMode}
+          onViewModeChange={onViewModeChange}
+          focusMode={focusMode}
+        />
+      )}
+    </header>
   );
 }
 
@@ -1097,35 +1311,49 @@ export function SectionPage() {
 
   const dismissSectionTransientUi = useCallback(() => {
     pendingCompanionComposerRef.current = false;
+    aiRunRef.current?.abort();
+    aiRunRef.current = null;
     setShowSpaceAdd(false);
     setCompanionComposerOpen(false);
     setQuickCaptureOpen(false);
     setQuickCaptureVariant('note');
     setMistakeReviewOpen(false);
+    setMistakeReviewQueue([]);
+    setMistakeReviewIndex(0);
     setResumeVisible(false);
     setAppearanceOpen(false);
     setDesignMode(false);
     setShowCustomize(false);
+    setAiAssistResult(null);
+    setStarterHints(null);
+    setSpaceEditingId(null);
+    setConnectHoverId(null);
     setFocusMode(null);
     cancelConnectMode();
+    navDebugLog('workspace-transient-ui-dismissed');
   }, [cancelConnectMode, setFocusMode]);
 
   const handleWorkspaceBack = useCallback(() => {
-    navDebugLog('workspace-back', { sectionId });
-    dismissSectionTransientUi();
-    dismissTransientUi();
+    const pathBefore = window.location.pathname;
+    navDebugLog('workspace-back-click', { sectionId, pathBefore });
     pulsePerformancePressure('route');
-    try {
-      navigate('/dashboard', { replace: false });
-    } catch {
-      window.location.assign('/dashboard');
-      return;
-    }
-    window.setTimeout(() => {
-      if (window.location.pathname.startsWith('/section/')) {
-        window.location.assign('/dashboard');
+    // Always route to Library — never history.back() or conditional destinations.
+    navigate('/dashboard', { replace: false });
+    queueMicrotask(() => {
+      try {
+        dismissSectionTransientUi();
+      } catch {
+        /* navigation must not depend on cleanup */
       }
-    }, 150);
+      try {
+        dismissTransientUi();
+      } catch {
+        /* navigation must not depend on cleanup */
+      }
+    });
+    if (import.meta.env.DEV) {
+      queueMicrotask(() => navDebugRouteCheck(pathBefore, window.location.pathname));
+    }
   }, [dismissSectionTransientUi, dismissTransientUi, navigate, sectionId]);
 
   const completeFreeSpaceConnect = useCallback(
@@ -1573,13 +1801,7 @@ export function SectionPage() {
           backgroundColor: tokens.pageBg,
         }}
       >
-        <WorkspaceBackControl
-          onBack={handleWorkspaceBack}
-          color={tokens.textMuted}
-          hoverColor={tokens.textPrimary}
-          wellBg={tokens.wellBg}
-        />
-        <SpaceNav
+        <WorkspaceSectionChrome
           title="Workspace"
           accent={tokens.accent}
           tokens={tokens}
@@ -1589,36 +1811,10 @@ export function SectionPage() {
           onCustomize={() => {}}
           onExitCustomize={() => {}}
           onResetCustomize={() => {}}
+          sectionViewMode="work-surface"
+          onViewModeChange={() => {}}
+          focusMode={null}
         />
-        <div
-          style={{
-            height: '40px',
-            borderBottom: `1px solid ${tokens.divider}`,
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 20px',
-            backgroundColor: tokens.navBg,
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              display: 'inline-flex',
-              borderRadius: '8px',
-              border: `1px solid ${tokens.cardBorder}`,
-              padding: '2px',
-              gap: '2px',
-              backgroundColor: `${tokens.wellBg}f2`,
-            }}
-          >
-            <span style={{ fontSize: '11px', fontWeight: 700, padding: '5px 10px', color: tokens.textGhost }}>
-              Work Surface
-            </span>
-            <span style={{ fontSize: '11px', fontWeight: 700, padding: '5px 10px', color: tokens.textGhost }}>
-              Free Space
-            </span>
-          </div>
-        </div>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.textMuted }} />
         </div>
@@ -1730,6 +1926,21 @@ export function SectionPage() {
       }}
     >
 
+      <WorkspaceSectionChrome
+        title={section.title}
+        accent={accentColor}
+        tokens={tokens}
+        isCustomizing={designMode}
+        onBack={handleWorkspaceBack}
+        onOpenAppearance={() => setAppearanceOpen(true)}
+        onCustomize={enterDesignMode}
+        onExitCustomize={exitDesignMode}
+        onResetCustomize={resetDesign}
+        sectionViewMode={sectionViewMode}
+        onViewModeChange={setSectionViewMode}
+        focusMode={focusMode}
+      />
+
       <QuickCaptureOverlay
         open={quickCaptureOpen}
         tokens={tokens}
@@ -1773,91 +1984,6 @@ export function SectionPage() {
         onUpdateGlobal={updateGlobal}
       />
 
-      <WorkspaceBackControl
-        onBack={handleWorkspaceBack}
-        color={tokens.textMuted}
-        hoverColor={tokens.textPrimary}
-        wellBg={tokens.wellBg}
-      />
-
-      {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
-      <SpaceNav
-        title={section.title}
-        accent={accentColor}
-        tokens={tokens}
-        isCustomizing={designMode}
-        onBack={handleWorkspaceBack}
-        onOpenAppearance={() => setAppearanceOpen(true)}
-        onCustomize={enterDesignMode}
-        onExitCustomize={exitDesignMode}
-        onResetCustomize={resetDesign}
-      />
-
-      <div
-        style={{
-          height: '40px',
-          borderBottom: `1px solid ${tokens.divider}`,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 20px',
-          backgroundColor: tokens.navBg,
-          position: 'relative',
-        }}
-      >
-        {focusMode ? (
-          <div
-            title="Reduce distraction while keeping nearby context visible."
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              fontSize: '10px',
-              fontWeight: 600,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: tokens.textSecondary,
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Focus · {FOCUS_MODE_BADGE[focusMode]}
-          </div>
-        ) : null}
-        <div
-          style={{
-            display: 'inline-flex',
-            borderRadius: '8px',
-            border: `1px solid ${tokens.cardBorder}`,
-            padding: '2px',
-            gap: '2px',
-            backgroundColor: `${tokens.wellBg}f2`,
-          }}
-        >
-          {([
-            { id: 'work-surface', label: 'Work Surface' },
-            { id: 'free-space', label: 'Free Space' },
-          ] as const).map(opt => (
-            <button
-              key={opt.id}
-              onClick={() => setSectionViewMode(opt.id)}
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                letterSpacing: '0.03em',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '5px 10px',
-                cursor: 'pointer',
-                backgroundColor: sectionViewMode === opt.id ? tokens.accent : 'transparent',
-                color: sectionViewMode === opt.id ? '#000' : tokens.textSecondary,
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* ── VIEW SURFACES (mounted; visibility switch — preserves iframes/PDF) ── */}
       <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate' }}>
