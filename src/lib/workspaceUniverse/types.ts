@@ -15,6 +15,8 @@ export interface WorkspaceNavigationState {
   parentSectionId?: string;
   /** Active subspace within a project (future UI). */
   subspaceId?: string;
+  /** First workspace: open Free Space with a calm arrival scene. */
+  firstArrival?: boolean;
 }
 
 export interface UniversePortalRecord {

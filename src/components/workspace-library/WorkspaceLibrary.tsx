@@ -29,6 +29,8 @@ import { useWorkspaceFolders } from '../../hooks/useWorkspaceFolders';
 import { useRecentWorkspaces } from '../../hooks/useRecentWorkspaces';
 import { getWorkspaceCustomization } from '../../hooks/useWorkspaceCustomization';
 import { UNIVERSE_ROUTE } from '../../lib/workspaceUniverse/types';
+import type { WorkspaceNavigationState } from '../../lib/workspaceUniverse/types';
+import { isAdvancedLibraryNavUnlocked, isFirstWorkspaceEntryPending } from '../../lib/firstSessionPrefs';
 import { runLibraryStartupHealth } from '../../lib/persistenceHealth';
 import { loadSession } from '../../utils/sessionPlan';
 import type { SectionWithProgress } from '../../types';
@@ -272,6 +274,7 @@ export function WorkspaceLibrary() {
   const activeSession = loadSession();
   const sectionIdSet = useMemo(() => new Set(sections.map(s => s.id)), [sections]);
   const hasWorkspaces = sections.length > 0;
+  const showAdvancedNav = hasWorkspaces && isAdvancedLibraryNavUnlocked();
   const libraryReady = !loading && !error;
 
   useEffect(() => {
@@ -387,7 +390,10 @@ export function WorkspaceLibrary() {
       });
       setNewTitle('');
       setShowNew(false);
-      navigate(`/section/${created.id}`);
+      const navState: WorkspaceNavigationState | undefined = isFirstWorkspaceEntryPending()
+        ? { firstArrival: true }
+        : undefined;
+      navigate(`/section/${created.id}`, navState ? { state: navState } : undefined);
     } catch {
       toast.error('Could not create workspace');
     } finally {
@@ -481,7 +487,7 @@ export function WorkspaceLibrary() {
               style={{ color: tokens.textSecondary, backgroundColor: appearanceOpen ? tokens.accentSubtle : 'transparent' }}
             >
               <Palette className="w-4 h-4" strokeWidth={2} style={{ color: tokens.accent }} />
-              Appearance
+              Scene
             </button>
           ) : (
             <p className="px-3 py-2 mb-1 text-[10px] leading-relaxed" style={{ color: tokens.textGhost }}>
@@ -495,34 +501,38 @@ export function WorkspaceLibrary() {
             label="Library"
             to="/dashboard"
           />
-          <LibraryNavLink
-            tokens={tokens}
-            active={location.pathname === UNIVERSE_ROUTE}
-            icon={<Sparkles className="w-4 h-4" strokeWidth={2} />}
-            label="Universe"
-            to={UNIVERSE_ROUTE}
-          />
-          <LibraryNavLink
-            tokens={tokens}
-            active={location.pathname === '/desk'}
-            icon={<LayoutDashboard className="w-4 h-4" strokeWidth={2} />}
-            label="Personal desk"
-            to="/desk"
-          />
-          <LibraryNavLink
-            tokens={tokens}
-            active={location.pathname === '/schedule'}
-            icon={<Calendar className="w-4 h-4" strokeWidth={2} />}
-            label="Schedule"
-            to="/schedule"
-          />
-          <LibraryNavLink
-            tokens={tokens}
-            active={location.pathname === '/session'}
-            icon={<Play className="w-4 h-4" strokeWidth={2} />}
-            label="Focus session"
-            to="/session"
-          />
+          {showAdvancedNav && (
+            <>
+              <LibraryNavLink
+                tokens={tokens}
+                active={location.pathname === UNIVERSE_ROUTE}
+                icon={<Sparkles className="w-4 h-4" strokeWidth={2} />}
+                label="Universe"
+                to={UNIVERSE_ROUTE}
+              />
+              <LibraryNavLink
+                tokens={tokens}
+                active={location.pathname === '/desk'}
+                icon={<LayoutDashboard className="w-4 h-4" strokeWidth={2} />}
+                label="Personal desk"
+                to="/desk"
+              />
+              <LibraryNavLink
+                tokens={tokens}
+                active={location.pathname === '/schedule'}
+                icon={<Calendar className="w-4 h-4" strokeWidth={2} />}
+                label="Schedule"
+                to="/schedule"
+              />
+              <LibraryNavLink
+                tokens={tokens}
+                active={location.pathname === '/session'}
+                icon={<Play className="w-4 h-4" strokeWidth={2} />}
+                label="Focus session"
+                to="/session"
+              />
+            </>
+          )}
         </nav>
 
         <div className="p-3 mt-auto" style={{ borderTop: `1px solid ${tokens.cardBorder}` }}>

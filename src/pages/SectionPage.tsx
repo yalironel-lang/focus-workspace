@@ -10,6 +10,11 @@ import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceSta
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
+import { WorkspaceStarterDock } from '../components/workspace-starter/WorkspaceStarterDock';
+import {
+  markFirstWorkspaceEntryDone,
+  unlockAdvancedLibraryNav,
+} from '../lib/firstSessionPrefs';
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
@@ -350,14 +355,21 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
           <>
             <button
               type="button"
-              aria-label="Appearance"
-              title="Appearance"
+              aria-label="Scene — living background"
+              title="Scene — living background"
               onClick={onOpenAppearance}
-              style={{ ...NAV_BTN_BASE, color: tokens.textMuted }}
+              style={{
+                ...NAV_BTN_BASE,
+                color: tokens.textMuted,
+                gap: 6,
+                padding: '0 12px',
+                minWidth: 'auto',
+              }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
             >
-              <Palette className="w-4 h-4" style={{ color: tokens.accent }} />
+              <Palette className="w-4 h-4 shrink-0" style={{ color: tokens.accent }} />
+              <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.02em' }}>Scene</span>
             </button>
             <button
               type="button"
@@ -797,9 +809,10 @@ export function SectionPage() {
   const [addingLane,      setAddingLane]       = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
-  const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() =>
-    sectionId ? loadSectionViewMode(sectionId) : 'work-surface',
-  );
+  const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() => {
+    if (navState?.firstArrival) return 'free-space';
+    return sectionId ? loadSectionViewMode(sectionId) : 'work-surface';
+  });
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space') => {
       pulsePerformancePressure('view-switch');
@@ -820,6 +833,11 @@ export function SectionPage() {
   const [mistakeReviewOpen, setMistakeReviewOpen] = useState(false);
   const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
   const [starterDismissed, setStarterDismissed] = useState(false);
+  const [starterExpanded, setStarterExpanded] = useState(false);
+  const [starterDockVisible, setStarterDockVisible] = useState(false);
+  const [starterRevealReady, setStarterRevealReady] = useState(false);
+  const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
+  const firstArrivalHandledRef = useRef(false);
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
@@ -1702,7 +1720,7 @@ export function SectionPage() {
   }, [sectionId]);
 
   const applyWorkspaceStarter = useCallback(
-    (starterId: WorkspaceStarterId) => {
+    (starterId: WorkspaceStarterId, opts?: { silent?: boolean; skipToast?: boolean }) => {
       const pack = buildWorkspaceStarterPack(starterId);
       let positions = { ...pack.positions };
       if (sectionObjects.objects.length > 0) {
@@ -1721,11 +1739,17 @@ export function SectionPage() {
       }
       sectionObjects.appendObjects(pack.objects);
       sectionPositions.applyPositions(positions);
-      setFocusMode(pack.focusSuggestion);
-      setStarterHints(pack.hints);
+      if (!opts?.silent) {
+        setFocusMode(pack.focusSuggestion);
+        setStarterHints(pack.hints);
+      }
       setSectionViewMode('free-space');
       setSpaceSelectedId(pack.objects[0]?.id ?? null);
-      toast.success(`${WORKSPACE_STARTER_LABEL[starterId]} desk ready`);
+      setStarterExpanded(false);
+      setStarterDockVisible(false);
+      if (!opts?.skipToast) {
+        toast.success(`${WORKSPACE_STARTER_LABEL[starterId]} desk ready`);
+      }
     },
     [
       sectionObjects.appendObjects,
@@ -1736,6 +1760,89 @@ export function SectionPage() {
       setFocusMode,
     ],
   );
+
+  const frameArrivalScene = useCallback(() => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
+    sectionCanvas.centerView(1520, 780, vw, vh);
+  }, [sectionCanvas]);
+
+  useEffect(() => {
+    firstArrivalHandledRef.current = false;
+    setStarterExpanded(false);
+    setStarterDockVisible(false);
+    setStarterRevealReady(false);
+  }, [sectionId]);
+
+  useEffect(() => {
+    if (!navState?.firstArrival || !section || !sectionId || firstArrivalHandledRef.current) return;
+    if (loading) return;
+    firstArrivalHandledRef.current = true;
+
+    setSectionViewMode('free-space');
+    saveSectionViewMode(sectionId, 'free-space');
+
+    if (sectionObjects.objects.length === 0) {
+      applyWorkspaceStarter('research-thinking', { silent: true, skipToast: true });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => frameArrivalScene());
+      });
+    }
+
+    markFirstWorkspaceEntryDone();
+    unlockAdvancedLibraryNav();
+    navigate(location.pathname, {
+      replace: true,
+      state: { ...navState, firstArrival: false },
+    });
+
+    const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
+    return () => window.clearTimeout(quietTimer);
+  }, [
+    applyWorkspaceStarter,
+    frameArrivalScene,
+    loading,
+    location.pathname,
+    navigate,
+    navState,
+    section,
+    sectionId,
+    sectionObjects.objects.length,
+  ]);
+
+  useEffect(() => {
+    if (sectionViewMode !== 'free-space' || sectionObjects.objects.length > 0 || starterDismissed) {
+      return;
+    }
+    if (navState?.firstArrival) return;
+
+    const revealTimer = window.setTimeout(() => setStarterRevealReady(true), 14_000);
+    return () => window.clearTimeout(revealTimer);
+  }, [navState?.firstArrival, sectionObjects.objects.length, sectionViewMode, starterDismissed]);
+
+  useEffect(() => {
+    if (!starterRevealReady || starterDismissed || sectionObjects.objects.length > 0) return;
+    setStarterDockVisible(true);
+  }, [starterRevealReady, starterDismissed, sectionObjects.objects.length]);
+
+  useEffect(() => {
+    if (sectionObjects.objects.length > 0 || starterDismissed || navState?.firstArrival) return;
+    const moved =
+      Math.abs(sectionCanvas.panX - 40) > 28 ||
+      Math.abs(sectionCanvas.panY - 40) > 28 ||
+      Math.abs(sectionCanvas.zoom - 1) > 0.04;
+    if (moved) {
+      setStarterRevealReady(true);
+      setStarterDockVisible(true);
+    }
+  }, [
+    navState?.firstArrival,
+    sectionCanvas.panX,
+    sectionCanvas.panY,
+    sectionCanvas.zoom,
+    sectionObjects.objects.length,
+    starterDismissed,
+  ]);
 
   useEffect(() => {
     if (!id) {
@@ -2029,7 +2136,15 @@ export function SectionPage() {
   const showWorkspaceStarter =
     sectionViewMode === 'free-space' &&
     sectionObjects.objects.length === 0 &&
-    !starterDismissed;
+    !starterDismissed &&
+    starterExpanded;
+
+  const showStarterDock =
+    sectionViewMode === 'free-space' &&
+    sectionObjects.objects.length === 0 &&
+    !starterDismissed &&
+    !starterExpanded &&
+    starterDockVisible;
 
   const progressColor = allDone || progress >= 70 ? '#10b981'
                       : progress >= 30             ? '#f59e0b'
@@ -2189,7 +2304,7 @@ export function SectionPage() {
               onSuggestionClick={applyWorkspaceResumeSuggestion}
             />
           )}
-          {!showWorkspaceStarter && !resumeVisible && (
+          {!showWorkspaceStarter && !showStarterDock && !resumeVisible && (
             <WorkspaceGuidanceBar
               sectionId={sectionId}
               tokens={tokens}
@@ -2199,7 +2314,7 @@ export function SectionPage() {
               priorityHints={starterHints}
               onClearPriorityHints={clearStarterHints}
               lastArrangeAt={lastArrangeAt}
-              chromeQuiet={!!spaceEditingId}
+              chromeQuiet={firstSessionQuiet || !!spaceEditingId}
             />
           )}
           <FreeSpaceArrangeControl
@@ -2262,13 +2377,24 @@ export function SectionPage() {
             />
           </FreeSpaceCanvasErrorBoundary>
 
+          {showStarterDock && (
+            <WorkspaceStarterDock
+              tokens={tokens}
+              onExpand={() => setStarterExpanded(true)}
+              onDismiss={dismissWorkspaceStarterOverlay}
+            />
+          )}
+
           {showWorkspaceStarter && (
             <WorkspaceStarterOverlay
               tokens={tokens}
               onChoose={sid => {
                 applyWorkspaceStarter(sid);
               }}
-              onDismiss={dismissWorkspaceStarterOverlay}
+              onDismiss={() => {
+                setStarterExpanded(false);
+                dismissWorkspaceStarterOverlay();
+              }}
             />
           )}
 
