@@ -5,6 +5,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlob } from '../../lib/freeSpacePdfIdb';
+import { flickerDebugLog } from '../../lib/flickerDebug';
 
 interface FreeSpacePdfCardProps {
   objectId: string;
@@ -129,6 +130,10 @@ export function FreeSpacePdfCard({
     objectUrl && loadState === 'ready'
       ? `${objectUrl}#page=${Math.max(1, displayPage)}&toolbar=0&navpanes=0`
       : '';
+
+  useEffect(() => {
+    if (iframeSrc) flickerDebugLog('pdf-iframe-src', `${objectId} p${displayPage}`);
+  }, [iframeSrc, objectId, displayPage]);
 
   const bumpPage = (delta: number) => {
     onChange({
@@ -299,6 +304,7 @@ export function FreeSpacePdfCard({
         )}
 
         {iframeSrc && (
+          <div style={{ flex: 1, minHeight: 0, contain: 'layout paint', isolation: 'isolate' }}>
           <iframe
             title={content.fileName || 'PDF'}
             src={iframeSrc}
@@ -320,6 +326,7 @@ export function FreeSpacePdfCard({
               setLoadState('error');
             }}
           />
+          </div>
         )}
       </div>
     </div>

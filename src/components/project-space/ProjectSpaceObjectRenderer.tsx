@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useEffect } from 'react';
+import { flickerDebugCount } from '../../lib/flickerDebug';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   ensureProjectObjectContent,
@@ -46,6 +47,10 @@ function ProjectSpaceObjectRendererInner({
   onRequestSelectObject,
   onCreateNotebookRecall,
 }: Props) {
+  useEffect(() => {
+    flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
+  }, [object.id]);
+
   const content = ensureProjectObjectContent(object.type, object.content);
 
   switch (content.type) {

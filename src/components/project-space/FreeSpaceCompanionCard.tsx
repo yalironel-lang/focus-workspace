@@ -378,7 +378,10 @@ export function FreeSpaceCompanionCard({
       </div>
 
       {shouldProbe && (embedState === 'probing' || embedState === 'embedded') ? (
-        <div className="relative min-h-0 flex-1" style={{ backgroundColor: tokens.wellBg }}>
+        <div
+          className="relative min-h-0 flex-1"
+          style={{ backgroundColor: tokens.wellBg, contain: 'layout paint', isolation: 'isolate' }}
+        >
           <iframe
             title={content.title}
             src={content.url}
@@ -387,8 +390,7 @@ export function FreeSpaceCompanionCard({
             referrerPolicy="strict-origin-when-cross-origin"
             allow="fullscreen; picture-in-picture"
             style={{
-              opacity: embedState === 'embedded' ? 1 : 0.02,
-              transition: 'opacity 0.22s ease',
+              visibility: embedState === 'embedded' ? 'visible' : 'hidden',
               backgroundColor: tokens.wellBg,
             }}
             onLoad={() => setEmbedState('embedded')}

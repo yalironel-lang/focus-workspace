@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { SectionWithProgress, SectionDetail, GroupWithItems, Item } from '../types';
 import { useAuth } from './useAuth';
+import { pulsePerformancePressure } from '../lib/performanceSafeMode';
 
 const DEFAULT_GROUPS = ['Slides', 'Exercises', 'Exams', 'Notes', 'Links'];
 
@@ -134,6 +135,7 @@ export function useSectionDetail(sectionId: string | undefined) {
     setSection(null);
     sectionRef.current = null;
     setLoading(!!user && !!sectionId);
+    pulsePerformancePressure('section-navigate');
   }, [user, sectionId]);
 
   const fetchSection = useCallback(async () => {

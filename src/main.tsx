@@ -2,6 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
+import { logAppBuildInfo } from './lib/appBuildInfo'
+import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
+
+logAppBuildInfo()
+initPerformanceSafeModeListeners()
 
 // ── Service Worker update lifecycle ──────────────────────────────────────────
 //
@@ -33,13 +38,27 @@ if ('serviceWorker' in navigator) {
     // In-memory flag prevents the same page instance from reloading twice.
     // Cleared automatically on reload (new page instance, flag = false).
     if ((window as Window & { __swRefreshing?: boolean }).__swRefreshing) return
-    ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true
 
-    if (import.meta.env.DEV) {
-      console.info('[SW] Controller changed — reloading to pick up new assets')
+    const reload = () => {
+      ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true
+      if (import.meta.env.DEV) {
+        console.info('[SW] Controller changed — reloading to pick up new assets')
+      }
+      window.location.reload()
     }
 
-    window.location.reload()
+    // Defer reload until idle to avoid a visible flash mid-interaction (common in installed PWA).
+    const schedule = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => {
+          window.setTimeout(reload, 320);
+        }, { timeout: 4000 });
+      } else {
+        window.setTimeout(reload, 800);
+      }
+    };
+    if (document.visibilityState === 'visible') schedule()
+    else document.addEventListener('visibilitychange', () => schedule(), { once: true })
   })
 
   // ── Dev-only diagnostics ──────────────────────────────────────────────────

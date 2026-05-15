@@ -10,6 +10,7 @@ import type { FreeSpaceCommandHandlers } from './types';
 import type { AIWorkspaceHandlers } from './aiWorkspaceHandlersRef';
 import type { FocusMode } from '../focusMode/focusModeTypes';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
+import { pulsePerformancePressure } from '../lib/performanceSafeMode';
 
 const freeHandlersRef = { current: null as FreeSpaceCommandHandlers | null };
 const aiWorkspaceRef = { current: null as AIWorkspaceHandlers | null };
@@ -151,6 +152,8 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     setPaletteOpen(false);
     setSessionModalOpen(false);
     setIntelligenceModalOpen(false);
+    setArrivalExperienceOpen(false);
+    pulsePerformancePressure('route');
   }, [location.pathname]);
 
   const value = useMemo(

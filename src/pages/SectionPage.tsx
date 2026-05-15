@@ -15,6 +15,9 @@ import { WorkspaceResumeLayer } from '../components/workspace-guidance/Workspace
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
+import { surfaceShellStyle } from '../lib/surfaceShellStyle';
+import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
+import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
@@ -457,6 +460,8 @@ export function SectionPage() {
   );
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space') => {
+      pulsePerformancePressure('view-switch');
+      flickerDebugLog('view-mode', mode);
       setSectionViewModeState(mode);
       if (sectionId) saveSectionViewMode(sectionId, mode);
     },
@@ -486,6 +491,15 @@ export function SectionPage() {
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
   const designSnapshot = useRef<WorkspaceCustomization | null>(null);
+
+  const performanceCalm = usePerformanceCalm();
+  const freeSpaceSurfaceVisible = sectionViewMode === 'free-space';
+  const workSurfaceVisible = sectionViewMode !== 'free-space' && !designMode;
+  const designSurfaceVisible = sectionViewMode !== 'free-space' && designMode;
+
+  useEffect(() => {
+    flickerDebugCount('SectionPage');
+  }, [id]);
 
   // Drag-and-drop for lane reorder (HTML5 drag API)
   const [dragId,     setDragId]     = useState<string | null>(null);
@@ -1760,8 +1774,9 @@ export function SectionPage() {
         </div>
       </div>
 
-      {/* ── CUSTOMIZE MODE ───────────────────────────────────────────────── */}
-      {sectionViewMode === 'free-space' ? (
+      {/* ── VIEW SURFACES (mounted; visibility switch — preserves iframes/PDF) ── */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate' }}>
+      <div style={surfaceShellStyle(freeSpaceSurfaceVisible)}>
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {!showWorkspaceStarter && !resumeVisible && (
             <WorkspaceGuidanceBar
@@ -1823,7 +1838,9 @@ export function SectionPage() {
               onCancelConnectMode={cancelConnectMode}
               spatialMinimapEnabled
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
-              focusMode={sectionViewMode === 'free-space' ? focusMode : null}
+              focusMode={freeSpaceSurfaceVisible ? focusMode : null}
+              surfaceActive={freeSpaceSurfaceVisible}
+              calmEffects={performanceCalm}
               continuityObjectIds={workspaceContinuity.continuityObjectIds}
               continuityClusterIds={workspaceContinuity.continuityClusterIds}
               continuityEdgeKeys={workspaceContinuity.continuityEdgeKeys}
@@ -1896,8 +1913,9 @@ export function SectionPage() {
             </div>
           )}
         </div>
-      ) : designMode ? (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+      </div>
+      <div style={surfaceShellStyle(designSurfaceVisible)}>
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           <div style={{ maxWidth: '896px', margin: '0 auto', padding: '24px 24px 64px' }}>
 
             <DesignModeBar
@@ -1994,11 +2012,9 @@ export function SectionPage() {
             </div>
           </div>
         </div>
-
-      ) : (
-
-        /* ── SPATIAL ENVIRONMENT ─────────────────────────────────────────── */
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0 }}>
+      </div>
+      <div style={surfaceShellStyle(workSurfaceVisible)}>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%' }}>
 
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
           <aside
@@ -2223,7 +2239,8 @@ export function SectionPage() {
             </div>
           </main>
         </div>
-      )}
+      </div>
+      </div>
 
       {aiAssistResult && (
         <AIAssistanceResultModal

@@ -85,6 +85,8 @@ import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
 import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
 import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
+import { flickerDebugCount } from '../../lib/flickerDebug';
+import { setPerformancePressure } from '../../lib/performanceSafeMode';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -175,6 +177,10 @@ interface Props {
   continuityClusterIds?: string[];
   /** Workspace continuity: recently viewed paths stay a little brighter. */
   continuityEdgeKeys?: string[];
+  /** False when Free Space is hidden (other view mounted) — pauses heavy ambient layers. */
+  surfaceActive?: boolean;
+  /** Global calm rendering (navigation, drag, low memory, hidden tab). */
+  calmEffects?: boolean;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -360,11 +366,23 @@ export function FreeformCanvas({
   continuityObjectIds = [],
   continuityClusterIds = [],
   continuityEdgeKeys = [],
+  surfaceActive = true,
+  calmEffects = false,
 }: Props) {
+  useEffect(() => {
+    flickerDebugCount('FreeformCanvas');
+  }, []);
+
+  const reduceEffects = calmEffects || !surfaceActive;
   const viewportRef  = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
   const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
+
+  useEffect(() => {
+    setPerformancePressure('canvas-drag', draggingId !== null);
+    return () => setPerformancePressure('canvas-drag', false);
+  }, [draggingId]);
   /** Distinct chrome for move vs resize without reading drag refs during pan. */
   const [activeDragKind, setActiveDragKind] = useState<'move' | 'resize' | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -1158,10 +1176,12 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
-        {spatialAmbient && tokens ? (
+        {spatialAmbient && tokens && surfaceActive ? (
           <FreeSpaceSpatialAmbient
             tokens={tokens}
-            opacityScale={focusMode && spatialAmbient ? focusAtm.spatialAmbientOpacity : 1}
+            opacityScale={
+              reduceEffects ? 0.22 : focusMode && spatialAmbient ? focusAtm.spatialAmbientOpacity : 1
+            }
           />
         ) : null}
 
@@ -1738,7 +1758,7 @@ export function FreeformCanvas({
               : focusMode && spatialAmbient
                 ? `radial-gradient(ellipse at 50% 42%, transparent ${focusAtm.vignetteInnerPct}%, ${tokens.pageBg}${focusAtm.vignetteEdgeAlpha} 100%)`
                 : `radial-gradient(ellipse at 50% 42%, transparent 46%, ${tokens.pageBg}72 100%)`,
-          transition: 'background 1.8s cubic-bezier(0.4,0,0.2,1)',
+          transition: reduceEffects ? 'none' : 'background 1.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
       {/* Layer 2: edge continuation — linear gradients on all four sides */}
@@ -1755,9 +1775,11 @@ export function FreeformCanvas({
             : focusMode && spatialAmbient
               ? focusAtm.edgeFadeOpacity
               : 0.74,
-          transition: focusMode && spatialAmbient
-            ? `opacity ${focusAtm.transition}`
-            : 'opacity 0.6s ease',
+          transition: reduceEffects
+            ? 'none'
+            : focusMode && spatialAmbient
+              ? `opacity ${focusAtm.transition}`
+              : 'opacity 0.6s ease',
           background: `
             linear-gradient(180deg, ${tokens.pageBg}18 0%, transparent 6%, transparent 94%, ${tokens.pageBg}18 100%),
             linear-gradient(90deg,  ${tokens.pageBg}14 0%, transparent 5%, transparent 95%, ${tokens.pageBg}14 100%)
