@@ -67,6 +67,10 @@ export interface GlobalTheme {
   grainAmount?:              number;
   vignetteStrength?:         number;
   activePreset:       string | null;
+  /** 0–1 living environment atmosphere strength */
+  environmentIntensity?: number;
+  /** Ambient environment motion (drift, breath, parallax) */
+  environmentMotion?: boolean;
 }
 
 export interface ModuleTheme {
@@ -277,6 +281,8 @@ export const DEFAULT_THEME: GlobalTheme = {
   constellationVisibility: 0,
   constellationStyle: 'minimal',
   activePreset:     'warm-studio',
+  environmentIntensity: 0.72,
+  environmentMotion:    true,
 };
 
 const GLOBAL_KEY  = 'fw_workspace_theme_v1';

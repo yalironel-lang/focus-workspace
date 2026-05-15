@@ -10,6 +10,8 @@ interface Props {
   tokens: AtmosphereTokens | null | undefined;
   /** Focus Mode: scales overall ambient presence (1 = default). */
   opacityScale?: number;
+  /** Pause ultra-slow drift when the user is focused on a cluster. */
+  pauseDrift?: boolean;
 }
 
 /** Deterministic pseudo-random 0..1 from index (stable layout). */
@@ -18,7 +20,7 @@ function hash01(i: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
+export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1, pauseDrift = false }: Props) {
   const rid = useId().replace(/:/g, '');
   const idCore = `fwAmbientCore-${rid}`;
   const idSide = `fwAmbientSide-${rid}`;
@@ -84,15 +86,15 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
         height: 3800,
         pointerEvents: 'none',
         zIndex: 0,
-        opacity: Math.max(0.34, Math.min(1.2, opacityScale)),
-        transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
-        animation: 'fwSpatialDrift 140s linear infinite alternate',
+        opacity: Math.max(0.28, Math.min(1.05, opacityScale * 0.92)),
+        transition: 'opacity 0.55s cubic-bezier(0.4, 0, 0.2, 1)',
+        animation: pauseDrift ? 'none' : 'fwSpatialDrift 220s ease-in-out infinite alternate',
       }}
     >
       <style>{`
         @keyframes fwSpatialDrift {
           from { transform: translate(0, 0); }
-          to { transform: translate(-10px, -6px); }
+          to { transform: translate(-6px, -4px); }
         }
       `}</style>
       <svg width="100%" height="100%" viewBox="0 0 4800 3800" preserveAspectRatio="xMidYMid slice">

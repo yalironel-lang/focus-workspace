@@ -308,8 +308,8 @@
 
   /* ── Freeform canvas empty state breath ── */
   @keyframes canvasBreath {
-    0%, 100% { opacity: 0.04; transform: translate(-50%, -50%) scale(1);    }
-    50%       { opacity: 0.09; transform: translate(-50%, -50%) scale(1.15); }
+    0%, 100% { opacity: 0.03; transform: translate(-50%, -50%) scale(1);    }
+    50%       { opacity: 0.06; transform: translate(-50%, -50%) scale(1.06); }
   }
 
   @keyframes fwCosmicTwinkle {
@@ -320,6 +320,84 @@
     animation-name: fwCosmicTwinkle;
     animation-timing-function: ease-in-out;
     animation-iteration-count: infinite;
+  }
+
+  @keyframes fwOceanCaustics {
+    0%, 100% { transform: translate3d(-0.8%, 0, 0); opacity: 0.88; }
+    50% { transform: translate3d(1.2%, 0.6%, 0); opacity: 1; }
+  }
+  .fw-ocean-caustics {
+    animation: fwOceanCaustics 36s ease-in-out infinite;
+  }
+
+  @keyframes fwForestMist {
+    0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.78; }
+    50% { transform: translate3d(16px, -6px, 0); opacity: 0.95; }
+  }
+  .fw-forest-mist {
+    animation: fwForestMist 48s ease-in-out infinite;
+  }
+
+  @keyframes fwForestLightShaft {
+    0%, 100% { opacity: 0.85; }
+    50% { opacity: 1; }
+  }
+  .fw-forest-light-shaft {
+    animation: fwForestLightShaft 42s ease-in-out infinite;
+  }
+
+  @keyframes fwDinoBreathe {
+    0%, 100% { transform: translate3d(0, 0, 0); }
+    50% { transform: translate3d(0, -2px, 0); }
+  }
+  .fw-dino-breathe {
+    animation: fwDinoBreathe 16s ease-in-out infinite;
+    transform-origin: 72% 88%;
+  }
+
+  @keyframes fwStudioDust {
+    0%, 100% { opacity: 0.88; }
+    50% { opacity: 1; }
+  }
+  .fw-studio-dust {
+    animation: fwStudioDust 38s ease-in-out infinite;
+  }
+
+  @keyframes fwEnvFog {
+    0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.78; }
+    50% { transform: translate3d(12px, -8px, 0); opacity: 0.95; }
+  }
+  .fw-env-fog {
+    animation: fwEnvFog 52s ease-in-out infinite;
+  }
+
+  @keyframes fwEnvLightShafts {
+    0%, 100% { opacity: 0.82; }
+    50% { opacity: 1; }
+  }
+  .fw-env-light-shafts {
+    animation: fwEnvLightShafts 44s ease-in-out infinite;
+  }
+
+  @keyframes fwCosmicNebulaDrift {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(1.5%, -0.8%, 0) scale(1.02); }
+  }
+  .fw-cosmic-nebula-drift {
+    animation: fwCosmicNebulaDrift 55s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fw-ocean-caustics,
+    .fw-forest-mist,
+    .fw-forest-light-shaft,
+    .fw-dino-breathe,
+    .fw-studio-dust,
+    .fw-cosmic-nebula-drift,
+    .fw-env-fog,
+    .fw-env-light-shafts {
+      animation: none !important;
+    }
   }
 
   /* ── Shimmer (loading skeleton) ── */

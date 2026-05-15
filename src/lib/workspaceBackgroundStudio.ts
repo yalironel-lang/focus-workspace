@@ -6,6 +6,10 @@ import { resolveCosmicBackdrop, type PresetCosmicProfile } from './cosmic/cosmic
 import { applyColorStudio, deriveCosmicSurfaceTokens } from './cosmic/cosmicColorStudio';
 import { enforceReadableTokens } from './cosmic/livingContrast';
 import { COSMIC_PROFILES, COSMIC_WORLD_PRESETS } from './cosmic/cosmicWorldPresets';
+import {
+  LIVING_WORLD_COSMIC_PROFILES,
+  LIVING_WORLD_PRESETS,
+} from './livingEnvironment/livingWorldPresets';
 import type { WorkspaceClarity } from './workspaceClarity';
 import { resolveWorkspaceClarity } from './workspaceClarity';
 
@@ -28,6 +32,10 @@ export type BackgroundPresetId =
   | 'milky-way'
   | 'deep-space'
   | 'zodiac-chamber'
+  | 'cosmic-drift'
+  | 'ocean-depths'
+  | 'ancient-forest'
+  | 'dinosaur-realm'
   | 'custom';
 
 export type SurfaceLuminance = 'dark' | 'mid' | 'light';
@@ -385,7 +393,13 @@ export const BACKGROUND_STUDIO_PRESETS: BackgroundPresetDefinition[] = [
 export const BACKGROUND_STUDIO_PRESETS_ALL: BackgroundPresetDefinition[] = [
   ...BACKGROUND_STUDIO_PRESETS,
   ...COSMIC_WORLD_PRESETS,
+  ...LIVING_WORLD_PRESETS,
 ];
+
+const MERGED_COSMIC_PROFILES: Record<string, PresetCosmicProfile> = {
+  ...COSMIC_PROFILES,
+  ...LIVING_WORLD_COSMIC_PROFILES,
+};
 
 const PRESET_BY_ID = Object.fromEntries(
   BACKGROUND_STUDIO_PRESETS_ALL.map(p => [p.id, p]),
@@ -484,7 +498,7 @@ export function backgroundPresetThemePatch(id: BackgroundPresetId): Partial<Glob
   const preset = PRESET_BY_ID[id];
   if (!preset) return { backgroundPreset: id };
   const d = preset.defaults;
-  const cosmic = COSMIC_PROFILES[id];
+  const cosmic = MERGED_COSMIC_PROFILES[id];
   const patch: Partial<GlobalTheme> = {
     backgroundPreset: id,
     activePreset: null,
@@ -657,7 +671,7 @@ export function resolveBackgroundStudio(
     clarity.gridMul,
   );
 
-  const cosmicProfile: PresetCosmicProfile | undefined = COSMIC_PROFILES[presetId];
+  const cosmicProfile: PresetCosmicProfile | undefined = MERGED_COSMIC_PROFILES[presetId];
   const cosmic = resolveCosmicBackdrop(
     global,
     defaults,

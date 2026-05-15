@@ -25,7 +25,8 @@ import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { useAtmosphere } from '../hooks/useAtmosphere';
-import { mergeAccent, resolveBackgroundStudio, useWorkspaceTheme } from '../hooks/useWorkspaceTheme';
+import { mergeAccent, useWorkspaceTheme } from '../hooks/useWorkspaceTheme';
+import { useLivingEnvironment } from '../hooks/useLivingEnvironment';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
@@ -176,6 +177,58 @@ const NAV_BTN_BASE: CSSProperties = {
   transition: 'color 0.15s ease, background-color 0.15s ease, transform 0.1s ease',
 };
 
+/** Stable workspace escape control — pill material, generous hit target, fast tactile feedback. */
+function workspaceBackPillStyle(
+  tokens: ReturnType<typeof useAtmosphere>['tokens'],
+  phase: 'idle' | 'hover' | 'pressed',
+): CSSProperties {
+  const idle = {
+    color: tokens.textSecondary,
+    backgroundColor: `${tokens.wellBg}f0`,
+    borderColor: tokens.cardBorder,
+    boxShadow: '0 1px 2px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.07)',
+    transform: 'translateY(0)',
+  };
+  const hover = {
+    color: tokens.textPrimary,
+    backgroundColor: tokens.wellBg,
+    borderColor: tokens.cardBorderHover,
+    boxShadow: '0 2px 6px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.09)',
+    transform: 'translateY(0)',
+  };
+  const pressed = {
+    color: tokens.textPrimary,
+    backgroundColor: `${tokens.wellBg}ee`,
+    borderColor: tokens.cardBorderHover,
+    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.22)',
+    transform: 'translateY(0.5px)',
+  };
+  const visual = phase === 'pressed' ? pressed : phase === 'hover' ? hover : idle;
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    flexShrink: 0,
+    position: 'relative',
+    zIndex: 2,
+    minWidth: 112,
+    minHeight: 44,
+    padding: '0 14px 0 12px',
+    margin: 0,
+    border: '1px solid',
+    borderRadius: 999,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    WebkitTapHighlightColor: 'transparent',
+    touchAction: 'manipulation',
+    pointerEvents: 'auto',
+    transition:
+      'color 0.1s ease, background-color 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease, transform 0.08s ease',
+    ...visual,
+  };
+}
+
 function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
@@ -187,55 +240,82 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearan
   onExitCustomize: () => void;
   onResetCustomize: () => void;
 }) {
+  const [backPhase, setBackPhase] = useState<'idle' | 'hover' | 'pressed'>('idle');
+
   return (
     <nav style={{
       height: '48px', backgroundColor: tokens.navBg,
       borderBottom: `1px solid ${tokens.divider}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 16px', flexShrink: 0,
+      padding: '0 18px 0 20px', flexShrink: 0,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          minWidth: 0,
+          flex: 1,
+          overflow: 'hidden',
+        }}
+      >
         <button
           type="button"
           onClick={onBack}
           aria-label="Back to Library"
           title="Back to Library"
+          style={workspaceBackPillStyle(tokens, backPhase)}
+          onMouseEnter={() => setBackPhase(p => (p === 'pressed' ? 'pressed' : 'hover'))}
+          onMouseLeave={() => setBackPhase('idle')}
+          onMouseDown={() => setBackPhase('pressed')}
+          onMouseUp={() => setBackPhase('hover')}
+          onPointerCancel={() => setBackPhase('idle')}
+          onBlur={() => setBackPhase('idle')}
+        >
+          <ArrowLeft className="w-4 h-4 shrink-0" strokeWidth={2.35} aria-hidden />
+          <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1 }}>
+            Library
+          </span>
+        </button>
+        <span
+          aria-hidden
           style={{
-            ...NAV_BTN_BASE,
-            gap: 6,
-            minWidth: 48,
-            minHeight: 48,
-            marginLeft: -8,
-            padding: '0 12px 0 8px',
-            color: tokens.textMuted,
+            width: '1px',
+            height: '18px',
+            backgroundColor: tokens.divider,
             flexShrink: 0,
+            opacity: 0.85,
           }}
-          onMouseEnter={e => {
-            const el = e.currentTarget as HTMLButtonElement;
-            el.style.color = tokens.textPrimary;
-            el.style.backgroundColor = tokens.wellBg;
-          }}
-          onMouseLeave={e => {
-            const el = e.currentTarget as HTMLButtonElement;
-            el.style.color = tokens.textMuted;
-            el.style.backgroundColor = 'transparent';
-            el.style.transform = 'scale(1)';
-          }}
-          onMouseDown={e => {
-            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.96)';
-          }}
-          onMouseUp={e => {
-            (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+        />
+        <span
+          style={{
+            fontSize: '12px',
+            fontWeight: 500,
+            color: tokens.textSecondary,
+            letterSpacing: '-0.01em',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+            flex: 1,
+            pointerEvents: 'none',
+            userSelect: 'none',
           }}
         >
-          <ArrowLeft className="w-4 h-4 shrink-0" strokeWidth={2.25} aria-hidden />
-          <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.01em' }}>Library</span>
-        </button>
-        <span style={{ width: '1px', height: '16px', backgroundColor: tokens.divider, flexShrink: 0 }} />
-        <span style={{ fontSize: '12px', fontWeight: 500, color: tokens.textSecondary, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {title}
         </span>
-        <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: accent, flexShrink: 0, opacity: 0.6 }} />
+        <span
+          aria-hidden
+          style={{
+            width: '4px',
+            height: '4px',
+            borderRadius: '50%',
+            backgroundColor: accent,
+            flexShrink: 0,
+            opacity: 0.55,
+            pointerEvents: 'none',
+          }}
+        />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
         {isCustomizing ? (
@@ -666,17 +746,6 @@ export function SectionPage() {
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { design, global, updateGlobal } = useWorkspaceTheme();
   const tokens = mergeAccent(atmTokens, design);
-  const backgroundStudio = useMemo(
-    () => resolveBackgroundStudio(global, mergeAccent(atmTokens, design)),
-    [global, atmTokens, design],
-  );
-  const freeSpaceTokens = useMemo(
-    () => mergeAccent(backgroundStudio.tokens, design),
-    [backgroundStudio.tokens, design],
-  );
-  const canvasBackgroundStyle = backgroundStudio.canvasStyle;
-  const cosmicBackdrop = backgroundStudio.cosmic;
-  const freeSpaceClarity = backgroundStudio.clarity;
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
   const sectionCanvas = useSectionCanvasMode(sectionId);
@@ -745,6 +814,55 @@ export function SectionPage() {
   const designSnapshot = useRef<WorkspaceCustomization | null>(null);
 
   const performanceCalm = usePerformanceCalm();
+  const environmentFocusGlow = useMemo(() => {
+    if (sectionViewMode !== 'free-space' || !spaceSelectedId) {
+      return { focusGlowX: 50, focusGlowY: 48 };
+    }
+    const pos = sectionPositions.positions[spaceSelectedId];
+    if (!pos) return { focusGlowX: 50, focusGlowY: 48 };
+    const vpW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const vpH = typeof window !== 'undefined' ? window.innerHeight - 44 : 800;
+    const w = pos.w ?? 300;
+    const h = pos.h ?? 220;
+    const cx = (pos.x ?? 0) + w / 2;
+    const cy = (pos.y ?? 0) + h / 2;
+    const screenX = cx * sectionCanvas.zoom + sectionCanvas.panX;
+    const screenY = cy * sectionCanvas.zoom + sectionCanvas.panY;
+    const clampPct = (n: number) => Math.min(95, Math.max(5, n));
+    return {
+      focusGlowX: clampPct((screenX / vpW) * 100),
+      focusGlowY: clampPct((screenY / vpH) * 100),
+    };
+  }, [
+    sectionViewMode,
+    spaceSelectedId,
+    sectionPositions.positions,
+    sectionCanvas.zoom,
+    sectionCanvas.panX,
+    sectionCanvas.panY,
+  ]);
+  const livingEnvironment = useLivingEnvironment(
+    global,
+    mergeAccent(atmTokens, design),
+    {
+      panX: sectionCanvas.panX,
+      panY: sectionCanvas.panY,
+      zoom: sectionCanvas.zoom,
+      selectedId: spaceSelectedId,
+      focusEditingId: spaceEditingId,
+      focusMode: sectionViewMode === 'free-space' ? focusMode : null,
+      calmEffects: performanceCalm,
+      reduceMotion: prefersReducedMotion,
+      surfaceActive: sectionViewMode === 'free-space',
+      ...environmentFocusGlow,
+    },
+  );
+  const freeSpaceTokens = useMemo(
+    () => mergeAccent(livingEnvironment.studio.tokens, design),
+    [livingEnvironment.studio.tokens, design],
+  );
+  const canvasBackgroundStyle = livingEnvironment.studio.canvasStyle;
+  const freeSpaceClarity = livingEnvironment.clarity;
   const freeSpaceSurfaceVisible = sectionViewMode === 'free-space';
   const workSurfaceVisible = sectionViewMode !== 'free-space' && !designMode;
   const designSurfaceVisible = sectionViewMode !== 'free-space' && designMode;
@@ -2028,7 +2146,7 @@ export function SectionPage() {
               tokens={freeSpaceTokens}
               fillParent
               canvasBackgroundStyle={canvasBackgroundStyle}
-              cosmicBackdrop={cosmicBackdrop}
+              livingEnvironment={livingEnvironment}
               modules={[]}
               blocks={sectionObjects.objects}
               tools={[]}

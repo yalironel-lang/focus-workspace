@@ -91,6 +91,7 @@ function FreeSpaceConnectionsLayerInner({
   const onLeave = useCallback(() => onHoveredEdgeChange(null), [onHoveredEdgeChange]);
 
   const accent = tokens.accent ?? '#f59e0b';
+  const ghostStroke = `${tokens.textGhost}52`;
   const continuitySet = useMemo(() => new Set(continuityEdgeKeys), [continuityEdgeKeys]);
 
   return (
@@ -120,8 +121,8 @@ function FreeSpaceConnectionsLayerInner({
         const hovered = hoveredEdgeKey === key;
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
         const lingering = continuitySet.has(key);
-        const stroke = hovered ? `${accent}d4` : lingering ? `${accent}8a` : `${accent}6e`;
-        const width = hovered ? 1.55 : lingering ? 1.24 : 1.08;
+        const stroke = hovered ? `${accent}c8` : lingering ? `${accent}72` : ghostStroke;
+        const width = hovered ? 1.45 : lingering ? 1.14 : 0.95;
         const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul));
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
@@ -144,7 +145,7 @@ function FreeSpaceConnectionsLayerInner({
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
                 opacity: ((pulse && !hovered ? 0.88 : lingering ? 1.1 : 1) * em),
-                animation: pulse ? 'fwConnPulse 2.6s ease-in-out infinite' : undefined,
+                animation: pulse ? 'fwConnPulse 3.8s ease-in-out infinite' : undefined,
               }}
             />
             {hovered && (
@@ -163,8 +164,8 @@ function FreeSpaceConnectionsLayerInner({
       })}
       <style>{`
         @keyframes fwConnPulse {
-          0%, 100% { opacity: 0.62; }
-          50% { opacity: 1; }
+          0%, 100% { opacity: 0.52; }
+          50% { opacity: 0.82; }
         }
       `}</style>
     </svg>

@@ -55,8 +55,8 @@ export function focusCanvasAtmosphere(
     dotGridAccentAlpha: '16',
     minimapOpacityMul: 1,
     minimapScale: 1,
-    spatialAmbientOpacity: 1.06,
-    connectionLineMul: 1.06,
+    spatialAmbientOpacity: 1.02,
+    connectionLineMul: 1.02,
   };
 
   if (!mode) return softenAtmosphere(base, strength, fogMul);

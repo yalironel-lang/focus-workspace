@@ -1807,7 +1807,12 @@ export function ProjectNotebookBlock({
             radial-gradient(circle at 50% 0%, rgba(255,255,255,0.05), transparent 36%),
             linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 34%)
           `,
-          boxShadow: `
+          boxShadow: context === 'free-space'
+            ? `
+            0 10px 28px rgba(0,0,0,0.2),
+            inset 0 1px 0 rgba(255,255,255,0.06)
+          `
+            : `
             0 22px 60px rgba(0,0,0,0.28),
             0 0 0 1px rgba(255,255,255,0.09),
             inset 0 1px 0 rgba(255,255,255,0.08)

@@ -53,6 +53,10 @@ export const PRESET_META: Record<BackgroundPresetId, PresetMeta> = {
   'deep-space': { icon: Layers, group: 'space', mood: 'Void depth' },
   'zodiac-chamber': { icon: CircleDot, group: 'zodiac', mood: 'Celestial wheel' },
   custom: { icon: Palette, group: 'professional', mood: 'Your color' },
+  'cosmic-drift': { icon: Orbit, group: 'space', mood: 'Celestial drift' },
+  'ocean-depths': { icon: Cloud, group: 'space', mood: 'Deep water' },
+  'ancient-forest': { icon: Mountain, group: 'space', mood: 'Forest fog' },
+  'dinosaur-realm': { icon: Layers, group: 'space', mood: 'Cinematic wild' },
 };
 
 export const PRESET_GROUP_ORDER: PresetGroup[] = ['professional', 'light', 'space', 'zodiac'];

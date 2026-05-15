@@ -17,6 +17,16 @@ import {
   type BackgroundPresetId,
 } from '../../lib/workspaceBackgroundStudio';
 import { PRESET_GROUP_LABELS, PRESET_GROUP_ORDER, presetsInGroup } from '../../lib/cosmic/backgroundPresetMeta';
+import {
+  ENV_INTENSITY_HIGH,
+  ENV_INTENSITY_LOW,
+  ENV_INTENSITY_MEDIUM,
+  LIVING_FEATURED_WORLD_IDS,
+  LIVING_WORLD_CATEGORIES,
+  environmentStrengthLabel,
+  environmentStrengthTier,
+  getLivingWorld,
+} from '../../lib/livingEnvironment';
 import { BackgroundStudioTile } from './BackgroundStudioTile';
 import { CosmicColorStudio } from './CosmicColorStudio';
 
@@ -126,7 +136,7 @@ export function LivingBackgroundStudio({ tokens, global, onUpdateGlobal }: Props
         <div className="mb-4">
           <div className="flex items-center justify-between mb-5">
             <p className="text-[13px] font-medium" style={{ color: tokens.textSecondary }}>
-              Curated worlds
+              Living environments
             </p>
             <button
               type="button"
@@ -145,8 +155,42 @@ export function LivingBackgroundStudio({ tokens, global, onUpdateGlobal }: Props
             </button>
           </div>
 
+          <section className="mb-6">
+            <div className="grid grid-cols-2 gap-3">
+              {LIVING_FEATURED_WORLD_IDS.map(id => {
+                const preset = BACKGROUND_STUDIO_PRESETS_ALL.find(p => p.id === id);
+                if (!preset) return null;
+                const world = getLivingWorld(id);
+                return (
+                  <div key={id}>
+                    <BackgroundStudioTile
+                      preset={preset}
+                      active={activeBackgroundId === preset.id}
+                      accentColor={tokens.accent}
+                      size="large"
+                      onClick={() => applyBackgroundStyle(preset.id)}
+                    />
+                    <p className="text-[10px] mt-1 capitalize" style={{ color: tokens.textGhost }}>
+                      {LIVING_WORLD_CATEGORIES.find(c => c.id === world.category)?.label ?? world.category}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <p
+            className="text-[10px] font-semibold uppercase tracking-[0.14em] mb-3"
+            style={{ color: tokens.textGhost }}
+          >
+            More worlds
+          </p>
+
           {PRESET_GROUP_ORDER.map(group => {
-            const ids = presetsInGroup(ALL_PRESET_IDS, group);
+            const otherIds = ALL_PRESET_IDS.filter(
+              pid => !(LIVING_FEATURED_WORLD_IDS as readonly string[]).includes(pid),
+            );
+            const ids = presetsInGroup(otherIds, group);
             if (ids.length === 0) return null;
             return (
               <section key={group} className="mb-6 last:mb-0">
@@ -224,6 +268,77 @@ export function LivingBackgroundStudio({ tokens, global, onUpdateGlobal }: Props
 
       {section === 'clarity' && (
         <section className="flex flex-col gap-6 mb-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-[13px] font-medium" style={{ color: tokens.textPrimary }}>
+              Environment strength
+            </p>
+            <p className="text-[11px]" style={{ color: tokens.textGhost }}>
+              {environmentStrengthLabel(global.environmentIntensity ?? 0.72)}
+            </p>
+            <div className="flex gap-2 mt-1">
+              {(
+                [
+                  ['low', ENV_INTENSITY_LOW, 'Low'],
+                  ['medium', ENV_INTENSITY_MEDIUM, 'Medium'],
+                  ['high', ENV_INTENSITY_HIGH, 'High'],
+                ] as const
+              ).map(([tier, value, label]) => {
+                const active = environmentStrengthTier(global.environmentIntensity ?? 0.72) === tier;
+                return (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => onUpdateGlobal({ environmentIntensity: value, activePreset: null })}
+                    className="flex-1 py-2 rounded-xl text-[12px] font-semibold transition-colors"
+                    style={{
+                      backgroundColor: active ? tokens.accentSubtle : tokens.wellBg,
+                      color: active ? tokens.accent : tokens.textMuted,
+                      border: `1px solid ${active ? `${tokens.accent}55` : 'rgba(255,255,255,0.06)'}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <SliderRow
+            label="Fine-tune strength"
+            hint={`${Math.round((global.environmentIntensity ?? 0.72) * 100)}%`}
+            value={global.environmentIntensity ?? 0.72}
+            min={0.35}
+            max={1}
+            step={0.02}
+            tokens={tokens}
+            onChange={v => onUpdateGlobal({ environmentIntensity: v, activePreset: null })}
+          />
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[13px] font-medium" style={{ color: tokens.textPrimary }}>
+                Ambient motion
+              </p>
+              <p className="text-[11px] mt-0.5" style={{ color: tokens.textGhost }}>
+                Drift, parallax, and subtle breath
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateGlobal({
+                  environmentMotion: global.environmentMotion === false,
+                  activePreset: null,
+                })
+              }
+              className="px-3 py-1.5 rounded-xl text-[12px] font-semibold"
+              style={{
+                backgroundColor:
+                  global.environmentMotion !== false ? tokens.accentSubtle : tokens.wellBg,
+                color: global.environmentMotion !== false ? tokens.accent : tokens.textMuted,
+              }}
+            >
+              {global.environmentMotion !== false ? 'On' : 'Off'}
+            </button>
+          </div>
           <SliderRow
             label="Fog"
             hint={global.fogLevel < 0.2 ? 'Clear' : global.fogLevel > 0.45 ? 'Heavy' : 'Balanced'}

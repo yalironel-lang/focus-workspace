@@ -93,7 +93,7 @@ function CosmicCanvasBackdropInner({
             twinkle > 0.05
               ? {
                   animationDelay: `${s.twinklePhase}s`,
-                  animationDuration: `${4 + (i % 5)}s`,
+                  animationDuration: `${6 + (i % 4)}s`,
                 }
               : glow > 0
                 ? { filter: `drop-shadow(0 0 ${glow}px rgba(${starRgb},${isBright ? 0.28 : 0.12}))` }

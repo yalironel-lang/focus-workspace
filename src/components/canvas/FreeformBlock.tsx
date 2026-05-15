@@ -12,6 +12,10 @@ import { useRef, useState } from 'react';
 import { GripHorizontal, X, Copy, Link2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
+import {
+  freeSpaceMaterialStyle,
+  type FreeSpaceMaterialTier,
+} from '../../lib/freeSpaceMaterials';
 
 export type BlockActiveGesture = 'move' | 'resize' | null;
 
@@ -41,6 +45,8 @@ interface Props {
   onConnectHoverTarget?: (targetId: string | null) => void;
   /** Focus Mode: added to stacking order for emphasized cards. */
   presentationZBoost?: number;
+  /** Material tier — primary thinking surfaces vs lighter utility chrome. */
+  materialTier?: FreeSpaceMaterialTier;
 }
 
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
@@ -66,9 +72,11 @@ export function FreeformBlock({
   connectModeSourceId = null,
   onConnectHoverTarget,
   presentationZBoost = 0,
+  materialTier = 'utility',
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
+  const material = freeSpaceMaterialStyle(materialTier);
 
   const w = pos.w > 0 ? pos.w : undefined;
   const h = pos.h > 0 ? pos.h : undefined;
@@ -88,18 +96,18 @@ export function FreeformBlock({
   const anchorNudge = deepFocusAnchor && !isDragging ? ' translateY(-1px)' : '';
 
   let transform = `translate3d(0,0,0) scale(1)${anchorNudge}`;
-  if (isConnectTargetHover) transform = `translate3d(0,-3px,0) scale(1.006)${anchorNudge}`;
-  else if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-3px,0) scale(1.004)${anchorNudge}`;
-  else if (isDragging) transform = `translate3d(0,-5px,0) scale(1.01) rotate(0.28deg)${anchorNudge}`;
-  else if (selected) transform = `translate3d(0,-4px,0) scale(1.003)${anchorNudge}`;
-  else if (hovered) transform = `translate3d(0,-2px,0) scale(1.0018)${anchorNudge}`;
-  else if (recede) transform = `translate3d(0,0,0) scale(0.999)${anchorNudge}`;
+  if (isConnectTargetHover) transform = `translate3d(0,-2px,0) scale(1.002)${anchorNudge}`;
+  else if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-2px,0) scale(1.002)${anchorNudge}`;
+  else if (isDragging) transform = `translate3d(0,-4px,0) scale(1.004) rotate(0.12deg)${anchorNudge}`;
+  else if (selected) transform = `translate3d(0,-3px,0) scale(1.0015)${anchorNudge}`;
+  else if (hovered) transform = `translate3d(0,-1px,0) scale(1.0008)${anchorNudge}`;
+  else if (recede) transform = `translate3d(0,0,0) scale(0.9995)${anchorNudge}`;
 
   let filter = 'none';
-  if (isDragging) filter = 'brightness(1.04) saturate(1.05)';
-  else if (selected) filter = 'brightness(1.025) saturate(1.03)';
-  else if (hovered) filter = 'brightness(1.012) saturate(1.02)';
-  else if (recede) filter = 'brightness(1.01) saturate(1.01)';
+  if (isDragging) filter = 'brightness(1.03) saturate(1.04)';
+  else if (selected) filter = 'brightness(1.018) saturate(1.02)';
+  else if (hovered) filter = 'brightness(1.01) saturate(1.015)';
+  else if (recede) filter = `brightness(${material.idleBrightness}) saturate(0.98)`;
   if (connectionChrome === 'dim') {
     filter = filter === 'none'
       ? 'brightness(0.99) saturate(0.97)'
@@ -115,36 +123,40 @@ export function FreeformBlock({
       : `saturate(1.03) ${filter}`;
   }
 
-  const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.085)';
-  const outerRim = ', 0 0 0 1px rgba(255,255,255,0.038)';
+  const sheen = material.surfaceSheen;
+  const innerRim = `inset 0 1px 0 rgba(255,255,255,${(0.07 + sheen * 0.4).toFixed(3)})`;
+  const outerRim = engaged ? ', 0 0 0 1px rgba(255,255,255,0.032)' : '';
   const innerHighlight = selected
-    ? `, inset 0 0 0 1px ${tokens.accent}14`
+    ? `, inset 0 0 0 1px ${tokens.accent}12`
     : hovered
-      ? ', inset 0 0 0 1px rgba(255,255,255,0.08)'
+      ? `, inset 0 0 0 1px rgba(255,255,255,${(0.06 + sheen).toFixed(3)})`
       : '';
+  const shadowBase = material.shadowMul;
   let boxShadow = `${innerRim}${outerRim}, ${tokens.shadowMd}`;
   if (isDragging && activeGesture === 'resize') {
-    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.04), ${tokens.shadowLg}`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 8px 20px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)}), ${tokens.shadowLg}`;
   } else if (isDragging) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.05), 0 10px 18px rgba(0,0,0,0.24), 0 26px 56px rgba(0,0,0,0.34)`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 8px 16px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)}), 0 22px 48px rgba(0,0,0,${(0.3 * shadowBase).toFixed(2)})`;
   } else if (selected) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 0 0 1px rgba(255,255,255,0.04), ${tokens.shadowLg}`;
+    boxShadow = `${innerRim}${innerHighlight}, 0 6px 14px rgba(0,0,0,${(0.18 * shadowBase).toFixed(2)}), ${tokens.shadowLg}`;
   } else if (hovered) {
-    boxShadow = `${innerRim}${outerRim}, 0 8px 18px rgba(0,0,0,0.22), 0 20px 42px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.07)`;
+    boxShadow = `${innerRim}${outerRim}, 0 6px 14px rgba(0,0,0,${(0.16 * shadowBase).toFixed(2)}), 0 16px 36px rgba(0,0,0,${(0.24 * shadowBase).toFixed(2)})`;
+  } else {
+    boxShadow = `${innerRim}, 0 4px 12px rgba(0,0,0,${(0.12 * shadowBase).toFixed(2)})`;
   }
   if (deepFocusAnchor && !isDragging) {
-    boxShadow = `${boxShadow}, 0 12px 32px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.04)`;
+    boxShadow = `${boxShadow}, 0 14px 36px rgba(0,0,0,0.26)`;
   }
 
   const borderColor = isConnectTargetHover
-    ? 'rgba(251,191,36,0.35)'
-    : selected
+    ? 'rgba(251,191,36,0.32)'
+    : selected || hovered
       ? tokens.cardBorderHover
-      : hovered
-        ? tokens.cardBorderHover
+      : material.borderIdleMul < 0.55
+        ? tokens.divider
         : tokens.cardBorder;
 
-  const z = (isDragging ? 10 : selected ? 8 : hovered ? 5 : 2) + presentationZBoost;
+  const z = (isDragging ? 10 : selected ? 7 : hovered ? 4 : 2) + presentationZBoost;
 
   return (
     <div
@@ -187,8 +199,8 @@ export function FreeformBlock({
         backgroundColor: tokens.cardBg,
         overflow: 'hidden',
         transition: isDragging
-          ? 'box-shadow 0.16s ease'
-          : `transform 0.32s ${liftEase}, box-shadow 0.28s ${chromeEase}, border-color 0.24s ${chromeEase}`,
+          ? 'box-shadow 0.2s ease'
+          : `transform 0.42s ${liftEase}, box-shadow 0.38s ${chromeEase}, border-color 0.32s ${chromeEase}, filter 0.38s ${chromeEase}`,
       }}
     >
       <div
@@ -220,7 +232,9 @@ export function FreeformBlock({
             background: headerHot
               ? `linear-gradient(180deg, ${tokens.accent}0d 0%, transparent 100%)`
               : 'transparent',
-            borderBottom: headerHot ? `1px solid ${selected ? `${tokens.accent}12` : tokens.divider}` : '1px solid transparent',
+            borderBottom: headerHot && (materialTier === 'primary' || selected)
+              ? `1px solid ${selected ? `${tokens.accent}10` : `${tokens.divider}88`}`
+              : '1px solid transparent',
             transition: `background 0.35s ${chromeEase}, border-color 0.35s ${chromeEase}`,
           }}
         >

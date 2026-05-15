@@ -2,8 +2,13 @@ import { useMemo } from 'react';
 import type { BackgroundPresetDefinition } from '../../lib/workspaceBackgroundStudio';
 import { PRESET_META } from '../../lib/cosmic/backgroundPresetMeta';
 import { COSMIC_PROFILES } from '../../lib/cosmic/cosmicWorldPresets';
+import { LIVING_WORLD_COSMIC_PROFILES } from '../../lib/livingEnvironment/livingWorldPresets';
 import { getConstellation } from '../../lib/cosmic/constellationCatalog';
 import { generateStarfield } from '../../lib/cosmic/cosmicStarfield';
+import {
+  FEATURED_PREVIEW_IDS,
+  WorldEnvironmentPreview,
+} from './WorldEnvironmentPreview';
 
 interface Props {
   preset: BackgroundPresetDefinition;
@@ -20,19 +25,21 @@ export function BackgroundStudioTile({ preset, active, accentColor, size = 'defa
   const isLight = preset.luminance === 'light';
   const meta = PRESET_META[preset.id];
   const Icon = meta?.icon;
-  const cosmic = COSMIC_PROFILES[preset.id];
+  const cosmic = COSMIC_PROFILES[preset.id] ?? LIVING_WORLD_COSMIC_PROFILES[preset.id];
+  const useWorldPreview = FEATURED_PREVIEW_IDS.has(preset.id);
 
   const previewStars = useMemo(() => {
-    if (!cosmic || (cosmic.layers.starDensity ?? 0) < 0.06) return [];
+    if (useWorldPreview || !cosmic || (cosmic.layers.starDensity ?? 0) < 0.06) return [];
     return generateStarfield(
       cosmic.seed,
       Math.min(0.45, cosmic.layers.starDensity ?? 0.2),
       cosmic.layers.starBrightness ?? 0.5,
       0.85,
     ).slice(0, 28);
-  }, [cosmic]);
+  }, [cosmic, useWorldPreview]);
 
   const constellationLines = useMemo(() => {
+    if (useWorldPreview) return null;
     const id = cosmic?.layers.constellationId;
     if (!id || id === 'none') return null;
     const c = getConstellation(id);
@@ -45,7 +52,7 @@ export function BackgroundStudioTile({ preset, active, accentColor, size = 'defa
         return { x1: sa.x, y1: sa.y, x2: sb.x, y2: sb.y };
       })
       .filter(Boolean) as { x1: number; y1: number; x2: number; y2: number }[];
-  }, [cosmic]);
+  }, [cosmic, useWorldPreview]);
 
   return (
     <button
@@ -65,39 +72,47 @@ export function BackgroundStudioTile({ preset, active, accentColor, size = 'defa
         style={{
           height: previewHeight,
           backgroundColor: d.canvasBase,
-          backgroundImage: [d.gradientA, d.gradientB].filter(Boolean).join(', ') || undefined,
+          backgroundImage: useWorldPreview
+            ? undefined
+            : [d.gradientA, d.gradientB].filter(Boolean).join(', ') || undefined,
         }}
       >
-        {constellationLines && constellationLines.length > 0 && (
-          <svg
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            viewBox="0 0 100 100"
-            preserveAspectRatio="xMidYMid slice"
-            aria-hidden
-          >
-            <g opacity={isLight ? 0.35 : 0.5} stroke={isLight ? 'rgba(60,70,90,0.35)' : 'rgba(200,215,255,0.28)'} strokeWidth="0.35">
-              {constellationLines.map((ln, i) => (
-                <line key={i} x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2} strokeLinecap="round" />
-              ))}
-            </g>
-          </svg>
+        {useWorldPreview ? (
+          <WorldEnvironmentPreview presetId={preset.id} canvasBase={d.canvasBase} height={previewHeight} />
+        ) : (
+          <>
+            {constellationLines && constellationLines.length > 0 && (
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="xMidYMid slice"
+                aria-hidden
+              >
+                <g opacity={isLight ? 0.35 : 0.5} stroke={isLight ? 'rgba(60,70,90,0.35)' : 'rgba(200,215,255,0.28)'} strokeWidth="0.35">
+                  {constellationLines.map((ln, i) => (
+                    <line key={i} x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2} strokeLinecap="round" />
+                  ))}
+                </g>
+              </svg>
+            )}
+            {previewStars.map((s, i) => (
+              <span
+                key={i}
+                className="absolute rounded-full"
+                style={{
+                  left: `${s.x}%`,
+                  top: `${s.y}%`,
+                  width: Math.max(1, s.r * 2.2),
+                  height: Math.max(1, s.r * 2.2),
+                  backgroundColor: isLight
+                    ? 'rgba(60,70,90,0.4)'
+                    : `rgba(220,230,255,${s.opacity * 0.75})`,
+                  boxShadow: s.opacity > 0.5 && !isLight ? `0 0 ${s.r * 3}px rgba(220,230,255,0.25)` : undefined,
+                }}
+              />
+            ))}
+          </>
         )}
-        {previewStars.map((s, i) => (
-          <span
-            key={i}
-            className="absolute rounded-full"
-            style={{
-              left: `${s.x}%`,
-              top: `${s.y}%`,
-              width: Math.max(1, s.r * 2.2),
-              height: Math.max(1, s.r * 2.2),
-              backgroundColor: isLight
-                ? 'rgba(60,70,90,0.4)'
-                : `rgba(220,230,255,${s.opacity * 0.75})`,
-              boxShadow: s.opacity > 0.5 && !isLight ? `0 0 ${s.r * 3}px rgba(220,230,255,0.25)` : undefined,
-            }}
-          />
-        ))}
         <div
           className="absolute left-3 bottom-3 w-[42%] h-7 rounded-lg"
           style={{
