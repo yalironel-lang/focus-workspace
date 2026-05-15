@@ -61,8 +61,8 @@ function computeLifecycle(lastActive: number | undefined): LifecycleResult {
   if (hrs < 2)   return { state: 'active',  opacity: 1.0  };
   if (hrs < 24)  return { state: 'warm',    opacity: 0.96 - (hrs / 24)         * 0.04 };
   if (hrs < 72)  return { state: 'dormant', opacity: 0.90 - ((hrs - 24) / 48)  * 0.06 };
-  if (hrs < 168) return { state: 'fading',  opacity: 0.84 - ((hrs - 72) / 96)  * 0.06 };
-  return { state: 'deep', opacity: 0.76 };
+  if (hrs < 168) return { state: 'fading',  opacity: 0.88 - ((hrs - 72) / 96)  * 0.05 };
+  return { state: 'deep', opacity: 0.82 };
 }
 
 // ── Region warmth helpers ─────────────────────────────────────────────────────
@@ -82,6 +82,10 @@ import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObj
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 import type { FocusMode } from '../../focusMode/focusModeTypes';
 import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
+import type { FocusStrength, WorkspaceClarity } from '../../lib/workspaceClarity';
+import { scaleVignetteEdgeAlpha } from '../../lib/workspaceClarity';
+import type { CosmicBackdropConfig } from '../../lib/cosmic/cosmicBackgroundTypes';
+import { CosmicCanvasBackdrop } from './CosmicCanvasBackdrop';
 import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
 import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
@@ -141,6 +145,11 @@ interface Props {
   /** Id of a Free Space object whose inner editor is actively in edit mode (deep writing focus). */
   focusEditingId?: string | null;
   topOffset?:   number;
+  /** Fill the positioned parent shell instead of viewport-fixed chrome offset. */
+  fillParent?: boolean;
+  /** Layered canvas background from theme (grid, ambient, base tone). */
+  canvasBackgroundStyle?: React.CSSProperties;
+  cosmicBackdrop?: CosmicBackdropConfig;
   /** True when a focus session is active — environment shifts */
   activeSession?: boolean;
   /** Section Free Space: subtle spatial ambient behind the world (does not affect interactions). */
@@ -181,6 +190,9 @@ interface Props {
   surfaceActive?: boolean;
   /** Global calm rendering (navigation, drag, low memory, hidden tab). */
   calmEffects?: boolean;
+  /** Appearance clarity multipliers (fog, ambient, focus dim). */
+  workspaceClarity?: WorkspaceClarity;
+  focusStrength?: FocusStrength;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -344,6 +356,9 @@ export function FreeformCanvas({
   spatialAmbient = false,
   focusEditingId,
   topOffset = 48,
+  fillParent = false,
+  canvasBackgroundStyle,
+  cosmicBackdrop,
   onSetPos,
   onSelect,
   onRemoveModule,
@@ -368,6 +383,8 @@ export function FreeformCanvas({
   continuityEdgeKeys = [],
   surfaceActive = true,
   calmEffects = false,
+  workspaceClarity,
+  focusStrength = 'soft',
 }: Props) {
   useEffect(() => {
     flickerDebugCount('FreeformCanvas');
@@ -537,7 +554,17 @@ export function FreeformCanvas({
   const hasDeepFocus = !!focusEditingId;
   const deepFocusAtmosphere = hasDeepFocus && !designMode;
 
-  const focusAtm = useMemo(() => focusCanvasAtmosphere(focusMode), [focusMode]);
+  const fogMul = workspaceClarity?.fogMul ?? 0.55;
+  const focusAtm = useMemo(
+    () => focusCanvasAtmosphere(focusMode, focusStrength, fogMul),
+    [focusMode, focusStrength, fogMul],
+  );
+  const focusDimScale = workspaceClarity?.focusDimScale ?? 0.42;
+  const ambientScale = reduceEffects
+    ? 0.22
+    : focusMode && spatialAmbient
+      ? focusAtm.spatialAmbientOpacity
+      : workspaceClarity?.ambientMul ?? 1;
   const continuityObjectSet = useMemo(() => new Set(continuityObjectIds), [continuityObjectIds]);
   const continuityClusterSet = useMemo(() => new Set(continuityClusterIds), [continuityClusterIds]);
   const focusTierById = useMemo(() => {
@@ -1089,8 +1116,8 @@ export function FreeformCanvas({
     <div
       ref={viewportRef}
       style={{
-        position:   'fixed',
-        top:        `${topOffset}px`,
+        position:   fillParent ? 'absolute' : 'fixed',
+        top:        fillParent ? 0 : topOffset,
         left:       0,
         right:      0,
         bottom:     0,
@@ -1102,6 +1129,7 @@ export function FreeformCanvas({
             : (spaceHeld ? 'grab' : 'grab'),
         userSelect: draggingId ? 'none' : undefined,
         backgroundColor: tokens.pageBg,
+        ...canvasBackgroundStyle,
       }}
       onDragOver={
         onPdfDroppedOnCanvas
@@ -1135,6 +1163,19 @@ export function FreeformCanvas({
       }}
       onMouseLeave={() => setControlsNear(false)}
     >
+      {cosmicBackdrop &&
+        (cosmicBackdrop.starDensity > 0.02 ||
+          cosmicBackdrop.constellationVisibility > 0.02 ||
+          cosmicBackdrop.nebulaIntensity > 0.02 ||
+          cosmicBackdrop.milkyWayIntensity > 0.02) && (
+          <CosmicCanvasBackdrop
+            config={cosmicBackdrop}
+            panX={safePanX}
+            panY={safePanY}
+            zoom={safeZoom}
+            calmEffects={calmEffects || draggingId !== null}
+          />
+        )}
       {/* ── Dot grid ───────────────────────────────────────────── */}
       <svg
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
@@ -1158,7 +1199,7 @@ export function FreeformCanvas({
                   ? `${tokens.textGhost}10`
                   : focusMode && spatialAmbient
                     ? `${tokens.accent}${focusAtm.dotGridAccentAlpha}`
-                    : `${tokens.textGhost}18`
+                    : `${tokens.textGhost}${(workspaceClarity?.gridMul ?? 1) > 0.82 ? '28' : '22'}`
               }
             />
           </pattern>
@@ -1179,9 +1220,7 @@ export function FreeformCanvas({
         {spatialAmbient && tokens && surfaceActive ? (
           <FreeSpaceSpatialAmbient
             tokens={tokens}
-            opacityScale={
-              reduceEffects ? 0.22 : focusMode && spatialAmbient ? focusAtm.spatialAmbientOpacity : 1
-            }
+            opacityScale={ambientScale}
           />
         ) : null}
 
@@ -1200,7 +1239,7 @@ export function FreeformCanvas({
 
         {/* ── Region warmth — the canvas surface develops memory ─── */}
         {warmthRef.current.filter(p => p.age < 30).map((point, i) => {
-          const intensity = Math.max(0, (1 - point.age / 30)) * 0.014;
+          const intensity = Math.max(0, (1 - point.age / 30)) * 0.02;
           const hex = Math.round(intensity * 255).toString(16).padStart(2, '0');
           return (
             <div
@@ -1289,8 +1328,8 @@ export function FreeformCanvas({
             region.dominantLane === 'support' ? 1.04 :
             0.98;
           const ambientOpacity = Math.min(
-            0.72,
-            (0.24 + (region.density - 0.72) * 0.44) *
+            0.82,
+            (0.28 + (region.density - 0.72) * 0.48) *
               (isStable ? 1 : 0.84) *
               (continuityClusterHit ? 1.2 : 1),
           );
@@ -1449,12 +1488,12 @@ export function FreeformCanvas({
           // Revisit — a dormant thought just woken up gets a warm amber signal
           const isRevisiting = revisitId  === item.id;
 
-          const baseOpacity = isOtherDragging ? 0.42
-            : sessionDim    ? Math.min(lifecycle.opacity, 0.38)
+          const baseOpacity = isOtherDragging ? 0.54
+            : sessionDim    ? Math.min(lifecycle.opacity, 0.52)
             : lifecycle.opacity;
 
           const tier = item.kind === 'block' ? focusTierById?.get(item.id) : undefined;
-          const fp = tier != null ? tierToPresentation(tier) : null;
+          const fp = tier != null ? tierToPresentation(tier, focusDimScale) : null;
           const combinedOpacity = Math.min(1, baseOpacity * (fp?.opacityMul ?? 1));
           const focusFilterExtra =
             fp?.filterExtra && fp.filterExtra !== 'none' ? fp.filterExtra : '';
@@ -1477,9 +1516,9 @@ export function FreeformCanvas({
           // Session focus: strong isolation for focus-session cards.
           // Deep focus: whisper-quiet recession for peers (readable, stable).
           const sessionFilter = sessionDim
-            ? 'saturate(0.35) brightness(0.7)'
+            ? 'saturate(0.58) brightness(0.84)'
             : deepInactive
-              ? 'saturate(0.9) brightness(0.96)'
+              ? 'saturate(0.94) brightness(0.98)'
               : 'none';
 
           const filterTransition = (sessionDim || deepInactive || isRevisiting || isReturning || focusFilterExtra)
@@ -1752,12 +1791,12 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           background: deepFocusAtmosphere
-            ? `radial-gradient(ellipse at 50% 44%, transparent 50%, ${tokens.pageBg}56 100%)`
+            ? `radial-gradient(ellipse at 50% 44%, transparent 54%, ${tokens.pageBg}48 100%)`
             : activeSession && !designMode
-              ? `radial-gradient(ellipse at 50% 42%, transparent 28%, ${tokens.pageBg}cc 100%)`
+              ? `radial-gradient(ellipse at 50% 42%, transparent 36%, ${tokens.pageBg}a8 100%)`
               : focusMode && spatialAmbient
                 ? `radial-gradient(ellipse at 50% 42%, transparent ${focusAtm.vignetteInnerPct}%, ${tokens.pageBg}${focusAtm.vignetteEdgeAlpha} 100%)`
-                : `radial-gradient(ellipse at 50% 42%, transparent 46%, ${tokens.pageBg}72 100%)`,
+                : `radial-gradient(ellipse at 50% 42%, transparent 54%, ${tokens.pageBg}${scaleVignetteEdgeAlpha('58', fogMul)} 100%)`,
           transition: reduceEffects ? 'none' : 'background 1.8s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
@@ -1771,10 +1810,10 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           opacity: deepFocusAtmosphere
-            ? 0.42
+            ? 0.34
             : focusMode && spatialAmbient
               ? focusAtm.edgeFadeOpacity
-              : 0.74,
+              : 0.48 * fogMul,
           transition: reduceEffects
             ? 'none'
             : focusMode && spatialAmbient
@@ -1795,10 +1834,10 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           boxShadow: deepFocusAtmosphere
-            ? `inset 0 0 84px rgba(7,11,20,0.2)`
+            ? `inset 0 0 72px rgba(7,11,20,0.14)`
             : focusMode && spatialAmbient
               ? focusAtm.insetShadow
-              : `inset 0 0 68px rgba(7,11,20,0.24)`,
+              : `inset 0 0 64px rgba(7,11,20,0.16)`,
           transition: focusMode && spatialAmbient
             ? `box-shadow ${focusAtm.transition}`
             : 'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',

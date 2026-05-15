@@ -23,14 +23,24 @@ const TEMPLATE_SCENE: Record<FreeSpaceTemplateId, WorkspaceMicroSceneVariant> = 
 
 interface Props {
   tokens: AtmosphereTokens | null | undefined;
-  topOffset: number;
+  /** Viewport-fixed offset (legacy). Omit when `inShell`. */
+  topOffset?: number;
+  /** Position inside the Free Space shell (below tabs). */
+  inShell?: boolean;
   objectCount: number;
   onApplyTemplate: (id: FreeSpaceTemplateId) => void;
   /** Notebook deep edit: control recedes until hovered. */
   chromeQuiet?: boolean;
 }
 
-export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onApplyTemplate, chromeQuiet = false }: Props) {
+export function FreeSpaceArrangeControl({
+  tokens,
+  topOffset = 0,
+  inShell = false,
+  objectCount,
+  onApplyTemplate,
+  chromeQuiet = false,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -70,8 +80,8 @@ export function FreeSpaceArrangeControl({ tokens, topOffset, objectCount, onAppl
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        position: 'fixed',
-        top: topOffset + 10,
+        position: inShell ? 'absolute' : 'fixed',
+        top: inShell ? 10 : topOffset + 10,
         left: 18,
         zIndex: 45,
         opacity: quietOpacity,

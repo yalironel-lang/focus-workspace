@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AtmosphereTokens } from './useAtmosphere';
+import { resolveWorkspaceClarity, type FocusStrength, type WorkspaceClarity } from '../lib/workspaceClarity';
+import type { BackgroundPresetId } from '../lib/workspaceBackgroundStudio';
+import type { ConstellationId, ConstellationStyle } from '../lib/cosmic/cosmicBackgroundTypes';
+
+export type { BackgroundPresetId };
+
+export type { FocusStrength, WorkspaceClarity };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -25,7 +32,41 @@ export interface GlobalTheme {
   typographyScale:  TypographyScale;
   gridVisible:      boolean;
   ambientIntensity: number; // 0–1
-  activePreset:     string | null;
+  /** 0 = clear workspace, 1 = cinematic edge fog */
+  fogLevel:           number;
+  focusStrength:      FocusStrength;
+  /** 0–1 card surface opacity (1 = solid) */
+  cardSolidity:       number;
+  /** 0–1 edge/grid/connection legibility */
+  spatialContrast:    number;
+  /** Background Studio curated style */
+  backgroundPreset: BackgroundPresetId;
+  canvasCustom:       string;
+  /** -1 cool … +1 warm tint on canvas base */
+  canvasWarmth:       number;
+  /** -0.35 … +0.35 lighten/darken canvas base */
+  canvasBrightness:   number;
+  /** 0–1 saturation (custom / color studio) */
+  canvasSaturation:   number;
+  /** 0–360 hue override (custom) */
+  canvasHue?:         number;
+  /** Enforce WCAG-readable text/cards on custom canvas */
+  canvasAutoContrast?: boolean;
+  starDensity?:              number;
+  starBrightness?:           number;
+  starScale?:                number;
+  starTwinkle?:              number;
+  constellationId?:          ConstellationId;
+  constellationVisibility?:  number;
+  constellationStyle?:       ConstellationStyle;
+  constellationLineOpacity?: number;
+  constellationStarScale?:   number;
+  constellationLabels?:      boolean;
+  nebulaIntensity?:          number;
+  milkyWayIntensity?:        number;
+  grainAmount?:              number;
+  vignetteStrength?:         number;
+  activePreset:       string | null;
 }
 
 export interface ModuleTheme {
@@ -204,6 +245,8 @@ export interface DesignTokens {
   bgStyle:      BackgroundStyle;
   gridVisible:  boolean;
   ambientInt:   number;
+  clarity:      WorkspaceClarity;
+  focusStrength: FocusStrength;
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -211,16 +254,29 @@ export interface DesignTokens {
 export const DEFAULT_THEME: GlobalTheme = {
   accentPreset:     'amber',
   accentCustom:     '#f59e0b',
-  backgroundStyle:  'warm-study',    // warmer, less harsh than deep-night
-  surfaceStyle:     'soft-card',     // softer than glass — more personal-studio feel
-  radiusStyle:      'round',         // rounder, more approachable
+  backgroundStyle:  'warm-study',
+  surfaceStyle:     'solid',
+  radiusStyle:      'round',
   density:          'comfortable',
-  glowIntensity:    'low',           // subtle glow, not overwhelming
+  glowIntensity:    'low',
   motionIntensity:  'smooth',
   typographyScale:  'normal',
-  gridVisible:      false,           // cleaner default canvas
-  ambientIntensity: 0.45,
-  activePreset:     'personal-studio',
+  gridVisible:      true,
+  ambientIntensity: 0.32,
+  fogLevel:           0.24,
+  focusStrength:      'soft',
+  cardSolidity:       0.92,
+  spatialContrast:    0.76,
+  backgroundPreset:   'deep-graphite',
+  canvasCustom:       '#1a1a1e',
+  canvasWarmth:       0,
+  canvasBrightness:   0,
+  canvasSaturation:   0.55,
+  canvasAutoContrast: true,
+  starDensity:        0.12,
+  constellationVisibility: 0,
+  constellationStyle: 'minimal',
+  activePreset:     'warm-studio',
 };
 
 const GLOBAL_KEY  = 'fw_workspace_theme_v1';
@@ -274,21 +330,47 @@ export function computeDesignTokens(g: GlobalTheme): DesignTokens {
     bgStyle:     g.backgroundStyle,
     gridVisible: g.gridVisible,
     ambientInt:  g.ambientIntensity,
+    clarity:     resolveWorkspaceClarity(g),
+    focusStrength: g.focusStrength ?? 'soft',
   };
 }
 
 // ── Merge accent overrides into AtmosphereTokens ──────────────────────────────
 
+function boostBorder(border: string, factor: number): string {
+  const m = border.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  if (!m) return border;
+  const a = Math.min(0.42, parseFloat(m[4] ?? '0.12') * factor);
+  return `rgba(${m[1]},${m[2]},${m[3]},${a.toFixed(3)})`;
+}
+
 export function mergeAccent(tokens: AtmosphereTokens, dt: DesignTokens): AtmosphereTokens {
+  const c = dt.clarity;
+  const borderBoost = 1 + c.spatialContrast * 0.35;
+  const glowCap = c.glowCap;
   return {
     ...tokens,
     accent:      dt.accent,
     accentHover: dt.accentHover,
-    accentGlow:  dt.accentGlow,
+    accentGlow:  scaleAlpha(dt.accentGlow, glowCap),
     accentSubtle: dt.accentSubtle,
     radius:      dt.radius,
     focusBorder: dt.accent,
+    cardBorder: boostBorder(tokens.cardBorder, borderBoost),
+    cardBorderHover: boostBorder(tokens.cardBorderHover, borderBoost * 1.08),
+    textGhost: tokens.textGhost,
+    textMuted: tokens.textMuted,
+    glowIntensity: Math.min(tokens.glowIntensity, glowCap),
   };
+}
+
+/** Opaque card background for project surfaces (avoids muddy stacking). */
+export function solidCardBackground(cardBg: string, clarity?: WorkspaceClarity): string {
+  const hex = cardBg.startsWith('#') && cardBg.length === 7 ? cardBg : cardBg;
+  if (hex.startsWith('#') && hex.length === 7) {
+    return `${hex}${clarity?.cardAlphaHex ?? 'fa'}`;
+  }
+  return cardBg;
 }
 
 // ── Compute surface CSS for a module ─────────────────────────────────────────
@@ -334,12 +416,12 @@ export function computeSurface(
   switch (surfaceStyle) {
     case 'glass':
       return {
-        backgroundColor:      `${tokens.cardBg}d0`,
-        backdropFilter:       `blur(${Math.max(blurPx, 16)}px)`,
-        WebkitBackdropFilter: `blur(${Math.max(blurPx, 16)}px)`,
+        backgroundColor:      `${tokens.cardBg}f5`,
+        backdropFilter:       `blur(${Math.max(blurPx, 12)}px)`,
+        WebkitBackdropFilter: `blur(${Math.max(blurPx, 12)}px)`,
         border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 4px 24px rgba(0,0,0,0.45)'),
+        boxShadow: baseShadow('0 4px 20px rgba(0,0,0,0.36)'),
       };
     case 'solid':
       return {
@@ -354,7 +436,7 @@ export function computeSurface(
         border,
         borderRadius: `${r}px`,
         // Soft elevation with inner highlight
-        boxShadow: baseShadow('0 4px 20px rgba(0,0,0,0.35)'),
+        boxShadow: baseShadow('0 6px 22px rgba(0,0,0,0.30)'),
       };
     case 'floating':
       return {
@@ -364,13 +446,13 @@ export function computeSurface(
         border:    bdr === 'default' ? `1px solid ${tokens.cardBorderHover}` : border,
         borderRadius: `${r}px`,
         // Strong lift with inner highlight
-        boxShadow: baseShadow('0 16px 48px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4)'),
+        boxShadow: baseShadow('0 14px 42px rgba(0,0,0,0.48), 0 2px 8px rgba(0,0,0,0.32)'),
       };
     case 'borderless':
       return {
-        backgroundColor:      `${tokens.cardBg}90`,
-        backdropFilter:       'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
+        backgroundColor:      `${tokens.cardBg}f2`,
+        backdropFilter:       'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
         border:       '1px solid transparent',
         borderRadius: `${r}px`,
         boxShadow:    glowStr ? `${glowStr}, ${innerHighlight}` : innerHighlight,
@@ -390,7 +472,9 @@ export function computeCanvasBg(
   dt: DesignTokens,
   tokens: AtmosphereTokens,
   inDesignMode: boolean,
+  canvasBase?: string,
 ): React.CSSProperties {
+  const page = canvasBase ?? tokens.pageBg;
   const gridOp  = dt.gridVisible ? (inDesignMode ? 0.14 : 0.055) : 0;
   const dotColor = gridOp > 0
     ? `rgba(${tokens.cardBorder.startsWith('#')
@@ -411,7 +495,7 @@ export function computeCanvasBg(
       ].filter(Boolean) as string[];
       const sizes = [gridOp > 0 ? gridSize : null, '100% 100%', '100% 100%'].filter(Boolean).join(', ');
       const pos   = [gridOp > 0 ? gridPos  : null, '0 0', '0 0'].filter(Boolean).join(', ');
-      return { backgroundColor: '#070b14', backgroundImage: layers.join(', '), backgroundSize: sizes, backgroundPosition: pos };
+      return { backgroundColor: page, backgroundImage: layers.join(', '), backgroundSize: sizes, backgroundPosition: pos };
     }
     case 'soft-gradient': {
       const layers = [
@@ -420,11 +504,11 @@ export function computeCanvasBg(
       ].filter(Boolean) as string[];
       const sizes = [gridOp > 0 ? gridSize : null, '100% 100%'].filter(Boolean).join(', ');
       const pos   = [gridOp > 0 ? gridPos  : null, '0 0'].filter(Boolean).join(', ');
-      return { backgroundColor: tokens.pageBg, backgroundImage: layers.join(', '), backgroundSize: sizes, backgroundPosition: pos };
+      return { backgroundColor: page, backgroundImage: layers.join(', '), backgroundSize: sizes, backgroundPosition: pos };
     }
     case 'grid-canvas':
       return {
-        backgroundColor: tokens.pageBg,
+        backgroundColor: page,
         backgroundImage: [
           `linear-gradient(${tokens.cardBorder}55 1px, transparent 1px)`,
           `linear-gradient(90deg, ${tokens.cardBorder}55 1px, transparent 1px)`,
@@ -439,11 +523,11 @@ export function computeCanvasBg(
       ].filter(Boolean) as string[];
       const sizes = [gridOp > 0 ? gridSize : null, '100% 100%', '100% 100%'].filter(Boolean).join(', ');
       const pos   = [gridOp > 0 ? gridPos  : null, '0 0', '0 0'].filter(Boolean).join(', ');
-      return { backgroundColor: tokens.pageBg, backgroundImage: layers.length ? layers.join(', ') : 'none', backgroundSize: sizes || gridSize, backgroundPosition: pos || gridPos };
+      return { backgroundColor: page, backgroundImage: layers.length ? layers.join(', ') : 'none', backgroundSize: sizes || gridSize, backgroundPosition: pos || gridPos };
     }
     case 'minimal-black':
       return {
-        backgroundColor: '#050508',
+        backgroundColor: page,
         backgroundImage: gridOp > 0 ? gridDot : 'none',
         backgroundSize:  gridSize,
         backgroundPosition: gridPos,
@@ -455,12 +539,22 @@ export function computeCanvasBg(
       ].filter(Boolean) as string[];
       const sizes = [gridOp > 0 ? gridSize : null, '100% 100%'].filter(Boolean).join(', ');
       const pos   = [gridOp > 0 ? gridPos  : null, '0 0'].filter(Boolean).join(', ');
-      return { backgroundColor: '#0f0d0a', backgroundImage: layers.length ? layers.join(', ') : 'none', backgroundSize: sizes || gridSize, backgroundPosition: pos || gridPos };
+      return { backgroundColor: page, backgroundImage: layers.length ? layers.join(', ') : 'none', backgroundSize: sizes || gridSize, backgroundPosition: pos || gridPos };
     }
     default:
-      return { backgroundColor: tokens.pageBg };
+      return { backgroundColor: page };
   }
 }
+
+export {
+  applyCanvasWarmth,
+  applyCanvasBrightness,
+  resolveCanvasBaseColor,
+  resolveBackgroundStudio,
+  backgroundPresetThemePatch,
+  BACKGROUND_STUDIO_PRESETS,
+  BACKGROUND_STUDIO_PRESETS_ALL,
+} from '../lib/workspaceBackgroundStudio';
 
 // ── User preset type ──────────────────────────────────────────────────────────
 

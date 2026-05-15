@@ -102,8 +102,8 @@ export function FreeformBlock({
   else if (recede) filter = 'brightness(1.01) saturate(1.01)';
   if (connectionChrome === 'dim') {
     filter = filter === 'none'
-      ? 'brightness(0.97) saturate(0.95)'
-      : `${filter} brightness(0.985)`;
+      ? 'brightness(0.99) saturate(0.97)'
+      : `${filter} brightness(0.992)`;
   } else if (connectionChrome === 'emphasis') {
     filter = filter === 'none'
       ? 'brightness(1.04) saturate(1.04)'
@@ -115,8 +115,8 @@ export function FreeformBlock({
       : `saturate(1.03) ${filter}`;
   }
 
-  const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.065)';
-  const outerRim = ', 0 0 0 1px rgba(255,255,255,0.025)';
+  const innerRim = 'inset 0 1px 0 rgba(255,255,255,0.085)';
+  const outerRim = ', 0 0 0 1px rgba(255,255,255,0.038)';
   const innerHighlight = selected
     ? `, inset 0 0 0 1px ${tokens.accent}14`
     : hovered

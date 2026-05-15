@@ -12,16 +12,20 @@ import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceS
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
+import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
+import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
 import { surfaceShellStyle } from '../lib/surfaceShellStyle';
 import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
+import { navDebugLog } from '../lib/navigationDebug';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { useAtmosphere } from '../hooks/useAtmosphere';
+import { mergeAccent, resolveBackgroundStudio, useWorkspaceTheme } from '../hooks/useWorkspaceTheme';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
@@ -67,6 +71,7 @@ import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
+  Palette,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -152,12 +157,13 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 // ── SpaceNav ──────────────────────────────────────────────────────────────────
 
-function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
   isCustomizing: boolean;
   onBack: () => void;
+  onOpenAppearance: () => void;
   onCustomize: () => void;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
@@ -196,11 +202,24 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onCustomize, o
             </button>
           </>
         ) : (
-          <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}>
-            <Sliders className="w-3 h-3" />
-          </button>
+          <>
+            <button
+              type="button"
+              aria-label="Appearance"
+              title="Appearance"
+              onClick={onOpenAppearance}
+              style={{ display: 'flex', alignItems: 'center', padding: '4px 6px', borderRadius: '6px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}
+            >
+              <Palette className="w-3 h-3" style={{ color: tokens.accent }} />
+            </button>
+            <button onClick={onCustomize} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: tokens.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '6px' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; }}>
+              <Sliders className="w-3 h-3" />
+            </button>
+          </>
         )}
       </div>
     </nav>
@@ -433,14 +452,36 @@ export function SectionPage() {
   const { links: globalLinks } = usePortalLinks('global');
   const sectionId = id ?? '';
   const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
-  const { tokens } = useAtmosphere();
+  const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
+  const { design, global, updateGlobal } = useWorkspaceTheme();
+  const tokens = mergeAccent(atmTokens, design);
+  const backgroundStudio = useMemo(
+    () => resolveBackgroundStudio(global, mergeAccent(atmTokens, design)),
+    [global, atmTokens, design],
+  );
+  const freeSpaceTokens = useMemo(
+    () => mergeAccent(backgroundStudio.tokens, design),
+    [backgroundStudio.tokens, design],
+  );
+  const canvasBackgroundStyle = backgroundStudio.canvasStyle;
+  const cosmicBackdrop = backgroundStudio.cosmic;
+  const freeSpaceClarity = backgroundStudio.clarity;
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
   const sectionCanvas = useSectionCanvasMode(sectionId);
   const sectionPositions = useSectionBlockPositions(sectionId);
   const sectionObjects = useSectionFreeSpaceObjects(sectionId);
   const sectionObjectsRef = useRef(sectionObjects);
   sectionObjectsRef.current = sectionObjects;
-  const { registerFreeSpace, registerAIWorkspace, registerFocusMode, registerWorkspaceStarter, paletteOpen, sessionModalOpen } = useCommandPalette();
+  const {
+    registerFreeSpace,
+    registerAIWorkspace,
+    registerFocusMode,
+    registerWorkspaceStarter,
+    paletteOpen,
+    sessionModalOpen,
+    dismissTransientUi,
+  } = useCommandPalette();
   const { focusMode, setFocusMode } = useFocusMode(sectionId);
   const focusModeLiveRef = useRef(focusMode);
   focusModeLiveRef.current = focusMode;
@@ -980,6 +1021,7 @@ export function SectionPage() {
     resumeSeedKeyRef.current = seedKey;
     setResumeVisible(
       !!(
+        !isResumeDismissed(sectionId) &&
         workspaceContinuity.continuityRecent &&
         workspaceContinuity.resumeCopy &&
         sectionObjects.objects.length > 0
@@ -1055,6 +1097,25 @@ export function SectionPage() {
     setConnectSourceId(null);
     setConnectHoverId(null);
   }, []);
+
+  const dismissSectionTransientUi = useCallback(() => {
+    pendingCompanionComposerRef.current = false;
+    setShowSpaceAdd(false);
+    setCompanionComposerOpen(false);
+    setQuickCaptureOpen(false);
+    setQuickCaptureVariant('note');
+    setMistakeReviewOpen(false);
+    setResumeVisible(false);
+    cancelConnectMode();
+  }, [cancelConnectMode]);
+
+  const handleWorkspaceBack = useCallback(() => {
+    navDebugLog('workspace-back', { sectionId });
+    dismissSectionTransientUi();
+    dismissTransientUi();
+    pulsePerformancePressure('route');
+    navigate('/dashboard');
+  }, [dismissSectionTransientUi, dismissTransientUi, navigate, sectionId]);
 
   const completeFreeSpaceConnect = useCallback(
     (from: string, to: string) => {
@@ -1506,7 +1567,8 @@ export function SectionPage() {
           accent={tokens.accent}
           tokens={tokens}
           isCustomizing={false}
-          onBack={() => navigate('/dashboard')}
+          onBack={handleWorkspaceBack}
+          onOpenAppearance={() => setAppearanceOpen(true)}
           onCustomize={() => {}}
           onExitCustomize={() => {}}
           onResetCustomize={() => {}}
@@ -1684,17 +1746,15 @@ export function SectionPage() {
         onCreate={createCompanionPanel}
       />
 
-      {resumeVisible && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
-        <WorkspaceResumeLayer
-          tokens={tokens}
-          topOffset={84}
-          continuity={workspaceContinuity.continuity}
-          resumeCopy={workspaceContinuity.resumeCopy}
-          suggestions={workspaceContinuity.suggestions}
-          onDismiss={() => setResumeVisible(false)}
-          onSuggestionClick={applyWorkspaceResumeSuggestion}
-        />
-      )}
+      <WorkspaceAppearancePanel
+        open={appearanceOpen}
+        tokens={tokens}
+        atmosphereId={atmosphereId}
+        global={global}
+        onClose={() => setAppearanceOpen(false)}
+        onSetAtmosphere={setAtmosphere}
+        onUpdateGlobal={updateGlobal}
+      />
 
       {/* ── SPACE NAV ────────────────────────────────────────────────────── */}
       <SpaceNav
@@ -1702,7 +1762,8 @@ export function SectionPage() {
         accent={accentColor}
         tokens={tokens}
         isCustomizing={designMode}
-        onBack={() => navigate('/dashboard')}
+        onBack={handleWorkspaceBack}
+        onOpenAppearance={() => setAppearanceOpen(true)}
         onCustomize={enterDesignMode}
         onExitCustomize={exitDesignMode}
         onResetCustomize={resetDesign}
@@ -1778,11 +1839,25 @@ export function SectionPage() {
       <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate' }}>
       <div style={surfaceShellStyle(freeSpaceSurfaceVisible)}>
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {resumeVisible && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
+            <WorkspaceResumeLayer
+              tokens={tokens}
+              inShell
+              continuity={workspaceContinuity.continuity}
+              resumeCopy={workspaceContinuity.resumeCopy}
+              suggestions={workspaceContinuity.suggestions}
+              onDismiss={() => {
+                markResumeDismissed(sectionId);
+                setResumeVisible(false);
+              }}
+              onSuggestionClick={applyWorkspaceResumeSuggestion}
+            />
+          )}
           {!showWorkspaceStarter && !resumeVisible && (
             <WorkspaceGuidanceBar
               sectionId={sectionId}
               tokens={tokens}
-              topOffset={84}
+              topOffset={0}
               objects={sectionObjects.objects}
               focusMode={focusMode}
               priorityHints={starterHints}
@@ -1793,14 +1868,17 @@ export function SectionPage() {
           )}
           <FreeSpaceArrangeControl
             tokens={tokens}
-            topOffset={84}
+            inShell
             objectCount={sectionObjects.objects.length}
             onApplyTemplate={handleApplySpaceTemplate}
             chromeQuiet={!!spaceEditingId}
           />
-          <FreeSpaceCanvasErrorBoundary tokens={tokens} topOffset={84}>
+          <FreeSpaceCanvasErrorBoundary tokens={freeSpaceTokens} fillParent>
             <FreeformCanvas
-              tokens={tokens}
+              tokens={freeSpaceTokens}
+              fillParent
+              canvasBackgroundStyle={canvasBackgroundStyle}
+              cosmicBackdrop={cosmicBackdrop}
               modules={[]}
               blocks={sectionObjects.objects}
               tools={[]}
@@ -1810,7 +1888,6 @@ export function SectionPage() {
               selectedId={spaceSelectedId}
               focusEditingId={spaceEditingId}
               spatialAmbient
-              topOffset={84}
               onSetPos={sectionPositions.setPos}
               onSelect={id => setSpaceSelectedId(id)}
               onRemoveModule={() => {}}
@@ -1841,6 +1918,8 @@ export function SectionPage() {
               focusMode={freeSpaceSurfaceVisible ? focusMode : null}
               surfaceActive={freeSpaceSurfaceVisible}
               calmEffects={performanceCalm}
+              workspaceClarity={freeSpaceClarity}
+              focusStrength={global.focusStrength ?? 'soft'}
               continuityObjectIds={workspaceContinuity.continuityObjectIds}
               continuityClusterIds={workspaceContinuity.continuityClusterIds}
               continuityEdgeKeys={workspaceContinuity.continuityEdgeKeys}

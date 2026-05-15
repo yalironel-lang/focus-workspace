@@ -12,6 +12,7 @@ import {
   Play,
   Plus,
   Search,
+  Palette,
   Sparkles,
   Trash2,
   X,
@@ -22,6 +23,7 @@ import { useSections } from '../../hooks/useSections';
 import { useDeadlines } from '../../hooks/useDeadlines';
 import { useAtmosphere } from '../../hooks/useAtmosphere';
 import { useWorkspaceTheme, mergeAccent } from '../../hooks/useWorkspaceTheme';
+import { WorkspaceAppearancePanel } from '../workspace-appearance/WorkspaceAppearancePanel';
 import { useSessionContinuity } from '../../hooks/useSessionContinuity';
 import { useWorkspaceFolders } from '../../hooks/useWorkspaceFolders';
 import { useRecentWorkspaces } from '../../hooks/useRecentWorkspaces';
@@ -246,9 +248,10 @@ export function WorkspaceLibrary() {
   const { user, signOut } = useAuth();
   const { sections, loading, createSection, deleteSection } = useSections();
   const { deadlines } = useDeadlines();
-  const { tokens: atmTokens } = useAtmosphere();
-  const { design } = useWorkspaceTheme();
+  const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
+  const { design, global, updateGlobal } = useWorkspaceTheme();
   const tokens = mergeAccent(atmTokens, design);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const continuity = useSessionContinuity();
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
   const { recentIdsOrdered, openedAt } = useRecentWorkspaces();
@@ -386,19 +389,19 @@ export function WorkspaceLibrary() {
         color: tokens.textPrimary,
       }}
     >
-      {/* Atmospheric depth — non-interactive */}
+      {/* Atmospheric depth — subdued so library stays readable */}
       <div
         className="pointer-events-none fixed inset-0 z-0"
         style={{
+          opacity: 0.45 + (design.clarity.fogMul ?? 0.5) * 0.35,
           background: `
-            radial-gradient(ellipse 80% 55% at 50% -10%, ${tokens.accent}12, transparent 55%),
-            radial-gradient(ellipse 60% 40% at 100% 100%, rgba(139,92,246,0.08), transparent 50%),
-            radial-gradient(ellipse 50% 35% at 0% 80%, rgba(59,130,246,0.06), transparent 45%)
+            radial-gradient(ellipse 80% 55% at 50% -10%, ${tokens.accent}0a, transparent 55%),
+            radial-gradient(ellipse 60% 40% at 100% 100%, rgba(139,92,246,0.04), transparent 50%)
           `,
         }}
       />
       <div
-        className="pointer-events-none fixed inset-0 z-0 opacity-[0.04]"
+        className="pointer-events-none fixed inset-0 z-0 opacity-[0.03]"
         style={{
           backgroundImage: `linear-gradient(${tokens.textPrimary}22 1px, transparent 1px), linear-gradient(90deg, ${tokens.textPrimary}22 1px, transparent 1px)`,
           backgroundSize: '48px 48px',
@@ -439,6 +442,15 @@ export function WorkspaceLibrary() {
         </div>
 
         <nav className="flex-1 px-2 py-4 flex flex-col gap-0.5">
+          <button
+            type="button"
+            onClick={() => setAppearanceOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-colors mb-1"
+            style={{ color: tokens.textSecondary, backgroundColor: appearanceOpen ? tokens.accentSubtle : 'transparent' }}
+          >
+            <Palette className="w-4 h-4" strokeWidth={2} style={{ color: tokens.accent }} />
+            Appearance
+          </button>
           <LibraryNavLink
             tokens={tokens}
             active={location.pathname === '/dashboard'}
@@ -868,6 +880,15 @@ export function WorkspaceLibrary() {
         </div>
       </main>
 
+      <WorkspaceAppearancePanel
+        open={appearanceOpen}
+        tokens={tokens}
+        atmosphereId={atmosphereId}
+        global={global}
+        onClose={() => setAppearanceOpen(false)}
+        onSetAtmosphere={setAtmosphere}
+        onUpdateGlobal={updateGlobal}
+      />
     </div>
   );
 }

@@ -47,6 +47,15 @@
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
       }
+      /* Vercel preview toolbar (injected on *.vercel.app) — not part of the app */
+      vercel-live-feedback,
+      [data-vercel-toolbar],
+      #vercel-toolbar,
+      iframe[src*="vercel.live"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
     </style>
   </head>
   <body>

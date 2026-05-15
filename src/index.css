@@ -270,8 +270,8 @@
   /* ── Empty state / onboarding ambient floating particles ── */
   @keyframes emptyStateParticle {
     0%   { opacity: 0;    transform: translateY(0px);   }
-    20%  { opacity: 0.35; }
-    80%  { opacity: 0.35; }
+    20%  { opacity: 0.42; }
+    80%  { opacity: 0.42; }
     100% { opacity: 0;    transform: translateY(-24px); }
   }
 
@@ -310,6 +310,16 @@
   @keyframes canvasBreath {
     0%, 100% { opacity: 0.04; transform: translate(-50%, -50%) scale(1);    }
     50%       { opacity: 0.09; transform: translate(-50%, -50%) scale(1.15); }
+  }
+
+  @keyframes fwCosmicTwinkle {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+  .fw-cosmic-star {
+    animation-name: fwCosmicTwinkle;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
   }
 
   /* ── Shimmer (loading skeleton) ── */

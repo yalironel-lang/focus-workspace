@@ -197,7 +197,7 @@ function ProjectSpaceObjectRendererInner({
         <div
           className="rounded-xl p-4 text-xs"
           style={{
-            backgroundColor: `${tokens.cardBg}ee`,
+            backgroundColor: `${tokens.cardBg}f8`,
             border: `1px solid ${tokens.cardBorder}`,
             color: tokens.textMuted,
           }}

@@ -115,15 +115,18 @@ export interface FocusObjectPresentation {
   zIndexBoost: number;
 }
 
-export function tierToPresentation(tier: FocusTier): FocusObjectPresentation {
+export function tierToPresentation(tier: FocusTier, focusDimScale = 1): FocusObjectPresentation {
+  const dim = (base: number) =>
+    focusDimScale >= 1 ? base : 1 - (1 - base) * focusDimScale;
+
   switch (tier) {
     case 1:
       return { opacityMul: 1, scale: 1.005, filterExtra: 'saturate(1.03) brightness(1.025)', zIndexBoost: 1 };
     case 2:
-      return { opacityMul: 0.98, scale: 1.002, filterExtra: 'saturate(1) brightness(1)', zIndexBoost: 0 };
+      return { opacityMul: dim(0.98), scale: 1.002, filterExtra: 'saturate(1) brightness(1)', zIndexBoost: 0 };
     case 3:
-      return { opacityMul: 0.9, scale: 0.999, filterExtra: 'saturate(0.95) brightness(0.97)', zIndexBoost: 0 };
+      return { opacityMul: dim(0.94), scale: 0.999, filterExtra: 'saturate(0.97) brightness(0.99)', zIndexBoost: 0 };
     default:
-      return { opacityMul: 0.78, scale: 0.997, filterExtra: 'saturate(0.88) brightness(0.94)', zIndexBoost: 0 };
+      return { opacityMul: dim(0.88), scale: 0.998, filterExtra: 'saturate(0.92) brightness(0.97)', zIndexBoost: 0 };
   }
 }

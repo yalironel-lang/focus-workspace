@@ -98,6 +98,11 @@ export function GlobalCommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setWorkspaceRecoveryOpen(false);
+    setWorkspaceRecoverySectionId(null);
+  }, [pathname]);
+
   const commands = useMemo((): CommandItem[] => {
     const list: CommandItem[] = [];
     const fs = getFreeSpaceHandlersSnapshot();

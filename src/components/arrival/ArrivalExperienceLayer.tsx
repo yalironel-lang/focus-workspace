@@ -92,6 +92,7 @@ export function ArrivalExperienceLayer({ tokens, reopened = false, onAction }: P
       style={{
         background: 'rgba(4, 6, 10, 0.58)',
         backdropFilter: 'blur(12px)',
+        pointerEvents: exiting ? 'none' : 'auto',
       }}
     >
       <div

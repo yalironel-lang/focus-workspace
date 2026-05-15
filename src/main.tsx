@@ -4,9 +4,11 @@ import App from './App.tsx'
 import './index.css'
 import { logAppBuildInfo } from './lib/appBuildInfo'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
+import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
 logAppBuildInfo()
 initPerformanceSafeModeListeners()
+suppressVercelToolbar()
 
 // ── Service Worker update lifecycle ──────────────────────────────────────────
 //

@@ -1,4 +1,7 @@
 {
+  "env": {
+    "VERCEL_PREVIEW_FEEDBACK_ENABLED": "0"
+  },
   "routes": [
     { "handle": "filesystem" },
     {

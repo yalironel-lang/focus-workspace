@@ -7,6 +7,7 @@ interface Props {
   tokens: AtmosphereTokens;
   /** Match FreeformCanvas `topOffset` so the fallback panel sits under the nav. */
   topOffset?: number;
+  fillParent?: boolean;
 }
 
 interface State {
@@ -31,12 +32,12 @@ export class FreeSpaceCanvasErrorBoundary extends Component<Props, State> {
     const { tokens, children } = this.props;
     if (!this.state.hasError) return children;
 
-    const top = this.props.topOffset ?? 0;
+    const { fillParent, topOffset = 0 } = this.props;
     return (
       <div
         style={{
-          position: 'fixed',
-          top,
+          position: fillParent ? 'absolute' : 'fixed',
+          top: fillParent ? 0 : topOffset,
           left: 0,
           right: 0,
           bottom: 0,

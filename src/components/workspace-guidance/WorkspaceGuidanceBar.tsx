@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
@@ -24,13 +24,21 @@ interface GuidanceMessage {
   variant: WorkspaceMicroSceneVariant;
 }
 
-const SNOOZE_MS = 20 * 60 * 1000;
+const AUTO_HIDE_MS = 7000;
 const CONTEXT_ROTATE_MS = 9800;
 const PRIORITY_ROTATE_MS = 7200;
 const FADE_MS = 360;
 
-function snoozeKey(sectionId: string): string {
-  return `fw_section_${sectionId}_workspace_guidance_snooze_v1`;
+function dismissedKey(sectionId: string): string {
+  return `fw_section_${sectionId}_guidance_dismissed_v1`;
+}
+
+function isDismissed(sectionId: string): boolean {
+  try {
+    return localStorage.getItem(dismissedKey(sectionId)) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function uniqueConnectionCount(objects: ProjectSpaceObject[]): number {
@@ -50,7 +58,7 @@ function hasConnectedTypePair(
   leftType: ProjectSpaceObject['type'],
   rightType: ProjectSpaceObject['type'],
 ): boolean {
-  const byId = new Map(objects.map((object) => [object.id, object]));
+  const byId = new Map(objects.map(object => [object.id, object]));
   for (const object of objects) {
     if (object.type !== leftType) continue;
     for (const otherId of coerceFreeSpaceConnectionIds(object.connections)) {
@@ -78,19 +86,19 @@ function buildContextMessages(
 ): GuidanceMessage[] {
   const objectCount = objects.length;
   const connectionCount = uniqueConnectionCount(objects);
-  const hasNotebook = objects.some((object) => object.type === 'notebook');
-  const hasPdf = objects.some((object) => object.type === 'pdf');
-  const hasMistake = objects.some((object) => object.type === 'mistake');
-  const hasToolPair = objects.some((object) => object.type === 'graph') && objects.some((object) => object.type === 'calculator');
-  const hasNotebookPdfConnection = hasConnectedTypePair(objects, 'notebook', 'pdf') || hasConnectedTypePair(objects, 'pdf', 'notebook');
+  const hasNotebook = objects.some(object => object.type === 'notebook');
+  const hasPdf = objects.some(object => object.type === 'pdf');
+  const hasMistake = objects.some(object => object.type === 'mistake');
+  const hasToolPair =
+    objects.some(object => object.type === 'graph') && objects.some(object => object.type === 'calculator');
+  const hasNotebookPdfConnection =
+    hasConnectedTypePair(objects, 'notebook', 'pdf') || hasConnectedTypePair(objects, 'pdf', 'notebook');
   const arrangedRecently = !!lastArrangeAt && Date.now() - lastArrangeAt < 12 * 60 * 1000;
 
   if (objectCount === 0) {
     return [
       { id: 'empty-build', text: 'Build connected study spaces.', variant: 'thinking-map' },
       { id: 'empty-link', text: 'Link notes, PDFs, mistakes, and tools.', variant: 'study-flow' },
-      { id: 'empty-arrange', text: 'Arrange ideas visually by thinking flow.', variant: 'course-desk' },
-      { id: 'empty-review', text: 'Review concepts spatially over time.', variant: 'cluster-return' },
     ];
   }
 
@@ -99,7 +107,7 @@ function buildContextMessages(
   if (objectCount < 2) {
     messages.push({
       id: 'capture',
-      text: 'Press C anywhere to quickly capture an idea.',
+      text: 'Press C to capture an idea.',
       variant: 'cluster-return',
     });
   }
@@ -107,7 +115,7 @@ function buildContextMessages(
   if (objectCount >= 2 && connectionCount === 0) {
     messages.push({
       id: 'connect',
-      text: 'Related objects work best when connected.',
+      text: 'Connect related objects.',
       variant: 'thinking-map',
     });
   }
@@ -115,7 +123,7 @@ function buildContextMessages(
   if (connectionCount > 0) {
     messages.push({
       id: 'grouped',
-      text: 'Connected notes stay grouped together.',
+      text: 'Connected notes stay grouped.',
       variant: 'study-flow',
     });
   }
@@ -123,7 +131,7 @@ function buildContextMessages(
   if (hasNotebook && hasPdf && !hasNotebookPdfConnection) {
     messages.push({
       id: 'source-link',
-      text: 'Connect reading material to your notes so it stays part of the same thought.',
+      text: 'Link reading to your notes.',
       variant: 'reading-focus',
     });
   }
@@ -131,23 +139,15 @@ function buildContextMessages(
   if (objectCount >= 3 && !arrangedRecently) {
     messages.push({
       id: 'arrange',
-      text: 'Try Arrange to organize the workspace by thinking flow.',
+      text: 'Try Arrange for thinking flow.',
       variant: 'study-flow',
-    });
-  }
-
-  if (arrangedRecently) {
-    messages.push({
-      id: 'arranged',
-      text: 'Arrange keeps connected groups closer and easier to read at a glance.',
-      variant: 'course-desk',
     });
   }
 
   if (hasMistake) {
     messages.push({
       id: 'mistakes',
-      text: 'Mistakes can resurface later for recall.',
+      text: 'Mistakes resurface for recall.',
       variant: 'cluster-return',
     });
   }
@@ -155,13 +155,18 @@ function buildContextMessages(
   if (focusMode) {
     messages.push({
       id: 'focus-active',
-      text: 'Focus Modes reduce distraction while keeping nearby context visible.',
-      variant: focusMode === 'thinking' ? 'thinking-map' : focusMode === 'solving' ? 'problem-tools' : 'reading-focus',
+      text: 'Focus keeps nearby context visible.',
+      variant:
+        focusMode === 'thinking'
+          ? 'thinking-map'
+          : focusMode === 'solving'
+            ? 'problem-tools'
+            : 'reading-focus',
     });
   } else if (objectCount >= 3) {
     messages.push({
       id: 'focus-discovery',
-      text: 'Cmd+K can shift the room into a calmer focus mode when you want less noise.',
+      text: 'Cmd+K for focus modes.',
       variant: 'reading-focus',
     });
   }
@@ -169,26 +174,17 @@ function buildContextMessages(
   if (hasToolPair) {
     messages.push({
       id: 'tool-pair',
-      text: 'Tools feel clearer when they stay near the notebook they support.',
+      text: 'Keep tools near the notebook they support.',
       variant: 'problem-tools',
     });
   }
 
-  if (objectCount >= 4 && connectionCount > 0 && arrangedRecently && focusMode) {
-    messages.unshift({
-      id: 'first-moment',
-      text: 'Connections, layout, and focus work together best when the workspace thinks in clusters.',
-      variant: 'study-flow',
-    });
-  }
-
-  return messages.slice(0, 5);
+  return messages.slice(0, 4);
 }
 
 export function WorkspaceGuidanceBar({
   sectionId,
   tokens,
-  topOffset,
   objects,
   focusMode,
   priorityHints = null,
@@ -196,21 +192,28 @@ export function WorkspaceGuidanceBar({
   lastArrangeAt = null,
   chromeQuiet = false,
 }: Props) {
+  const [dismissed, setDismissed] = useState(() => (sectionId ? isDismissed(sectionId) : false));
   const [hovered, setHovered] = useState(false);
-  const [dismissedUntil, setDismissedUntil] = useState(0);
+  const [expanded, setExpanded] = useState(true);
   const [index, setIndex] = useState(0);
-  const [opacity, setOpacity] = useState(0);
+  const [messageOpacity, setMessageOpacity] = useState(0);
 
   useEffect(() => {
     if (!sectionId) {
-      setDismissedUntil(0);
+      setDismissed(false);
       return;
     }
+    setDismissed(isDismissed(sectionId));
+    setExpanded(true);
+  }, [sectionId]);
+
+  const dismissPermanent = useCallback(() => {
+    setDismissed(true);
+    setExpanded(false);
     try {
-      const raw = localStorage.getItem(snoozeKey(sectionId));
-      setDismissedUntil(raw ? Number(raw) || 0 : 0);
+      localStorage.setItem(dismissedKey(sectionId), '1');
     } catch {
-      setDismissedUntil(0);
+      /* ignore */
     }
   }, [sectionId]);
 
@@ -218,22 +221,25 @@ export function WorkspaceGuidanceBar({
     () =>
       (priorityHints ?? [])
         .filter(Boolean)
-        .map((text, index) => ({
-          id: `priority-${index}-${text.slice(0, 18)}`,
+        .map((text, i) => ({
+          id: `priority-${i}-${text.slice(0, 18)}`,
           text,
-          variant: inferPriorityVariant(text, index),
+          variant: inferPriorityVariant(text, i),
         })),
     [priorityHints],
   );
 
   const messages = useMemo(
-    () => (priorityMessages.length ? priorityMessages : buildContextMessages(objects, focusMode, lastArrangeAt)),
+    () =>
+      priorityMessages.length
+        ? priorityMessages
+        : buildContextMessages(objects, focusMode, lastArrangeAt),
     [priorityMessages, objects, focusMode, lastArrangeAt],
   );
 
   useEffect(() => {
     setIndex(0);
-  }, [messages.map((message) => message.id).join('|')]);
+  }, [messages.map(m => m.id).join('|')]);
 
   useEffect(() => {
     if (!priorityMessages.length || !onClearPriorityHints) return;
@@ -246,131 +252,169 @@ export function WorkspaceGuidanceBar({
     if (messages.length <= 1) return;
     const rotateMs = priorityMessages.length ? PRIORITY_ROTATE_MS : CONTEXT_ROTATE_MS;
     const timer = window.setInterval(() => {
-      setIndex((current) => (current + 1) % messages.length);
+      setIndex(current => (current + 1) % messages.length);
     }, rotateMs);
     return () => window.clearInterval(timer);
   }, [messages.length, priorityMessages.length]);
 
   useEffect(() => {
     if (!messages.length) {
-      setOpacity(0);
+      setMessageOpacity(0);
       return;
     }
-    setOpacity(0);
-    const raf = requestAnimationFrame(() => setOpacity(1));
+    setMessageOpacity(0);
+    const raf = requestAnimationFrame(() => setMessageOpacity(1));
     return () => cancelAnimationFrame(raf);
   }, [messages[index]?.id, messages.length, index]);
 
-  if (!messages.length) return null;
-  if (dismissedUntil > Date.now()) return null;
+  useEffect(() => {
+    if (dismissed || !messages.length) return;
+    if (hovered) {
+      setExpanded(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setExpanded(false), AUTO_HIDE_MS);
+    return () => window.clearTimeout(timer);
+  }, [dismissed, hovered, messages.length, sectionId]);
+
+  if (!messages.length || dismissed) return null;
 
   const message = messages[index] ?? messages[0];
-  const quietOpacity = chromeQuiet && !hovered ? 0.58 : 1;
+  const showPill = expanded || hovered;
+  const shellOpacity = chromeQuiet && !hovered ? 0.72 : 1;
 
   return (
     <div
       aria-live="polite"
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={() => {
+        setHovered(true);
+        setExpanded(true);
+      }}
       onMouseLeave={() => setHovered(false)}
       style={{
         position: 'fixed',
-        top: topOffset + 10,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 46,
-        width: 'min(720px, calc(100vw - 146px))',
+        left: 16,
+        bottom: 20,
+        zIndex: 44,
+        maxWidth: 'min(320px, calc(100vw - 200px))',
         pointerEvents: 'none',
-        opacity: quietOpacity,
-        transition: 'opacity 0.35s ease',
+        opacity: shellOpacity,
+        transition: 'opacity 0.35s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+        transform: showPill ? 'translateY(0)' : 'translateY(4px)',
       }}
     >
-      <div
+      <GuidancePill
+        showPill={showPill}
+        tokens={tokens}
+        message={message}
+        messageOpacity={messageOpacity}
+        messages={messages}
+        index={index}
+        onDismiss={dismissPermanent}
+      />
+    </div>
+  );
+}
+
+function GuidancePill({
+  showPill,
+  tokens,
+  message,
+  messageOpacity,
+  messages,
+  index,
+  onDismiss,
+}: {
+  showPill: boolean;
+  tokens: AtmosphereTokens;
+  message: GuidanceMessage;
+  messageOpacity: number;
+  messages: GuidanceMessage[];
+  index: number;
+  onDismiss: () => void;
+}) {
+  if (!showPill) {
+    return (
+      <button
+        type="button"
+        aria-label="Show workspace tip"
         style={{
           pointerEvents: 'auto',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          minHeight: 58,
-          padding: '8px 12px 8px 10px',
-          borderRadius: 16,
-          border: `1px solid rgba(255,255,255,0.07)`,
-          background: `${tokens.cardBg}d8`,
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04)',
-          transition: `opacity ${FADE_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`,
-          opacity,
+          width: 10,
+          height: 10,
+          borderRadius: 999,
+          border: `1px solid ${tokens.accent}55`,
+          backgroundColor: `${tokens.accent}44`,
+          boxShadow: `0 0 12px ${tokens.accent}33`,
+          cursor: 'default',
+          padding: 0,
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        pointerEvents: 'auto',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 8px 6px 6px',
+        borderRadius: 999,
+        border: `1px solid ${tokens.cardBorder}`,
+        background: tokens.cardBg,
+        boxShadow: '0 8px 28px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.06)',
+        transition: `opacity ${FADE_MS}ms ease`,
+        opacity: messageOpacity,
+      }}
+    >
+      <WorkspaceMicroScene tokens={tokens} variant={message.variant} size="compact" />
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 11,
+          lineHeight: 1.4,
+          color: tokens.textSecondary,
+          letterSpacing: '-0.01em',
         }}
       >
-        <WorkspaceMicroScene tokens={tokens} variant={message.variant} size="compact" />
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 12.5,
-              lineHeight: 1.45,
-              color: tokens.textSecondary,
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {message.text}
-          </div>
-          {messages.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 7 }}>
-              {messages.map((entry, dotIndex) => (
-                <span
-                  key={entry.id}
-                  style={{
-                    width: dotIndex === index ? 13 : 5,
-                    height: 5,
-                    borderRadius: 999,
-                    backgroundColor: dotIndex === index ? `${tokens.accent}c8` : 'rgba(148,163,184,0.28)',
-                    transition: 'width 0.25s ease, background-color 0.25s ease',
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button
-          type="button"
-          aria-label="Dismiss workspace guidance for now"
-          onClick={() => {
-            const until = Date.now() + SNOOZE_MS;
-            setDismissedUntil(until);
-            try {
-              localStorage.setItem(snoozeKey(sectionId), String(until));
-            } catch {
-              /* ignore */
-            }
-          }}
+        {message.text}
+      </span>
+      {messages.length > 1 && (
+        <span
+          aria-hidden
           style={{
-            width: 28,
-            height: 28,
-            border: 'none',
-            borderRadius: 8,
-            background: 'transparent',
+            fontSize: 9,
+            fontWeight: 600,
             color: tokens.textGhost,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             flexShrink: 0,
-            transition: 'background-color 0.18s ease, color 0.18s ease',
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
-            event.currentTarget.style.color = tokens.textSecondary;
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.backgroundColor = 'transparent';
-            event.currentTarget.style.color = tokens.textGhost;
           }}
         >
-          <X style={{ width: 13, height: 13 }} />
-        </button>
-      </div>
+          {index + 1}/{messages.length}
+        </span>
+      )}
+      <button
+        type="button"
+        aria-label="Dismiss tips for this workspace"
+        onClick={onDismiss}
+        style={{
+          width: 22,
+          height: 22,
+          border: 'none',
+          borderRadius: 999,
+          background: 'transparent',
+          color: tokens.textGhost,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <X style={{ width: 12, height: 12 }} />
+      </button>
     </div>
   );
 }

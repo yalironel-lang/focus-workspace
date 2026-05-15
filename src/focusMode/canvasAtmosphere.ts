@@ -1,3 +1,5 @@
+import type { FocusStrength } from '../lib/workspaceClarity';
+import { scaleVignetteEdgeAlpha } from '../lib/workspaceClarity';
 import type { FocusMode } from './focusModeTypes';
 import { FOCUS_PRESENTATION_TRANSITION } from './focusModeTypes';
 
@@ -17,75 +19,106 @@ export interface FocusCanvasAtmosphere {
   connectionLineMul: number;
 }
 
-export function focusCanvasAtmosphere(mode: FocusMode | null): FocusCanvasAtmosphere {
+function softenAtmosphere(atm: FocusCanvasAtmosphere, strength: FocusStrength, fogMul: number): FocusCanvasAtmosphere {
+  const dim =
+    strength === 'guided' ? 1 : strength === 'balanced' ? 0.72 : 0.48;
+  const fog = Math.min(1, fogMul);
+  return {
+    ...atm,
+    vignetteInnerPct: Math.min(58, atm.vignetteInnerPct + (1 - dim) * 6),
+    vignetteEdgeAlpha: scaleVignetteEdgeAlpha(
+      atm.vignetteEdgeAlpha,
+      fog * (0.5 + dim * 0.5),
+    ),
+    edgeFadeOpacity: atm.edgeFadeOpacity * (0.42 + dim * 0.38) * fog,
+    insetShadow: atm.insetShadow.replace(
+      /rgba\(7,11,20,([\d.]+)\)/,
+      (_, n) => `rgba(7,11,20,${(parseFloat(n) * (0.65 + dim * 0.25) * fog).toFixed(2)})`,
+    ),
+    spatialAmbientOpacity: 1 + (atm.spatialAmbientOpacity - 1) * dim,
+    connectionLineMul: 1 + (atm.connectionLineMul - 1) * dim,
+    minimapOpacityMul: 1 + (atm.minimapOpacityMul - 1) * dim,
+  };
+}
+
+export function focusCanvasAtmosphere(
+  mode: FocusMode | null,
+  strength: FocusStrength = 'soft',
+  fogMul = 0.55,
+): FocusCanvasAtmosphere {
   const base: FocusCanvasAtmosphere = {
     transition: FOCUS_PRESENTATION_TRANSITION,
-    vignetteInnerPct: 44,
-    vignetteEdgeAlpha: '72',
-    edgeFadeOpacity: 0.78,
-    insetShadow: 'inset 0 0 68px rgba(7,11,20,0.24)',
-    dotGridAccentAlpha: '12',
+    vignetteInnerPct: 52,
+    vignetteEdgeAlpha: '58',
+    edgeFadeOpacity: 0.58,
+    insetShadow: 'inset 0 0 64px rgba(7,11,20,0.16)',
+    dotGridAccentAlpha: '16',
     minimapOpacityMul: 1,
     minimapScale: 1,
-    spatialAmbientOpacity: 1,
-    connectionLineMul: 1,
+    spatialAmbientOpacity: 1.06,
+    connectionLineMul: 1.06,
   };
 
-  if (!mode) return base;
+  if (!mode) return softenAtmosphere(base, strength, fogMul);
 
+  let tuned: FocusCanvasAtmosphere;
   switch (mode) {
     case 'reading':
-      return {
+      tuned = {
         ...base,
-        vignetteInnerPct: 40,
-        vignetteEdgeAlpha: '76',
-        edgeFadeOpacity: 0.72,
-        insetShadow: 'inset 0 0 74px rgba(7,11,20,0.26)',
-        dotGridAccentAlpha: '0f',
-        minimapOpacityMul: 0.82,
-        minimapScale: 0.98,
-        spatialAmbientOpacity: 0.95,
-        connectionLineMul: 0.94,
-      };
-    case 'solving':
-      return {
-        ...base,
-        vignetteInnerPct: 46,
-        vignetteEdgeAlpha: '70',
-        edgeFadeOpacity: 0.74,
-        insetShadow: 'inset 0 0 70px rgba(7,11,20,0.24)',
-        dotGridAccentAlpha: '12',
-        minimapOpacityMul: 0.94,
-        minimapScale: 1,
-        spatialAmbientOpacity: 0.98,
-        connectionLineMul: 1,
-      };
-    case 'thinking':
-      return {
-        ...base,
-        vignetteInnerPct: 50,
-        vignetteEdgeAlpha: '64',
-        edgeFadeOpacity: 0.8,
-        insetShadow: 'inset 0 0 62px rgba(7,11,20,0.2)',
+        vignetteInnerPct: 48,
+        vignetteEdgeAlpha: '62',
+        edgeFadeOpacity: 0.54,
+        insetShadow: 'inset 0 0 68px rgba(7,11,20,0.17)',
         dotGridAccentAlpha: '14',
-        minimapOpacityMul: 1.02,
-        minimapScale: 1.04,
-        spatialAmbientOpacity: 1.04,
-        connectionLineMul: 1.14,
+        minimapOpacityMul: 0.92,
+        minimapScale: 0.99,
+        spatialAmbientOpacity: 1.02,
+        connectionLineMul: 1.02,
       };
+      break;
+    case 'solving':
+      tuned = {
+        ...base,
+        vignetteInnerPct: 54,
+        vignetteEdgeAlpha: '56',
+        edgeFadeOpacity: 0.56,
+        insetShadow: 'inset 0 0 66px rgba(7,11,20,0.16)',
+        dotGridAccentAlpha: '16',
+        minimapOpacityMul: 0.98,
+        minimapScale: 1,
+        spatialAmbientOpacity: 1.04,
+        connectionLineMul: 1.06,
+      };
+      break;
+    case 'thinking':
+      tuned = {
+        ...base,
+        vignetteInnerPct: 56,
+        vignetteEdgeAlpha: '52',
+        edgeFadeOpacity: 0.6,
+        insetShadow: 'inset 0 0 58px rgba(7,11,20,0.14)',
+        dotGridAccentAlpha: '18',
+        minimapOpacityMul: 1.04,
+        minimapScale: 1.02,
+        spatialAmbientOpacity: 1.1,
+        connectionLineMul: 1.16,
+      };
+      break;
     case 'review':
     default:
-      return {
+      tuned = {
         ...base,
-        vignetteInnerPct: 42,
-        vignetteEdgeAlpha: '74',
-        edgeFadeOpacity: 0.76,
-        insetShadow: 'inset 0 0 72px rgba(7,11,20,0.25)',
-        dotGridAccentAlpha: '10',
-        minimapOpacityMul: 0.96,
+        vignetteInnerPct: 50,
+        vignetteEdgeAlpha: '60',
+        edgeFadeOpacity: 0.56,
+        insetShadow: 'inset 0 0 66px rgba(7,11,20,0.17)',
+        dotGridAccentAlpha: '14',
+        minimapOpacityMul: 1,
         minimapScale: 1,
-        spatialAmbientOpacity: 0.98,
-        connectionLineMul: 1.08,
+        spatialAmbientOpacity: 1.04,
+        connectionLineMul: 1.1,
       };
   }
+  return softenAtmosphere(tuned, strength, fogMul);
 }

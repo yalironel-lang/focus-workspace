@@ -10,6 +10,7 @@ import type { FreeSpaceCommandHandlers } from './types';
 import type { AIWorkspaceHandlers } from './aiWorkspaceHandlersRef';
 import type { FocusMode } from '../focusMode/focusModeTypes';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
+import { navDebugLog } from '../lib/navigationDebug';
 import { pulsePerformancePressure } from '../lib/performanceSafeMode';
 
 const freeHandlersRef = { current: null as FreeSpaceCommandHandlers | null };
@@ -71,6 +72,8 @@ export interface CommandPaletteContextValue {
   arrivalExperienceOpen: boolean;
   openArrivalExperience: () => void;
   closeArrivalExperience: () => void;
+  /** Close palette + global modals before/while navigating. */
+  dismissTransientUi: () => void;
   aiWorkspaceVersion: number;
   focusModeVersion: number;
   workspaceStarterVersion: number;
@@ -143,18 +146,29 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     setArrivalExperienceOpen(false);
   }, []);
 
+  const dismissTransientUi = useCallback(() => {
+    setPaletteOpen(false);
+    setSessionModalOpen(false);
+    setIntelligenceModalOpen(false);
+    setArrivalExperienceOpen(false);
+  }, []);
+
   const sectionIdFromRoute = useMemo(() => {
     const m = location.pathname.match(/^\/section\/([^/]+)/);
     return m?.[1];
   }, [location.pathname]);
 
   useEffect(() => {
-    setPaletteOpen(false);
-    setSessionModalOpen(false);
-    setIntelligenceModalOpen(false);
-    setArrivalExperienceOpen(false);
+    navDebugLog('route-change', {
+      pathname: location.pathname,
+      hadPalette: paletteOpen,
+      hadSessionModal: sessionModalOpen,
+      hadIntelligenceModal: intelligenceModalOpen,
+      hadArrival: arrivalExperienceOpen,
+    });
+    dismissTransientUi();
     pulsePerformancePressure('route');
-  }, [location.pathname]);
+  }, [location.pathname, dismissTransientUi]);
 
   const value = useMemo(
     (): CommandPaletteContextValue => ({
@@ -186,6 +200,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       arrivalExperienceOpen,
       openArrivalExperience,
       closeArrivalExperience,
+      dismissTransientUi,
       aiWorkspaceVersion,
       focusModeVersion,
       workspaceStarterVersion,
@@ -214,6 +229,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       arrivalExperienceOpen,
       openArrivalExperience,
       closeArrivalExperience,
+      dismissTransientUi,
       aiWorkspaceVersion,
       focusModeVersion,
       workspaceStarterVersion,

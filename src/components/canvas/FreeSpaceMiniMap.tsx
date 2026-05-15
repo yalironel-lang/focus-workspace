@@ -380,12 +380,12 @@ function FreeSpaceMiniMapInner({
         height: H,
         zIndex: 32,
         borderRadius: 14,
-        backgroundColor: calmDuringInteraction ? `${tokens.cardBg}f2` : `${tokens.cardBg}de`,
+        backgroundColor: calmDuringInteraction ? `${tokens.cardBg}fa` : `${tokens.cardBg}ec`,
         border: `1px solid ${tokens.cardBorderHover}`,
         boxShadow: `0 10px 36px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07)`,
         backdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
         WebkitBackdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
-        opacity: (calmDuringInteraction ? 0.92 : hovered ? 0.97 : 0.88) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
+        opacity: (calmDuringInteraction ? 0.94 : hovered ? 0.98 : 0.92) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
         transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
         transformOrigin: 'bottom right',
         transition: calmDuringInteraction ? 'none' : 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -427,8 +427,8 @@ function FreeSpaceMiniMapInner({
               x2={b.x}
               y2={b.y}
               stroke={amber}
-              strokeOpacity={0.24}
-              strokeWidth={0.95}
+              strokeOpacity={0.36}
+              strokeWidth={1.02}
               vectorEffect="non-scaling-stroke"
             />
           );
@@ -444,7 +444,7 @@ function FreeSpaceMiniMapInner({
           const sel = id === selectedId;
           const inCluster = cluster.has(id);
           const fill = sel || inCluster ? amber : tokens.textPrimary;
-          const fillOp = sel ? 0.5 : inCluster ? 0.34 : 0.16;
+          const fillOp = sel ? 0.54 : inCluster ? 0.4 : 0.22;
           return (
             <rect
               key={id}

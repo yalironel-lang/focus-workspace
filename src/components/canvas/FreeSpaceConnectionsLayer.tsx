@@ -120,8 +120,8 @@ function FreeSpaceConnectionsLayerInner({
         const hovered = hoveredEdgeKey === key;
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
         const lingering = continuitySet.has(key);
-        const stroke = hovered ? `${accent}bf` : lingering ? `${accent}72` : `${accent}52`;
-        const width = hovered ? 1.5 : lingering ? 1.18 : 1.02;
+        const stroke = hovered ? `${accent}d4` : lingering ? `${accent}8a` : `${accent}6e`;
+        const width = hovered ? 1.55 : lingering ? 1.24 : 1.08;
         const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul));
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
@@ -143,7 +143,7 @@ function FreeSpaceConnectionsLayerInner({
               filter={hovered || pulse ? `url(#${filterId})` : undefined}
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
-                opacity: ((pulse && !hovered ? 0.8 : lingering ? 1.08 : 1) * em),
+                opacity: ((pulse && !hovered ? 0.88 : lingering ? 1.1 : 1) * em),
                 animation: pulse ? 'fwConnPulse 2.6s ease-in-out infinite' : undefined,
               }}
             />
@@ -163,8 +163,8 @@ function FreeSpaceConnectionsLayerInner({
       })}
       <style>{`
         @keyframes fwConnPulse {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 0.95; }
+          0%, 100% { opacity: 0.62; }
+          50% { opacity: 1; }
         }
       `}</style>
     </svg>

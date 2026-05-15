@@ -305,7 +305,7 @@ export function FreeSpaceCompanionCard({
     <div
       className="flex h-full min-h-[220px] flex-col rounded-2xl overflow-hidden"
       style={{
-        background: `linear-gradient(180deg, ${tokens.cardBg}f7 0%, ${tokens.wellBg}f0 100%)`,
+        background: `linear-gradient(180deg, ${tokens.cardBg} 0%, ${tokens.wellBg} 100%)`,
         border: `1px solid ${tokens.cardBorderHover}`,
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), 0 0 24px ${tokens.accentGlow}`,
       }}

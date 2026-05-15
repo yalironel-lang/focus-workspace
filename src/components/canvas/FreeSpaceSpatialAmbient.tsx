@@ -30,7 +30,7 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
       const x = hash01(i, 1) * 4200 - 400;
       const y = hash01(i, 2) * 3200 - 300;
       const r = 0.35 + hash01(i, 3) * 0.85;
-      const o = 0.035 + hash01(i, 4) * 0.075;
+      const o = 0.045 + hash01(i, 4) * 0.09;
       out.push({ x, y, r, o });
     }
     return out;
@@ -59,7 +59,7 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
             y1: pi.y,
             x2: pj.x,
             y2: pj.y,
-            o: 0.02 + hash01(i * j, 8) * 0.028,
+            o: 0.028 + hash01(i * j, 8) * 0.034,
           });
         }
       }
@@ -84,7 +84,7 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
         height: 3800,
         pointerEvents: 'none',
         zIndex: 0,
-        opacity: Math.max(0.24, Math.min(1.2, opacityScale)),
+        opacity: Math.max(0.34, Math.min(1.2, opacityScale)),
         transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         animation: 'fwSpatialDrift 140s linear infinite alternate',
       }}
@@ -98,8 +98,8 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
       <svg width="100%" height="100%" viewBox="0 0 4800 3800" preserveAspectRatio="xMidYMid slice">
         <defs>
           <radialGradient id={idCore} cx="42%" cy="38%" r="55%">
-            <stop offset="0%" stopColor={tokens.accent} stopOpacity="0.055" />
-            <stop offset="45%" stopColor={tokens.textSecondary} stopOpacity="0.028" />
+            <stop offset="0%" stopColor={tokens.accent} stopOpacity="0.078" />
+            <stop offset="45%" stopColor={tokens.textSecondary} stopOpacity="0.038" />
             <stop offset="100%" stopColor={tokens.pageBg} stopOpacity="0" />
           </radialGradient>
           <radialGradient id={idSide} cx="78%" cy="62%" r="40%">
@@ -156,8 +156,8 @@ export function FreeSpaceSpatialAmbient({ tokens, opacityScale = 1 }: Props) {
           <circle key={`st-${rid}-${i}`} cx={s.x} cy={s.y} r={s.r} fill={tokens.textPrimary} opacity={s.o} />
         ))}
 
-        <circle cx={3200} cy={900} r={340} fill={accentFill} opacity={0.028} filter="blur(80px)" />
-        <circle cx={1200} cy={2600} r={420} fill={tokens.textSecondary} opacity={0.024} filter="blur(90px)" />
+        <circle cx={3200} cy={900} r={340} fill={accentFill} opacity={0.038} filter="blur(80px)" />
+        <circle cx={1200} cy={2600} r={420} fill={tokens.textSecondary} opacity={0.032} filter="blur(90px)" />
       </svg>
     </div>
   );

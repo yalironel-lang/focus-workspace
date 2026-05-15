@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useCommandPalette } from '../../command/CommandPaletteContext';
 import { useAuth } from '../../hooks/useAuth';
 import { hasSeenArrivalExperience, markArrivalExperienceSeen } from '../../lib/arrivalExperience';
+import { navDebugLog } from '../../lib/navigationDebug';
 import { ArrivalExperienceLayer, type ArrivalExperienceAction } from './ArrivalExperienceLayer';
 
 function isEligibleAutoRoute(pathname: string): boolean {
@@ -16,6 +17,8 @@ export function ArrivalExperienceGate() {
   const { tokens, arrivalExperienceOpen, closeArrivalExperience } = useCommandPalette();
   const [seen, setSeen] = useState<boolean>(() => hasSeenArrivalExperience());
   const [autoOpen, setAutoOpen] = useState(false);
+  const prevPathRef = useRef(location.pathname);
+  const suppressAutoOpenRef = useRef(false);
 
   useEffect(() => {
     if (!user) {
@@ -26,15 +29,28 @@ export function ArrivalExperienceGate() {
   }, [user]);
 
   useEffect(() => {
+    const prev = prevPathRef.current;
+    if (prev !== location.pathname) {
+      if (autoOpen || arrivalExperienceOpen) suppressAutoOpenRef.current = true;
+      navDebugLog('arrival-route-reset', { from: prev, to: location.pathname });
+      setAutoOpen(false);
+      closeArrivalExperience();
+    }
+    prevPathRef.current = location.pathname;
+  }, [location.pathname, autoOpen, arrivalExperienceOpen, closeArrivalExperience]);
+
+  useEffect(() => {
+    if (suppressAutoOpenRef.current) return;
     if (loading || !user || seen || arrivalExperienceOpen) return;
     if (!isEligibleAutoRoute(location.pathname)) return;
     setAutoOpen(true);
   }, [arrivalExperienceOpen, loading, location.pathname, seen, user]);
 
-  const open = useMemo(
-    () => !loading && !!user && location.pathname !== '/' && (arrivalExperienceOpen || autoOpen),
-    [arrivalExperienceOpen, autoOpen, loading, location.pathname, user],
-  );
+  const open = useMemo(() => {
+    if (loading || !user || location.pathname === '/') return false;
+    if (arrivalExperienceOpen) return true;
+    return autoOpen && isEligibleAutoRoute(location.pathname);
+  }, [arrivalExperienceOpen, autoOpen, loading, location.pathname, user]);
 
   const closeAndPersist = useCallback(() => {
     markArrivalExperienceSeen();
