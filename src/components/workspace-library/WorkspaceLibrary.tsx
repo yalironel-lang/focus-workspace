@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -28,6 +28,8 @@ import { useSessionContinuity } from '../../hooks/useSessionContinuity';
 import { useWorkspaceFolders } from '../../hooks/useWorkspaceFolders';
 import { useRecentWorkspaces } from '../../hooks/useRecentWorkspaces';
 import { getWorkspaceCustomization } from '../../hooks/useWorkspaceCustomization';
+import { UNIVERSE_ROUTE } from '../../lib/workspaceUniverse/types';
+import { runLibraryStartupHealth } from '../../lib/persistenceHealth';
 import { loadSession } from '../../utils/sessionPlan';
 import type { SectionWithProgress } from '../../types';
 import type { Deadline } from '../../types';
@@ -246,7 +248,7 @@ export function WorkspaceLibrary() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
-  const { sections, loading, createSection, deleteSection } = useSections();
+  const { sections, loading, error, fetchSections, createSection, deleteSection } = useSections();
   const { deadlines } = useDeadlines();
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { design, global, updateGlobal } = useWorkspaceTheme();
@@ -254,7 +256,10 @@ export function WorkspaceLibrary() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const continuity = useSessionContinuity();
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
-  const { recentIdsOrdered, openedAt } = useRecentWorkspaces();
+  const { recentIdsOrdered, openedAt, pruneToValidIds, reloadFromStorage: reloadRecentFromStorage } =
+    useRecentWorkspaces();
+  const autoOpenedCreateRef = useRef(false);
+  const startupHealthRanRef = useRef(false);
   const { openSessionModal, openArrivalExperience } = useCommandPalette();
 
   const [search, setSearch] = useState('');
@@ -265,6 +270,9 @@ export function WorkspaceLibrary() {
   const [filterFolder, setFilterFolder] = useState<string | 'all' | 'unfiled'>('all');
 
   const activeSession = loadSession();
+  const sectionIdSet = useMemo(() => new Set(sections.map(s => s.id)), [sections]);
+  const hasWorkspaces = sections.length > 0;
+  const libraryReady = !loading && !error;
 
   useEffect(() => {
     try {
@@ -276,6 +284,24 @@ export function WorkspaceLibrary() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    if (!libraryReady) return;
+    const ids = sections.map(s => s.id);
+    if (!startupHealthRanRef.current) {
+      runLibraryStartupHealth(ids);
+      startupHealthRanRef.current = true;
+    }
+    pruneToValidIds(ids);
+    continuity.reloadFromStorage();
+    reloadRecentFromStorage();
+  }, [libraryReady, sections, pruneToValidIds, continuity, reloadRecentFromStorage]);
+
+  useEffect(() => {
+    if (!libraryReady || hasWorkspaces || autoOpenedCreateRef.current) return;
+    autoOpenedCreateRef.current = true;
+    setShowNew(true);
+  }, [hasWorkspaces, libraryReady]);
 
   const displayName = useMemo(() => {
     if (!user?.email) return '';
@@ -312,7 +338,7 @@ export function WorkspaceLibrary() {
       });
     }
     const last = continuity.lastSession;
-    if (continuity.isRecent && last) {
+    if (continuity.isRecent && last && sectionIdSet.has(last.sectionId)) {
       cards.push({
         key: 'last',
         title: last.sectionTitle,
@@ -322,7 +348,7 @@ export function WorkspaceLibrary() {
       });
     }
     return cards;
-  }, [activeSession, continuity.isRecent, continuity.lastSession, navigate, tokens.accent]);
+  }, [activeSession, continuity.isRecent, continuity.lastSession, navigate, sectionIdSet, tokens.accent]);
 
   const grouped = useMemo(() => {
     if (filterFolder !== 'all') return null;
@@ -351,12 +377,17 @@ export function WorkspaceLibrary() {
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      await createSection(newTitle.trim());
-      toast.success('Workspace created', {
+      const created = await createSection(newTitle.trim());
+      if (!created) {
+        toast.error('Could not create workspace');
+        return;
+      }
+      toast.success('Workspace created — opening…', {
         style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
       });
       setNewTitle('');
       setShowNew(false);
+      navigate(`/section/${created.id}`);
     } catch {
       toast.error('Could not create workspace');
     } finally {
@@ -442,21 +473,34 @@ export function WorkspaceLibrary() {
         </div>
 
         <nav className="flex-1 px-2 py-4 flex flex-col gap-0.5">
-          <button
-            type="button"
-            onClick={() => setAppearanceOpen(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-colors mb-1"
-            style={{ color: tokens.textSecondary, backgroundColor: appearanceOpen ? tokens.accentSubtle : 'transparent' }}
-          >
-            <Palette className="w-4 h-4" strokeWidth={2} style={{ color: tokens.accent }} />
-            Appearance
-          </button>
+          {hasWorkspaces ? (
+            <button
+              type="button"
+              onClick={() => setAppearanceOpen(true)}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-colors mb-1"
+              style={{ color: tokens.textSecondary, backgroundColor: appearanceOpen ? tokens.accentSubtle : 'transparent' }}
+            >
+              <Palette className="w-4 h-4" strokeWidth={2} style={{ color: tokens.accent }} />
+              Appearance
+            </button>
+          ) : (
+            <p className="px-3 py-2 mb-1 text-[10px] leading-relaxed" style={{ color: tokens.textGhost }}>
+              Create a workspace first — then customize living backgrounds inside it.
+            </p>
+          )}
           <LibraryNavLink
             tokens={tokens}
             active={location.pathname === '/dashboard'}
             icon={<BookOpenCheck className="w-4 h-4" strokeWidth={2} />}
             label="Library"
             to="/dashboard"
+          />
+          <LibraryNavLink
+            tokens={tokens}
+            active={location.pathname === UNIVERSE_ROUTE}
+            icon={<Sparkles className="w-4 h-4" strokeWidth={2} />}
+            label="Universe"
+            to={UNIVERSE_ROUTE}
           />
           <LibraryNavLink
             tokens={tokens}
@@ -511,11 +555,44 @@ export function WorkspaceLibrary() {
           <p className="text-[11px] font-semibold tracking-[0.2em] uppercase mb-2" style={{ color: tokens.textGhost }}>
             Workspace library
           </p>
-          <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight mb-6" style={{ color: tokens.textPrimary }}>
-            Your spaces
+          <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight mb-2" style={{ color: tokens.textPrimary }}>
+            {hasWorkspaces ? 'Your spaces' : 'Welcome — let’s set up your first workspace'}
           </h1>
+          {!hasWorkspaces && libraryReady && (
+            <p className="text-sm mb-6 max-w-xl leading-relaxed" style={{ color: tokens.textMuted }}>
+              A workspace is a course or project. You’ll get a work surface and a spatial Free Space for notes, files, and focus.
+            </p>
+          )}
 
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between max-w-4xl">
+          {error && (
+            <div
+              className="mb-6 max-w-xl rounded-2xl px-5 py-4 border flex flex-col sm:flex-row sm:items-center gap-3"
+              style={{
+                borderColor: 'rgba(239,68,68,0.35)',
+                backgroundColor: 'rgba(239,68,68,0.08)',
+              }}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: tokens.textPrimary }}>
+                  Couldn’t load workspaces
+                </p>
+                <p className="text-xs mt-1" style={{ color: tokens.textMuted }}>
+                  {error}. Check your connection and try again.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchSections()}
+                className="shrink-0 px-4 py-2 rounded-xl text-xs font-semibold"
+                style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {hasWorkspaces && (
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between max-w-4xl mb-6">
             <div
               className="flex items-center gap-3 rounded-2xl px-4 py-2.5 flex-1 min-w-0 max-w-xl"
               style={{
@@ -562,9 +639,10 @@ export function WorkspaceLibrary() {
               </button>
             </div>
           </div>
+          )}
 
-          {showNew && (
-            <form onSubmit={handleCreate} className="mt-4 flex flex-wrap gap-2 items-center max-w-xl animate-fade-in">
+          {(showNew || (!hasWorkspaces && libraryReady && !error)) && (
+            <form onSubmit={handleCreate} className="mt-2 flex flex-wrap gap-2 items-center max-w-xl animate-fade-in">
               <input
                 type="text"
                 value={newTitle}
@@ -586,16 +664,30 @@ export function WorkspaceLibrary() {
               >
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
               </button>
-              <button
-                type="button"
-                onClick={() => setShowNew(false)}
-                className="p-2 rounded-xl"
-                style={{ color: tokens.textGhost }}
-                aria-label="Cancel"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              {hasWorkspaces && (
+                <button
+                  type="button"
+                  onClick={() => setShowNew(false)}
+                  className="p-2 rounded-xl"
+                  style={{ color: tokens.textGhost }}
+                  aria-label="Cancel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </form>
+          )}
+
+          {!hasWorkspaces && libraryReady && !error && (
+            <button
+              type="button"
+              onClick={() => setShowNew(true)}
+              className="mt-4 inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-semibold"
+              style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
+            >
+              <Plus className="w-4 h-4" strokeWidth={2.5} />
+              Create your first workspace
+            </button>
           )}
         </header>
 
@@ -606,7 +698,7 @@ export function WorkspaceLibrary() {
             </div>
           ) : (
             <>
-              {(continueCards.length > 0 || sections.length > 0) && (
+              {hasWorkspaces && continueCards.length > 0 && (
                 <section className="mb-10">
                   <h2 className="text-xs font-semibold tracking-widest uppercase mb-4" style={{ color: tokens.textGhost }}>
                     Continue working
@@ -637,8 +729,7 @@ export function WorkspaceLibrary() {
                         </div>
                       </button>
                     ))}
-                    {sections.length > 0 && (
-                      <button
+                    <button
                         type="button"
                         onClick={() => openSessionModal()}
                         className="text-left rounded-2xl px-5 py-4 min-w-[180px] border transition-all"
@@ -653,12 +744,11 @@ export function WorkspaceLibrary() {
                         </div>
                         <div className="text-xs">Choose a workspace to focus in.</div>
                       </button>
-                    )}
                   </div>
                 </section>
               )}
 
-              {recentSections.length > 0 && (
+              {hasWorkspaces && recentSections.length > 0 && (
                 <section className="mb-10">
                   <h2 className="text-xs font-semibold tracking-widest uppercase mb-4" style={{ color: tokens.textGhost }}>
                     Recently opened
@@ -687,6 +777,7 @@ export function WorkspaceLibrary() {
                 </section>
               )}
 
+              {hasWorkspaces && (
               <div className="flex flex-col lg:flex-row gap-10">
                 {/* Collections rail */}
                 <section className="lg:w-56 shrink-0">
@@ -769,34 +860,7 @@ export function WorkspaceLibrary() {
                     {filterFolder === 'all' ? 'All workspaces' : filterFolder === 'unfiled' ? 'Unfiled' : folders.find(f => f.id === filterFolder)?.name ?? 'Workspaces'}
                   </h2>
 
-                  {sections.length === 0 ? (
-                    <div
-                      className="rounded-2xl p-10 text-center border max-w-lg"
-                      style={{ borderColor: tokens.cardBorder, backgroundColor: 'rgba(255,255,255,0.02)' }}
-                    >
-                      <p className="text-sm mb-2" style={{ color: tokens.textSecondary }}>
-                        No workspaces yet
-                      </p>
-                      <p className="text-xs mb-6 leading-relaxed" style={{ color: tokens.textGhost }}>
-                        Create a workspace for each course or project. Everything stays local-first with your account.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setShowNew(true)}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
-                        style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
-                      >
-                        <Plus className="w-4 h-4" strokeWidth={2.5} />
-                        Create workspace
-                      </button>
-                      <p className="text-[11px] mt-6" style={{ color: tokens.textGhost }}>
-                        Prefer the free-form desk?{' '}
-                        <Link to="/desk" style={{ color: tokens.accent }} className="font-medium">
-                          Open personal desk
-                        </Link>
-                      </p>
-                    </div>
-                  ) : filterFolder === 'all' && grouped ? (
+                  {filterFolder === 'all' && grouped ? (
                     <>
                       {folders.map(folder => {
                         const list = grouped.byFolder.get(folder.id) ?? [];
@@ -875,13 +939,31 @@ export function WorkspaceLibrary() {
                   )}
                 </section>
               </div>
+              )}
+
+              {!hasWorkspaces && libraryReady && !error && (
+                <div
+                  className="rounded-2xl p-10 text-center border max-w-lg mx-auto"
+                  style={{ borderColor: tokens.cardBorder, backgroundColor: 'rgba(255,255,255,0.02)' }}
+                >
+                  <BookOpenCheck className="w-10 h-10 mx-auto mb-4 opacity-50" style={{ color: tokens.accent }} />
+                  <p className="text-base font-semibold mb-2" style={{ color: tokens.textPrimary }}>
+                    Name your first workspace above
+                  </p>
+                  <p className="text-sm leading-relaxed" style={{ color: tokens.textMuted }}>
+                    Examples: “Organic Chemistry”, “Thesis”, “Side project”. You can open Free Space and customize the living background after you create it.
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>
       </main>
 
+      {hasWorkspaces && (
       <WorkspaceAppearancePanel
         open={appearanceOpen}
+        scope="global"
         tokens={tokens}
         atmosphereId={atmosphereId}
         global={global}
@@ -889,6 +971,7 @@ export function WorkspaceLibrary() {
         onSetAtmosphere={setAtmosphere}
         onUpdateGlobal={updateGlobal}
       />
+      )}
     </div>
   );
 }

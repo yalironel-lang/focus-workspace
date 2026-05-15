@@ -14,6 +14,7 @@ import { SECTION_DEFAULT_GRID_SIZE } from '../hooks/useSectionCanvasMode';
 
 const FOLDERS_KEY = 'fw_workspace_library_folders_v1';
 const RECENT_KEY = 'fw_workspace_library_recent_v1';
+const CONTINUITY_KEY = 'fw_last_session_v1';
 const VIEW_DEFAULTS = { zoom: 1, panX: 40, panY: 40 };
 const PREF_DEFAULTS = { snapToGrid: true, gridSize: SECTION_DEFAULT_GRID_SIZE };
 
@@ -105,6 +106,102 @@ export function repairRecentWorkspacesStorage(): PersistenceHealthResult {
     messages.push('Recent workspaces could not be validated.');
   }
   return { messages, wrote };
+}
+
+/** Drop recent-workspace rows that no longer exist in the account. */
+export function pruneRecentWorkspacesAgainst(validSectionIds: string[]): boolean {
+  const valid = new Set(validSectionIds);
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return false;
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) {
+      localStorage.removeItem(RECENT_KEY);
+      return true;
+    }
+    const next = arr.filter(
+      (x): x is { sectionId: string; openedAt: string } =>
+        !!x &&
+        typeof x === 'object' &&
+        typeof (x as { sectionId?: string }).sectionId === 'string' &&
+        valid.has((x as { sectionId: string }).sectionId),
+    );
+    if (next.length === arr.length) return false;
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next.slice(0, 24)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Clear cross-session continuity when it points at a deleted/missing workspace. */
+export function pruneContinuityAgainst(validSectionIds: string[]): boolean {
+  const valid = new Set(validSectionIds);
+  try {
+    const raw = localStorage.getItem(CONTINUITY_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { sectionId?: string };
+    if (typeof parsed?.sectionId === 'string' && !valid.has(parsed.sectionId)) {
+      localStorage.removeItem(CONTINUITY_KEY);
+      return true;
+    }
+  } catch {
+    localStorage.removeItem(CONTINUITY_KEY);
+    return true;
+  }
+  return false;
+}
+
+/** Run library-scoped repairs after the workspace list loads successfully. */
+export function runLibraryStartupHealth(validSectionIds: string[]): PersistenceHealthResult {
+  const messages: string[] = [];
+  let wrote = false;
+  const f = repairWorkspaceFoldersStorage();
+  messages.push(...f.messages);
+  if (f.wrote) wrote = true;
+  const r = repairRecentWorkspacesStorage();
+  messages.push(...r.messages);
+  if (r.wrote) wrote = true;
+  if (pruneRecentWorkspacesAgainst(validSectionIds)) {
+    messages.push('Removed stale entries from recently opened workspaces.');
+    wrote = true;
+  }
+  if (pruneContinuityAgainst(validSectionIds)) {
+    messages.push('Cleared an outdated “continue working” suggestion.');
+    wrote = true;
+  }
+  return { messages, wrote };
+}
+
+/** Remove library continuity/recent pointers for one missing workspace id. */
+export function pruneStaleSectionReferences(sectionId: string): void {
+  if (!sectionId) return;
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr)) {
+        const next = arr.filter(
+          (x): x is { sectionId: string } =>
+            !!x && typeof x === 'object' && (x as { sectionId?: string }).sectionId !== sectionId,
+        );
+        if (next.length !== arr.length) {
+          localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const raw = localStorage.getItem(CONTINUITY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { sectionId?: string };
+      if (parsed?.sectionId === sectionId) localStorage.removeItem(CONTINUITY_KEY);
+    }
+  } catch {
+    localStorage.removeItem(CONTINUITY_KEY);
+  }
 }
 
 /**

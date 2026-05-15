@@ -114,6 +114,10 @@ export function LivingBackgroundStudio({ tokens, global, onUpdateGlobal }: Props
 
   return (
     <>
+      <p className="text-[11px] leading-relaxed mb-4 px-1" style={{ color: tokens.textMuted }}>
+        Pick a world below — the preview updates immediately. Inside a workspace, open{' '}
+        <span style={{ color: tokens.textSecondary }}>Free Space</span> to see the full cinematic background.
+      </p>
       <div className="flex gap-1.5 p-1 rounded-2xl mb-6" style={{ backgroundColor: tokens.wellBg }}>
         {sections.map(s => (
           <button

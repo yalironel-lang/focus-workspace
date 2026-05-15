@@ -14,6 +14,8 @@ interface FreeSpacePdfCardProps {
   sectionId: string;
   onChange: (next: ProjectObjectContent) => void;
   onTitleChange?: (title: string) => void;
+  /** LOD: keep chrome, suspend iframe until object is active/near. */
+  suspendViewer?: boolean;
 }
 
 export function FreeSpacePdfCard({
@@ -23,6 +25,7 @@ export function FreeSpacePdfCard({
   sectionId,
   onChange,
   onTitleChange,
+  suspendViewer = false,
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
@@ -303,7 +306,18 @@ export function FreeSpacePdfCard({
           </div>
         )}
 
-        {iframeSrc && (
+        {suspendViewer && loadState === 'ready' && (
+          <div
+            className="flex-1 flex items-center justify-center px-4 py-8"
+            style={{ backgroundColor: tokens.wellBg, minHeight: 200 }}
+          >
+            <p className="text-[11px] text-center" style={{ color: tokens.textGhost }}>
+              PDF paused — select to view
+            </p>
+          </div>
+        )}
+
+        {iframeSrc && !suspendViewer && (
           <div style={{ flex: 1, minHeight: 0, contain: 'layout paint', isolation: 'isolate' }}>
           <iframe
             title={content.fileName || 'PDF'}

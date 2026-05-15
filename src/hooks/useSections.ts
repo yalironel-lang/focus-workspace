@@ -43,10 +43,17 @@ export function useSections() {
   const { user } = useAuth();
   const [sections, setSections] = useState<SectionWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchSections = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setSections([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
+    setError(null);
 
     const { data: sectionsData, error: sectionsError } = await supabase
       .from('sections')
@@ -54,7 +61,12 @@ export function useSections() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (sectionsError) { setLoading(false); return; }
+    if (sectionsError) {
+      setSections([]);
+      setError(sectionsError.message || 'Could not load workspaces');
+      setLoading(false);
+      return;
+    }
 
     const sectionsWithProgress: SectionWithProgress[] = [];
 
@@ -109,7 +121,7 @@ export function useSections() {
     await fetchSections();
   };
 
-  return { sections, loading, fetchSections, createSection, deleteSection };
+  return { sections, loading, error, fetchSections, createSection, deleteSection };
 }
 
 // ── useSectionDetail (workspace page) ────────────────────────────────────────
@@ -124,6 +136,8 @@ export function useSectionDetail(sectionId: string | undefined) {
   const { user } = useAuth();
   const [section, setSection] = useState<SectionDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   // Track which sectionId we have already run ensureDefaultGroups for
   const ensuredRef = useRef<string | null>(null);
   const requestSeqRef = useRef(0);
@@ -134,6 +148,8 @@ export function useSectionDetail(sectionId: string | undefined) {
     ensuredRef.current = null;
     setSection(null);
     sectionRef.current = null;
+    setNotFound(false);
+    setFetchError(null);
     setLoading(!!user && !!sectionId);
     pulsePerformancePressure('section-navigate');
   }, [user, sectionId]);
@@ -141,22 +157,36 @@ export function useSectionDetail(sectionId: string | undefined) {
   const fetchSection = useCallback(async () => {
     if (!user || !sectionId) {
       setSection(null);
+      setNotFound(false);
+      setFetchError(null);
       setLoading(false);
       return;
     }
     const requestId = ++requestSeqRef.current;
     const isStale = () => requestSeqRef.current !== requestId;
     if (!sectionRef.current) setLoading(true);
+    setNotFound(false);
+    setFetchError(null);
 
     const { data: sectionData, error: sectionError } = await supabase
       .from('sections')
       .select('*')
       .eq('id', sectionId)
-      .single();
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     if (isStale()) return;
-    if (sectionError || !sectionData) {
+    if (sectionError) {
       setSection(null);
+      setFetchError(sectionError.message || 'Could not load workspace');
+      setNotFound(false);
+      setLoading(false);
+      return;
+    }
+    if (!sectionData) {
+      setSection(null);
+      setNotFound(true);
+      setFetchError(null);
       setLoading(false);
       return;
     }
@@ -361,6 +391,8 @@ export function useSectionDetail(sectionId: string | undefined) {
   return {
     section,
     loading,
+    notFound,
+    fetchError,
     fetchSection,
     addItem,
     pushItem,

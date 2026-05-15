@@ -7,6 +7,7 @@ import { ArrivalExperienceGate } from './components/arrival/ArrivalExperienceGat
 import { Dashboard } from './pages/Dashboard';
 import { DeskPage } from './pages/DeskPage';
 import { SectionPage } from './pages/SectionPage';
+import { UniversePage } from './pages/UniversePage';
 import { SchedulePage } from './pages/SchedulePage';
 import { SessionPage } from './pages/SessionPage';
 import { Toaster } from 'react-hot-toast';
@@ -44,6 +45,14 @@ function AppRoutes() {
         element={
           <PrivateRoute>
             <Dashboard />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/universe"
+        element={
+          <PrivateRoute>
+            <UniversePage />
           </PrivateRoute>
         }
       />

@@ -97,6 +97,12 @@ import { resolveFreeSpaceMaterialTier } from '../../lib/freeSpaceMaterials';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 import { flickerDebugCount } from '../../lib/flickerDebug';
 import { setPerformancePressure } from '../../lib/performanceSafeMode';
+import {
+  buildBlockRenderPolicies,
+  buildCanvasScaleContext,
+  type BlockPolicyInput,
+} from '../../lib/freeSpaceScalePolicy';
+import { FreeSpaceRenderPolicyProvider } from './FreeSpaceRenderPolicyContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -571,12 +577,36 @@ export function FreeformCanvas({
   const envReactions = livingEnvironment?.reactions;
   const effectiveCosmic = livingEnvironment?.cosmic ?? cosmicBackdrop;
 
+  const allItemsPreview: { kind: 'module' | 'block' | 'tool'; id: string }[] = useMemo(
+    () => [
+      ...enabledModules.map(m => ({ kind: 'module' as const, id: m.id })),
+      ...blocks.map(b => ({ kind: 'block' as const, id: b.id })),
+      ...tools.map(t => ({ kind: 'tool' as const, id: t.id })),
+    ],
+    [enabledModules, blocks, tools],
+  );
+
+  const canvasScaleContext = useMemo(
+    () =>
+      buildCanvasScaleContext({
+        zoom: safeZoom,
+        panX: safePanX,
+        panY: safePanY,
+        viewportW: viewportSize.w,
+        viewportH: viewportSize.h,
+        objectCount: allItemsPreview.length,
+      }),
+    [safeZoom, safePanX, safePanY, viewportSize.w, viewportSize.h, allItemsPreview.length],
+  );
+
   const ambientScale =
     (reduceEffects
       ? 0.22
       : focusMode && spatialAmbient
         ? focusAtm.spatialAmbientOpacity
-        : workspaceClarity?.ambientMul ?? 1) * (envReactions?.spatialAmbientScale ?? 1);
+        : workspaceClarity?.ambientMul ?? 1) *
+    (envReactions?.spatialAmbientScale ?? 1) *
+    canvasScaleContext.ambientScaleMul;
   const continuityObjectSet = useMemo(() => new Set(continuityObjectIds), [continuityObjectIds]);
   const continuityClusterSet = useMemo(() => new Set(continuityClusterIds), [continuityClusterIds]);
   const focusTierById = useMemo(() => {
@@ -651,6 +681,46 @@ export function FreeformCanvas({
     const region = semanticClusterRegions.find(r => r.memberIds.includes(focalId));
     return region?.key ?? null;
   }, [focusEditingId, selectedId, semanticClusterRegions]);
+
+  const blockRenderPolicies = useMemo(() => {
+    const inputs: BlockPolicyInput[] = allItems.map(item => {
+      const pos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
+      const inActiveCluster =
+        !activeClusterKey ||
+        semanticClusterRegions.some(
+          r => r.key === activeClusterKey && r.memberIds.includes(item.id),
+        );
+      return {
+        id: item.id,
+        kind: item.kind,
+        blockType: item.kind === 'block' ? blocksById.get(item.id)?.type : undefined,
+        pos,
+        selected: selectedId === item.id,
+        editing: focusEditingId === item.id,
+        inActiveCluster,
+        relatedToSelection: relatedToSelection?.has(item.id) ?? false,
+        dragging: draggingId === item.id,
+      };
+    });
+    return buildBlockRenderPolicies(canvasScaleContext, inputs);
+  }, [
+    allItems,
+    positions,
+    activeClusterKey,
+    semanticClusterRegions,
+    blocksById,
+    selectedId,
+    focusEditingId,
+    relatedToSelection,
+    draggingId,
+    canvasScaleContext,
+  ]);
+
+  useEffect(() => {
+    const dense = canvasScaleContext.density !== 'comfortable';
+    setPerformancePressure('canvas-density', dense);
+    return () => setPerformancePressure('canvas-density', false);
+  }, [canvasScaleContext.density]);
 
   const vignetteFocal = useMemo(() => {
     const focalId = focusEditingId ?? selectedId;
@@ -1267,6 +1337,10 @@ export function FreeformCanvas({
           willChange:     'transform',
         }}
       >
+        <FreeSpaceRenderPolicyProvider
+          policies={blockRenderPolicies}
+          scaleContext={canvasScaleContext}
+        >
         {spatialAmbient && tokens && surfaceActive ? (
           <FreeSpaceSpatialAmbient
             tokens={tokens}
@@ -1285,6 +1359,7 @@ export function FreeformCanvas({
             hoveredEdgeKey={hoveredConnectionEdgeKey}
             onHoveredEdgeChange={setHoveredConnectionEdgeKey}
             lineEmphasisMul={focusMode && spatialAmbient ? focusAtm.connectionLineMul : 1}
+            scaleContext={canvasScaleContext}
           />
         )}
 
@@ -1583,9 +1658,13 @@ export function FreeformCanvas({
             : sessionDim    ? Math.min(lifecycle.opacity, 0.52)
             : lifecycle.opacity;
 
+          const scalePolicy = blockRenderPolicies.get(item.id);
           const tier = item.kind === 'block' ? focusTierById?.get(item.id) : undefined;
           const fp = tier != null ? tierToPresentation(tier, focusDimScale) : null;
-          const combinedOpacity = Math.min(1, baseOpacity * (fp?.opacityMul ?? 1));
+          const combinedOpacity = Math.min(
+            1,
+            baseOpacity * (fp?.opacityMul ?? 1) * (scalePolicy?.quietMul ?? 1),
+          );
           const focusFilterExtra =
             fp?.filterExtra && fp.filterExtra !== 'none' ? fp.filterExtra : '';
           const focusScale = fp?.scale ?? 1;
@@ -1606,13 +1685,22 @@ export function FreeformCanvas({
 
           // Session focus: strong isolation for focus-session cards.
           // Deep focus: whisper-quiet recession for peers (readable, stable).
+          const lodRecess =
+            scalePolicy && scalePolicy.fidelity !== 'full'
+              ? scalePolicy.fidelity === 'distant'
+                ? 'saturate(0.88) brightness(0.94)'
+                : scalePolicy.fidelity === 'chrome'
+                  ? 'saturate(0.92) brightness(0.96)'
+                  : 'saturate(0.96) brightness(0.98)'
+              : 'none';
+
           const sessionFilter = sessionDim
             ? 'saturate(0.58) brightness(0.84)'
             : deepInactive
               ? 'saturate(0.9) brightness(0.96)'
               : distantFromCluster && !designMode
                 ? 'saturate(0.92) brightness(0.97)'
-                : 'none';
+                : lodRecess;
 
           const filterTransition = (sessionDim || deepInactive || isRevisiting || isReturning || focusFilterExtra)
             ? ', filter 1.4s cubic-bezier(0.4,0,0.2,1)'
@@ -1690,7 +1778,7 @@ export function FreeformCanvas({
                   pointerEvents: 'none',
                   zIndex: 0,
                   opacity:
-                    canvasInteracting
+                    canvasInteracting || scalePolicy?.glowAllowed === false
                       ? 0
                       : item.kind === 'block'
                         ? continuityObjectSet.has(item.id)
@@ -1699,7 +1787,8 @@ export function FreeformCanvas({
                             ? 0.48
                             : 0
                         : 0,
-                  filter: canvasInteracting ? 'none' : 'blur(22px)',
+                  filter:
+                    canvasInteracting || scalePolicy?.glowAllowed === false ? 'none' : 'blur(22px)',
                   background: `radial-gradient(ellipse at 50% 42%, ${tokens.accent}14 0%, ${tokens.accent}0a 26%, transparent 72%)`,
                   transition: canvasInteracting ? 'none' : 'opacity 0.35s ease',
                 }}
@@ -1759,6 +1848,7 @@ export function FreeformCanvas({
                     item.kind,
                     item.kind === 'block' ? blocksById.get(item.id)?.type : undefined,
                   )}
+                  materialShadowMul={scalePolicy?.materialShadowMul ?? 1}
                 >
                   {content}
                 </FreeformBlock>
@@ -1872,6 +1962,7 @@ export function FreeformCanvas({
           </div>
         )}
 
+        </FreeSpaceRenderPolicyProvider>
       </div>
 
       {/* ── Spatial depth (viewport): ambient vignette → edge fade → window inset ── */}

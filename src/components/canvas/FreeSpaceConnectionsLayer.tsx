@@ -2,6 +2,10 @@ import { memo, useMemo, useCallback, useId } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import type { PositionMap } from '../../hooks/useBlockPositions';
+import {
+  shouldRenderConnection,
+  type CanvasScaleContext,
+} from '../../lib/freeSpaceScalePolicy';
 
 const DEFAULT_W = 340;
 const DEFAULT_H = 220;
@@ -23,10 +27,13 @@ function edgeKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-function cubicPath(ax: number, ay: number, bx: number, by: number): string {
+function cubicPath(ax: number, ay: number, bx: number, by: number, simplified: boolean): string {
   const dx = bx - ax;
   const dy = by - ay;
   const dist = Math.hypot(dx, dy) || 1;
+  if (simplified) {
+    return `M ${ax.toFixed(2)} ${ay.toFixed(2)} L ${bx.toFixed(2)} ${by.toFixed(2)}`;
+  }
   const perpX = (-dy / dist) * Math.min(48, dist * 0.22);
   const perpY = (dx / dist) * Math.min(48, dist * 0.22);
   const cx1 = ax + dx * 0.38 + perpX * 0.55;
@@ -48,6 +55,7 @@ export interface FreeSpaceConnectionsLayerProps {
   onHoveredEdgeChange: (key: string | null) => void;
   /** Focus Mode: multiply base stroke presence (1 = default). */
   lineEmphasisMul?: number;
+  scaleContext?: CanvasScaleContext | null;
 }
 
 function FreeSpaceConnectionsLayerInner({
@@ -59,6 +67,7 @@ function FreeSpaceConnectionsLayerInner({
   hoveredEdgeKey,
   onHoveredEdgeChange,
   lineEmphasisMul = 1,
+  scaleContext = null,
 }: FreeSpaceConnectionsLayerProps) {
   const fid = useId().replace(/:/g, '');
   const filterId = `fw-conn-glow-${fid}`;
@@ -66,7 +75,8 @@ function FreeSpaceConnectionsLayerInner({
   const edges = useMemo(() => {
     const idSet = new Set(blocks.map(b => b.id));
     const seen = new Set<string>();
-    const list: { key: string; from: string; to: string; d: string }[] = [];
+    const list: { key: string; from: string; to: string; d: string; opacityMul: number; glow: boolean }[] = [];
+    const focalId = animateFocusId ?? null;
     for (const b of blocks) {
       const conns = coerceFreeSpaceConnectionIds(b.connections);
       if (!conns.length) continue;
@@ -78,11 +88,22 @@ function FreeSpaceConnectionsLayerInner({
         const ca = blockCenter(b.id, positions);
         const cb = blockCenter(toId, positions);
         if (!ca || !cb) continue;
-        list.push({ key: k, from: b.id, to: toId, d: cubicPath(ca.x, ca.y, cb.x, cb.y) });
+        const edgePolicy = scaleContext
+          ? shouldRenderConnection(scaleContext, b.id, toId, positions, focalId)
+          : { render: true, opacityMul: 1, simplified: false, glow: true };
+        if (!edgePolicy.render) continue;
+        list.push({
+          key: k,
+          from: b.id,
+          to: toId,
+          d: cubicPath(ca.x, ca.y, cb.x, cb.y, edgePolicy.simplified),
+          opacityMul: edgePolicy.opacityMul,
+          glow: edgePolicy.glow,
+        });
       }
     }
     return list;
-  }, [blocks, positions]);
+  }, [blocks, positions, scaleContext, animateFocusId]);
 
   const onEnter = useCallback(
     (k: string) => () => onHoveredEdgeChange(k),
@@ -93,6 +114,7 @@ function FreeSpaceConnectionsLayerInner({
   const accent = tokens.accent ?? '#f59e0b';
   const ghostStroke = `${tokens.textGhost}52`;
   const continuitySet = useMemo(() => new Set(continuityEdgeKeys), [continuityEdgeKeys]);
+  const globalConnMul = scaleContext?.connectionOpacityMul ?? 1;
 
   return (
     <svg
@@ -117,13 +139,14 @@ function FreeSpaceConnectionsLayerInner({
           </feMerge>
         </filter>
       </defs>
-      {edges.map(({ key, d, from, to }) => {
+      {edges.map(({ key, d, from, to, opacityMul, glow }) => {
         const hovered = hoveredEdgeKey === key;
         const pulse = !!animateFocusId && (animateFocusId === from || animateFocusId === to);
         const lingering = continuitySet.has(key);
         const stroke = hovered ? `${accent}c8` : lingering ? `${accent}72` : ghostStroke;
         const width = hovered ? 1.45 : lingering ? 1.14 : 0.95;
-        const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul));
+        const em = Math.max(0.5, Math.min(1.6, lineEmphasisMul)) * globalConnMul;
+        const useGlow = glow && (hovered || pulse) && (scaleContext?.connectionGlowEnabled ?? true);
         return (
           <g key={key} style={{ pointerEvents: 'auto' }}>
             <path
@@ -141,14 +164,15 @@ function FreeSpaceConnectionsLayerInner({
               stroke={stroke}
               strokeWidth={width * (0.85 + em * 0.15)}
               strokeLinecap="round"
-              filter={hovered || pulse ? `url(#${filterId})` : undefined}
+              filter={useGlow ? `url(#${filterId})` : undefined}
               style={{
                 transition: 'stroke 0.32s ease, stroke-width 0.32s ease, opacity 0.4s ease',
-                opacity: ((pulse && !hovered ? 0.88 : lingering ? 1.1 : 1) * em),
-                animation: pulse ? 'fwConnPulse 3.8s ease-in-out infinite' : undefined,
+                opacity:
+                  ((pulse && !hovered ? 0.88 : lingering ? 1.1 : 1) * em * opacityMul),
+                animation: pulse && !hovered ? 'fwConnPulse 3.8s ease-in-out infinite' : undefined,
               }}
             />
-            {hovered && (
+            {hovered && useGlow && (
               <path
                 d={d}
                 fill="none"

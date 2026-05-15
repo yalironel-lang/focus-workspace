@@ -18,6 +18,7 @@ interface Props {
   tokens: AtmosphereTokens;
   onChange: (next: ProjectObjectContent) => void;
   onTitleChange?: (title: string) => void;
+  suspendEmbed?: boolean;
 }
 
 type EmbedViewState = 'idle' | 'probing' | 'embedded' | 'fallback';
@@ -29,6 +30,7 @@ export function FreeSpaceCompanionCard({
   tokens,
   onChange,
   onTitleChange,
+  suspendEmbed = false,
 }: Props) {
   const content = ensureProjectObjectContent('companion', rawContent);
   if (content.type !== 'companion') return null;
@@ -377,7 +379,16 @@ export function FreeSpaceCompanionCard({
         </div>
       </div>
 
-      {shouldProbe && (embedState === 'probing' || embedState === 'embedded') ? (
+      {suspendEmbed ? (
+        <div
+          className="flex flex-1 items-center justify-center px-4 py-10"
+          style={{ backgroundColor: tokens.wellBg, minHeight: 160 }}
+        >
+          <p className="text-[11px] text-center" style={{ color: tokens.textGhost }}>
+            Companion paused — select to load
+          </p>
+        </div>
+      ) : shouldProbe && (embedState === 'probing' || embedState === 'embedded') ? (
         <div
           className="relative min-h-0 flex-1"
           style={{ backgroundColor: tokens.wellBg, contain: 'layout paint', isolation: 'isolate' }}

@@ -47,6 +47,8 @@ interface Props {
   presentationZBoost?: number;
   /** Material tier — primary thinking surfaces vs lighter utility chrome. */
   materialTier?: FreeSpaceMaterialTier;
+  /** Canvas LOD: scales shadow depth (semantic quieting). */
+  materialShadowMul?: number;
 }
 
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
@@ -73,6 +75,7 @@ export function FreeformBlock({
   onConnectHoverTarget,
   presentationZBoost = 0,
   materialTier = 'utility',
+  materialShadowMul = 1,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -131,7 +134,7 @@ export function FreeformBlock({
     : hovered
       ? `, inset 0 0 0 1px rgba(255,255,255,${(0.06 + sheen).toFixed(3)})`
       : '';
-  const shadowBase = material.shadowMul;
+  const shadowBase = material.shadowMul * materialShadowMul;
   let boxShadow = `${innerRim}${outerRim}, ${tokens.shadowMd}`;
   if (isDragging && activeGesture === 'resize') {
     boxShadow = `${innerRim}${innerHighlight}, 0 8px 20px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)}), ${tokens.shadowLg}`;

@@ -4,11 +4,15 @@ import type { GlobalTheme } from '../../hooks/useWorkspaceTheme';
 import { resolveBackgroundPresetId } from '../../lib/workspaceBackgroundStudio';
 import { LivingBackgroundStudio } from './LivingBackgroundStudio';
 
+type AppearanceScope = 'global' | 'workspace';
+
 interface Props {
   open: boolean;
   tokens: AtmosphereTokens;
   atmosphereId: string;
   global: GlobalTheme;
+  scope?: AppearanceScope;
+  workspaceTitle?: string;
   onClose: () => void;
   onSetAtmosphere: (id: string) => void;
   onUpdateGlobal: (patch: Partial<GlobalTheme>) => void;
@@ -19,6 +23,8 @@ export function WorkspaceAppearancePanel({
   tokens,
   atmosphereId,
   global,
+  scope = 'workspace',
+  workspaceTitle,
   onClose,
   onUpdateGlobal,
 }: Props) {
@@ -60,6 +66,13 @@ export function WorkspaceAppearancePanel({
             <h2 className="text-[22px] font-semibold tracking-tight leading-tight">
               Living Background
             </h2>
+            <p className="text-[12px] mt-2 leading-relaxed max-w-[280px]" style={{ color: tokens.textMuted }}>
+              {scope === 'global'
+                ? 'Applies across Library and every workspace. Open a workspace and switch to Free Space to see the full cinematic scene.'
+                : workspaceTitle
+                  ? `Applies to “${workspaceTitle}” and its Free Space. Changes save to your device and sync with your account theme.`
+                  : 'Applies to this workspace and its Free Space. Switch to Free Space to see the full scene.'}
+            </p>
           </div>
           <button
             type="button"

@@ -18,6 +18,8 @@ import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
+import { useFreeSpaceRenderPolicy } from '../canvas/FreeSpaceRenderPolicyContext';
+import { FreeSpaceObjectShell } from './FreeSpaceObjectShell';
 
 interface Props {
   object: ProjectSpaceObject;
@@ -51,7 +53,37 @@ function ProjectSpaceObjectRendererInner({
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
   }, [object.id]);
 
+  const renderPolicy = useFreeSpaceRenderPolicy(object.id);
   const content = ensureProjectObjectContent(object.type, object.content);
+
+  if (renderPolicy.chromeOnly) {
+    return (
+      <FreeSpaceObjectShell
+        type={object.type}
+        title={object.title}
+        tokens={tokens}
+        variant="chrome"
+      />
+    );
+  }
+
+  if (renderPolicy.suspendHeavyContent && object.type === 'notebook' && content.type === 'notebook') {
+    const preview = (content.body ?? '')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .join(' · ');
+    return (
+      <FreeSpaceObjectShell
+        type="notebook"
+        title={object.title}
+        tokens={tokens}
+        variant="preview"
+        subtitle={preview || 'Notebook'}
+      />
+    );
+  }
 
   switch (content.type) {
     case 'notebook':
@@ -178,6 +210,7 @@ function ProjectSpaceObjectRendererInner({
             sectionId={freeSpaceSectionId}
             onChange={c => onChange(c)}
             onTitleChange={onTitleChange}
+            suspendViewer={renderPolicy.suspendHeavyContent}
           />
         </WorkspaceSurfaceErrorBoundary>
       );
@@ -189,6 +222,7 @@ function ProjectSpaceObjectRendererInner({
             tokens={tokens}
             onChange={c => onChange(c)}
             onTitleChange={onTitleChange}
+            suspendEmbed={renderPolicy.suspendHeavyContent}
           />
         </WorkspaceSurfaceErrorBoundary>
       );

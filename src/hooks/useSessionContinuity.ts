@@ -74,6 +74,8 @@ export interface SessionContinuityState {
   recordSession: (session: { sectionId: string; sectionTitle: string; startedAt: string }) => void;
   /** Remove the stored record (user dismissed "continue?" suggestion) */
   clearLastSession: () => void;
+  /** Re-read continuity from localStorage (after startup repairs). */
+  reloadFromStorage: () => void;
 }
 
 export function useSessionContinuity(): SessionContinuityState {
@@ -96,7 +98,11 @@ export function useSessionContinuity(): SessionContinuityState {
     setLastSession(null);
   }, []);
 
+  const reloadFromStorage = useCallback(() => {
+    setLastSession(load());
+  }, []);
+
   const isRecent = !!(lastSession && isRecentRecord(lastSession));
 
-  return { lastSession, isRecent, recordSession, clearLastSession };
+  return { lastSession, isRecent, recordSession, clearLastSession, reloadFromStorage };
 }

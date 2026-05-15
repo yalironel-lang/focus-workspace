@@ -84,6 +84,15 @@ export default defineConfig({
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
             },
           },
+          // Living environment scenes (public/environments/* — too large for precache)
+          {
+            urlPattern: /\/environments\/.+\.(?:jpg|jpeg|webp)$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'living-environments-v1',
+              expiration: { maxEntries: 12, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            },
+          },
           // External images / media (CDN assets not in the app bundle)
           {
             urlPattern: /\.(?:png|jpg|jpeg|gif|webp|avif)$/i,

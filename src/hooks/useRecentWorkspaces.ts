@@ -53,5 +53,19 @@ export function useRecentWorkspaces() {
 
   const recentIdsOrdered = useMemo(() => recent.map(r => r.sectionId), [recent]);
 
-  return { recent, recentIdsOrdered, touch, openedAt };
+  const pruneToValidIds = useCallback((validIds: string[]) => {
+    const valid = new Set(validIds);
+    setRecent(prev => {
+      const next = prev.filter(e => valid.has(e.sectionId));
+      if (next.length === prev.length) return prev;
+      write(next);
+      return next;
+    });
+  }, []);
+
+  const reloadFromStorage = useCallback(() => {
+    setRecent(read());
+  }, []);
+
+  return { recent, recentIdsOrdered, touch, openedAt, pruneToValidIds, reloadFromStorage };
 }

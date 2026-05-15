@@ -14,12 +14,18 @@ import { WorkspaceGuidanceBar } from '../components/workspace-guidance/Workspace
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
 import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
 import { surfaceShellStyle } from '../lib/surfaceShellStyle';
 import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
 import { navDebugLog, navDebugRouteCheck } from '../lib/navigationDebug';
+import {
+  LIBRARY_ROUTE,
+  UNIVERSE_ROUTE,
+  type WorkspaceNavigationState,
+} from '../lib/workspaceUniverse/types';
+import { pruneStaleSectionReferences } from '../lib/persistenceHealth';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -229,11 +235,12 @@ function workspaceBackPillStyle(
   };
 }
 
-function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
   isCustomizing: boolean;
+  backLabel?: string;
   onBack: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
@@ -262,8 +269,8 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearan
         <button
           type="button"
           onClick={onBack}
-          aria-label="Back to Library"
-          title="Back to Library"
+          aria-label={`Back to ${backLabel}`}
+          title={`Back to ${backLabel}`}
           style={workspaceBackPillStyle(tokens, backPhase)}
           onMouseEnter={() => setBackPhase(p => (p === 'pressed' ? 'pressed' : 'hover'))}
           onMouseLeave={() => setBackPhase('idle')}
@@ -274,7 +281,7 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onOpenAppearan
         >
           <ArrowLeft className="w-4 h-4 shrink-0" strokeWidth={2.35} aria-hidden />
           <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1 }}>
-            Library
+            {backLabel}
           </span>
         </button>
         <span
@@ -459,6 +466,7 @@ function WorkspaceSectionChrome({
   accent,
   tokens,
   isCustomizing,
+  backLabel = 'Library',
   onBack,
   onOpenAppearance,
   onCustomize,
@@ -473,6 +481,7 @@ function WorkspaceSectionChrome({
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
   isCustomizing: boolean;
+  backLabel?: string;
   onBack: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
@@ -499,6 +508,7 @@ function WorkspaceSectionChrome({
         accent={accent}
         tokens={tokens}
         isCustomizing={isCustomizing}
+        backLabel={backLabel}
         onBack={onBack}
         onOpenAppearance={onOpenAppearance}
         onCustomize={onCustomize}
@@ -727,9 +737,12 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
 export function SectionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const navState = (location.state ?? null) as WorkspaceNavigationState | null;
+  const workspaceBackLabel = navState?.returnTo === 'universe' ? 'Universe' : 'Library';
 
   const {
-    section, loading, fetchSection,
+    section, loading, notFound, fetchError, fetchSection,
     addItem, pushItem, updateItem, deleteItem, toggleTask,
     addGroup, updateGroup, deleteGroup, setExamDate,
   } = useSectionDetail(id);
@@ -739,9 +752,17 @@ export function SectionPage() {
     if (section?.id) touchRecentWorkspace(section.id);
   }, [section?.id, touchRecentWorkspace]);
 
+  const sectionId = id ?? '';
+
+  useEffect(() => {
+    if (!sectionId || loading || !notFound) return;
+    pruneStaleSectionReferences(sectionId);
+    toast.error('That workspace was not found or is no longer available.');
+    navigate(LIBRARY_ROUTE, { replace: true });
+  }, [loading, navigate, notFound, sectionId]);
+
   const { links: courseLinks } = usePortalLinks('course', id);
   const { links: globalLinks } = usePortalLinks('global');
-  const sectionId = id ?? '';
   const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { design, global, updateGlobal } = useWorkspaceTheme();
@@ -1453,10 +1474,11 @@ export function SectionPage() {
 
   const handleWorkspaceBack = useCallback(() => {
     const pathBefore = window.location.pathname;
-    navDebugLog('workspace-back-click', { sectionId, pathBefore });
+    const returnTo = navState?.returnTo ?? 'library';
+    navDebugLog('workspace-back-click', { sectionId, pathBefore, returnTo });
     pulsePerformancePressure('route');
-    // Always route to Library — never history.back() or conditional destinations.
-    navigate('/dashboard', { replace: false });
+    const destination = returnTo === 'universe' ? UNIVERSE_ROUTE : LIBRARY_ROUTE;
+    navigate(destination, { replace: false });
     queueMicrotask(() => {
       try {
         dismissSectionTransientUi();
@@ -1472,7 +1494,7 @@ export function SectionPage() {
     if (import.meta.env.DEV) {
       queueMicrotask(() => navDebugRouteCheck(pathBefore, window.location.pathname));
     }
-  }, [dismissSectionTransientUi, dismissTransientUi, navigate, sectionId]);
+  }, [dismissSectionTransientUi, dismissTransientUi, navigate, navState?.returnTo, sectionId]);
 
   const completeFreeSpaceConnect = useCallback(
     (from: string, to: string) => {
@@ -1924,6 +1946,7 @@ export function SectionPage() {
           accent={tokens.accent}
           tokens={tokens}
           isCustomizing={false}
+          backLabel={workspaceBackLabel}
           onBack={handleWorkspaceBack}
           onOpenAppearance={() => setAppearanceOpen(true)}
           onCustomize={() => {}}
@@ -1940,18 +1963,60 @@ export function SectionPage() {
     );
   }
 
-  if (!section) {
+  if (!section && !loading) {
+    if (notFound) {
+      return (
+        <div
+          style={{
+            minHeight: '100dvh',
+            backgroundColor: tokens.pageBg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.textMuted }} />
+        </div>
+      );
+    }
     return (
-      <div style={{ minHeight: '100dvh', backgroundColor: tokens.pageBg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-        <h2 className="text-lg font-semibold" style={{ color: '#f8fafc' }}>
-          Workspace not found
+      <div
+        style={{
+          minHeight: '100dvh',
+          backgroundColor: tokens.pageBg,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 16,
+          padding: 24,
+          textAlign: 'center',
+        }}
+      >
+        <h2 className="text-lg font-semibold" style={{ color: tokens.textPrimary }}>
+          Couldn’t load this workspace
         </h2>
-        <Link to="/dashboard" className="text-sm font-semibold" style={{ color: '#f59e0b' }}>
-          ← Back to dashboard
-        </Link>
+        <p className="text-sm max-w-sm" style={{ color: tokens.textMuted }}>
+          {fetchError ?? 'Something went wrong. Check your connection and try again.'}
+        </p>
+        <div className="flex flex-wrap gap-3 justify-center">
+          <button
+            type="button"
+            onClick={() => void fetchSection()}
+            className="px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
+          >
+            Retry
+          </button>
+          <Link to={LIBRARY_ROUTE} className="px-4 py-2 rounded-xl text-sm font-semibold" style={{ color: tokens.accent }}>
+            Back to library
+          </Link>
+        </div>
       </div>
     );
   }
+
+  if (!section) return null;
 
   const totalItems     = section.groups.reduce((sum, g) => sum + g.items.length, 0);
   const completedItems = section.groups.reduce((sum, g) => sum + g.items.filter(i => i.completed).length, 0);
@@ -2049,6 +2114,7 @@ export function SectionPage() {
         accent={accentColor}
         tokens={tokens}
         isCustomizing={designMode}
+        backLabel={workspaceBackLabel}
         onBack={handleWorkspaceBack}
         onOpenAppearance={() => setAppearanceOpen(true)}
         onCustomize={enterDesignMode}
@@ -2094,6 +2160,8 @@ export function SectionPage() {
 
       <WorkspaceAppearancePanel
         open={appearanceOpen}
+        scope="workspace"
+        workspaceTitle={section.title}
         tokens={tokens}
         atmosphereId={atmosphereId}
         global={global}
