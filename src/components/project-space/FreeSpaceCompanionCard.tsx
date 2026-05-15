@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import toast from 'react-hot-toast';
 import { Copy, ExternalLink, Globe, PencilLine } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
@@ -62,15 +62,21 @@ export function FreeSpaceCompanionCard({
     !editing &&
     (content.embedMode === 'embedded' || (content.embedMode === 'auto' && !autoExternalOnly));
 
+  const lastProbeUrlRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!content.url || editing) {
       setEmbedState('idle');
+      lastProbeUrlRef.current = null;
       return;
     }
     if (!shouldProbe) {
       setEmbedState('fallback');
+      lastProbeUrlRef.current = content.url;
       return;
     }
+    if (lastProbeUrlRef.current === content.url) return;
+    lastProbeUrlRef.current = content.url;
     setEmbedState('probing');
     const timer = window.setTimeout(() => {
       setEmbedState(current => (current === 'embedded' ? current : 'fallback'));

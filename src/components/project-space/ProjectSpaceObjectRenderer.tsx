@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   ensureProjectObjectContent,
@@ -34,7 +35,7 @@ interface Props {
   onCreateNotebookRecall?: (sourceObjectId: string, prompt: string) => void;
 }
 
-export function ProjectSpaceObjectRenderer({
+function ProjectSpaceObjectRendererInner({
   object,
   allObjects,
   tokens,
@@ -50,7 +51,7 @@ export function ProjectSpaceObjectRenderer({
   switch (content.type) {
     case 'notebook':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Notebook">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Notebook">
           <ProjectNotebookBlock
             content={content}
             tokens={tokens}
@@ -75,7 +76,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'note':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Note">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Note">
           <NoteBlock
             content={{ type: 'note', body: content.body }}
             tokens={tokens}
@@ -85,7 +86,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'mistake':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Mistake card">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Mistake card">
           <FreeSpaceMistakeCard
             title={object.title}
             content={content}
@@ -97,7 +98,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'link':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Link">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Link">
           <div>
             <div style={{ fontSize: '10px', color: tokens.textMuted, padding: '10px 14px 0' }}>
               Click to open. Double-click to edit.
@@ -112,7 +113,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'checklist':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Checklist">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Checklist">
           <ChecklistBlock
             content={content}
             tokens={tokens}
@@ -122,7 +123,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'image':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Image">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Image">
           <div>
             <div style={{ fontSize: '10px', color: tokens.textMuted, padding: '10px 14px 0' }}>
               Hover image to change source.
@@ -137,7 +138,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'calculator':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Calculator">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Calculator">
           <FreeSpaceCalculator
             content={content}
             tokens={tokens}
@@ -147,7 +148,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'graph':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Graph">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Graph">
           <FreeSpaceGraph
             content={content}
             tokens={tokens}
@@ -164,7 +165,7 @@ export function ProjectSpaceObjectRenderer({
         );
       }
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="PDF">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="PDF">
           <FreeSpacePdfCard
             objectId={object.id}
             content={content}
@@ -177,7 +178,7 @@ export function ProjectSpaceObjectRenderer({
       );
     case 'companion':
       return (
-        <WorkspaceSurfaceErrorBoundary key={object.id} tokens={tokens} label="Companion">
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Companion">
           <FreeSpaceCompanionCard
             content={content}
             tokens={tokens}
@@ -202,3 +203,14 @@ export function ProjectSpaceObjectRenderer({
   }
 }
 
+export const ProjectSpaceObjectRenderer = memo(
+  ProjectSpaceObjectRendererInner,
+  (prev, next) =>
+    prev.object.id === next.object.id &&
+    prev.object.type === next.object.type &&
+    prev.object.title === next.object.title &&
+    prev.object.content === next.object.content &&
+    prev.tokens === next.tokens &&
+    prev.freeSpaceSectionId === next.freeSpaceSectionId &&
+    prev.allObjects === next.allObjects,
+);

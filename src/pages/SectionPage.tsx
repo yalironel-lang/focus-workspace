@@ -14,6 +14,7 @@ import { WorkspaceGuidanceBar } from '../components/workspace-guidance/Workspace
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
+import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
@@ -162,7 +163,6 @@ function SpaceNav({ title, accent, tokens, isCustomizing, onBack, onCustomize, o
     <nav style={{
       height: '44px', backgroundColor: tokens.navBg,
       borderBottom: `1px solid ${tokens.divider}`,
-      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 20px', position: 'sticky', top: 0, zIndex: 50, flexShrink: 0,
     }}>
@@ -452,7 +452,16 @@ export function SectionPage() {
   const [addingLane,      setAddingLane]       = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
-  const [sectionViewMode, setSectionViewMode] = useState<'work-surface' | 'free-space'>('work-surface');
+  const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() =>
+    sectionId ? loadSectionViewMode(sectionId) : 'work-surface',
+  );
+  const setSectionViewMode = useCallback(
+    (mode: 'work-surface' | 'free-space') => {
+      setSectionViewModeState(mode);
+      if (sectionId) saveSectionViewMode(sectionId, mode);
+    },
+    [sectionId],
+  );
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
   const [companionComposerOpen, setCompanionComposerOpen] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
@@ -513,7 +522,7 @@ export function SectionPage() {
     setAddingLane(false);
     setEditingExamDate(false);
     setShowCustomize(false);
-    setSectionViewMode('work-surface');
+    setSectionViewModeState(sectionId ? loadSectionViewMode(sectionId) : 'work-surface');
     setShowSpaceAdd(false);
     setCompanionComposerOpen(false);
     setSpaceSelectedId(null);
@@ -1442,10 +1451,84 @@ export function SectionPage() {
     if (connectSourceId && !valid.has(connectSourceId)) setConnectSourceId(null);
   }, [sectionObjects.objects, spaceSelectedId, spaceEditingId, connectSourceId]);
 
-  if (loading) {
+  const renderSpaceObject = useCallback((objectId: string): React.ReactNode | null => {
+    const store = sectionObjectsRef.current;
+    const obj = store.getObject(objectId);
+    if (!obj) return null;
     return (
-      <div style={{ minHeight: '100dvh', backgroundColor: tokens.pageBg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.textMuted }} />
+      <ProjectSpaceObjectRenderer
+        object={obj}
+        allObjects={store.objects}
+        tokens={tokens}
+        freeSpaceSectionId={sectionId}
+        onChange={content => store.updateObjectContent(objectId, content)}
+        onTitleChange={
+          obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
+            ? t => store.updateObjectFields(objectId, { title: t })
+            : undefined
+        }
+        onNotebookEditingChange={(oid, isEditing) => {
+          setSpaceEditingId(prev => (isEditing ? oid : prev === oid ? null : prev));
+        }}
+        onRequestSelectObject={setSpaceSelectedId}
+        onCreateNotebookRecall={createNotebookRecallItem}
+      />
+    );
+  }, [sectionId, tokens, createNotebookRecallItem]);
+
+  if (!section && loading) {
+    return (
+      <div
+        style={{
+          minHeight: '100dvh',
+          color: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: tokens.pageBg,
+        }}
+      >
+        <SpaceNav
+          title="Workspace"
+          accent={tokens.accent}
+          tokens={tokens}
+          isCustomizing={false}
+          onBack={() => navigate('/dashboard')}
+          onCustomize={() => {}}
+          onExitCustomize={() => {}}
+          onResetCustomize={() => {}}
+        />
+        <div
+          style={{
+            height: '40px',
+            borderBottom: `1px solid ${tokens.divider}`,
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0 20px',
+            backgroundColor: tokens.navBg,
+            flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              borderRadius: '8px',
+              border: `1px solid ${tokens.cardBorder}`,
+              padding: '2px',
+              gap: '2px',
+              backgroundColor: `${tokens.wellBg}f2`,
+            }}
+          >
+            <span style={{ fontSize: '11px', fontWeight: 700, padding: '5px 10px', color: tokens.textGhost }}>
+              Work Surface
+            </span>
+            <span style={{ fontSize: '11px', fontWeight: 700, padding: '5px 10px', color: tokens.textGhost }}>
+              Free Space
+            </span>
+          </div>
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Loader2 className="w-5 h-5 animate-spin" style={{ color: tokens.textMuted }} />
+        </div>
       </div>
     );
   }
@@ -1538,30 +1621,6 @@ export function SectionPage() {
     return obj?.title ?? 'Object';
   };
 
-  const renderSpaceObject = (id: string): React.ReactNode | null => {
-    const obj = sectionObjects.getObject(id);
-    if (!obj) return null;
-    return (
-      <ProjectSpaceObjectRenderer
-        object={obj}
-        allObjects={sectionObjects.objects}
-        tokens={tokens}
-        freeSpaceSectionId={sectionId}
-        onChange={content => sectionObjects.updateObjectContent(id, content)}
-        onTitleChange={
-          obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
-            ? t => sectionObjects.updateObjectFields(id, { title: t })
-            : undefined
-        }
-        onNotebookEditingChange={(objectId, isEditing) => {
-          setSpaceEditingId(prev => (isEditing ? objectId : prev === objectId ? null : prev));
-        }}
-        onRequestSelectObject={setSpaceSelectedId}
-        onCreateNotebookRecall={createNotebookRecallItem}
-      />
-    );
-  };
-
   return (
     <div
       style={{
@@ -1644,8 +1703,6 @@ export function SectionPage() {
           padding: '0 20px',
           backgroundColor: tokens.navBg,
           position: 'relative',
-          opacity: focusMode && sectionViewMode === 'free-space' ? 0.9 : 1,
-          transition: 'opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
         {focusMode ? (
@@ -1791,16 +1848,13 @@ export function SectionPage() {
                 right: '20px',
                 zIndex: 60,
                 width: '220px',
-                backgroundColor: `${tokens.cardBg}f5`,
+                backgroundColor: `${tokens.cardBg}fa`,
                 border: `1px solid ${tokens.cardBorder}`,
                 borderRadius: '12px',
                 padding: '8px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '4px',
-                backdropFilter: 'blur(16px)',
-                opacity: spaceEditingId ? 0.88 : 1,
-                transition: 'opacity 0.35s ease',
               }}
             >
               {([

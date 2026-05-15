@@ -119,9 +119,15 @@ export function FreeSpacePdfCard({
     [sectionId, objectId, onChange, onTitleChange],
   );
 
+  const [displayPage, setDisplayPage] = useState(content.page);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDisplayPage(content.page), 280);
+    return () => window.clearTimeout(timer);
+  }, [content.page]);
+
   const iframeSrc =
     objectUrl && loadState === 'ready'
-      ? `${objectUrl}#page=${Math.max(1, content.page)}&toolbar=0&navpanes=0`
+      ? `${objectUrl}#page=${Math.max(1, displayPage)}&toolbar=0&navpanes=0`
       : '';
 
   const bumpPage = (delta: number) => {

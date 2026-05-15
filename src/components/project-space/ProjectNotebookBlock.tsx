@@ -2766,18 +2766,24 @@ export function ProjectNotebookBlock({
           {(content.body ?? '').trim() === ''
             ? null
             : previewLines.map((line, index) => {
+            const lineKey =
+              line.kind === 'blank'
+                ? `blank-${index}`
+                : line.kind === 'divider'
+                  ? `divider-${index}`
+                  : `${line.kind}-${index}-${line.text.slice(0, 24)}`;
             const prevLine = index > 0 ? previewLines[index - 1] : undefined;
             const prevKind =
               prevLine && prevLine.kind !== 'blank' ? prevLine.kind : undefined;
             if (line.kind === 'blank') {
-              return <div key={index} style={{ height: '14px' }} />;
+              return <div key={`blank-${index}`} style={{ height: '14px' }} />;
             }
             if (line.kind === 'title') {
               const titleMarginTop = index === 0 ? 0 : typeScale.s1;
               const showPreviewUntitled = line.text.trim() === '';
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     fontSize: `${typeScale.l1}px`,
                     fontWeight: 700,
@@ -2800,7 +2806,7 @@ export function ProjectNotebookBlock({
                 index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2;
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     fontSize: `${typeScale.l2}px`,
                     fontWeight: 600,
@@ -2817,7 +2823,7 @@ export function ProjectNotebookBlock({
             if (line.kind === 'divider') {
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     height: '1px',
                     margin: '28px 0',
@@ -2831,7 +2837,7 @@ export function ProjectNotebookBlock({
             if (line.kind === 'ordered') {
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
@@ -2871,7 +2877,7 @@ export function ProjectNotebookBlock({
             if (line.kind === 'task') {
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     display: 'flex',
                     alignItems: 'baseline',
@@ -2916,7 +2922,7 @@ export function ProjectNotebookBlock({
             if (line.kind === 'quote') {
               return (
                 <blockquote
-                  key={index}
+                  key={lineKey}
                   style={{
                     margin: `${typeScale.s3 + 6}px 0`,
                     paddingLeft: '26px',
@@ -2943,7 +2949,7 @@ export function ProjectNotebookBlock({
                     : notebookInk.muted;
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
                     padding: '15px 16px 15px',
@@ -2982,7 +2988,7 @@ export function ProjectNotebookBlock({
             if (line.kind === 'math') {
               return (
                 <div
-                  key={index}
+                  key={lineKey}
                   style={{
                     margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
                     padding: '15px 18px',
@@ -3027,7 +3033,7 @@ export function ProjectNotebookBlock({
                 index === 0 ? 0 : prevKind === 'title' ? typeScale.s5 : prevKind === 'section' ? typeScale.s5 : typeScale.s5;
               return (
                 <p
-                  key={index}
+                  key={lineKey}
                   style={{
                     margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
                     color: fine ? notebookInk.muted : muted ? notebookInk.secondary : notebookInk.primary,

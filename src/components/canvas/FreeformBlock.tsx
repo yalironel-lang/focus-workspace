@@ -187,8 +187,8 @@ export function FreeformBlock({
         backgroundColor: tokens.cardBg,
         overflow: 'hidden',
         transition: isDragging
-          ? 'filter 0.2s ease, box-shadow 0.2s ease'
-          : `transform 0.42s ${liftEase}, box-shadow 0.38s ${chromeEase}, filter 0.38s ${chromeEase}, border-color 0.32s ${chromeEase}`,
+          ? 'box-shadow 0.16s ease'
+          : `transform 0.32s ${liftEase}, box-shadow 0.28s ${chromeEase}, border-color 0.24s ${chromeEase}`,
       }}
     >
       <div

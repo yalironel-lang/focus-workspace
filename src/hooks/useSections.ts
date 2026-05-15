@@ -126,10 +126,13 @@ export function useSectionDetail(sectionId: string | undefined) {
   // Track which sectionId we have already run ensureDefaultGroups for
   const ensuredRef = useRef<string | null>(null);
   const requestSeqRef = useRef(0);
+  const sectionRef = useRef<SectionDetail | null>(null);
+  sectionRef.current = section;
 
   useEffect(() => {
     ensuredRef.current = null;
     setSection(null);
+    sectionRef.current = null;
     setLoading(!!user && !!sectionId);
   }, [user, sectionId]);
 
@@ -141,7 +144,7 @@ export function useSectionDetail(sectionId: string | undefined) {
     }
     const requestId = ++requestSeqRef.current;
     const isStale = () => requestSeqRef.current !== requestId;
-    setLoading(true);
+    if (!sectionRef.current) setLoading(true);
 
     const { data: sectionData, error: sectionError } = await supabase
       .from('sections')

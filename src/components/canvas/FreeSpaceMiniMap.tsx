@@ -132,6 +132,8 @@ export interface FreeSpaceMiniMapProps {
   presentationOpacityMul?: number;
   /** Focus Mode: scales the minimap panel. */
   presentationScale?: number;
+  /** Suspend expensive blur/opacity transitions during canvas drag/pan. */
+  calmDuringInteraction?: boolean;
 }
 
 function FreeSpaceMiniMapInner({
@@ -148,6 +150,7 @@ function FreeSpaceMiniMapInner({
   setViewport,
   presentationOpacityMul = 1,
   presentationScale = 1,
+  calmDuringInteraction = false,
 }: FreeSpaceMiniMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -377,15 +380,15 @@ function FreeSpaceMiniMapInner({
         height: H,
         zIndex: 32,
         borderRadius: 14,
-        backgroundColor: `${tokens.cardBg}de`,
+        backgroundColor: calmDuringInteraction ? `${tokens.cardBg}f2` : `${tokens.cardBg}de`,
         border: `1px solid ${tokens.cardBorderHover}`,
         boxShadow: `0 10px 36px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07)`,
-        backdropFilter: 'blur(14px) saturate(1.2)',
-        WebkitBackdropFilter: 'blur(14px) saturate(1.2)',
-        opacity: (hovered ? 0.97 : 0.88) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
+        backdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
+        WebkitBackdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
+        opacity: (calmDuringInteraction ? 0.92 : hovered ? 0.97 : 0.88) * Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
         transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
         transformOrigin: 'bottom right',
-        transition: 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: calmDuringInteraction ? 'none' : 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         pointerEvents: 'auto',
         overflow: 'hidden',
       }}

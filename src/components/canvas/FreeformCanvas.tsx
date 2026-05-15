@@ -1445,10 +1445,14 @@ export function FreeformCanvas({
           // — Coming alive (active) snaps quickly so freshly-touched thoughts
           //   feel immediately responsive.
           // — Settling back (warm/dormant/fading/deep) is slow and graceful.
-          const opacityTransition = isOtherDragging      ? 'opacity 0.18s cubic-bezier(0.4,0,0.2,1)'
-            : lifecycle.state === 'active'               ? 'opacity 0.4s cubic-bezier(0.4,0,0.2,1)'
-            : (isRevisiting || isReturning)              ? 'opacity 1.4s cubic-bezier(0.4,0,0.2,1), filter 2s cubic-bezier(0.4,0,0.2,1)'
-            : 'opacity 1.8s cubic-bezier(0.4,0,0.2,1)';
+          const canvasInteracting = isOtherDragging || draggingId === item.id;
+          const opacityTransition = canvasInteracting
+            ? 'none'
+            : lifecycle.state === 'active'
+              ? 'opacity 0.28s cubic-bezier(0.4,0,0.2,1)'
+              : (isRevisiting || isReturning)
+                ? 'opacity 0.6s cubic-bezier(0.4,0,0.2,1), filter 0.6s cubic-bezier(0.4,0,0.2,1)'
+                : 'opacity 0.5s cubic-bezier(0.4,0,0.2,1)';
 
           // Session focus: strong isolation for focus-session cards.
           // Deep focus: whisper-quiet recession for peers (readable, stable).
@@ -1538,16 +1542,18 @@ export function FreeformCanvas({
                   pointerEvents: 'none',
                   zIndex: 0,
                   opacity:
-                    item.kind === 'block'
-                      ? continuityObjectSet.has(item.id)
-                        ? 0.78
-                        : continuityClusterSet.has(item.id)
-                          ? 0.48
-                          : 0
-                      : 0,
-                  filter: 'blur(22px)',
+                    canvasInteracting
+                      ? 0
+                      : item.kind === 'block'
+                        ? continuityObjectSet.has(item.id)
+                          ? 0.78
+                          : continuityClusterSet.has(item.id)
+                            ? 0.48
+                            : 0
+                        : 0,
+                  filter: canvasInteracting ? 'none' : 'blur(22px)',
                   background: `radial-gradient(ellipse at 50% 42%, ${tokens.accent}14 0%, ${tokens.accent}0a 26%, transparent 72%)`,
-                  transition: 'opacity 0.6s ease, filter 0.6s ease',
+                  transition: canvasInteracting ? 'none' : 'opacity 0.35s ease',
                 }}
               />
               <div
@@ -1557,9 +1563,13 @@ export function FreeformCanvas({
                   transform: focusScale !== 1 ? `scale(${focusScale})` : undefined,
                   transformOrigin: 'center center',
                   filter:
-                    item.kind === 'block' && continuityObjectSet.has(item.id) && displayFilter === 'none'
-                      ? 'brightness(1.01) saturate(1.02)'
-                      : displayFilter,
+                    canvasInteracting || combinedOpacity < 0.98
+                      ? displayFilter === 'none'
+                        ? 'none'
+                        : displayFilter
+                      : item.kind === 'block' && continuityObjectSet.has(item.id) && displayFilter === 'none'
+                        ? 'brightness(1.01) saturate(1.02)'
+                        : displayFilter,
                 }}
                 onClickCapture={() => {
                   // Pure clicks (no drag) must also record activity + trigger revisit.
@@ -1830,6 +1840,7 @@ export function FreeformCanvas({
             setViewport={setViewport}
             presentationOpacityMul={focusMode && spatialAmbient ? focusAtm.minimapOpacityMul : 1}
             presentationScale={focusMode && spatialAmbient ? focusAtm.minimapScale : 1}
+            calmDuringInteraction={draggingId !== null}
           />
         </WorkspaceSurfaceErrorBoundary>
       )}
