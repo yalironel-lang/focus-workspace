@@ -257,6 +257,9 @@ export function WorkspaceLibrary() {
   const tokens = mergeAccent(atmTokens, design);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const continuity = useSessionContinuity();
+  // Destructure the stable callback so it can be used as a dep without
+  // the whole object (which is a new reference every render → infinite loop).
+  const { reloadFromStorage: reloadContinuityFromStorage } = continuity;
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
   const { recentIdsOrdered, openedAt, pruneToValidIds, reloadFromStorage: reloadRecentFromStorage } =
     useRecentWorkspaces();
@@ -296,9 +299,9 @@ export function WorkspaceLibrary() {
       startupHealthRanRef.current = true;
     }
     pruneToValidIds(ids);
-    continuity.reloadFromStorage();
+    reloadContinuityFromStorage();
     reloadRecentFromStorage();
-  }, [libraryReady, sections, pruneToValidIds, continuity, reloadRecentFromStorage]);
+  }, [libraryReady, sections, pruneToValidIds, reloadContinuityFromStorage, reloadRecentFromStorage]);
 
   useEffect(() => {
     if (!libraryReady || hasWorkspaces || autoOpenedCreateRef.current) return;

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
 import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap } from '../lib/freeSpacePersistence';
@@ -178,6 +178,8 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     return { x, y };
   }, [positions]);
 
-  return { positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => ({ positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos }),
+    [positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos]);
 }
 

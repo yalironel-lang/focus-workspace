@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
@@ -798,7 +798,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
 
   const getObject = useCallback((id: string) => objects.find(o => o.id === id), [objects]);
 
-  return {
+  return useMemo(() => ({
     objects,
     appendObjects,
     addObject,
@@ -813,5 +813,20 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     removeObject,
     duplicateObject,
     getObject,
-  };
+  }), [
+    objects,
+    appendObjects,
+    addObject,
+    addQuickCaptureNote,
+    addQuickCaptureMistake,
+    addRecallItem,
+    convertNoteToMistake,
+    updateObjectContent,
+    updateObjectFields,
+    addConnection,
+    clearConnectionsForObject,
+    removeObject,
+    duplicateObject,
+    getObject,
+  ]);
 }

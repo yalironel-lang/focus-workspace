@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { FileText, BookOpen, Link2, Calculator, BarChart3, AlertCircle, Image } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectType } from '../../hooks/useSectionFreeSpaceObjects';
@@ -32,7 +33,7 @@ function typeIcon(type: string) {
   }
 }
 
-export function FreeSpaceObjectShell({ type, title, tokens, variant, subtitle }: Props) {
+export const FreeSpaceObjectShell = memo(function FreeSpaceObjectShell({ type, title, tokens, variant, subtitle }: Props) {
   const Icon = typeIcon(type);
   return (
     <div
@@ -67,4 +68,4 @@ export function FreeSpaceObjectShell({ type, title, tokens, variant, subtitle }:
       </div>
     </div>
   );
-}
+});

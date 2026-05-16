@@ -420,6 +420,7 @@ export function FreeformCanvas({
   const [spaceHeld, setSpaceHeld] = useState(false);
   // Controls bar is ambient — only surfaces near the bottom edge
   const [controlsNear,   setControlsNear]    = useState(false);
+  const controlsNearRef = useRef(false);
   const [addChromeHovered, setAddChromeHovered] = useState(false);
   const [viewportSize, setViewportSize] = useState({ w: 800, h: 600 });
 
@@ -1278,9 +1279,18 @@ export function FreeformCanvas({
       onMouseDown={onCanvasMouseDown}
       onMouseMove={e => {
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        setControlsNear(rect.height - (e.clientY - rect.top) < 96);
+        const near = rect.height - (e.clientY - rect.top) < 96;
+        if (near !== controlsNearRef.current) {
+          controlsNearRef.current = near;
+          setControlsNear(near);
+        }
       }}
-      onMouseLeave={() => setControlsNear(false)}
+      onMouseLeave={() => {
+        if (controlsNearRef.current) {
+          controlsNearRef.current = false;
+          setControlsNear(false);
+        }
+      }}
     >
       {surfaceActive && (livingEnvironment || (effectiveCosmic && hasCosmicBg)) ? (
         <LivingEnvironmentBackdrop

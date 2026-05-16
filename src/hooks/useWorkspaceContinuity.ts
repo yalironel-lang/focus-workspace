@@ -126,7 +126,7 @@ export function useWorkspaceContinuity({
     [continuity, objects],
   );
 
-  return {
+  return useMemo(() => ({
     continuity,
     continuityRecent,
     resumeCopy,
@@ -136,5 +136,15 @@ export function useWorkspaceContinuity({
     continuityEdgeKeys,
     restoreSelectionId,
     restoreViewport,
-  };
+  }), [
+    continuity,
+    continuityRecent,
+    resumeCopy,
+    suggestions,
+    continuityObjectIds,
+    continuityClusterIds,
+    continuityEdgeKeys,
+    restoreSelectionId,
+    restoreViewport,
+  ]);
 }

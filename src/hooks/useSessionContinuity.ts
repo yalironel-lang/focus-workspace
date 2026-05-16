@@ -21,7 +21,7 @@
  *   - `isRecent` = saved within RECENT_HOURS (48h).
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -104,5 +104,6 @@ export function useSessionContinuity(): SessionContinuityState {
 
   const isRecent = !!(lastSession && isRecentRecord(lastSession));
 
-  return { lastSession, isRecent, recordSession, clearLastSession, reloadFromStorage };
+  return useMemo(() => ({ lastSession, isRecent, recordSession, clearLastSession, reloadFromStorage }),
+    [lastSession, isRecent, recordSession, clearLastSession, reloadFromStorage]);
 }

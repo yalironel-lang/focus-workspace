@@ -778,7 +778,7 @@ export function SectionPage() {
   const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { design, global, updateGlobal } = useWorkspaceTheme();
-  const tokens = mergeAccent(atmTokens, design);
+  const tokens = useMemo(() => mergeAccent(atmTokens, design), [atmTokens, design]);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
   const sectionCanvas = useSectionCanvasMode(sectionId);
@@ -1112,8 +1112,20 @@ export function SectionPage() {
     };
   }, [sectionCanvas.panX, sectionCanvas.panY, sectionCanvas.zoom, sectionCanvas.snapToGrid, sectionCanvas.gridSize]);
 
+  // Destructure ALL stable callbacks from the hook return objects so that
+  // useCallback dep arrays never hold the unstable plain-object reference.
+  const { addObject: addSpaceObject, addConnection: addSpaceConnection,
+          addRecallItem, addQuickCaptureNote, addQuickCaptureMistake,
+          updateObjectFields: updateSpaceObjectFields,
+          updateObjectContent: updateSpaceObjectContent,
+          getObject: getSpaceObject,
+          convertNoteToMistake,
+          clearConnectionsForObject,
+          removeObject: removeSpaceObject } = sectionObjects;
+  const { initPos, positions: spacePositions, removePos } = sectionPositions;
+
   const handleAddToSpace = useCallback((type: ProjectObjectType) => {
-    const obj = sectionObjects.addObject(type);
+    const obj = addSpaceObject(type);
     const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
     const sizeHint =
       type === 'notebook'
@@ -1131,10 +1143,10 @@ export function SectionPage() {
                 : type === 'pdf'
                   ? { w: 520, h: 460 }
                   : { w: 360, h: 280 };
-    sectionPositions.initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
+    initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
-  }, [sectionObjects, sectionPositions, viewportCenterWorld]);
+  }, [addSpaceObject, initPos, viewportCenterWorld]);
 
   const requestCompanionComposer = useCallback(() => {
     setShowSpaceAdd(false);
@@ -1157,14 +1169,14 @@ export function SectionPage() {
 
   const createCompanionPanel = useCallback(
     (content: CompanionPanelContentFields) => {
-      const obj = sectionObjects.addObject('companion');
+      const obj = addSpaceObject('companion');
       const base = viewportCenterWorld((Math.random() - 0.5) * 72, (Math.random() - 0.5) * 56);
       const preferred = content.preferredSize ?? { w: 460, h: 320 };
-      sectionObjects.updateObjectFields(obj.id, {
+      updateSpaceObjectFields(obj.id, {
         title: content.title,
         content: { type: 'companion', ...content },
       });
-      sectionPositions.initPos(obj.id, {
+      initPos(obj.id, {
         x: base.x,
         y: base.y,
         w: preferred.w,
@@ -1175,7 +1187,7 @@ export function SectionPage() {
       setShowSpaceAdd(false);
       toast.success('Companion added');
     },
-    [sectionObjects, sectionPositions, viewportCenterWorld],
+    [addSpaceObject, updateSpaceObjectFields, initPos, viewportCenterWorld],
   );
 
   const animateToContinuityViewport = useCallback(
@@ -1216,12 +1228,12 @@ export function SectionPage() {
       if (suggestion.focusMode !== undefined) setFocusMode(suggestion.focusMode ?? null);
 
       if (suggestion.openCompanion && targetId) {
-        const object = sectionObjects.getObject(targetId);
+        const object = getSpaceObject(targetId);
         if (object?.type === 'companion') {
           const content = ensureProjectObjectContent('companion', object.content);
           if (content.type === 'companion' && content.url) {
             window.open(content.url, '_blank', 'noopener,noreferrer');
-            sectionObjects.updateObjectContent(targetId, {
+            updateSpaceObjectContent(targetId, {
               ...content,
               lastOpenedAt: Date.now(),
             });
@@ -1242,7 +1254,8 @@ export function SectionPage() {
     },
     [
       animateToContinuityViewport,
-      sectionObjects,
+      getSpaceObject,
+      updateSpaceObjectContent,
       sectionViewMode,
       setFocusMode,
       workspaceContinuity.restoreSelectionId,
@@ -1257,17 +1270,17 @@ export function SectionPage() {
         toast.error('Focus a notebook block with text first.');
         return;
       }
-      const obj = sectionObjects.addRecallItem(prompt);
-      const anchor = sectionPositions.positions[notebookId];
+      const obj = addRecallItem(prompt);
+      const anchor = spacePositions[notebookId];
       const fallback = viewportCenterWorld(120, 32);
       const x = anchor ? anchor.x + Math.max(48, Math.min(anchor.w + 28, 420)) : fallback.x;
       const y = anchor ? anchor.y + 24 : fallback.y;
-      sectionPositions.initPos(obj.id, { x, y, w: 380, h: 320 });
-      sectionObjects.addConnection(notebookId, obj.id);
+      initPos(obj.id, { x, y, w: 380, h: 320 });
+      addSpaceConnection(notebookId, obj.id);
       setSpaceSelectedId(obj.id);
       toast.success('Recall item created');
     },
-    [sectionObjects, sectionPositions, viewportCenterWorld],
+    [addRecallItem, spacePositions, initPos, addSpaceConnection, viewportCenterWorld],
   );
 
   const handlePdfDroppedOnCanvas = useCallback(
@@ -1276,14 +1289,14 @@ export function SectionPage() {
         toast.error('Only PDF files are supported for now.');
         return;
       }
-      const obj = sectionObjects.addObject('pdf');
+      const obj = addSpaceObject('pdf');
       const x = Math.max(20, Math.round(worldX - 260));
       const y = Math.max(20, Math.round(worldY - 230));
-      sectionPositions.initPos(obj.id, { x, y, w: 520, h: 460 });
+      initPos(obj.id, { x, y, w: 520, h: 460 });
       setSpaceSelectedId(obj.id);
       try {
         await savePdfBlob(sectionId, obj.id, file);
-        sectionObjects.updateObjectFields(obj.id, {
+        updateSpaceObjectFields(obj.id, {
           title: file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name,
           content: {
             type: 'pdf',
@@ -1297,18 +1310,18 @@ export function SectionPage() {
         });
       } catch {
         toast.error('Could not store this PDF on this device.');
-        sectionObjects.removeObject(obj.id);
-        sectionPositions.removePos(obj.id);
+        removeSpaceObject(obj.id);
+        removePos(obj.id);
       }
     },
-    [sectionId, sectionObjects, sectionPositions],
+    [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos],
   );
 
   const createQuickCaptureNote = useCallback(
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const obj = sectionObjects.addQuickCaptureNote(trimmed);
+      const obj = addQuickCaptureNote(trimmed);
       const stack = quickCaptureStackRef.current++;
       const staggerX = (stack % 7) * 34 - 102;
       const staggerY = (stack % 5) * 28 - 56;
@@ -1316,17 +1329,17 @@ export function SectionPage() {
         staggerX + (Math.random() - 0.5) * 20,
         staggerY + (Math.random() - 0.5) * 16,
       );
-      sectionPositions.initPos(obj.id, { x: base.x, y: base.y, w: 360, h: 280 });
+      initPos(obj.id, { x: base.x, y: base.y, w: 360, h: 280 });
       setSpaceSelectedId(obj.id);
     },
-    [sectionObjects, sectionPositions, viewportCenterWorld],
+    [addQuickCaptureNote, initPos, viewportCenterWorld],
   );
 
   const createQuickCaptureMistake = useCallback(
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const obj = sectionObjects.addQuickCaptureMistake(trimmed);
+      const obj = addQuickCaptureMistake(trimmed);
       const stack = quickCaptureStackRef.current++;
       const staggerX = (stack % 7) * 34 - 102;
       const staggerY = (stack % 5) * 28 - 56;
@@ -1334,10 +1347,10 @@ export function SectionPage() {
         staggerX + (Math.random() - 0.5) * 20,
         staggerY + (Math.random() - 0.5) * 16,
       );
-      sectionPositions.initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
+      initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
       setSpaceSelectedId(obj.id);
     },
-    [sectionObjects, sectionPositions, viewportCenterWorld],
+    [addQuickCaptureMistake, initPos, viewportCenterWorld],
   );
 
   const handleQuickCaptureCommit = useCallback(
@@ -1516,11 +1529,11 @@ export function SectionPage() {
 
   const completeFreeSpaceConnect = useCallback(
     (from: string, to: string) => {
-      sectionObjects.addConnection(from, to);
+      addSpaceConnection(from, to);
       cancelConnectMode();
       toast.success('Connected');
     },
-    [sectionObjects, cancelConnectMode],
+    [addSpaceConnection, cancelConnectMode],
   );
 
   const startConnectFromSelected = useCallback(() => {
@@ -1541,9 +1554,9 @@ export function SectionPage() {
       return;
     }
     if (!spaceSelectedId) return;
-    sectionObjects.clearConnectionsForObject(spaceSelectedId);
+    clearConnectionsForObject(spaceSelectedId);
     toast.success('Connections cleared');
-  }, [sectionViewMode, spaceSelectedId, sectionObjects]);
+  }, [sectionViewMode, spaceSelectedId, clearConnectionsForObject]);
 
   const openMistakeReview = useCallback(
     (mode: 'all' | 'neglected' | 'low' = 'all') => {
@@ -1567,14 +1580,14 @@ export function SectionPage() {
       toast.error('Select a note first');
       return;
     }
-    const o = sectionObjects.getObject(spaceSelectedId);
+    const o = getSpaceObject(spaceSelectedId);
     if (!o || o.type !== 'note') {
       toast.error('Select a text note to convert');
       return;
     }
-    sectionObjects.convertNoteToMistake(spaceSelectedId);
+    convertNoteToMistake(spaceSelectedId);
     toast.success('Captured as mistake');
-  }, [sectionViewMode, spaceSelectedId, sectionObjects]);
+  }, [sectionViewMode, spaceSelectedId, getSpaceObject, convertNoteToMistake]);
 
   const runAiAsync = useCallback(async (resultTitle: string, messages: ChatMessage[]) => {
     aiRunRef.current?.abort();
@@ -1597,17 +1610,17 @@ export function SectionPage() {
 
   const markMistakeReviewedInSession = useCallback(
     (mistakeId: string) => {
-      const o = sectionObjects.getObject(mistakeId);
+      const o = getSpaceObject(mistakeId);
       if (!o || o.type !== 'mistake') return;
       const c = ensureProjectObjectContent('mistake', o.content);
       if (c.type !== 'mistake') return;
-      sectionObjects.updateObjectContent(mistakeId, {
+      updateSpaceObjectContent(mistakeId, {
         ...c,
         timesReviewed: c.timesReviewed + 1,
         lastReviewedAt: Date.now(),
       });
     },
-    [sectionObjects],
+    [getSpaceObject, updateSpaceObjectContent],
   );
 
   useEffect(() => {
@@ -1693,7 +1706,12 @@ export function SectionPage() {
       setMode: setFocusMode,
     });
     return () => registerFocusMode(null);
-  }, [id, registerFocusMode, setFocusMode, focusMode]);
+  // focusMode intentionally omitted: getMode reads focusModeLiveRef.current
+  // (always fresh) so handlers never go stale. Including focusMode here
+  // would cause registerFocusMode → setFocusModeVersion(v+1) on every
+  // mode change, adding unnecessary context churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, registerFocusMode, setFocusMode]);
 
   useEffect(() => {
     if (!sectionId) {

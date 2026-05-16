@@ -90,7 +90,10 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   const { recentIdsOrdered } = useRecentWorkspaces();
   const { tokens: atmTokens } = useAtmosphere();
   const { design } = useWorkspaceTheme();
-  const tokens = mergeAccent(atmTokens, design);
+  // Memoize explicitly: mergeAccent creates a new object every call.
+  // Without this, `tokens` is a new reference every render → value useMemo
+  // recomputes → ALL context consumers re-render every tick.
+  const tokens = useMemo(() => mergeAccent(atmTokens, design), [atmTokens, design]);
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sessionModalOpen, setSessionModalOpen] = useState(false);

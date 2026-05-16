@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AtmosphereTokens } from './useAtmosphere';
 import { resolveWorkspaceClarity, type FocusStrength, type WorkspaceClarity } from '../lib/workspaceClarity';
 import type { BackgroundPresetId } from '../lib/workspaceBackgroundStudio';
@@ -602,7 +602,11 @@ export function useWorkspaceTheme() {
   useEffect(() => { localStorage.setItem(MODULES_KEY,      JSON.stringify(moduleThemes)); }, [moduleThemes]);
   useEffect(() => { localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(userPresets));  }, [userPresets]);
 
-  const design = computeDesignTokens(global);
+  // Memoize so callers get a stable reference when global hasn't changed.
+  // Without this, every render produces a new object, making mergeAccent()
+  // in consumers (CommandPaletteContext, SectionPage) also new every render,
+  // which destabilizes useCallback deps and triggers infinite context loops.
+  const design = useMemo(() => computeDesignTokens(global), [global]);
 
   // Propagate key values as CSS custom props for instant reactivity
   useEffect(() => {
