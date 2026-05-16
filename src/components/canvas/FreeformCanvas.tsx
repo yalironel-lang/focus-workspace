@@ -123,6 +123,9 @@ interface DragState {
   lastX?:     number;
   lastY?:     number;
   lastT?:     number;
+  // last applied pan (written directly to DOM during drag, committed to state on up)
+  currentPanX?: number;
+  currentPanY?: number;
   // last applied block world position — starting point for block inertia
   currentBlockX?: number;
   currentBlockY?: number;
@@ -407,6 +410,7 @@ export function FreeformCanvas({
 
   const reduceEffects = calmEffects || !surfaceActive;
   const viewportRef  = useRef<HTMLDivElement>(null);
+  const worldRef     = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
   const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
@@ -942,10 +946,18 @@ export function FreeformCanvas({
         const targetPanY = (drag.startPanY ?? 0) + dy;
         const curPanX = liveViewRef.current.panX;
         const curPanY = liveViewRef.current.panY;
-        setPan(
-          curPanX + (targetPanX - curPanX) * DRAG_SMOOTHING,
-          curPanY + (targetPanY - curPanY) * DRAG_SMOOTHING,
-        );
+        const newPanX = curPanX + (targetPanX - curPanX) * DRAG_SMOOTHING;
+        const newPanY = curPanY + (targetPanY - curPanY) * DRAG_SMOOTHING;
+
+        // Write directly to DOM — skip React state during active pan drag
+        if (worldRef.current) {
+          const z = liveViewRef.current.zoom;
+          worldRef.current.style.transform = `translate(${newPanX}px,${newPanY}px) scale(${z})`;
+        }
+        liveViewRef.current.panX = newPanX;
+        liveViewRef.current.panY = newPanY;
+        drag.currentPanX = newPanX;
+        drag.currentPanY = newPanY;
 
         // ── EMA velocity smoothing ────────────────────────────────────
         // Exponential moving average reduces jitter in instantaneous velocity
@@ -979,7 +991,15 @@ export function FreeformCanvas({
         const baseY = drag.currentBlockY ?? (drag.startBlockY ?? 0);
         const newX = baseX + (targetX - baseX) * DRAG_SMOOTHING;
         const newY = baseY + (targetY - baseY) * DRAG_SMOOTHING;
-        onSetPos(drag.blockId, { x: newX, y: newY });
+
+        // Write directly to the block DOM element — skip React state during drag
+        const blockEl = worldRef.current?.querySelector<HTMLElement>(
+          `[data-freeform-block="${drag.blockId}"]`
+        );
+        if (blockEl) {
+          blockEl.style.left = `${newX}px`;
+          blockEl.style.top  = `${newY}px`;
+        }
 
         const now = performance.now();
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
@@ -1011,7 +1031,14 @@ export function FreeformCanvas({
         const baseH = drag.currentBlockH ?? (drag.startBlockH ?? 200);
         const newW = Math.max(200, baseW + (targetW - baseW) * RESIZE_SMOOTHING);
         const newH = Math.max(80,  baseH + (targetH - baseH) * RESIZE_SMOOTHING);
-        onSetPos(drag.blockId, { w: newW, h: newH });
+        // Write directly to DOM — skip React state during resize drag
+        const resizeEl = worldRef.current?.querySelector<HTMLElement>(
+          `[data-freeform-block="${drag.blockId}"]`
+        );
+        if (resizeEl) {
+          resizeEl.style.width  = `${newW}px`;
+          resizeEl.style.height = `${newH}px`;
+        }
         drag.currentBlockW = newW;
         drag.currentBlockH = newH;
       }
@@ -1022,6 +1049,25 @@ export function FreeformCanvas({
       dragRef.current = null;
       setDraggingId(null);
       setActiveDragKind(null);
+
+      // Commit block position/size to React state (was written directly to DOM during drag)
+      if (drag?.type === 'block-move' && drag.blockId != null && drag.moveStarted) {
+        const finalX = drag.currentBlockX ?? drag.startBlockX ?? 0;
+        const finalY = drag.currentBlockY ?? drag.startBlockY ?? 0;
+        onSetPos(drag.blockId, { x: finalX, y: finalY });
+      }
+      if (drag?.type === 'block-resize' && drag.blockId != null && drag.resizeStarted) {
+        const finalW = drag.currentBlockW ?? drag.startBlockW ?? 340;
+        const finalH = drag.currentBlockH ?? drag.startBlockH ?? 200;
+        onSetPos(drag.blockId, { w: finalW, h: finalH });
+      }
+
+      // Commit pan position to React state (was written directly to DOM during drag)
+      if (drag?.type === 'canvas' && drag.panStarted) {
+        const finalPanX = drag.currentPanX ?? liveViewRef.current.panX;
+        const finalPanY = drag.currentPanY ?? liveViewRef.current.panY;
+        setPan(finalPanX, finalPanY);
+      }
 
       // Launch momentum only when the pan threshold was actually crossed
       if (drag?.type === 'canvas' && drag.panStarted) {
@@ -1339,6 +1385,7 @@ export function FreeformCanvas({
 
       {/* ── World transform ─────────────────────────────────────── */}
       <div
+        ref={worldRef}
         style={{
           position:       'absolute',
           inset:          0,
