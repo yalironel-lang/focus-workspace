@@ -825,6 +825,8 @@ export function SectionPage() {
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
   const [companionComposerOpen, setCompanionComposerOpen] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
+  const spaceSelectedIdRef = useRef<string | null>(null);
+  spaceSelectedIdRef.current = spaceSelectedId;
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
@@ -1656,7 +1658,8 @@ export function SectionPage() {
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
       addPdf: () => requestFreeSpaceAdd('pdf'),
-      getFreeSpaceSelectedId: () => spaceSelectedId,
+      // Use ref so selection changes don't re-register (which bumps freeSpaceVersion → re-renders all consumers)
+      getFreeSpaceSelectedId: () => spaceSelectedIdRef.current,
       startConnectFromSelected,
       clearConnectionsForSelected,
       openMistakeReviewAll: () => openMistakeReview('all'),
@@ -1670,7 +1673,6 @@ export function SectionPage() {
     registerFreeSpace,
     requestFreeSpaceAdd,
     requestCompanionComposer,
-    spaceSelectedId,
     startConnectFromSelected,
     clearConnectionsForSelected,
     openMistakeReview,

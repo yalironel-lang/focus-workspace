@@ -62,15 +62,19 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
   };
 
   return (
-    <div
+    <Link
+      to={`/section/${section.id}`}
       className="group relative flex flex-col transition-all duration-300"
       style={{
         backgroundColor: 'rgba(255,255,255,0.025)',
         borderRadius: '16px',
         overflow: 'hidden',
+        textDecoration: 'none',
+        display: 'flex',
+        cursor: 'pointer',
       }}
       onMouseEnter={e => {
-        (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.038)';
+        (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.048)';
       }}
       onMouseLeave={e => {
         (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.025)';
@@ -154,20 +158,17 @@ export function SectionCard({ section, onDelete, deadlines = [] }: SectionCardPr
           </div>
         )}
 
-        {/* Enter — just the arrow */}
+        {/* Enter — arrow hint */}
         <div className="pt-2.5 mt-auto" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-          <Link
-            to={`/section/${section.id}`}
-            className="flex items-center justify-end group/link"
-          >
+          <div className="flex items-center justify-end">
             <ArrowRight
-              className="w-3.5 h-3.5 transition-all duration-200 group-hover/link:translate-x-0.5 group-hover/link:opacity-100"
+              className="w-3.5 h-3.5 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100"
               style={{ color: '#2a3a54', opacity: 0.6 }}
             />
-          </Link>
+          </div>
         </div>
 
       </div>
-    </div>
+    </Link>
   );
 }
