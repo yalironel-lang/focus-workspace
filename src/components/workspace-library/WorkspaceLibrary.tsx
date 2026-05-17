@@ -620,6 +620,8 @@ export function WorkspaceLibrary() {
   const sCompleted = resumeWorkspace?.completed_items ?? 0;
   const sNearest   = resumeWorkspace ? deadlinesFor(resumeWorkspace.id).filter(d => !d.completed).sort((a, b) => a.due_date.localeCompare(b.due_date))[0] : undefined;
   const stagePath  = resumeWorkspace ? `/section/${resumeWorkspace.id}` : '#';
+  const showLibraryContextBubbles = false;
+  const coreWorkflow = ['Upload source/PDF', 'Write notes', 'Ask tutor', 'Start focus timer'];
 
   return (
     <>
@@ -825,7 +827,7 @@ export function WorkspaceLibrary() {
               <span style={{ fontSize: 9.5, fontWeight: 900, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.20)' }}>
                 {getGreeting()}{displayName ? `, ${displayName}` : ''} ·{' '}
                 <span style={{ color: sA, transition: 'color 1.2s ease' }}>
-                  {sections.length > 0 ? `${sections.length} workspace${sections.length > 1 ? 's' : ''} active` : 'workspace OS'}
+                  {sections.length > 0 ? `${sections.length} study space${sections.length > 1 ? 's' : ''}` : 'calm study space'}
                 </span>
               </span>
 
@@ -916,7 +918,7 @@ export function WorkspaceLibrary() {
                         transition: 'background 1.2s ease, box-shadow 1.2s ease',
                       }} />
                       <span style={{ fontSize: 9, fontWeight: 920, letterSpacing: '0.28em', textTransform: 'uppercase', color: sA, transition: 'color 1.2s ease' }}>
-                        resume your world
+                        continue studying
                       </span>
                     </div>
 
@@ -967,11 +969,26 @@ export function WorkspaceLibrary() {
                       Enter workspace
                       <ArrowRight style={{ width: 17, height: 17 }} strokeWidth={2.5} />
                     </a>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
+                      {coreWorkflow.map(action => (
+                        <span key={action} style={{
+                          border: '1px solid rgba(255,255,255,0.085)',
+                          background: 'rgba(255,255,255,0.034)',
+                          borderRadius: 999,
+                          padding: '7px 10px',
+                          color: 'rgba(255,255,255,0.58)',
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}>
+                          {action}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* FLOATING CONTEXT BUBBLES */}
-                {resumeWorkspace.next_item_title && (
+                {/* Secondary context stays hidden by default; users can discover details inside a workspace. */}
+                {showLibraryContextBubbles && resumeWorkspace.next_item_title && (
                   <FloatingGlassBubble
                     label="Next task"
                     value={resumeWorkspace.next_item_title.length > 28
@@ -982,7 +999,7 @@ export function WorkspaceLibrary() {
                     animName="libFloat1" animDuration={8} animDelay={0.3}
                   />
                 )}
-                {sTotal > 0 && (
+                {showLibraryContextBubbles && sTotal > 0 && (
                   <FloatingGlassBubble
                     label="Progress"
                     value={`${sCompleted} / ${sTotal} complete`}
@@ -991,7 +1008,7 @@ export function WorkspaceLibrary() {
                     animName="libFloat2" animDuration={10} animDelay={1.2}
                   />
                 )}
-                {sNearest && (
+                {showLibraryContextBubbles && sNearest && (
                   <FloatingGlassBubble
                     label="Due"
                     value={sNearest.due_date}
@@ -1036,6 +1053,22 @@ export function WorkspaceLibrary() {
                   <Plus style={{ width: 16, height: 16 }} strokeWidth={2.5} />
                   Create your first workspace
                 </button>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 22, maxWidth: 440 }}>
+                  {coreWorkflow.map(action => (
+                    <div key={action} style={{
+                      border: '1px solid rgba(255,255,255,0.085)',
+                      background: 'rgba(255,255,255,0.035)',
+                      borderRadius: 12,
+                      padding: '10px 12px',
+                      color: 'rgba(255,255,255,0.72)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: '-0.01em',
+                    }}>
+                      {action}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
