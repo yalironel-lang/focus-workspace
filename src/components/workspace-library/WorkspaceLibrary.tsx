@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -299,7 +300,7 @@ interface LibraryCardProps {
   folders: { id: string; name: string }[];
   folderId: string | null;
   onFolderChange: (sectionId: string, folderId: string | null) => void;
-  onDelete: (id: string) => void;
+  onDelete: (section: SectionWithProgress) => void;
   wide?: boolean;
 }
 
@@ -472,12 +473,112 @@ function LibraryCard({ section, deadlines, tokens, folders, folderId, onFolderCh
             style={{ width: '100%', textAlign: 'left', padding: '7px 8px', borderRadius: 8, background: 'transparent', border: 'none', color: '#fb7185', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(244,63,94,0.08)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-            onClick={() => { if (confirm('Remove this workspace? This cannot be undone.')) onDelete(section.id); setMenuOpen(false); }}
+            onClick={() => { onDelete(section); setMenuOpen(false); }}
           >
             Remove workspace…
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function DeleteWorkspaceDialog({
+  section,
+  tokens,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  section: SectionWithProgress | null;
+  tokens: ReturnType<typeof mergeAccent>;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [confirmation, setConfirmation] = useState('');
+
+  useEffect(() => {
+    setConfirmation('');
+  }, [section?.id]);
+
+  if (!section) return null;
+  const canDelete = confirmation === 'DELETE' && !deleting;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="library-delete-workspace-title"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 500,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+        background: 'rgba(0,0,0,0.58)',
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
+      }}
+    >
+      <div style={{
+        width: 'min(460px, 100%)',
+        borderRadius: 22,
+        border: '1px solid rgba(251,113,133,0.28)',
+        background: 'linear-gradient(180deg, rgba(10,15,27,0.98), rgba(4,6,12,0.98))',
+        boxShadow: '0 30px 100px rgba(0,0,0,0.66), inset 0 1px 0 rgba(255,255,255,0.08)',
+        padding: 20,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 14, background: 'rgba(251,113,133,0.12)', color: '#fb7185', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Trash2 style={{ width: 16, height: 16 }} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h2 id="library-delete-workspace-title" style={{ margin: 0, color: tokens.textPrimary, fontSize: 18, fontWeight: 850, letterSpacing: '-0.03em' }}>
+              Delete {section.title}?
+            </h2>
+            <p style={{ margin: '8px 0 0', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.55 }}>
+              This permanently removes this workspace and its related local workspace data.
+            </p>
+          </div>
+        </div>
+        <label style={{ display: 'block', marginTop: 18 }}>
+          <span style={{ display: 'block', color: tokens.textMuted, fontSize: 11, fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 7 }}>
+            Type DELETE to confirm
+          </span>
+          <input
+            autoFocus
+            value={confirmation}
+            onChange={e => setConfirmation(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') onCancel();
+              if (e.key === 'Enter' && canDelete) onConfirm();
+            }}
+            style={{
+              width: '100%',
+              height: 42,
+              borderRadius: 12,
+              border: `1px solid ${confirmation ? 'rgba(251,113,133,0.34)' : 'rgba(255,255,255,0.10)'}`,
+              background: 'rgba(255,255,255,0.04)',
+              color: tokens.textPrimary,
+              outline: 'none',
+              padding: '0 12px',
+              fontSize: 14,
+              boxSizing: 'border-box',
+            }}
+          />
+        </label>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+          <button type="button" onClick={onCancel} disabled={deleting} style={{ minHeight: 42, padding: '0 15px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.10)', background: 'transparent', color: tokens.textSecondary, fontSize: 13, fontWeight: 750, cursor: deleting ? 'default' : 'pointer' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={!canDelete} style={{ minHeight: 42, padding: '0 16px', borderRadius: 12, border: '1px solid rgba(251,113,133,0.58)', background: canDelete ? '#e11d48' : 'rgba(127,29,29,0.32)', color: canDelete ? '#fff' : 'rgba(255,255,255,0.34)', fontSize: 13, fontWeight: 850, cursor: canDelete ? 'pointer' : 'not-allowed' }}>
+            {deleting ? 'Deleting…' : 'Delete workspace'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -506,6 +607,8 @@ export function WorkspaceLibrary() {
   const [folderDraft,     setFolderDraft]     = useState('');
   const [showFolderInput, setShowFolderInput] = useState(false);
   const [mounted,         setMounted]         = useState(false);
+  const [deleteTarget,    setDeleteTarget]    = useState<SectionWithProgress | null>(null);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setMounted(true), 40); return () => clearTimeout(t); }, []);
 
@@ -579,6 +682,20 @@ export function WorkspaceLibrary() {
     catch { toast.error('Failed to sign out'); }
   };
 
+  const handleConfirmDeleteWorkspace = async () => {
+    if (!deleteTarget) return;
+    setDeletingWorkspace(true);
+    try {
+      await deleteSection(deleteTarget.id);
+      toast.success('Workspace deleted');
+      setDeleteTarget(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not delete workspace');
+    } finally {
+      setDeletingWorkspace(false);
+    }
+  };
+
   const deadlinesFor = useCallback((id: string) => deadlines.filter(d => d.section_id === id), [deadlines]);
 
   // Asymmetric grid: first card wide (2fr), remainder fills normally
@@ -589,11 +706,11 @@ export function WorkspaceLibrary() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: rest.length > 0 ? '2fr 1fr' : '1fr', gap: 14 }}>
           <div style={{ animation: `libFadeUp 0.38s ${baseDelay}s ease both` }}>
-            <LibraryCard section={first} deadlines={deadlinesFor(first.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(first.id)} onFolderChange={setSectionFolder} onDelete={deleteSection} wide />
+            <LibraryCard section={first} deadlines={deadlinesFor(first.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(first.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} wide />
           </div>
           {rest[0] && (
             <div style={{ animation: `libFadeUp 0.38s ${baseDelay + 0.05}s ease both` }}>
-              <LibraryCard section={rest[0]} deadlines={deadlinesFor(rest[0].id)} tokens={tokens} folders={folders} folderId={getFolderForSection(rest[0].id)} onFolderChange={setSectionFolder} onDelete={deleteSection} />
+              <LibraryCard section={rest[0]} deadlines={deadlinesFor(rest[0].id)} tokens={tokens} folders={folders} folderId={getFolderForSection(rest[0].id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} />
             </div>
           )}
         </div>
@@ -601,7 +718,7 @@ export function WorkspaceLibrary() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(255px, 1fr))', gap: 14 }}>
             {rest.slice(1).map((s, i) => (
               <div key={s.id} style={{ animation: `libFadeUp 0.36s ${baseDelay + 0.10 + i * 0.04}s ease both` }}>
-                <LibraryCard section={s} deadlines={deadlinesFor(s.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(s.id)} onFolderChange={setSectionFolder} onDelete={deleteSection} />
+                <LibraryCard section={s} deadlines={deadlinesFor(s.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(s.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} />
               </div>
             ))}
           </div>
@@ -1271,6 +1388,15 @@ export function WorkspaceLibrary() {
         {hasWorkspaces && (
           <WorkspaceAppearancePanel open={appearanceOpen} scope="global" tokens={tokens} atmosphereId={atmosphereId} global={global} onClose={() => setAppearanceOpen(false)} onSetAtmosphere={setAtmosphere} onUpdateGlobal={updateGlobal} />
         )}
+        <DeleteWorkspaceDialog
+          section={deleteTarget}
+          tokens={tokens}
+          deleting={deletingWorkspace}
+          onCancel={() => {
+            if (!deletingWorkspace) setDeleteTarget(null);
+          }}
+          onConfirm={handleConfirmDeleteWorkspace}
+        />
       </div>
     </>
   );

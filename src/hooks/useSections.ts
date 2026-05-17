@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { SectionWithProgress, SectionDetail, GroupWithItems, Item } from '../types';
 import { useAuth } from './useAuth';
 import { pulsePerformancePressure } from '../lib/performanceSafeMode';
+import { clearFreeSpacePersistenceForSection } from '../lib/freeSpacePersistence';
 
 const DEFAULT_GROUPS = ['Slides', 'Exercises', 'Exams', 'Notes', 'Links'];
 
@@ -116,8 +117,10 @@ export function useSections() {
   };
 
   const deleteSection = async (id: string) => {
-    const { error } = await supabase.from('sections').delete().eq('id', id);
+    if (!user) throw new Error('Not signed in');
+    const { error } = await supabase.from('sections').delete().eq('id', id).eq('user_id', user.id);
     if (error) throw error;
+    clearFreeSpacePersistenceForSection(id);
     await fetchSections();
   };
 
@@ -388,6 +391,19 @@ export function useSectionDetail(sectionId: string | undefined) {
     await fetchSection();
   }, [sectionId, fetchSection]);
 
+  const deleteSection = useCallback(async () => {
+    if (!sectionId || !user) throw new Error('Not signed in');
+    const { error } = await supabase
+      .from('sections')
+      .delete()
+      .eq('id', sectionId)
+      .eq('user_id', user.id);
+    if (error) throw error;
+    clearFreeSpacePersistenceForSection(sectionId);
+    setSection(null);
+    sectionRef.current = null;
+  }, [sectionId, user]);
+
   return {
     section,
     loading,
@@ -403,5 +419,6 @@ export function useSectionDetail(sectionId: string | undefined) {
     updateGroup,
     deleteGroup,
     setExamDate,
+    deleteSection,
   };
 }
