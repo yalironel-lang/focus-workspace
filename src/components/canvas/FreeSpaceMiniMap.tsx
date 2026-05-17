@@ -20,8 +20,8 @@ const H = 108;
 const PAD = 8;
 const WORLD_CLAMP = 60_000;
 const MIN_SPAN = 400;
-const BOTTOM = 76;
-const RIGHT = 20;
+const BOTTOM = 96;
+const RIGHT = 24;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));

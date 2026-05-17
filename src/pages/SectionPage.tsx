@@ -41,6 +41,7 @@ import { useLivingEnvironment } from '../hooks/useLivingEnvironment';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
+import type { BlockPos, PositionMap } from '../hooks/useBlockPositions';
 import {
   useSectionFreeSpaceObjects,
   type ProjectObjectType,
@@ -54,6 +55,7 @@ import { DesignModeBar } from '../components/DesignModeBar';
 import { FreeformCanvas } from '../components/canvas/FreeformCanvas';
 import { FreeSpaceArrangeControl } from '../components/canvas/FreeSpaceArrangeControl';
 import {
+  computeCleanFreeSpaceLayout,
   computeFreeSpaceTemplateLayout,
   type FreeSpaceTemplateId,
 } from '../lib/sectionFreeSpaceLayoutTemplates';
@@ -906,6 +908,73 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
   );
 }
 
+const FREE_SPACE_MAX_SIZE: Record<ProjectObjectType, { w: number; h: number }> = {
+  notebook: { w: 640, h: 540 },
+  note: { w: 440, h: 360 },
+  mistake: { w: 440, h: 380 },
+  link: { w: 440, h: 320 },
+  checklist: { w: 440, h: 380 },
+  image: { w: 540, h: 440 },
+  calculator: { w: 360, h: 440 },
+  graph: { w: 480, h: 400 },
+  pdf: { w: 580, h: 500 },
+  companion: { w: 540, h: 420 },
+};
+
+const FREE_SPACE_DEFAULT_SIZE: Record<ProjectObjectType, { w: number; h: number }> = {
+  notebook: { w: 560, h: 440 },
+  note: { w: 360, h: 280 },
+  mistake: { w: 360, h: 280 },
+  link: { w: 360, h: 240 },
+  checklist: { w: 360, h: 300 },
+  image: { w: 460, h: 360 },
+  calculator: { w: 300, h: 360 },
+  graph: { w: 380, h: 320 },
+  pdf: { w: 500, h: 420 },
+  companion: { w: 460, h: 320 },
+};
+
+function objectRect(type: ProjectObjectType, pos: BlockPos | undefined) {
+  const fallback = FREE_SPACE_DEFAULT_SIZE[type];
+  return {
+    x: pos?.x ?? 0,
+    y: pos?.y ?? 0,
+    w: pos && pos.w > 0 ? pos.w : fallback.w,
+    h: pos && pos.h > 0 ? pos.h : fallback.h,
+  };
+}
+
+function needsCleanFreeSpaceLayout(
+  objects: Array<{ id: string; type: ProjectObjectType }>,
+  positions: PositionMap,
+): boolean {
+  if (objects.length < 2) return false;
+  const rects = objects.map(object => ({ object, rect: objectRect(object.type, positions[object.id]) }));
+
+  for (const { object, rect } of rects) {
+    const max = FREE_SPACE_MAX_SIZE[object.type];
+    if (!positions[object.id]) return true;
+    if (rect.x < 0 || rect.y < 0) return true;
+    if (rect.w > max.w || rect.h > max.h) return true;
+  }
+
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i]!.rect;
+      const b = rects[j]!.rect;
+      const gap = 18;
+      const separated =
+        a.x + a.w + gap <= b.x ||
+        b.x + b.w + gap <= a.x ||
+        a.y + a.h + gap <= b.y ||
+        b.y + b.h + gap <= a.y;
+      if (!separated) return true;
+    }
+  }
+
+  return false;
+}
+
 // ── SectionPage ───────────────────────────────────────────────────────────────
 
 export function SectionPage() {
@@ -1004,6 +1073,7 @@ export function SectionPage() {
   const [starterRevealReady, setStarterRevealReady] = useState(false);
   const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
   const firstArrivalHandledRef = useRef(false);
+  const freeSpaceRecoveryAppliedRef = useRef(false);
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
@@ -1310,19 +1380,19 @@ export function SectionPage() {
     const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
     const sizeHint =
       type === 'notebook'
-        ? { w: 620, h: 520 }
+        ? { w: 560, h: 440 }
         : type === 'companion'
           ? { w: 460, h: 320 }
         : type === 'image'
           ? { w: 460, h: 360 }
           : type === 'graph'
-            ? { w: 400, h: 360 }
+            ? { w: 380, h: 320 }
             : type === 'calculator'
-              ? { w: 300, h: 420 }
+              ? { w: 300, h: 360 }
               : type === 'mistake'
-                ? { w: 380, h: 320 }
+                ? { w: 360, h: 280 }
                 : type === 'pdf'
-                  ? { w: 520, h: 460 }
+                  ? { w: 500, h: 420 }
                   : { w: 360, h: 280 };
     initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
@@ -1473,7 +1543,7 @@ export function SectionPage() {
       const obj = addSpaceObject('pdf');
       const x = Math.max(20, Math.round(worldX - 260));
       const y = Math.max(20, Math.round(worldY - 230));
-      initPos(obj.id, { x, y, w: 520, h: 460 });
+      initPos(obj.id, { x, y, w: 500, h: 420 });
       setSpaceSelectedId(obj.id);
       try {
         await savePdfBlob(sectionId, obj.id, file);
@@ -1960,17 +2030,12 @@ export function SectionPage() {
     ],
   );
 
-  const frameArrivalScene = useCallback(() => {
-    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
-    sectionCanvas.centerView(1520, 780, vw, vh);
-  }, [sectionCanvas]);
-
   useEffect(() => {
     firstArrivalHandledRef.current = false;
     setStarterExpanded(false);
     setStarterDockVisible(false);
     setStarterRevealReady(false);
+    freeSpaceRecoveryAppliedRef.current = false;
   }, [sectionId]);
 
   useEffect(() => {
@@ -1982,10 +2047,7 @@ export function SectionPage() {
     saveSectionViewMode(sectionId, 'free-space');
 
     if (sectionObjects.objects.length === 0) {
-      applyWorkspaceStarter('research-thinking', { silent: true, skipToast: true });
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => frameArrivalScene());
-      });
+      sectionCanvas.setViewport(1, 80, 120);
     }
 
     markFirstWorkspaceEntryDone();
@@ -1998,8 +2060,6 @@ export function SectionPage() {
     const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
     return () => window.clearTimeout(quietTimer);
   }, [
-    applyWorkspaceStarter,
-    frameArrivalScene,
     loading,
     location.pathname,
     navigate,
@@ -2007,6 +2067,7 @@ export function SectionPage() {
     section,
     sectionId,
     sectionObjects.objects.length,
+    sectionCanvas,
   ]);
 
   useEffect(() => {
@@ -2203,6 +2264,24 @@ export function SectionPage() {
     if (!id) return;
     sectionPositions.seedMissingPositions(freeSpaceObjectsRef.current.map(o => o.id));
   }, [id, freeSpaceObjectIdsKey, sectionPositions.seedMissingPositions]);
+
+  useEffect(() => {
+    if (!id || sectionViewMode !== 'free-space' || freeSpaceRecoveryAppliedRef.current) return;
+    const objects = sectionObjects.objects;
+    if (!needsCleanFreeSpaceLayout(objects, sectionPositions.positions)) return;
+    const patches = computeCleanFreeSpaceLayout(objects, sectionPositions.positions);
+    if (!patches || Object.keys(patches).length === 0) return;
+    freeSpaceRecoveryAppliedRef.current = true;
+    sectionPositions.applyPositions(patches);
+    setLastArrangeAt(Date.now());
+  }, [
+    id,
+    sectionViewMode,
+    freeSpaceObjectIdsKey,
+    sectionObjects.objects,
+    sectionPositions.positions,
+    sectionPositions.applyPositions,
+  ]);
 
   useEffect(() => {
     const valid = new Set(sectionObjects.objects.map(o => o.id));

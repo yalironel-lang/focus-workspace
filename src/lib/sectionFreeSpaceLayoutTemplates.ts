@@ -40,30 +40,86 @@ const INNER_GAP = 26;
 const OUTER_GAP = 132;
 
 const DEFAULT_W: Record<ProjectObjectType, number> = {
-  notebook: 620,
+  notebook: 560,
   note: 360,
-  mistake: 380,
+  mistake: 360,
   link: 360,
   companion: 460,
   checklist: 360,
   image: 460,
   calculator: 300,
-  graph: 400,
-  pdf: 520,
+  graph: 380,
+  pdf: 500,
 };
 
 const DEFAULT_H: Record<ProjectObjectType, number> = {
-  notebook: 520,
+  notebook: 440,
   note: 280,
-  mistake: 320,
+  mistake: 280,
   link: 240,
   companion: 320,
   checklist: 300,
   image: 360,
-  calculator: 420,
-  graph: 360,
-  pdf: 460,
+  calculator: 360,
+  graph: 320,
+  pdf: 420,
 };
+
+const MIN_W: Record<ProjectObjectType, number> = {
+  notebook: 440,
+  note: 300,
+  mistake: 320,
+  link: 300,
+  companion: 360,
+  checklist: 300,
+  image: 340,
+  calculator: 280,
+  graph: 340,
+  pdf: 420,
+};
+
+const MAX_W: Record<ProjectObjectType, number> = {
+  notebook: 620,
+  note: 420,
+  mistake: 420,
+  link: 420,
+  companion: 520,
+  checklist: 420,
+  image: 520,
+  calculator: 340,
+  graph: 460,
+  pdf: 560,
+};
+
+const MIN_H: Record<ProjectObjectType, number> = {
+  notebook: 340,
+  note: 220,
+  mistake: 240,
+  link: 200,
+  companion: 260,
+  checklist: 240,
+  image: 280,
+  calculator: 300,
+  graph: 280,
+  pdf: 340,
+};
+
+const MAX_H: Record<ProjectObjectType, number> = {
+  notebook: 520,
+  note: 340,
+  mistake: 360,
+  link: 300,
+  companion: 380,
+  checklist: 360,
+  image: 420,
+  calculator: 420,
+  graph: 380,
+  pdf: 480,
+};
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
 
 type LocalClusterLayout = {
   cluster: SemanticCluster<ProjectSpaceObject>;
@@ -75,8 +131,8 @@ type LocalClusterLayout = {
 
 function effDims(type: ProjectObjectType, p: BlockPos | undefined): { w: number; h: number } {
   const base = p ?? { x: 0, y: 0, w: 0, h: 0 };
-  const w = base.w > 0 ? base.w : DEFAULT_W[type];
-  const h = base.h > 0 ? base.h : DEFAULT_H[type];
+  const w = clamp(base.w > 0 ? base.w : DEFAULT_W[type], MIN_W[type], MAX_W[type]);
+  const h = clamp(base.h > 0 ? base.h : DEFAULT_H[type], MIN_H[type], MAX_H[type]);
   return { w, h };
 }
 
@@ -813,6 +869,56 @@ export function computeFreeSpaceTemplateLayout(
   }
 
   return relaxOverlaps(out, sorted, clusterById, hierarchyById);
+}
+
+export function computeCleanFreeSpaceLayout(
+  objects: ProjectSpaceObject[] | null | undefined,
+  positions: PositionMap | null | undefined,
+): Record<string, BlockPos> {
+  if (!objects || objects.length === 0) return {};
+  const posMap: PositionMap = positions && typeof positions === 'object' ? positions : {};
+  const sorted = [...objects].sort((a, b) => a.createdAt - b.createdAt);
+  const byLane: Record<SemanticLane, ProjectSpaceObject[]> = {
+    source: [],
+    core: [],
+    tool: [],
+    review: [],
+    support: [],
+  };
+  for (const object of sorted) {
+    byLane[getSemanticProfile(object.type).lane].push(object);
+  }
+
+  const out: Record<string, BlockPos> = {};
+  const placeStack = (
+    items: ProjectSpaceObject[],
+    x: number,
+    y: number,
+    gap = 32,
+  ) => {
+    let cursorY = y;
+    for (const item of items) {
+      const { w, h } = effDims(item.type, posMap[item.id]);
+      out[item.id] = { x, y: cursorY, w, h };
+      cursorY += h + gap;
+    }
+  };
+
+  placeStack(byLane.source, 96, 96, 34);
+  placeStack(byLane.core, byLane.source.length ? 660 : 420, 140, 34);
+  placeStack(byLane.tool, 1260, 140, 34);
+  placeStack(byLane.review, 1260, 560, 34);
+  placeStack(byLane.support, byLane.core.length ? 660 : 420, 620, 32);
+
+  const clusterById: Record<string, string> = {};
+  const hierarchyById: Record<string, SemanticHierarchy> = {};
+  for (const object of sorted) {
+    const lane = getSemanticProfile(object.type).lane;
+    clusterById[object.id] = lane;
+    hierarchyById[object.id] = getSemanticProfile(object.type).hierarchy;
+  }
+
+  return relaxOverlaps(out, sorted, clusterById, hierarchyById, 18);
 }
 
 export const FREE_SPACE_TEMPLATE_CONFIRM_MIN = 4;
