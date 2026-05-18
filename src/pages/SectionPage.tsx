@@ -41,7 +41,6 @@ import { useLivingEnvironment } from '../hooks/useLivingEnvironment';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
-import type { BlockPos, PositionMap } from '../hooks/useBlockPositions';
 import {
   useSectionFreeSpaceObjects,
   type ProjectObjectType,
@@ -55,7 +54,6 @@ import { DesignModeBar } from '../components/DesignModeBar';
 import { FreeformCanvas } from '../components/canvas/FreeformCanvas';
 import { FreeSpaceArrangeControl } from '../components/canvas/FreeSpaceArrangeControl';
 import {
-  computeCleanFreeSpaceLayout,
   computeFreeSpaceTemplateLayout,
   type FreeSpaceTemplateId,
 } from '../lib/sectionFreeSpaceLayoutTemplates';
@@ -86,7 +84,6 @@ import {
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
   Palette,
-  Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -243,7 +240,7 @@ function workspaceBackPillStyle(
   };
 }
 
-function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', onBack, onOpenAppearance, onCustomize, onDeleteWorkspace, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
@@ -252,7 +249,6 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
   onBack: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
-  onDeleteWorkspace: () => void;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
 }) {
@@ -386,17 +382,6 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
             >
               <Sliders className="w-4 h-4" />
             </button>
-            <button
-              type="button"
-              aria-label="Delete workspace"
-              title="Delete workspace"
-              onClick={onDeleteWorkspace}
-              style={{ ...NAV_BTN_BASE, color: tokens.textGhost }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#fb7185'; (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(251,113,133,0.08)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textGhost; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
           </>
         )}
       </div>
@@ -488,142 +473,6 @@ function WorkspaceViewModeBar({
   );
 }
 
-function DeleteWorkspaceDialog({
-  open,
-  name,
-  tokens,
-  deleting,
-  onCancel,
-  onConfirm,
-}: {
-  open: boolean;
-  name: string;
-  tokens: ReturnType<typeof useAtmosphere>['tokens'];
-  deleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const [confirmation, setConfirmation] = useState('');
-
-  useEffect(() => {
-    if (open) setConfirmation('');
-  }, [open]);
-
-  if (!open) return null;
-  const canDelete = confirmation === 'DELETE' && !deleting;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="delete-workspace-title"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 900,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        background: 'rgba(0,0,0,0.58)',
-        backdropFilter: 'blur(14px)',
-        WebkitBackdropFilter: 'blur(14px)',
-      }}
-    >
-      <div
-        style={{
-          width: 'min(460px, 100%)',
-          borderRadius: 22,
-          border: `1px solid rgba(251,113,133,0.26)`,
-          background: `linear-gradient(180deg, ${tokens.cardBg}fc, ${tokens.pageBg}f5)`,
-          boxShadow: '0 30px 100px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.08)',
-          padding: 20,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 14, background: 'rgba(251,113,133,0.12)', color: '#fb7185', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Trash2 className="w-4 h-4" />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <h2 id="delete-workspace-title" style={{ margin: 0, color: tokens.textPrimary, fontSize: 18, fontWeight: 850, letterSpacing: '-0.03em' }}>
-              Delete {name}?
-            </h2>
-            <p style={{ margin: '8px 0 0', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.55 }}>
-              This permanently removes this workspace and its related local workspace data.
-            </p>
-          </div>
-        </div>
-
-        <label style={{ display: 'block', marginTop: 18 }}>
-          <span style={{ display: 'block', color: tokens.textMuted, fontSize: 11, fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 7 }}>
-            Type DELETE to confirm
-          </span>
-          <input
-            autoFocus
-            value={confirmation}
-            onChange={e => setConfirmation(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape') onCancel();
-              if (e.key === 'Enter' && canDelete) onConfirm();
-            }}
-            style={{
-              width: '100%',
-              height: 42,
-              borderRadius: 12,
-              border: `1px solid ${confirmation ? 'rgba(251,113,133,0.34)' : tokens.cardBorder}`,
-              background: tokens.wellBg,
-              color: tokens.textPrimary,
-              outline: 'none',
-              padding: '0 12px',
-              fontSize: 14,
-              boxSizing: 'border-box',
-            }}
-          />
-        </label>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={deleting}
-            style={{
-              minHeight: 42,
-              padding: '0 15px',
-              borderRadius: 12,
-              border: `1px solid ${tokens.cardBorder}`,
-              background: 'transparent',
-              color: tokens.textSecondary,
-              fontSize: 13,
-              fontWeight: 750,
-              cursor: deleting ? 'default' : 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={!canDelete}
-            style={{
-              minHeight: 42,
-              padding: '0 16px',
-              borderRadius: 12,
-              border: '1px solid rgba(251,113,133,0.58)',
-              background: canDelete ? '#e11d48' : 'rgba(127,29,29,0.32)',
-              color: canDelete ? '#fff' : 'rgba(255,255,255,0.34)',
-              fontSize: 13,
-              fontWeight: 850,
-              cursor: canDelete ? 'pointer' : 'not-allowed',
-            }}
-          >
-            {deleting ? 'Deleting…' : 'Delete workspace'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function WorkspaceSectionChrome({
   title,
   accent,
@@ -633,7 +482,6 @@ function WorkspaceSectionChrome({
   onBack,
   onOpenAppearance,
   onCustomize,
-  onDeleteWorkspace,
   onExitCustomize,
   onResetCustomize,
   sectionViewMode,
@@ -649,7 +497,6 @@ function WorkspaceSectionChrome({
   onBack: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
-  onDeleteWorkspace: () => void;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
   sectionViewMode: 'work-surface' | 'free-space';
@@ -677,7 +524,6 @@ function WorkspaceSectionChrome({
         onBack={onBack}
         onOpenAppearance={onOpenAppearance}
         onCustomize={onCustomize}
-        onDeleteWorkspace={onDeleteWorkspace}
         onExitCustomize={onExitCustomize}
         onResetCustomize={onResetCustomize}
       />
@@ -716,38 +562,28 @@ function WorkItem({ item, onToggle, onDelete }: {
 
   // Temporal presence — older unfinished items recede slightly, like they've been
   // sitting in the same place for a while.
-  const itemOpacity = item.completed ? 0.55
+  const itemOpacity = item.completed ? 0.4
     : age === 'fresh'     ? 1.0
-    : age === 'settled'   ? 0.96
-    : age === 'lingering' ? 0.9
-    : 0.84;
+    : age === 'settled'   ? 0.92
+    : age === 'lingering' ? 0.82
+    : 0.70;
 
   // The toggle button takes on a faint amber warmth for lingering/old items —
   // a quiet signal that this has been waiting, without announcing it.
   const toggleColor = item.completed ? '#10b981'
     : age === 'lingering' ? '#6b5c3e'
     : age === 'old'       ? '#7c5e3a'
-    : '#475569';
+    : '#263043';
 
   const toggleHoverColor = item.completed ? '#10b981'
     : (age === 'lingering' || age === 'old') ? '#f59e0b'
-    : '#64748b';
+    : '#374151';
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '13px',
-        padding: '10px 10px',
-        borderRadius: 12,
-        border: `1px solid ${hovered ? 'rgba(255,255,255,0.075)' : 'transparent'}`,
-        background: hovered ? 'rgba(255,255,255,0.032)' : 'transparent',
-        opacity: itemOpacity,
-        transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1), background-color 0.18s ease, border-color 0.18s ease',
-      }}
+      style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '11px 0 9px', borderBottom: '1px solid rgba(255,255,255,0.022)', opacity: itemOpacity, transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1)' }}
     >
       <button
         onClick={() => onToggle(item.id, !item.completed).catch(() => toast.error('Failed'))}
@@ -757,15 +593,15 @@ function WorkItem({ item, onToggle, onDelete }: {
       >
         {item.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
       </button>
-      <span style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: item.completed ? '#64748b' : '#f1f5f9', textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ flex: 1, fontSize: '14px', fontWeight: 500, color: item.completed ? '#374151' : '#e2e8f0', textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {item.title}
       </span>
       {hovered && (
         <button
           onClick={() => onDelete(item.id).catch(() => toast.error('Failed'))}
-          style={{ flexShrink: 0, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
+          style={{ flexShrink: 0, color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
           onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#ef4444')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -791,8 +627,8 @@ function WorkCapture({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '12px 10px 6px', marginTop: '6px' }}>
-      <span style={{ flexShrink: 0, color: '#64748b', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '13px 0 6px', marginTop: '2px' }}>
+      <span style={{ flexShrink: 0, color: '#1e2a38', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
         {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
       </span>
       <input
@@ -800,15 +636,15 @@ function WorkCapture({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
         value={value}
         onChange={e => setValue(e.target.value)}
         placeholder="capture a task…"
-        style={{ flex: 1, fontSize: '13px', color: '#94a3b8', backgroundColor: 'transparent', border: 'none', outline: 'none', fontStyle: 'italic' }}
+        style={{ flex: 1, fontSize: '13px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', outline: 'none', fontStyle: 'italic' }}
         onFocus={e => { (e.currentTarget as HTMLInputElement).style.color = '#64748b'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'normal'; }}
-        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#94a3b8'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'italic'; }}
+        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#2a3a50'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'italic'; }}
         onKeyDown={e => { if (e.key === 'Escape') { setValue(''); (e.currentTarget as HTMLInputElement).blur(); } }}
       />
       {value.trim() && (
-        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#94a3b8', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 6px', borderRadius: '4px', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 6px', borderRadius: '4px', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
           onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}>
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#2a3a50')}>
           ↵
         </button>
       )}
@@ -908,73 +744,6 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
   );
 }
 
-const FREE_SPACE_MAX_SIZE: Record<ProjectObjectType, { w: number; h: number }> = {
-  notebook: { w: 640, h: 540 },
-  note: { w: 440, h: 360 },
-  mistake: { w: 440, h: 380 },
-  link: { w: 440, h: 320 },
-  checklist: { w: 440, h: 380 },
-  image: { w: 540, h: 440 },
-  calculator: { w: 360, h: 440 },
-  graph: { w: 480, h: 400 },
-  pdf: { w: 580, h: 500 },
-  companion: { w: 540, h: 420 },
-};
-
-const FREE_SPACE_DEFAULT_SIZE: Record<ProjectObjectType, { w: number; h: number }> = {
-  notebook: { w: 560, h: 440 },
-  note: { w: 360, h: 280 },
-  mistake: { w: 360, h: 280 },
-  link: { w: 360, h: 240 },
-  checklist: { w: 360, h: 300 },
-  image: { w: 460, h: 360 },
-  calculator: { w: 300, h: 360 },
-  graph: { w: 380, h: 320 },
-  pdf: { w: 500, h: 420 },
-  companion: { w: 460, h: 320 },
-};
-
-function objectRect(type: ProjectObjectType, pos: BlockPos | undefined) {
-  const fallback = FREE_SPACE_DEFAULT_SIZE[type];
-  return {
-    x: pos?.x ?? 0,
-    y: pos?.y ?? 0,
-    w: pos && pos.w > 0 ? pos.w : fallback.w,
-    h: pos && pos.h > 0 ? pos.h : fallback.h,
-  };
-}
-
-function needsCleanFreeSpaceLayout(
-  objects: Array<{ id: string; type: ProjectObjectType }>,
-  positions: PositionMap,
-): boolean {
-  if (objects.length < 2) return false;
-  const rects = objects.map(object => ({ object, rect: objectRect(object.type, positions[object.id]) }));
-
-  for (const { object, rect } of rects) {
-    const max = FREE_SPACE_MAX_SIZE[object.type];
-    if (!positions[object.id]) return true;
-    if (rect.x < 0 || rect.y < 0) return true;
-    if (rect.w > max.w || rect.h > max.h) return true;
-  }
-
-  for (let i = 0; i < rects.length; i++) {
-    for (let j = i + 1; j < rects.length; j++) {
-      const a = rects[i]!.rect;
-      const b = rects[j]!.rect;
-      const gap = 18;
-      const separated =
-        a.x + a.w + gap <= b.x ||
-        b.x + b.w + gap <= a.x ||
-        a.y + a.h + gap <= b.y ||
-        b.y + b.h + gap <= a.y;
-      if (!separated) return true;
-    }
-  }
-
-  return false;
-}
-
 // ── SectionPage ───────────────────────────────────────────────────────────────
 
 export function SectionPage() {
@@ -987,7 +756,7 @@ export function SectionPage() {
   const {
     section, loading, notFound, fetchError, fetchSection,
     addItem, pushItem, updateItem, deleteItem, toggleTask,
-    addGroup, updateGroup, deleteGroup, setExamDate, deleteSection,
+    addGroup, updateGroup, deleteGroup, setExamDate,
   } = useSectionDetail(id);
   const { touch: touchRecentWorkspace } = useRecentWorkspaces();
 
@@ -1040,8 +809,6 @@ export function SectionPage() {
   const [addingLane,      setAddingLane]       = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() => {
     if (navState?.firstArrival) return 'free-space';
     return sectionId ? loadSectionViewMode(sectionId) : 'work-surface';
@@ -1073,7 +840,6 @@ export function SectionPage() {
   const [starterRevealReady, setStarterRevealReady] = useState(false);
   const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
   const firstArrivalHandledRef = useRef(false);
-  const freeSpaceRecoveryAppliedRef = useRef(false);
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
@@ -1288,21 +1054,6 @@ export function SectionPage() {
     navigate('/session');
   };
 
-  const handleDeleteWorkspace = useCallback(async () => {
-    if (!section) return;
-    setDeletingWorkspace(true);
-    try {
-      await deleteSection();
-      toast.success('Workspace deleted');
-      setDeleteDialogOpen(false);
-      navigate(LIBRARY_ROUTE, { replace: true });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not delete workspace');
-    } finally {
-      setDeletingWorkspace(false);
-    }
-  }, [deleteSection, navigate, section]);
-
   const handleWorkCapture = async (title: string) => {
     if (!section) return;
     const exercisesGrp = section.groups.find(g => g.title === 'Exercises');
@@ -1380,19 +1131,19 @@ export function SectionPage() {
     const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
     const sizeHint =
       type === 'notebook'
-        ? { w: 560, h: 440 }
+        ? { w: 620, h: 520 }
         : type === 'companion'
           ? { w: 460, h: 320 }
         : type === 'image'
           ? { w: 460, h: 360 }
           : type === 'graph'
-            ? { w: 380, h: 320 }
+            ? { w: 400, h: 360 }
             : type === 'calculator'
-              ? { w: 300, h: 360 }
+              ? { w: 300, h: 420 }
               : type === 'mistake'
-                ? { w: 360, h: 280 }
+                ? { w: 380, h: 320 }
                 : type === 'pdf'
-                  ? { w: 500, h: 420 }
+                  ? { w: 520, h: 460 }
                   : { w: 360, h: 280 };
     initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     setSpaceSelectedId(obj.id);
@@ -1543,7 +1294,7 @@ export function SectionPage() {
       const obj = addSpaceObject('pdf');
       const x = Math.max(20, Math.round(worldX - 260));
       const y = Math.max(20, Math.round(worldY - 230));
-      initPos(obj.id, { x, y, w: 500, h: 420 });
+      initPos(obj.id, { x, y, w: 520, h: 460 });
       setSpaceSelectedId(obj.id);
       try {
         await savePdfBlob(sectionId, obj.id, file);
@@ -2030,12 +1781,17 @@ export function SectionPage() {
     ],
   );
 
+  const frameArrivalScene = useCallback(() => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
+    sectionCanvas.centerView(1520, 780, vw, vh);
+  }, [sectionCanvas]);
+
   useEffect(() => {
     firstArrivalHandledRef.current = false;
     setStarterExpanded(false);
     setStarterDockVisible(false);
     setStarterRevealReady(false);
-    freeSpaceRecoveryAppliedRef.current = false;
   }, [sectionId]);
 
   useEffect(() => {
@@ -2047,7 +1803,10 @@ export function SectionPage() {
     saveSectionViewMode(sectionId, 'free-space');
 
     if (sectionObjects.objects.length === 0) {
-      sectionCanvas.setViewport(1, 80, 120);
+      applyWorkspaceStarter('research-thinking', { silent: true, skipToast: true });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => frameArrivalScene());
+      });
     }
 
     markFirstWorkspaceEntryDone();
@@ -2060,6 +1819,8 @@ export function SectionPage() {
     const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
     return () => window.clearTimeout(quietTimer);
   }, [
+    applyWorkspaceStarter,
+    frameArrivalScene,
     loading,
     location.pathname,
     navigate,
@@ -2067,7 +1828,6 @@ export function SectionPage() {
     section,
     sectionId,
     sectionObjects.objects.length,
-    sectionCanvas,
   ]);
 
   useEffect(() => {
@@ -2266,24 +2026,6 @@ export function SectionPage() {
   }, [id, freeSpaceObjectIdsKey, sectionPositions.seedMissingPositions]);
 
   useEffect(() => {
-    if (!id || sectionViewMode !== 'free-space' || freeSpaceRecoveryAppliedRef.current) return;
-    const objects = sectionObjects.objects;
-    if (!needsCleanFreeSpaceLayout(objects, sectionPositions.positions)) return;
-    const patches = computeCleanFreeSpaceLayout(objects, sectionPositions.positions);
-    if (!patches || Object.keys(patches).length === 0) return;
-    freeSpaceRecoveryAppliedRef.current = true;
-    sectionPositions.applyPositions(patches);
-    setLastArrangeAt(Date.now());
-  }, [
-    id,
-    sectionViewMode,
-    freeSpaceObjectIdsKey,
-    sectionObjects.objects,
-    sectionPositions.positions,
-    sectionPositions.applyPositions,
-  ]);
-
-  useEffect(() => {
     const valid = new Set(sectionObjects.objects.map(o => o.id));
     if (spaceSelectedId && !valid.has(spaceSelectedId)) setSpaceSelectedId(null);
     if (spaceEditingId && !valid.has(spaceEditingId)) setSpaceEditingId(null);
@@ -2335,7 +2077,6 @@ export function SectionPage() {
           onBack={handleWorkspaceBack}
           onOpenAppearance={() => setAppearanceOpen(true)}
           onCustomize={() => {}}
-          onDeleteWorkspace={() => {}}
           onExitCustomize={() => {}}
           onResetCustomize={() => {}}
           sectionViewMode="work-surface"
@@ -2512,7 +2253,6 @@ export function SectionPage() {
         onBack={handleWorkspaceBack}
         onOpenAppearance={() => setAppearanceOpen(true)}
         onCustomize={enterDesignMode}
-        onDeleteWorkspace={() => setDeleteDialogOpen(true)}
         onExitCustomize={exitDesignMode}
         onResetCustomize={resetDesign}
         sectionViewMode={sectionViewMode}
@@ -2563,17 +2303,6 @@ export function SectionPage() {
         onClose={() => setAppearanceOpen(false)}
         onSetAtmosphere={setAtmosphere}
         onUpdateGlobal={updateGlobal}
-      />
-
-      <DeleteWorkspaceDialog
-        open={deleteDialogOpen}
-        name={section.title}
-        tokens={tokens}
-        deleting={deletingWorkspace}
-        onCancel={() => {
-          if (!deletingWorkspace) setDeleteDialogOpen(false);
-        }}
-        onConfirm={handleDeleteWorkspace}
       />
 
 
@@ -2696,36 +2425,27 @@ export function SectionPage() {
                 top: '92px',
                 right: '20px',
                 zIndex: 60,
-                width: '264px',
+                width: '220px',
                 backgroundColor: `${tokens.cardBg}fa`,
                 border: `1px solid ${tokens.cardBorder}`,
                 borderRadius: '12px',
-                padding: '10px',
+                padding: '8px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '4px',
-                boxShadow: '0 22px 72px rgba(0,0,0,0.48)',
               }}
             >
-              <div style={{ padding: '3px 8px 8px' }}>
-                <div style={{ fontSize: 10, fontWeight: 850, letterSpacing: '0.14em', textTransform: 'uppercase', color: tokens.textGhost }}>
-                  Add to Free Space
-                </div>
-                <div style={{ marginTop: 3, fontSize: 11, color: tokens.textMuted, lineHeight: 1.35 }}>
-                  Spatial objects, study tools, and resources.
-                </div>
-              </div>
               {([
-                { type: 'note', label: 'Note', hint: 'Quick capture' },
+                { type: 'companion', label: 'Companion', hint: 'Pinned external tool or source' },
                 { type: 'notebook', label: 'Notebook', hint: 'Large writing surface' },
-                { type: 'pdf', label: 'PDF / source', hint: 'Local file window' },
-                { type: 'link', label: 'Link / resource', hint: 'Reference URL' },
-                { type: 'mistake', label: 'Mistake', hint: 'Review slips and corrections' },
-                { type: 'calculator', label: 'Calculator', hint: 'Math scratchpad' },
-                { type: 'graph', label: 'Graph', hint: 'Plot y = f(x)' },
+                { type: 'note', label: 'Note', hint: 'Quick capture' },
+                { type: 'mistake', label: 'Mistake', hint: 'Learn from slips' },
+                { type: 'link', label: 'Link', hint: 'Reference URL' },
                 { type: 'checklist', label: 'Checklist', hint: 'Action list' },
                 { type: 'image', label: 'Image', hint: 'Visual reference' },
-                { type: 'companion', label: 'Companion', hint: 'Pinned external tool or tutor' },
+                { type: 'calculator', label: 'Calculator', hint: 'Safe math scratchpad' },
+                { type: 'graph', label: 'Graph', hint: 'Plot y = f(x)' },
+                { type: 'pdf', label: 'PDF', hint: 'Local file window' },
               ] as const).map(item => (
                 <button
                   key={item.type}
@@ -2855,18 +2575,12 @@ export function SectionPage() {
         </div>
       </div>
       <div style={surfaceShellStyle(workSurfaceVisible)}>
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]" style={{ overflow: 'hidden', minHeight: 0, height: '100%' }}>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%' }}>
 
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
           <aside
             className="hidden lg:flex flex-col overflow-y-auto"
-            style={{
-              borderRight: '1px solid rgba(255,255,255,0.07)',
-              padding: '28px 18px 24px',
-              gap: 0,
-              background: 'linear-gradient(180deg, rgba(8,13,24,0.96) 0%, rgba(4,7,13,0.98) 100%)',
-              boxShadow: 'inset -1px 0 0 rgba(245,158,11,0.035)',
-            }}
+            style={{ borderRight: '1px solid rgba(255,255,255,0.04)', padding: '32px 14px 24px 18px', gap: 0, backgroundColor: '#070b14' }}
           >
             <CourseHub sectionId={section.id} />
 
@@ -2887,31 +2601,20 @@ export function SectionPage() {
               pointerEvents: 'none', zIndex: 0, transition: 'background 1.4s cubic-bezier(0.4,0,0.2,1)',
             }} />
 
-            <div style={{ position: 'relative', zIndex: 1, padding: '42px 56px 88px', maxWidth: '1120px', margin: '0 auto' }}>
+            <div style={{ position: 'relative', zIndex: 1, padding: '42px 46px 88px', maxWidth: '680px' }}>
 
               {/* ── IDENTITY HEADER ──────────────────────────────────────── */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                marginBottom: '26px',
-                padding: '18px 20px',
-                borderRadius: '22px',
-                border: `1px solid rgba(255,255,255,0.075)`,
-                borderLeft: `3px solid ${accentColor}b8`,
-                background: 'linear-gradient(135deg, rgba(13,20,36,0.86), rgba(7,11,20,0.74))',
-                boxShadow: '0 18px 64px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.06)',
-              }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '34px', paddingLeft: '15px', borderLeft: `2px solid ${accentColor}70` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                     {customization.icon && (
                       <span style={{ fontSize: '16px', lineHeight: 1 }} role="img">{customization.icon}</span>
                     )}
-                    <h1 style={{ fontSize: '24px', fontWeight: 820, color: '#f8fafc', letterSpacing: '-0.04em', margin: 0 }}>
+                    <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em', margin: 0 }}>
                       {section.title}
                     </h1>
                     {spaceAge(section.created_at) && (
-                      <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 650, letterSpacing: '0.02em', flexShrink: 0, userSelect: 'none' }}>
+                      <span style={{ fontSize: '10px', color: '#1a2230', fontWeight: 400, letterSpacing: '0.02em', flexShrink: 0, userSelect: 'none' }}>
                         {spaceAge(section.created_at)}
                       </span>
                     )}
@@ -2925,15 +2628,15 @@ export function SectionPage() {
                         </span>
                       ) : (
                         <>
-                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                          <span style={{ fontSize: '12px', color: '#4b5563' }}>
                             <span style={{ color: '#94a3b8', fontWeight: 600 }}>{remaining}</span> remaining
                           </span>
-                          <span style={{ fontSize: '12px', color: '#475569' }}>·</span>
+                          <span style={{ fontSize: '12px', color: '#1a2230' }}>·</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <div style={{ width: '112px', height: '4px', borderRadius: '999px', backgroundColor: '#111827', overflow: 'hidden' }}>
+                            <div style={{ width: '80px', height: '3px', borderRadius: '2px', backgroundColor: '#111827', overflow: 'hidden' }}>
                               <div style={{ height: '100%', width: `${progress}%`, backgroundColor: progressColor, borderRadius: '2px', transition: 'width 0.7s ease' }} />
                             </div>
-                            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700 }}>{progress}%</span>
+                            <span style={{ fontSize: '11px', color: '#374151', fontWeight: 600 }}>{progress}%</span>
                           </div>
                         </>
                       )}
@@ -2951,14 +2654,14 @@ export function SectionPage() {
                       ) : section.exam_date ? (
                         <button
                           onClick={() => setEditingExamDate(true)}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                           onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
                           onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
                         >
                           <Calendar className="w-3 h-3" />
                           {formatExamDate(section.exam_date)}
                           {examDays !== null && (
-                            <span style={{ color: examDays <= 0 ? '#94a3b8' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#94a3b8', fontWeight: 650 }}>
+                            <span style={{ color: examDays <= 0 ? '#4b5563' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#4b5563', fontWeight: 600 }}>
                               · {examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today!' : 'Past'}
                             </span>
                           )}
@@ -2966,7 +2669,7 @@ export function SectionPage() {
                       ) : (
                         <button
                           onClick={() => setEditingExamDate(true)}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                           onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
                           onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
                         >
@@ -2975,7 +2678,7 @@ export function SectionPage() {
                       )}
                     </div>
                   ) : (
-                    <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Add tasks to start tracking progress</p>
+                    <p style={{ fontSize: '12px', color: '#263043', margin: 0 }}>Add tasks to start tracking progress</p>
                   )}
                 </div>
 
@@ -3002,47 +2705,39 @@ export function SectionPage() {
 
               {/* ── FOCUS NOW STRIP ──────────────────────────────────────── */}
               {todayPlan.length > 0 && (
-                <div style={{
-                  border: '1px solid rgba(245,158,11,0.18)',
-                  background: 'linear-gradient(135deg, rgba(245,158,11,0.075), rgba(255,255,255,0.024))',
-                  borderRadius: 20,
-                  marginBottom: '24px',
-                  overflow: 'hidden',
-                  boxShadow: '0 18px 58px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.05)',
-                }}>
-                  <div style={{ padding: '14px 18px 0', marginBottom: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.82)', fontWeight: 820 }}>Current focus</span>
-                    <span style={{ fontSize: 11, color: '#64748b', fontWeight: 650 }}>{todayPlan.length} suggestion{todayPlan.length === 1 ? '' : 's'}</span>
+                <div style={{ borderLeft: '1.5px solid rgba(245,158,11,0.45)', backgroundColor: 'rgba(245,158,11,0.014)', borderRadius: '0 3px 3px 0', marginBottom: '36px' }}>
+                  <div style={{ padding: '6px 16px 0', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '9px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.5)', fontWeight: 600 }}>now</span>
                   </div>
 
                   <button
                     onClick={() => scrollToItem(todayPlan[0].item.id)}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 18px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.055)')}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '8px 16px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.025)')}
                     onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                   >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0, boxShadow: '0 0 18px rgba(245,158,11,0.72)' }} />
+                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0, opacity: 0.7 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: '16px', fontWeight: 780, color: '#f8fafc', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>
+                      <p style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {todayPlan[0].item.title}
                       </p>
-                      <p style={{ fontSize: '11px', color: '#94a3b8', margin: '3px 0 0', fontWeight: 600 }}>
+                      <p style={{ fontSize: '10px', color: '#374151', margin: '2px 0 0' }}>
                         {todayPlan[0].lane}
                       </p>
                     </div>
-                    <ArrowRight className="w-4 h-4" style={{ color: '#f59e0b', flexShrink: 0 }} />
+                    <ArrowRight className="w-3 h-3" style={{ color: '#2a3040', flexShrink: 0 }} />
                   </button>
 
                   {todayPlan.slice(1).map((rec) => (
                     <button
                       key={rec.item.id}
                       onClick={() => scrollToItem(rec.item.id)}
-                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '8px 18px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.035)')}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '6px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.015)')}
                       onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
                     >
-                      <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#64748b', flexShrink: 0, opacity: 0.72 }} />
-                      <p style={{ flex: 1, fontSize: '13px', color: '#cbd5e1', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#374151', flexShrink: 0, opacity: 0.5 }} />
+                      <p style={{ flex: 1, fontSize: '12px', color: '#4b5563', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {rec.item.title}
                       </p>
                     </button>
@@ -3063,25 +2758,7 @@ export function SectionPage() {
               )}
 
               {/* ── WORK SURFACE ─────────────────────────────────────────── */}
-              <div style={{
-                marginBottom: '28px',
-                borderRadius: 20,
-                border: '1px solid rgba(255,255,255,0.07)',
-                background: 'linear-gradient(180deg, rgba(10,16,30,0.72), rgba(6,10,18,0.62))',
-                boxShadow: '0 16px 52px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.045)',
-                padding: '18px 20px 12px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                  <div>
-                    <p style={{ margin: 0, color: '#f8fafc', fontSize: 15, fontWeight: 820, letterSpacing: '-0.02em' }}>Tasks</p>
-                    <p style={{ margin: '3px 0 0', color: '#64748b', fontSize: 11, lineHeight: 1.4 }}>Capture what needs doing, then start a focus session.</p>
-                  </div>
-                  {remaining > 0 && (
-                    <span style={{ flexShrink: 0, color: '#f59e0b', background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 999, padding: '5px 9px', fontSize: 11, fontWeight: 750 }}>
-                      {remaining} open
-                    </span>
-                  )}
-                </div>
+              <div style={{ marginBottom: '40px' }}>
 
                 {exercisesGroup ? (
                   <>
@@ -3091,13 +2768,13 @@ export function SectionPage() {
                       </div>
                     ))}
                     {exercisesGroup.items.length === 0 && (
-                      <p style={{ fontSize: '13px', color: '#64748b', padding: '10px 0', fontStyle: 'italic', margin: 0 }}>
+                      <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', fontStyle: 'italic', margin: 0 }}>
                         Nothing here yet — add a task below.
                       </p>
                     )}
                   </>
                 ) : (
-                  <p style={{ fontSize: '13px', color: '#64748b', padding: '10px 0', margin: 0 }}>
+                  <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', margin: 0 }}>
                     No work items yet.
                   </p>
                 )}
@@ -3106,10 +2783,7 @@ export function SectionPage() {
               </div>
 
               {/* ── SHELF ────────────────────────────────────────────────── */}
-              <div style={{
-                paddingTop: '22px',
-                borderTop: '1px solid rgba(255,255,255,0.07)',
-              }}>
+              <div style={{ paddingTop: '32px', borderTop: '1px solid rgba(255,255,255,0.035)' }}>
                 <ResourcesBlock
                   groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
                   sectionId={section.id}
@@ -3353,20 +3027,20 @@ function ResourcesBlock({
           onClick={() => { setAddingType(type); setIsOpen(true); }}
           className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
           style={{
-            backgroundColor: addingType === type ? '#1a2236' : 'rgba(255,255,255,0.022)',
-            color:           addingType === type ? '#cbd5e1' : '#94a3b8',
-            border:          `1px solid ${addingType === type ? '#334155' : 'rgba(255,255,255,0.055)'}`,
+            backgroundColor: addingType === type ? '#1a2236' : 'transparent',
+            color:           addingType === type ? '#94a3b8' : '#4b5563',
+            border:          `1px solid ${addingType === type ? '#263043' : 'transparent'}`,
           }}
           onMouseEnter={e => {
             if (addingType !== type) {
               (e.currentTarget as HTMLElement).style.backgroundColor = '#111827';
-              (e.currentTarget as HTMLElement).style.color = '#cbd5e1';
+              (e.currentTarget as HTMLElement).style.color = '#94a3b8';
             }
           }}
           onMouseLeave={e => {
             if (addingType !== type) {
-              (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(255,255,255,0.022)';
-              (e.currentTarget as HTMLElement).style.color = '#94a3b8';
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+              (e.currentTarget as HTMLElement).style.color = '#4b5563';
             }
           }}
         >
@@ -3378,16 +3052,7 @@ function ResourcesBlock({
   );
 
   return (
-    <div
-      className="mb-4"
-      style={{
-        borderRadius: 20,
-        border: '1px solid rgba(255,255,255,0.07)',
-        background: 'linear-gradient(180deg, rgba(10,16,30,0.66), rgba(6,10,18,0.55))',
-        padding: 18,
-        boxShadow: '0 16px 52px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.045)',
-      }}
-    >
+    <div className="mb-4">
 
       {/* ── Header ── */}
       <div
@@ -3395,20 +3060,20 @@ function ResourcesBlock({
         onClick={() => setIsOpen(o => !o)}
       >
         <div className="flex items-center gap-2">
-          <span className="flex-shrink-0" style={{ color: '#64748b', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}>
+          <span className="flex-shrink-0" style={{ color: '#263043', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
             {isOpen
               ? <ChevronDown  className="w-3 h-3" />
               : <ChevronRight className="w-3 h-3" />}
           </span>
-          <span className="text-[13px] font-bold"
-                style={{ color: '#f1f5f9', letterSpacing: '-0.01em' }}>
-            Shelf
+          <span className="text-[10px] font-semibold"
+                style={{ color: '#374151', letterSpacing: '0.04em' }}>
+            shelf
           </span>
           {totalItems > 0 && (
             <span className="text-[9px]"
-                  style={{ color: '#64748b' }}>
+                  style={{ color: '#263043' }}>
               {totalItems}
             </span>
           )}
@@ -3434,7 +3099,7 @@ function ResourcesBlock({
 
           {/* Groups / items */}
           {groups.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {groups.map(group => (
                 <GroupComponent
                   key={group.id}
@@ -3455,7 +3120,7 @@ function ResourcesBlock({
           ) : !addingType ? (
             /* ── Empty state ── */
             <div className="flex flex-col py-6 gap-3" style={{ paddingLeft: '2px' }}>
-              <p className="text-xs" style={{ color: '#64748b', fontStyle: 'italic' }}>
+              <p className="text-xs" style={{ color: '#263043', fontStyle: 'italic' }}>
                 A place for notes, links, and references.
               </p>
               {/* Primary CTAs — one per type */}

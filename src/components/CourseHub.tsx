@@ -350,16 +350,12 @@ export function CourseHub({ sectionId }: Props) {
   return (
     <div
       className="rounded-2xl overflow-hidden mb-4"
-      style={{
-        background: 'linear-gradient(180deg, rgba(13,20,36,0.96), rgba(7,11,20,0.94))',
-        border: '1px solid rgba(255,255,255,0.075)',
-        boxShadow: '0 18px 58px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.055)',
-      }}
+      style={{ backgroundColor: '#0d1424', border: '1px solid #1a2638' }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
+        style={{ borderBottom: '1px solid #1a2638' }}
       >
         <div className="flex items-center gap-2">
           <Link2 className="w-4 h-4" style={{ color: '#f59e0b' }} />
@@ -367,7 +363,7 @@ export function CourseHub({ sectionId }: Props) {
           {hasLinks && (
             <span
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: '#111d2e', color: '#94a3b8' }}
+              style={{ backgroundColor: '#111d2e', color: '#475569' }}
             >
               {links.length}
             </span>
@@ -377,9 +373,9 @@ export function CourseHub({ sectionId }: Props) {
           <button
             onClick={() => setShowAddCustom(true)}
             className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg transition-all"
-            style={{ color: '#94a3b8' }}
+            style={{ color: '#475569' }}
             onMouseEnter={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = '#111d2e'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#475569'; e.currentTarget.style.backgroundColor = 'transparent'; }}
           >
             <Plus className="w-3 h-3" strokeWidth={2.5} />Add link
           </button>
@@ -400,7 +396,7 @@ export function CourseHub({ sectionId }: Props) {
         {/* Empty state */}
         {!hasLinks && !showingForm && (
           <div>
-            <p className="text-xs mb-3 leading-relaxed" style={{ color: '#64748b' }}>
+            <p className="text-xs mb-3" style={{ color: '#334155' }}>
               Save links for this space — Moodle, shared Drive, professor email, and more.
             </p>
             <div className="flex flex-wrap gap-2">
