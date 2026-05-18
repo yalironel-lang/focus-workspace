@@ -46,6 +46,8 @@ import {
   type ProjectObjectType,
   ensureProjectObjectContent,
 } from '../hooks/useSectionFreeSpaceObjects';
+import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
+import { ProjectSpacesRow } from '../components/project-space/ProjectSpacesRow';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
@@ -488,6 +490,10 @@ function WorkspaceSectionChrome({
   onViewModeChange,
   focusMode,
   showViewTabs = true,
+  boards,
+  activeBoardId,
+  onSelectBoard,
+  onCreateBoard,
 }: {
   title: string;
   accent: string;
@@ -503,6 +509,10 @@ function WorkspaceSectionChrome({
   onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
   focusMode: FocusMode | null;
   showViewTabs?: boolean;
+  boards?: import('../hooks/useSectionFreeSpaceBoards').FreeSpaceBoard[];
+  activeBoardId?: string;
+  onSelectBoard?: (id: string) => void;
+  onCreateBoard?: (name: string) => void;
 }) {
   return (
     <header
@@ -528,12 +538,24 @@ function WorkspaceSectionChrome({
         onResetCustomize={onResetCustomize}
       />
       {showViewTabs && (
-        <WorkspaceViewModeBar
-          tokens={tokens}
-          sectionViewMode={sectionViewMode}
-          onViewModeChange={onViewModeChange}
-          focusMode={focusMode}
-        />
+        <>
+          {sectionViewMode === 'free-space' && boards && activeBoardId != null && onSelectBoard && onCreateBoard && (
+            <div style={{ padding: '6px 16px 0' }}>
+              <ProjectSpacesRow
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelect={onSelectBoard}
+                onCreate={onCreateBoard}
+              />
+            </div>
+          )}
+          <WorkspaceViewModeBar
+            tokens={tokens}
+            sectionViewMode={sectionViewMode}
+            onViewModeChange={onViewModeChange}
+            focusMode={focusMode}
+          />
+        </>
       )}
     </header>
   );
@@ -781,9 +803,10 @@ export function SectionPage() {
   const tokens = useMemo(() => mergeAccent(atmTokens, design), [atmTokens, design]);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
-  const sectionCanvas = useSectionCanvasMode(sectionId);
-  const sectionPositions = useSectionBlockPositions(sectionId);
-  const sectionObjects = useSectionFreeSpaceObjects(sectionId);
+  const sectionBoards = useSectionFreeSpaceBoards(sectionId);
+  const sectionCanvas = useSectionCanvasMode(sectionId, sectionBoards.activeBoardId);
+  const sectionPositions = useSectionBlockPositions(sectionId, sectionBoards.activeBoardId);
+  const sectionObjects = useSectionFreeSpaceObjects(sectionId, sectionBoards.activeBoardId);
   const sectionObjectsRef = useRef(sectionObjects);
   sectionObjectsRef.current = sectionObjects;
   const {
@@ -2258,6 +2281,10 @@ export function SectionPage() {
         sectionViewMode={sectionViewMode}
         onViewModeChange={setSectionViewMode}
         focusMode={focusMode}
+        boards={sectionBoards.boards}
+        activeBoardId={sectionBoards.activeBoardId}
+        onSelectBoard={sectionBoards.setActiveBoardId}
+        onCreateBoard={sectionBoards.createBoard}
       />
 
       <QuickCaptureOverlay

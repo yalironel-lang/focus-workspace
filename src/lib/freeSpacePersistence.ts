@@ -24,6 +24,35 @@ export function freeSpaceStorageKeys(sectionId: string) {
   } as const;
 }
 
+/**
+ * Board-scoped storage keys for Project Spaces (multiple Free Space boards per section).
+ * 'main' board (or empty boardId) falls back to the original single-board keys so
+ * existing data is preserved without migration.
+ */
+export function boardScopedFreeSpaceKeys(sectionId: string, boardId: string) {
+  const isMain = !boardId || boardId === 'main';
+  if (isMain) {
+    return freeSpaceStorageKeys(sectionId);
+  }
+  const prefix = `fw_section_${sectionId}_board_${boardId}`;
+  return {
+    objects: `${prefix}_objects_v1`,
+    positions: `${prefix}_positions_v1`,
+    viewport: `${prefix}_viewport_v1`,
+    prefs: `${prefix}_prefs_v1`,
+  } as const;
+}
+
+/** localStorage key for the board list of a section. */
+export function sectionBoardsListKey(sectionId: string): string {
+  return `fw_section_${sectionId}_boards_v1`;
+}
+
+/** localStorage key for the active board id of a section. */
+export function sectionActiveBoardKey(sectionId: string): string {
+  return `fw_section_${sectionId}_active_board_v1`;
+}
+
 /** Removes objects, positions, viewport, and prefs for one section (dev / recovery). */
 export function clearFreeSpacePersistenceForSection(sectionId: string): void {
   if (!sectionId) {

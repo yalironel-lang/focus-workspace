@@ -1,38 +1,38 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
-import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap } from '../lib/freeSpacePersistence';
+import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 
-function key(sectionId: string): string {
-  return `fw_section_${sectionId}_free_space_positions_v1`;
+function key(sectionId: string, boardId = ''): string {
+  return boardScopedFreeSpaceKeys(sectionId, boardId).positions;
 }
 
-function load(sectionId: string): PositionMap {
+function load(sectionId: string, boardId = ''): PositionMap {
   if (!sectionId) return {};
   try {
-    const raw = localStorage.getItem(key(sectionId));
+    const raw = localStorage.getItem(key(sectionId, boardId));
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     const { map, repaired } = sanitizePositionMap(parsed, sectionId);
     if (repaired) {
       fwPersistWarn(`Repaired invalid Free Space positions for section "${sectionId}" and rewrote storage.`);
       try {
-        localStorage.setItem(key(sectionId), JSON.stringify(map));
+        localStorage.setItem(key(sectionId, boardId), JSON.stringify(map));
       } catch { /* quota */ }
     }
     return map;
   } catch (e) {
     fwPersistWarn(`Failed to parse Free Space positions for section "${sectionId}": ${String(e)}; clearing positions key.`);
     try {
-      localStorage.removeItem(key(sectionId));
+      localStorage.removeItem(key(sectionId, boardId));
     } catch { /* ignore */ }
     return {};
   }
 }
 
-function persist(sectionId: string, m: PositionMap): void {
+function persist(sectionId: string, boardId: string, m: PositionMap): void {
   if (!sectionId) return;
-  try { localStorage.setItem(key(sectionId), JSON.stringify(m)); } catch { /* quota */ }
+  try { localStorage.setItem(key(sectionId, boardId), JSON.stringify(m)); } catch { /* quota */ }
 }
 
 const makeDefault = (hint?: Partial<BlockPos>): BlockPos => ({
@@ -55,10 +55,10 @@ export interface SectionBlockPositionsState {
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
 }
 
-export function useSectionBlockPositions(sectionId: string): SectionBlockPositionsState {
-  const [positions, setPositions] = useState<PositionMap>(() => load(sectionId));
+export function useSectionBlockPositions(sectionId: string, boardId = ''): SectionBlockPositionsState {
+  const [positions, setPositions] = useState<PositionMap>(() => load(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingPersistRef = useRef<{ sectionId: string; positions: PositionMap } | null>(null);
+  const pendingPersistRef = useRef<{ sectionId: string; boardId: string; positions: PositionMap } | null>(null);
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -68,26 +68,26 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     const pending = pendingPersistRef.current;
     if (!pending) return;
     pendingPersistRef.current = null;
-    persist(pending.sectionId, pending.positions);
+    persist(pending.sectionId, pending.boardId, pending.positions);
   }, []);
 
-  const schedulePersist = useCallback((next: PositionMap, targetSectionId: string) => {
+  const schedulePersist = useCallback((next: PositionMap, targetSectionId: string, targetBoardId: string) => {
     if (!targetSectionId) return;
-    pendingPersistRef.current = { sectionId: targetSectionId, positions: next };
+    pendingPersistRef.current = { sectionId: targetSectionId, boardId: targetBoardId, positions: next };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
       const pending = pendingPersistRef.current;
       persistTimerRef.current = null;
       if (!pending) return;
       pendingPersistRef.current = null;
-      persist(pending.sectionId, pending.positions);
+      persist(pending.sectionId, pending.boardId, pending.positions);
     }, 120);
   }, []);
 
   useEffect(() => {
     flushPersist();
-    setPositions(load(sectionId));
-  }, [sectionId, flushPersist]);
+    setPositions(load(sectionId, boardId));
+  }, [sectionId, boardId, flushPersist]);
 
   useEffect(() => () => flushPersist(), [flushPersist]);
 
@@ -98,7 +98,7 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         ...prev,
         [id]: sanitizeBlockPos(merged),
       };
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -112,7 +112,7 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         const merged = sanitizeBlockPos({ ...(prev[id] ?? makeDefault()), ...pos });
         next[id] = merged;
       }
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -121,7 +121,7 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
     setPositions(prev => {
       if (prev[id]) return prev;
       const next: PositionMap = { ...prev, [id]: sanitizeBlockPos(makeDefault(hint)) };
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -151,7 +151,7 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
         changed = true;
       }
       if (!changed) return prev;
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -159,10 +159,10 @@ export function useSectionBlockPositions(sectionId: string): SectionBlockPositio
   const removePos = useCallback((id: string) => {
     setPositions(prev => {
       const { [id]: _removed, ...rest } = prev;
-      schedulePersist(rest, sectionId);
+      schedulePersist(rest, sectionId, boardId);
       return rest;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const nextFreePos = useCallback((existingMap?: PositionMap): { x: number; y: number } => {
     const map = existingMap ?? positions;

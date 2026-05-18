@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
-import { fwPersistWarn } from '../lib/freeSpacePersistence';
+import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
 import {
   buildCompanionContent,
@@ -89,8 +89,8 @@ const OBJECT_TYPES = new Set<ProjectObjectType>([
   'companion',
 ]);
 
-function key(sectionId: string): string {
-  return `fw_section_${sectionId}_free_space_objects_v1`;
+function key(sectionId: string, boardId = ''): string {
+  return boardScopedFreeSpaceKeys(sectionId, boardId).objects;
 }
 
 function uid(type: ProjectObjectType): string {
@@ -448,10 +448,10 @@ export function repairFreeSpaceObjectList(
   return { objects: normalized, repaired };
 }
 
-function load(sectionId: string): ProjectSpaceObject[] {
+function load(sectionId: string, boardId = ''): ProjectSpaceObject[] {
   if (!sectionId) return [];
   try {
-    const raw = localStorage.getItem(key(sectionId));
+    const raw = localStorage.getItem(key(sectionId, boardId));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     const { objects: normalized, repaired } = repairFreeSpaceObjectList(parsed, sectionId);
@@ -460,7 +460,7 @@ function load(sectionId: string): ProjectSpaceObject[] {
         `Repaired Free Space objects for section "${sectionId}"; rewriting storage (${Array.isArray(parsed) ? parsed.length : 0} rows → ${normalized.length} valid).`,
       );
       try {
-        localStorage.setItem(key(sectionId), JSON.stringify(normalized));
+        localStorage.setItem(key(sectionId, boardId), JSON.stringify(normalized));
       } catch { /* quota */ }
     }
     return normalized;
@@ -470,10 +470,10 @@ function load(sectionId: string): ProjectSpaceObject[] {
   }
 }
 
-function persist(sectionId: string, objects: ProjectSpaceObject[]): void {
+function persist(sectionId: string, boardId: string, objects: ProjectSpaceObject[]): void {
   if (!sectionId) return;
   try {
-    localStorage.setItem(key(sectionId), JSON.stringify(objects));
+    localStorage.setItem(key(sectionId, boardId), JSON.stringify(objects));
   } catch { /* quota */ }
 }
 
@@ -500,10 +500,10 @@ export interface SectionFreeSpaceObjectsState {
   getObject: (id: string) => ProjectSpaceObject | undefined;
 }
 
-export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceObjectsState {
-  const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId));
+export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): SectionFreeSpaceObjectsState {
+  const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingPersistRef = useRef<{ sectionId: string; objects: ProjectSpaceObject[] } | null>(null);
+  const pendingPersistRef = useRef<{ sectionId: string; boardId: string; objects: ProjectSpaceObject[] } | null>(null);
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -513,26 +513,26 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     const pending = pendingPersistRef.current;
     if (!pending) return;
     pendingPersistRef.current = null;
-    persist(pending.sectionId, pending.objects);
+    persist(pending.sectionId, pending.boardId, pending.objects);
   }, []);
 
-  const schedulePersist = useCallback((next: ProjectSpaceObject[], targetSectionId: string) => {
+  const schedulePersist = useCallback((next: ProjectSpaceObject[], targetSectionId: string, targetBoardId: string) => {
     if (!targetSectionId) return;
-    pendingPersistRef.current = { sectionId: targetSectionId, objects: next };
+    pendingPersistRef.current = { sectionId: targetSectionId, boardId: targetBoardId, objects: next };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
       const pending = pendingPersistRef.current;
       persistTimerRef.current = null;
       if (!pending) return;
       pendingPersistRef.current = null;
-      persist(pending.sectionId, pending.objects);
+      persist(pending.sectionId, pending.boardId, pending.objects);
     }, 180);
   }, []);
 
   useEffect(() => {
     flushPersist();
-    setObjects(load(sectionId));
-  }, [sectionId, flushPersist]);
+    setObjects(load(sectionId, boardId));
+  }, [sectionId, boardId, flushPersist]);
 
   useEffect(() => () => flushPersist(), [flushPersist]);
 
@@ -540,7 +540,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     if (!incoming.length) return;
     setObjects(prev => {
       const next = [...prev, ...incoming];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -558,7 +558,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return obj;
@@ -579,7 +579,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return obj;
@@ -610,7 +610,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return obj;
@@ -641,7 +641,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return obj;
@@ -679,7 +679,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       };
       out = nextObj;
       const next = prev.map(x => (x.id === objectId ? nextObj : x));
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return out;
@@ -688,7 +688,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -706,7 +706,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
           updatedAt: Date.now(),
         };
         const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];
-        schedulePersist(next, sectionId);
+        schedulePersist(next, sectionId, boardId);
         return next;
       });
     },
@@ -731,7 +731,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
         if (cur.includes(toId)) return o;
         return { ...o, connections: [...cur, toId], updatedAt: Date.now() };
       });
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -754,7 +754,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
           updatedAt: Date.now(),
         };
       });
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -765,7 +765,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
       if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
   }, [schedulePersist, sectionId]);
@@ -790,7 +790,7 @@ export function useSectionFreeSpaceObjects(sectionId: string): SectionFreeSpaceO
     }
     setObjects(prev => {
       const next = [...prev, copy];
-      schedulePersist(next, sectionId);
+      schedulePersist(next, sectionId, boardId);
       return next;
     });
     return copy;
