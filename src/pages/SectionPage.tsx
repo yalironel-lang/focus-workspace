@@ -86,6 +86,17 @@ import {
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
   Palette,
+  FileText,
+  BookOpen,
+  FileUp,
+  ListChecks,
+  Brain,
+  RotateCcw,
+  MessageCircle,
+  Calculator,
+  LineChart,
+  Link2,
+  Image,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
@@ -471,6 +482,252 @@ function WorkspaceViewModeBar({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type FreeSpacePaletteItemId =
+  | ProjectObjectType
+  | 'recall'
+  | 'tutor'
+  | 'quick-review';
+
+type FreeSpacePaletteGroup = {
+  label: string;
+  items: Array<{
+    id: FreeSpacePaletteItemId;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+  }>;
+};
+
+function FreeSpaceToolPalette({
+  tokens,
+  onClose,
+  onPick,
+}: {
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
+  onClose: () => void;
+  onPick: (id: FreeSpacePaletteItemId) => void;
+}) {
+  const groups: FreeSpacePaletteGroup[] = [
+    {
+      label: 'Core',
+      items: [
+        { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
+        { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
+        { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
+        { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
+      ],
+    },
+    {
+      label: 'Study',
+      items: [
+        { id: 'mistake', title: 'Mistake', description: 'Track slips and corrections.', icon: <AlertTriangle className="w-4 h-4" /> },
+        { id: 'recall', title: 'Flashcard / Recall', description: 'Create a prompt to review later.', icon: <Brain className="w-4 h-4" /> },
+        { id: 'tutor', title: 'Tutor', description: 'Open a companion tutor panel.', icon: <MessageCircle className="w-4 h-4" /> },
+        { id: 'quick-review', title: 'Quick Review', description: 'Review mistakes and recall cards.', icon: <RotateCcw className="w-4 h-4" /> },
+      ],
+    },
+    {
+      label: 'Tools',
+      items: [
+        { id: 'calculator', title: 'Calculator', description: 'Use a math scratchpad.', icon: <Calculator className="w-4 h-4" /> },
+        { id: 'graph', title: 'Graph', description: 'Plot and inspect an equation.', icon: <LineChart className="w-4 h-4" /> },
+        { id: 'link', title: 'Link', description: 'Save a reference URL.', icon: <Link2 className="w-4 h-4" /> },
+        { id: 'image', title: 'Image', description: 'Place a visual reference.', icon: <Image className="w-4 h-4" /> },
+      ],
+    },
+  ];
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Add Free Space object"
+      style={{
+        position: 'fixed',
+        top: 88,
+        right: 20,
+        zIndex: 70,
+        width: 'min(760px, calc(100vw - 40px))',
+        maxHeight: 'calc(100dvh - 124px)',
+        overflowY: 'auto',
+        borderRadius: 24,
+        border: `1px solid ${tokens.cardBorderHover}`,
+        background: `linear-gradient(145deg, ${tokens.cardBg}fb, ${tokens.pageBg}f2)`,
+        backdropFilter: 'blur(28px) saturate(1.55)',
+        WebkitBackdropFilter: 'blur(28px) saturate(1.55)',
+        boxShadow: `0 34px 110px rgba(0,0,0,0.64), 0 0 0 1px ${tokens.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.08)`,
+        padding: 18,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
+        <div>
+          <p style={{ margin: '0 0 5px', color: tokens.accent, fontSize: 10, fontWeight: 850, letterSpacing: '0.16em', textTransform: 'uppercase' }}>
+            Add to Free Space
+          </p>
+          <h2 style={{ margin: 0, color: tokens.textPrimary, fontSize: 22, fontWeight: 850, letterSpacing: '-0.035em', lineHeight: 1.12 }}>
+            Choose a study object or tool.
+          </h2>
+          <p style={{ margin: '7px 0 0', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.48, maxWidth: 520 }}>
+            Sources, notes, review cards, and math tools all stay available on the same spatial canvas.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close add menu"
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            border: `1px solid ${tokens.cardBorder}`,
+            background: 'rgba(255,255,255,0.035)',
+            color: tokens.textSecondary,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        {groups.map(group => (
+          <section key={group.label}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px' }}>
+              <span style={{ color: tokens.textGhost, fontSize: 10, fontWeight: 850, letterSpacing: '0.16em', textTransform: 'uppercase' }}>
+                {group.label}
+              </span>
+              <span style={{ height: 1, flex: 1, background: tokens.cardBorder }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(156px, 1fr))', gap: 8 }}>
+              {group.items.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onPick(item.id)}
+                  style={{
+                    minHeight: 92,
+                    padding: 12,
+                    borderRadius: 16,
+                    border: `1px solid ${tokens.cardBorder}`,
+                    background: `linear-gradient(180deg, ${tokens.wellBg}f2, rgba(255,255,255,0.018))`,
+                    color: tokens.textPrimary,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    transition: 'transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.borderColor = `${tokens.accent}66`;
+                    e.currentTarget.style.boxShadow = `0 10px 34px ${tokens.accentGlow}`;
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'none';
+                    e.currentTarget.style.borderColor = tokens.cardBorder;
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <span style={{ width: 34, height: 34, borderRadius: 12, background: tokens.accentSubtle, color: tokens.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {item.icon}
+                  </span>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 800, letterSpacing: '-0.012em' }}>{item.title}</span>
+                  <span style={{ display: 'block', color: tokens.textMuted, fontSize: 11.5, lineHeight: 1.35 }}>{item.description}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <p style={{ margin: '14px 2px 0', color: tokens.textGhost, fontSize: 11, lineHeight: 1.4 }}>
+        Press <kbd style={{ border: `1px solid ${tokens.cardBorder}`, borderRadius: 6, padding: '1px 6px', color: tokens.textMuted, background: tokens.wellBg }}>A</kbd> to add tools.
+      </p>
+    </div>
+  );
+}
+
+function FreeSpaceEmptyGuidance({
+  tokens,
+  onAddPdf,
+  onAddNote,
+  onAskTutor,
+}: {
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
+  onAddPdf: () => void;
+  onAddNote: () => void;
+  onAskTutor: () => void;
+}) {
+  const actions = [
+    { label: 'Upload PDF', onClick: onAddPdf, icon: <FileUp className="w-3.5 h-3.5" /> },
+    { label: 'Create Note', onClick: onAddNote, icon: <FileText className="w-3.5 h-3.5" /> },
+    { label: 'Ask Tutor', onClick: onAskTutor, icon: <MessageCircle className="w-3.5 h-3.5" /> },
+  ];
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '50%',
+        top: 'calc(50% - 120px)',
+        transform: 'translate(-50%, -50%)',
+        zIndex: 34,
+        width: 'min(520px, calc(100vw - 48px))',
+        borderRadius: 24,
+        border: `1px solid ${tokens.cardBorder}`,
+        background: `linear-gradient(145deg, ${tokens.cardBg}e8, ${tokens.pageBg}d8)`,
+        backdropFilter: 'blur(22px) saturate(1.35)',
+        WebkitBackdropFilter: 'blur(22px) saturate(1.35)',
+        boxShadow: '0 24px 82px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.07)',
+        padding: 18,
+        pointerEvents: 'auto',
+        textAlign: 'center',
+      }}
+    >
+      <p style={{ margin: '0 0 5px', color: tokens.accent, fontSize: 10, fontWeight: 850, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+        Free Space
+      </p>
+      <h2 style={{ margin: 0, color: tokens.textPrimary, fontSize: 20, fontWeight: 850, letterSpacing: '-0.03em' }}>
+        Start by adding a source, note, or tutor.
+      </h2>
+      <p style={{ margin: '8px auto 15px', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.5, maxWidth: 380 }}>
+        Build a spatial study desk from the objects you actually need.
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+        {actions.map(action => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={action.onClick}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              minHeight: 40,
+              padding: '0 12px',
+              borderRadius: 12,
+              border: `1px solid ${tokens.cardBorder}`,
+              background: tokens.wellBg,
+              color: tokens.textPrimary,
+              fontSize: 12.5,
+              fontWeight: 760,
+              cursor: 'pointer',
+            }}
+          >
+            <span style={{ color: tokens.accent }}>{action.icon}</span>
+            {action.label}
+          </button>
+        ))}
+      </div>
+      <p style={{ margin: '13px 0 0', color: tokens.textGhost, fontSize: 11 }}>
+        Press <kbd style={{ border: `1px solid ${tokens.cardBorder}`, borderRadius: 6, padding: '1px 6px', color: tokens.textMuted, background: tokens.wellBg }}>A</kbd> to add tools.
+      </p>
     </div>
   );
 }
@@ -1173,6 +1430,14 @@ export function SectionPage() {
     setShowSpaceAdd(false);
   }, [addSpaceObject, initPos, viewportCenterWorld]);
 
+  const handleAddRecallToSpace = useCallback(() => {
+    const obj = addRecallItem('Recall prompt');
+    const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
+    initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
+    setSpaceSelectedId(obj.id);
+    setShowSpaceAdd(false);
+  }, [addRecallItem, initPos, viewportCenterWorld]);
+
   const requestCompanionComposer = useCallback(() => {
     setShowSpaceAdd(false);
     if (sectionViewMode === 'free-space') {
@@ -1467,6 +1732,15 @@ export function SectionPage() {
       if (connectSourceId) return;
       if (isQuickCaptureBlockedTarget(e.target)) return;
 
+      const letterA =
+        (e.key === 'a' || e.key === 'A') && !e.metaKey && !e.ctrlKey && !e.altKey;
+      if (letterA && sectionViewMode === 'free-space') {
+        if (e.repeat) return;
+        e.preventDefault();
+        setShowSpaceAdd(v => !v);
+        return;
+      }
+
       const altMistake =
         (e.key === 'c' || e.key === 'C') && e.altKey && !e.metaKey && !e.ctrlKey;
       if (altMistake) {
@@ -1497,6 +1771,7 @@ export function SectionPage() {
     paletteOpen,
     sessionModalOpen,
     connectSourceId,
+    sectionViewMode,
   ]);
 
   const cancelConnectMode = useCallback(() => {
@@ -2424,6 +2699,15 @@ export function SectionPage() {
             />
           </FreeSpaceCanvasErrorBoundary>
 
+          {freeSpaceSurfaceVisible && sectionObjects.objects.length === 0 && !resumeVisible && !showWorkspaceStarter && !showStarterDock && !spaceEditingId && (
+            <FreeSpaceEmptyGuidance
+              tokens={freeSpaceTokens}
+              onAddPdf={() => handleAddToSpace('pdf')}
+              onAddNote={() => handleAddToSpace('note')}
+              onAskTutor={requestCompanionComposer}
+            />
+          )}
+
           {showStarterDock && (
             <WorkspaceStarterDock
               tokens={tokens}
@@ -2446,59 +2730,31 @@ export function SectionPage() {
           )}
 
           {showSpaceAdd && (
-            <div
-              style={{
-                position: 'fixed',
-                top: '92px',
-                right: '20px',
-                zIndex: 60,
-                width: '220px',
-                backgroundColor: `${tokens.cardBg}fa`,
-                border: `1px solid ${tokens.cardBorder}`,
-                borderRadius: '12px',
-                padding: '8px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
+            <FreeSpaceToolPalette
+              tokens={freeSpaceTokens}
+              onClose={() => setShowSpaceAdd(false)}
+              onPick={itemId => {
+                if (itemId === 'tutor') {
+                  requestCompanionComposer();
+                  return;
+                }
+                if (itemId === 'recall') {
+                  handleAddRecallToSpace();
+                  return;
+                }
+                if (itemId === 'quick-review') {
+                  const hasReviewCards = sectionObjects.objects.some(o => o.type === 'mistake');
+                  if (!hasReviewCards) {
+                    toast('Add a Mistake or Recall card first.');
+                    return;
+                  }
+                  setShowSpaceAdd(false);
+                  openMistakeReview('all');
+                  return;
+                }
+                handleAddToSpace(itemId);
               }}
-            >
-              {([
-                { type: 'companion', label: 'Companion', hint: 'Pinned external tool or source' },
-                { type: 'notebook', label: 'Notebook', hint: 'Large writing surface' },
-                { type: 'note', label: 'Note', hint: 'Quick capture' },
-                { type: 'mistake', label: 'Mistake', hint: 'Learn from slips' },
-                { type: 'link', label: 'Link', hint: 'Reference URL' },
-                { type: 'checklist', label: 'Checklist', hint: 'Action list' },
-                { type: 'image', label: 'Image', hint: 'Visual reference' },
-                { type: 'calculator', label: 'Calculator', hint: 'Safe math scratchpad' },
-                { type: 'graph', label: 'Graph', hint: 'Plot y = f(x)' },
-                { type: 'pdf', label: 'PDF', hint: 'Local file window' },
-              ] as const).map(item => (
-                <button
-                  key={item.type}
-                  onClick={() => {
-                    if (item.type === 'companion') {
-                      requestCompanionComposer();
-                      return;
-                    }
-                    handleAddToSpace(item.type);
-                  }}
-                  style={{
-                    textAlign: 'left',
-                    border: 'none',
-                    background: 'transparent',
-                    borderRadius: '8px',
-                    padding: '7px 8px',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = tokens.wellBg)}
-                  onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent')}
-                >
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: tokens.textPrimary }}>{item.label}</div>
-                  <div style={{ fontSize: '10px', color: tokens.textGhost }}>{item.hint}</div>
-                </button>
-              ))}
-            </div>
+            />
           )}
         </div>
       </div>
