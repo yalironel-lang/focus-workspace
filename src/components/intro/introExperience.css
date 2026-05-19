@@ -1,0 +1,78 @@
+/* Cinematic intro — GPU-friendly, minimal paint */
+
+.fw-intro-root {
+  --fw-intro-bg: #04060e;
+  --fw-intro-indigo: #6366f1;
+  --fw-intro-violet: #8b5cf6;
+  --fw-intro-cyan: #38bdf8;
+  background: var(--fw-intro-bg);
+  contain: strict;
+}
+
+.fw-intro-noise {
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+.fw-intro-grid {
+  background-image:
+    linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 48%, black 0%, transparent 72%);
+}
+
+@keyframes fwIntroDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(12px, -8px, 0) scale(1.04);
+  }
+}
+
+@keyframes fwIntroRingPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes fwIntroParticle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    opacity: 0.45;
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+.fw-intro-glow-drift {
+  animation: fwIntroDrift 14s ease-in-out infinite;
+}
+
+.fw-intro-ring-pulse {
+  animation: fwIntroRingPulse 5s ease-in-out infinite;
+}
+
+.fw-intro-particle {
+  animation: fwIntroParticle 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fw-intro-glow-drift,
+  .fw-intro-ring-pulse,
+  .fw-intro-particle {
+    animation: none;
+  }
+}

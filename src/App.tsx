@@ -4,6 +4,7 @@ import { GlobalCommandPalette } from './command/GlobalCommandPalette';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { Auth } from './components/Auth';
 import { ArrivalExperienceGate } from './components/arrival/ArrivalExperienceGate';
+import { IntroExperienceGate } from './components/intro/IntroExperienceGate';
 import { Dashboard } from './pages/Dashboard';
 import { DeskPage } from './pages/DeskPage';
 import { SectionPage } from './pages/SectionPage';
@@ -44,7 +45,9 @@ function AppRoutes() {
         path="/dashboard"
         element={
           <PrivateRoute>
-            <Dashboard />
+            <IntroExperienceGate>
+              <Dashboard />
+            </IntroExperienceGate>
           </PrivateRoute>
         }
       />
