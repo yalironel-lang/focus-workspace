@@ -17,6 +17,12 @@ import {
 } from '../lib/firstSessionPrefs';
 import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
 import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
+import { WorkspaceStudyLoopBar } from '../components/workspace-guidance/WorkspaceStudyLoopBar';
+import {
+  buildStudyLoopActions,
+  pickStudyLinkTargets,
+  type StudyLoopAction,
+} from '../lib/studyConnections';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
 import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
@@ -1238,6 +1244,7 @@ export function SectionPage() {
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
   const [resumeVisible, setResumeVisible] = useState(false);
+  const [studyLoopDismissed, setStudyLoopDismissed] = useState(false);
   const resumeSeedKeyRef = useRef('');
   const cameraRestoreRafRef = useRef(0);
   const pendingResumeSuggestionRef = useRef<WorkspaceContinuitySuggestion | null>(null);
@@ -1364,6 +1371,7 @@ export function SectionPage() {
     setMistakeReviewIndex(0);
     setAiAssistResult(null);
     setResumeVisible(false);
+    setStudyLoopDismissed(false);
     setDesignMode(false);
     setDragId(null);
     setDragOverId(null);
@@ -1527,6 +1535,26 @@ export function SectionPage() {
           removeObject: removeSpaceObject } = sectionObjects;
   const { initPos, positions: spacePositions, removePos } = sectionPositions;
 
+  const applyStudyLinksForObject = useCallback(
+    (newObjectId: string, type: ProjectObjectType) => {
+      const anchorId = spaceSelectedIdRef.current;
+      const { connectTo, sourceObjectId } = pickStudyLinkTargets(anchorId, sectionObjects.objects);
+      for (const tid of connectTo) {
+        if (tid !== newObjectId) addSpaceConnection(newObjectId, tid);
+      }
+      if (type === 'mistake' && sourceObjectId) {
+        const o = getSpaceObject(newObjectId);
+        if (o?.type === 'mistake') {
+          const c = ensureProjectObjectContent('mistake', o.content);
+          if (c.type === 'mistake') {
+            updateSpaceObjectContent(newObjectId, { ...c, sourceObjectId });
+          }
+        }
+      }
+    },
+    [sectionObjects.objects, addSpaceConnection, getSpaceObject, updateSpaceObjectContent],
+  );
+
   const handleAddToSpace = useCallback((type: ProjectObjectType) => {
     const obj = addSpaceObject(type);
     const base = viewportCenterWorld((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 60);
@@ -1547,9 +1575,10 @@ export function SectionPage() {
                   ? { w: 520, h: 460 }
                   : { w: 360, h: 280 };
     initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
+    applyStudyLinksForObject(obj.id, type);
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
-  }, [addSpaceObject, initPos, viewportCenterWorld]);
+  }, [addSpaceObject, initPos, viewportCenterWorld, applyStudyLinksForObject]);
 
   const handleAddRecallToSpace = useCallback(() => {
     const obj = addRecallItem('Recall prompt');
@@ -1635,6 +1664,18 @@ export function SectionPage() {
 
   const applyWorkspaceResumeSuggestion = useCallback(
     (suggestion: WorkspaceContinuitySuggestion) => {
+      if (suggestion.id === 'resume-mistake-loop') {
+        setResumeVisible(false);
+        if (sectionViewMode !== 'free-space') {
+          setSectionViewMode('free-space');
+        }
+        const q = buildMistakeReviewQueueFiltered(sectionObjects.objects, 'neglected');
+        setMistakeReviewQueue(q);
+        setMistakeReviewIndex(0);
+        setMistakeReviewOpen(q.length > 0);
+        return;
+      }
+
       const targetId = suggestion.objectId ?? workspaceContinuity.restoreSelectionId;
       if (suggestion.focusMode !== undefined) setFocusMode(suggestion.focusMode ?? null);
 
@@ -1671,6 +1712,7 @@ export function SectionPage() {
       setFocusMode,
       workspaceContinuity.restoreSelectionId,
       workspaceContinuity.restoreViewport,
+      sectionObjects.objects,
     ],
   );
 
@@ -1719,13 +1761,14 @@ export function SectionPage() {
             zoom: 1,
           },
         });
+        applyStudyLinksForObject(obj.id, 'pdf');
       } catch {
         toast.error('Could not store this PDF on this device.');
         removeSpaceObject(obj.id);
         removePos(obj.id);
       }
     },
-    [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos],
+    [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
   );
 
   const createQuickCaptureNote = useCallback(
@@ -1741,9 +1784,10 @@ export function SectionPage() {
         staggerY + (Math.random() - 0.5) * 16,
       );
       initPos(obj.id, { x: base.x, y: base.y, w: 360, h: 280 });
+      applyStudyLinksForObject(obj.id, 'note');
       setSpaceSelectedId(obj.id);
     },
-    [addQuickCaptureNote, initPos, viewportCenterWorld],
+    [addQuickCaptureNote, initPos, viewportCenterWorld, applyStudyLinksForObject],
   );
 
   const createQuickCaptureMistake = useCallback(
@@ -1759,9 +1803,10 @@ export function SectionPage() {
         staggerY + (Math.random() - 0.5) * 16,
       );
       initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
+      applyStudyLinksForObject(obj.id, 'mistake');
       setSpaceSelectedId(obj.id);
     },
-    [addQuickCaptureMistake, initPos, viewportCenterWorld],
+    [addQuickCaptureMistake, initPos, viewportCenterWorld, applyStudyLinksForObject],
   );
 
   const handleQuickCaptureCommit = useCallback(
@@ -2007,8 +2052,9 @@ export function SectionPage() {
       return;
     }
     convertNoteToMistake(spaceSelectedId);
+    applyStudyLinksForObject(spaceSelectedId, 'mistake');
     toast.success('Captured as mistake');
-  }, [sectionViewMode, spaceSelectedId, getSpaceObject, convertNoteToMistake]);
+  }, [sectionViewMode, spaceSelectedId, getSpaceObject, convertNoteToMistake, applyStudyLinksForObject]);
 
   const runAiAsync = useCallback(async (resultTitle: string, messages: ChatMessage[]) => {
     aiRunRef.current?.abort();
@@ -2035,10 +2081,17 @@ export function SectionPage() {
       if (!o || o.type !== 'mistake') return;
       const c = ensureProjectObjectContent('mistake', o.content);
       if (c.type !== 'mistake') return;
+      const nextConfidence =
+        c.confidence === 'low'
+          ? 'medium'
+          : c.confidence === 'medium'
+            ? 'high'
+            : c.confidence;
       updateSpaceObjectContent(mistakeId, {
         ...c,
         timesReviewed: c.timesReviewed + 1,
         lastReviewedAt: Date.now(),
+        confidence: c.confidence === 'mastered' ? 'mastered' : nextConfidence,
       });
     },
     [getSpaceObject, updateSpaceObjectContent],
@@ -2101,6 +2154,33 @@ export function SectionPage() {
   const mistakeInsights = useMemo(
     () => computeMistakeInsights(sectionObjects.objects),
     [sectionObjects.objects],
+  );
+
+  const studyLoopActions = useMemo(
+    () => buildStudyLoopActions(sectionObjects.objects, workspaceContinuity.continuity),
+    [
+      sectionObjects.objects,
+      workspaceContinuity.continuity?.savedAt,
+      workspaceContinuity.continuity?.lastSelectedObjectId,
+      workspaceContinuity.continuity?.recentNotebookId,
+      workspaceContinuity.continuity?.activeClusterObjectIds,
+    ],
+  );
+
+  const handleStudyLoopAction = useCallback(
+    (action: StudyLoopAction) => {
+      setStudyLoopDismissed(true);
+      if (action.kind === 'review-mistakes') {
+        openMistakeReview(action.reviewMode ?? 'all');
+        return;
+      }
+      if (action.objectId) {
+        setSectionViewMode('free-space');
+        setSpaceSelectedId(action.objectId);
+        if (action.kind === 'resume-source') setFocusMode('reading');
+      }
+    },
+    [openMistakeReview, setSectionViewMode, setFocusMode],
   );
 
   useEffect(() => {
@@ -2747,6 +2827,19 @@ export function SectionPage() {
               onSuggestionClick={applyWorkspaceResumeSuggestion}
             />
           )}
+          {!showWorkspaceStarter &&
+            !showStarterDock &&
+            !resumeVisible &&
+            !studyLoopDismissed &&
+            studyLoopActions.length > 0 && (
+              <WorkspaceStudyLoopBar
+                tokens={tokens}
+                inShell
+                actions={studyLoopActions}
+                onAction={handleStudyLoopAction}
+                onDismiss={() => setStudyLoopDismissed(true)}
+              />
+            )}
           {!showWorkspaceStarter && !showStarterDock && !resumeVisible && (
             <WorkspaceGuidanceBar
               sectionId={sectionId}

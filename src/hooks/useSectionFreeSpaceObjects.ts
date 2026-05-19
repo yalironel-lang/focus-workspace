@@ -39,6 +39,8 @@ export type ProjectObjectContent =
       confidence: MistakeConfidence;
       timesReviewed: number;
       lastReviewedAt: number | null;
+      /** Optional lineage — primary PDF/source this mistake came from. */
+      sourceObjectId?: string | null;
     }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
@@ -114,6 +116,7 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
           confidence: 'low',
           timesReviewed: 0,
           lastReviewedAt: null,
+          sourceObjectId: null,
         },
       };
     case 'link': return { title: 'Reference Link', content: { type: 'link', title: 'Untitled link', url: '' } };
@@ -216,6 +219,9 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const last = r.lastReviewedAt;
       const lastReviewedAt =
         typeof last === 'number' && Number.isFinite(last) ? last : null;
+      const sourceRaw = r.sourceObjectId;
+      const sourceObjectId =
+        typeof sourceRaw === 'string' && sourceRaw.trim() ? sourceRaw.trim() : null;
       return {
         type: 'mistake',
         variant,
@@ -226,6 +232,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         confidence,
         timesReviewed: Math.max(0, Math.floor(numOr(r.timesReviewed, 0))),
         lastReviewedAt,
+        sourceObjectId,
       };
     }
     case 'link': {

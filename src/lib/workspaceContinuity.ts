@@ -6,6 +6,8 @@ import {
 } from '../hooks/useSectionFreeSpaceObjects';
 import type { FocusMode } from '../focusMode/focusModeTypes';
 import { getCompanionKind } from './companionPanels';
+import { countNeedsReviewMistakes } from './mistakeIntelligence';
+import { findLinkedNotebook, findLinkedSource } from './studyConnections';
 
 export type WorkspaceContinuityIntent =
   | 'reading'
@@ -401,10 +403,26 @@ export function buildWorkspaceResumeCopy(
   if (companions.length > 0) {
     details.push(`${companions.length} companion${companions.length === 1 ? '' : 's'} were active.`);
   }
+  const needsReview = countNeedsReviewMistakes(objects);
+  if (needsReview > 0) {
+    details.push(
+      needsReview === 1
+        ? 'One mistake is ready to revisit.'
+        : `${needsReview} mistakes are ready to revisit.`,
+    );
+  }
+  const source = anchor ? findLinkedSource(anchor, objects) : null;
+  const notebook = anchor ? findLinkedNotebook(anchor, objects) : null;
+  if (source && anchor?.type !== 'pdf') {
+    details.push(`Linked source: ${titleForResume(source)}.`);
+  }
+  if (notebook && anchor && notebook.id !== anchor.id) {
+    details.push(`Notebook: ${titleForResume(notebook)}.`);
+  }
   return {
     headline: `Last active ${formatTimeAgo(memory.savedAt)}`,
     subtitle: subtitleForResume(memory.intent, anchor),
-    details: details.slice(0, 3),
+    details: details.slice(0, 4),
   };
 }
 
@@ -475,6 +493,16 @@ export function buildWorkspaceContinuitySuggestions(
       label: 'Continue reviewing mistakes',
       subtitle: 'Return to the mistake cluster you were using.',
       objectId: reviewTarget.id,
+      focusMode: 'review',
+    });
+  }
+
+  const dueCount = countNeedsReviewMistakes(objects);
+  if (dueCount > 0) {
+    push({
+      id: 'resume-mistake-loop',
+      label: dueCount === 1 ? 'Revisit 1 mistake' : `Revisit ${dueCount} mistakes`,
+      subtitle: 'Pick up slips that still need attention.',
       focusMode: 'review',
     });
   }

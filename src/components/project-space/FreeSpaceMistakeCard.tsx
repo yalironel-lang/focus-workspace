@@ -8,6 +8,10 @@ interface Props {
   title: string;
   content: MistakeBody;
   tokens: AtmosphereTokens;
+  linkedSourceTitle?: string | null;
+  linkedNotebookTitle?: string | null;
+  needsReview?: boolean;
+  reviewLabel?: string;
   onChange: (c: MistakeBody) => void;
   onTitleChange?: (title: string) => void;
 }
@@ -27,7 +31,17 @@ function formatAgo(ts: number | null): string {
   return `${d} days ago`;
 }
 
-export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitleChange }: Props) {
+export function FreeSpaceMistakeCard({
+  title,
+  content,
+  tokens,
+  linkedSourceTitle,
+  linkedNotebookTitle,
+  needsReview = false,
+  reviewLabel,
+  onChange,
+  onTitleChange,
+}: Props) {
   const [open, setOpen] = useState(false);
   const variant = content.variant === 'recall' ? 'recall' : 'mistake';
   const isRecall = variant === 'recall';
@@ -87,18 +101,51 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
           : `1px solid rgba(248,113,113,0.12)`,
       }}
     >
-      <div
-        style={{
-          fontSize: '9px',
-          fontWeight: 700,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: isRecall ? `${tokens.accent}b5` : `${tokens.accent}99`,
-          marginBottom: 6,
-        }}
-      >
-        {isRecall ? 'Recall item' : 'Mistake'}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+        <div
+          style={{
+            fontSize: '9px',
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: isRecall ? `${tokens.accent}b5` : `${tokens.accent}99`,
+          }}
+        >
+          {isRecall ? 'Recall item' : 'Mistake'}
+        </div>
+        {needsReview ? (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 750,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: tokens.accent,
+              padding: '2px 7px',
+              borderRadius: 6,
+              border: `1px solid ${tokens.accent}44`,
+              background: `${tokens.accent}14`,
+            }}
+          >
+            Needs review
+          </span>
+        ) : null}
       </div>
+      {(linkedSourceTitle || linkedNotebookTitle) && (
+        <p style={{ margin: '0 0 8px', fontSize: 10.5, color: tokens.textMuted, lineHeight: 1.4 }}>
+          {linkedSourceTitle ? (
+            <span>
+              Linked source · <span style={{ color: tokens.textSecondary }}>{linkedSourceTitle}</span>
+            </span>
+          ) : null}
+          {linkedSourceTitle && linkedNotebookTitle ? ' · ' : null}
+          {linkedNotebookTitle ? (
+            <span>
+              From notebook · <span style={{ color: tokens.textSecondary }}>{linkedNotebookTitle}</span>
+            </span>
+          ) : null}
+        </p>
+      )}
       <input
         value={title}
         onChange={e => onTitleChange?.(e.target.value)}
@@ -223,7 +270,7 @@ export function FreeSpaceMistakeCard({ title, content, tokens, onChange, onTitle
         style={{ borderTop: `1px solid ${tokens.divider}` }}
       >
         <div style={{ fontSize: '10px', color: tokens.textMuted }}>
-          {isRecall ? 'Revisited' : 'Seen'} {content.timesReviewed}× · last {formatAgo(content.lastReviewedAt)}
+          {reviewLabel ?? `${isRecall ? 'Revisited' : 'Seen'} ${content.timesReviewed}× · last ${formatAgo(content.lastReviewedAt)}`}
         </div>
         <button
           type="button"

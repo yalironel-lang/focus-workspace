@@ -15,6 +15,12 @@ import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
 
 import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
+import {
+  deriveStudyLineage,
+  findLinkedNotebook,
+  findLinkedSource,
+} from '../../lib/studyConnections';
+import { mistakeContent, mistakeNeedsReview, mistakeReviewLabel } from '../../lib/mistakeIntelligence';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
@@ -121,18 +127,30 @@ function ProjectSpaceObjectRendererInner({
           />
         </WorkspaceSurfaceErrorBoundary>
       );
-    case 'mistake':
+    case 'mistake': {
+      const objects = allObjects ?? [object];
+      const lineage = deriveStudyLineage(object.id, objects);
+      const mc = mistakeContent(object);
+      const needsReview = mc ? mistakeNeedsReview(mc) : false;
+      const reviewLabel = mc ? mistakeReviewLabel(mc) : undefined;
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Mistake card">
           <FreeSpaceMistakeCard
             title={object.title}
             content={content}
             tokens={tokens}
+            linkedSourceTitle={lineage.sourceTitle}
+            linkedNotebookTitle={
+              lineage.notebookId && lineage.notebookId !== object.id ? lineage.notebookTitle : null
+            }
+            needsReview={needsReview}
+            reviewLabel={reviewLabel}
             onChange={c => onChange(c)}
             onTitleChange={onTitleChange}
           />
         </WorkspaceSurfaceErrorBoundary>
       );
+    }
     case 'link':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Link">
@@ -193,7 +211,14 @@ function ProjectSpaceObjectRendererInner({
           />
         </WorkspaceSurfaceErrorBoundary>
       );
-    case 'pdf':
+    case 'pdf': {
+      const objects = allObjects ?? [object];
+      const notebook = findLinkedNotebook(object, objects);
+      const mistakeCount = objects.filter(o => {
+        if (o.type !== 'mistake') return false;
+        const src = findLinkedSource(o, objects);
+        return src?.id === object.id;
+      }).length;
       if (!freeSpaceSectionId) {
         return (
           <div className="p-4 text-xs" style={{ color: tokens.textMuted }}>
@@ -211,9 +236,12 @@ function ProjectSpaceObjectRendererInner({
             onChange={c => onChange(c)}
             onTitleChange={onTitleChange}
             suspendViewer={renderPolicy.suspendHeavyContent}
+            linkedNotebookTitle={notebook?.title ?? null}
+            relatedMistakeCount={mistakeCount}
           />
         </WorkspaceSurfaceErrorBoundary>
       );
+    }
     case 'companion':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Companion">

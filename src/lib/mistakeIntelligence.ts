@@ -19,11 +19,12 @@ function isMistake(o: ProjectSpaceObject): boolean {
   return o.type === 'mistake';
 }
 
-function mistakeContent(o: ProjectSpaceObject): {
+export function mistakeContent(o: ProjectSpaceObject): {
   tags: string[];
   confidence: string;
   timesReviewed: number;
   lastReviewedAt: number | null;
+  sourceObjectId: string | null;
 } | null {
   if (o.type !== 'mistake' || !o.content || typeof o.content !== 'object') return null;
   const c = o.content as Record<string, unknown>;
@@ -31,16 +32,62 @@ function mistakeContent(o: ProjectSpaceObject): {
   const tags = Array.isArray(c.tags)
     ? (c.tags as unknown[]).map(t => (typeof t === 'string' ? t.trim().toLowerCase() : '')).filter(Boolean)
     : [];
+  const sourceRaw = c.sourceObjectId;
+  const sourceObjectId =
+    typeof sourceRaw === 'string' && sourceRaw.trim() ? sourceRaw.trim() : null;
   return {
     tags,
     confidence: typeof c.confidence === 'string' ? c.confidence : 'low',
     timesReviewed: typeof c.timesReviewed === 'number' && Number.isFinite(c.timesReviewed) ? c.timesReviewed : 0,
     lastReviewedAt:
       typeof c.lastReviewedAt === 'number' && Number.isFinite(c.lastReviewedAt) ? c.lastReviewedAt : null,
+    sourceObjectId,
   };
 }
 
 const MS_DAY = 86_400_000;
+
+/** Lightweight “due for revisit” — not spaced repetition. */
+export function mistakeNeedsReview(
+  m: {
+    confidence: string;
+    timesReviewed: number;
+    lastReviewedAt: number | null;
+  },
+  now = Date.now(),
+): boolean {
+  if (m.confidence === 'mastered') return false;
+  const daysSince =
+    m.lastReviewedAt != null ? (now - m.lastReviewedAt) / MS_DAY : 999;
+  if (m.confidence === 'low') return daysSince >= 2 || m.timesReviewed === 0;
+  if (m.confidence === 'medium') return daysSince >= 6;
+  if (m.confidence === 'high') return daysSince >= 14;
+  return daysSince >= 3;
+}
+
+export function mistakeReviewLabel(
+  m: {
+    confidence: string;
+    timesReviewed: number;
+    lastReviewedAt: number | null;
+  },
+  now = Date.now(),
+): string {
+  if (m.confidence === 'mastered') return 'Quiet for now';
+  if (!mistakeNeedsReview(m, now)) {
+    if (m.lastReviewedAt == null) return 'Not reviewed yet';
+    const d = Math.floor((now - m.lastReviewedAt) / MS_DAY);
+    if (d <= 0) return 'Reviewed today';
+    if (d === 1) return 'Reviewed yesterday';
+    return `Settling · ${d}d since review`;
+  }
+  const daysSince =
+    m.lastReviewedAt != null ? Math.floor((now - m.lastReviewedAt) / MS_DAY) : null;
+  if (daysSince == null || m.timesReviewed === 0) return 'Needs first review';
+  if (daysSince >= 14) return 'Long quiet — worth revisiting';
+  if (daysSince >= 7) return 'Due for revisit';
+  return 'Needs review';
+}
 
 /** Priority score: higher = review sooner. Heuristic, not SM-2. */
 export function mistakeReviewScore(o: ProjectSpaceObject, now: number): number {
@@ -53,6 +100,14 @@ export function mistakeReviewScore(o: ProjectSpaceObject, now: number): number {
   const neglect = Math.min(120, daysSince) * 2.2;
   const lowReviewBoost = Math.max(0, 6 - Math.min(m.timesReviewed, 6)) * 3;
   return confW * 38 + neglect + lowReviewBoost;
+}
+
+export function countNeedsReviewMistakes(objects: ProjectSpaceObject[], now = Date.now()): number {
+  return objects.filter(o => {
+    if (o.type !== 'mistake') return false;
+    const m = mistakeContent(o);
+    return m != null && mistakeNeedsReview(m, now);
+  }).length;
 }
 
 export function buildMistakeReviewQueue(objects: ProjectSpaceObject[], now = Date.now()): string[] {

@@ -16,6 +16,8 @@ interface FreeSpacePdfCardProps {
   onTitleChange?: (title: string) => void;
   /** LOD: keep chrome, suspend iframe until object is active/near. */
   suspendViewer?: boolean;
+  linkedNotebookTitle?: string | null;
+  relatedMistakeCount?: number;
 }
 
 export function FreeSpacePdfCard({
@@ -26,6 +28,8 @@ export function FreeSpacePdfCard({
   onChange,
   onTitleChange,
   suspendViewer = false,
+  linkedNotebookTitle,
+  relatedMistakeCount = 0,
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
@@ -153,6 +157,8 @@ export function FreeSpacePdfCard({
   const border = tokens.cardBorder;
   const well = tokens.wellBg;
 
+  const hasStudyLinks = !!(linkedNotebookTitle || relatedMistakeCount > 0);
+
   return (
     <div
       className="flex flex-col h-full min-h-[200px] rounded-xl overflow-hidden"
@@ -219,6 +225,27 @@ export function FreeSpacePdfCard({
           </a>
         )}
       </div>
+
+      {hasStudyLinks ? (
+        <div
+          className="px-3 py-1.5 shrink-0"
+          style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.accent}0c` }}
+        >
+          <p style={{ margin: 0, fontSize: 10.5, color: tokens.textMuted, lineHeight: 1.4 }}>
+            {linkedNotebookTitle ? (
+              <span>
+                Referenced in <span style={{ color: tokens.textSecondary }}>{linkedNotebookTitle}</span>
+              </span>
+            ) : null}
+            {linkedNotebookTitle && relatedMistakeCount > 0 ? ' · ' : null}
+            {relatedMistakeCount > 0 ? (
+              <span>
+                {relatedMistakeCount} related mistake{relatedMistakeCount === 1 ? '' : 's'}
+              </span>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
 
       <div
         className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"

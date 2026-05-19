@@ -403,7 +403,7 @@ export function NotebookContextSidebar({
 
       <Section tokens={tokens} label="Linked notes" items={data.linkedNotes} onSelectObject={onSelectObject} />
       <Section tokens={tokens} label="Connected mistakes" items={data.connectedMistakes} onSelectObject={onSelectObject} />
-      <Section tokens={tokens} label="References" items={data.references} onSelectObject={onSelectObject} />
+      <Section tokens={tokens} label="Linked source" items={data.references} onSelectObject={onSelectObject} />
       <Section tokens={tokens} label="Tools" items={data.tools} onSelectObject={onSelectObject} />
       <Section tokens={tokens} label="Mentioned in" items={data.mentionedIn} onSelectObject={onSelectObject} />
     </aside>
