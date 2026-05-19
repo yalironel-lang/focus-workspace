@@ -18,7 +18,7 @@
  * Normal (view) mode hides controls and allows content interaction.
  */
 
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useState, useMemo } from 'react';
 import { ZoomIn, ZoomOut, Maximize2, Grid3x3, Wand2 } from 'lucide-react';
 const ACTIVITY_KEY  = 'fw_obj_activity_v2';
 const WARMTH_KEY    = 'fw_region_warmth_v1';
@@ -96,6 +96,11 @@ import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/fr
 import { resolveFreeSpaceMaterialTier } from '../../lib/freeSpaceMaterials';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 import { flickerDebugCount } from '../../lib/flickerDebug';
+import {
+  computeFollowPanVelocity,
+  type FollowPanZone,
+} from '../../lib/followPanSteering';
+import { createFollowPanCursorController } from './FreeSpaceFollowPanCursor';
 import { setPerformancePressure } from '../../lib/performanceSafeMode';
 import {
   buildBlockRenderPolicies,
@@ -553,10 +558,192 @@ export function FreeformCanvas({
   const usedViewportFallback =
     !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(panX) || !Number.isFinite(panY);
 
-  // Live viewport — updated each render so RAF loops can read current values
-  // without stale closures. Tracks zoom too for the zoom lerp loop.
+  const followPanActiveRef = useRef(false);
+  // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
-  liveViewRef.current = { panX, panY, zoom };
+  if (!followPanActiveRef.current) {
+    liveViewRef.current = { panX, panY, zoom };
+  } else {
+    liveViewRef.current.zoom = safeZoom;
+  }
+  const followPanRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    pendingDx: 0,
+    pendingDy: 0,
+    arrowAngle: 0,
+    zone: null as FollowPanZone | null,
+    rafId: 0,
+    cursor: null as ReturnType<typeof createFollowPanCursorController> | null,
+  });
+  const gridSizeRef = useRef(safeGridSize);
+  gridSizeRef.current = safeGridSize;
+  const [followPanActive, setFollowPanActive] = useState(false);
+
+  const applyWorldTransform = useCallback((px: number, py: number, z: number) => {
+    const world = worldRef.current;
+    if (!world) return;
+    world.style.transform = `translate(${px}px, ${py}px) scale(${z})`;
+  }, []);
+
+  const syncDotGridVars = useCallback((px: number, py: number, z: number) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const spacing = Math.max(4, gridSizeRef.current * z);
+    const offX = ((px % spacing) + spacing) % spacing;
+    const offY = ((py % spacing) + spacing) % spacing;
+    vp.style.setProperty('--fw-dot-x', `${offX}px`);
+    vp.style.setProperty('--fw-dot-y', `${offY}px`);
+  }, []);
+
+  const commitLiveViewport = useCallback(() => {
+    const { panX: px, panY: py, zoom: z } = liveViewRef.current;
+    setPan(px, py);
+    targetViewRef.current = { zoom: z, panX: px, panY: py };
+    applyWorldTransform(px, py, z);
+    syncDotGridVars(px, py, z);
+  }, [setPan, applyWorldTransform, syncDotGridVars]);
+
+  const stopFollowPan = useCallback(() => {
+    if (!followPanActiveRef.current) return;
+    followPanActiveRef.current = false;
+    setFollowPanActive(false);
+    followPanRef.current.cursor?.hide();
+    document.body.style.cursor = '';
+    document.body.removeAttribute('data-fw-follow-pan');
+    commitLiveViewport();
+  }, [commitLiveViewport]);
+
+  const toggleFollowPan = useCallback((anchorX?: number, anchorY?: number) => {
+    if (followPanActiveRef.current) {
+      stopFollowPan();
+      return;
+    }
+    cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(zoomRafRef.current);
+    zoomRafRef.current = 0;
+    velRef.current = { vx: 0, vy: 0 };
+
+    liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
+    targetViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
+
+    const el = viewportRef.current;
+    const rect = el?.getBoundingClientRect();
+    const mx = anchorX ?? (rect ? rect.left + rect.width * 0.5 : window.innerWidth * 0.5);
+    const my = anchorY ?? (rect ? rect.top + rect.height * 0.5 : window.innerHeight * 0.5);
+    followPanRef.current.mouseX = mx;
+    followPanRef.current.mouseY = my;
+    followPanRef.current.pendingDx = 0;
+    followPanRef.current.pendingDy = 0;
+    if (!followPanRef.current.cursor) {
+      followPanRef.current.cursor = createFollowPanCursorController(tokens.accent);
+    }
+
+    followPanActiveRef.current = true;
+    setFollowPanActive(true);
+    document.body.setAttribute('data-fw-follow-pan', 'true');
+    document.body.style.cursor = 'none';
+  }, [stopFollowPan, safePanX, safePanY, safeZoom, tokens.accent]);
+
+  // Persistent follow-pan loop (always mounted) — avoids start/stop RAF churn.
+  const handleMinimapZoneChange = useCallback((zone: FollowPanZone | null) => {
+    followPanRef.current.zone = zone;
+  }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      followPanRef.current.rafId = requestAnimationFrame(tick);
+      if (!followPanActiveRef.current) return;
+
+      const mx = followPanRef.current.mouseX;
+      const my = followPanRef.current.mouseY;
+      const deltaX = followPanRef.current.pendingDx;
+      const deltaY = followPanRef.current.pendingDy;
+      followPanRef.current.pendingDx = 0;
+      followPanRef.current.pendingDy = 0;
+
+      const pan = computeFollowPanVelocity({
+        deltaX,
+        deltaY,
+        cursorX: mx,
+        cursorY: my,
+        zone: followPanRef.current.zone,
+        zoom: liveViewRef.current.zoom,
+      });
+
+      if (pan.moveAngle != null) {
+        const smooth = 0.38;
+        followPanRef.current.arrowAngle +=
+          (pan.moveAngle - followPanRef.current.arrowAngle) * smooth;
+        followPanRef.current.cursor?.show(mx, my, followPanRef.current.arrowAngle);
+      }
+
+      const z = liveViewRef.current.zoom;
+      let px = liveViewRef.current.panX + pan.dPanX;
+      let py = liveViewRef.current.panY + pan.dPanY;
+
+      px = Math.min(10_000_000, Math.max(-10_000_000, px));
+      py = Math.min(10_000_000, Math.max(-10_000_000, py));
+
+      liveViewRef.current.panX = px;
+      liveViewRef.current.panY = py;
+      targetViewRef.current.panX = px;
+      targetViewRef.current.panY = py;
+
+      applyWorldTransform(px, py, z);
+      syncDotGridVars(px, py, z);
+    };
+
+    followPanRef.current.rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(followPanRef.current.rafId);
+      followPanRef.current.rafId = 0;
+    };
+  }, [applyWorldTransform, syncDotGridVars]);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!followPanActiveRef.current) return;
+      followPanRef.current.mouseX = e.clientX;
+      followPanRef.current.mouseY = e.clientY;
+      if (Number.isFinite(e.movementX) && Number.isFinite(e.movementY)) {
+        followPanRef.current.pendingDx += e.movementX;
+        followPanRef.current.pendingDy += e.movementY;
+      }
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => window.removeEventListener('pointermove', onMove);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!followPanActiveRef.current || e.key !== 'Escape') return;
+      e.preventDefault();
+      stopFollowPan();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stopFollowPan]);
+
+  useEffect(() => {
+    return () => {
+      followPanActiveRef.current = false;
+      cancelAnimationFrame(followPanRef.current.rafId);
+      followPanRef.current.rafId = 0;
+      followPanRef.current.cursor?.hide();
+      document.querySelector('[data-fw-follow-pan-cursor]')?.remove();
+      followPanRef.current.cursor = null;
+      document.body.style.cursor = '';
+      document.body.removeAttribute('data-fw-follow-pan');
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!followPanActiveRef.current) return;
+    const { panX: px, panY: py, zoom: z } = liveViewRef.current;
+    applyWorldTransform(px, py, z);
+    syncDotGridVars(px, py, z);
+  });
 
   // Initialize targetView to current viewport on first render
   if (!Number.isFinite(targetViewRef.current.zoom) || targetViewRef.current.zoom === 0) {
@@ -798,6 +985,7 @@ export function FreeformCanvas({
   // ── Mouse event handlers ──────────────────────────────────────────────────
 
   const onBlockMouseDown = useCallback((blockId: string, e: React.MouseEvent, type: 'move' | 'resize') => {
+    if (followPanActiveRef.current) stopFollowPan();
     if (spaceHeldRef.current || e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
@@ -860,9 +1048,11 @@ export function FreeformCanvas({
     handleBlockSelect,
     connectModeSourceId,
     onConnectPairComplete,
+    stopFollowPan,
   ]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (followPanActiveRef.current) stopFollowPan();
     // Left-click panning is only for empty canvas. Space+drag and middle-click
     // should pan from anywhere for easier navigation.
     if (e.button !== 0 && e.button !== 1) return;
@@ -885,7 +1075,7 @@ export function FreeformCanvas({
       startPanY:   panY,
       panStarted:  forcePan ? true : false,
     };
-  }, [onSelect, onCancelConnectMode, panX, panY]);
+  }, [onSelect, onCancelConnectMode, panX, panY, stopFollowPan]);
 
   useEffect(() => {
     const isEditingTarget = (el: EventTarget | null): boolean => {
@@ -1162,6 +1352,7 @@ export function FreeformCanvas({
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
+      if (followPanActiveRef.current) stopFollowPan();
       const isZoomIntent = e.ctrlKey || e.metaKey;
       const active = document.activeElement;
       const editingFocus = active instanceof HTMLElement
@@ -1246,7 +1437,7 @@ export function FreeformCanvas({
     };
     // Stable dependencies only — the lerp loop reads liveViewRef/targetViewRef
     // via refs to avoid stale closures, so zoom/panX/panY are NOT needed here
-  }, [setViewport]);
+  }, [setViewport, stopFollowPan]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -1270,9 +1461,11 @@ export function FreeformCanvas({
 
   // ── Dot grid background ───────────────────────────────────────────────────
 
+  const displayPanX = followPanActive ? liveViewRef.current.panX : safePanX;
+  const displayPanY = followPanActive ? liveViewRef.current.panY : safePanY;
   const dotSpacing = safeGridSize * safeZoom;
-  const dotOffX    = ((safePanX % dotSpacing) + dotSpacing) % dotSpacing;
-  const dotOffY    = ((safePanY % dotSpacing) + dotSpacing) % dotSpacing;
+  const dotOffX    = ((displayPanX % dotSpacing) + dotSpacing) % dotSpacing;
+  const dotOffY    = ((displayPanY % dotSpacing) + dotSpacing) % dotSpacing;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1280,6 +1473,8 @@ export function FreeformCanvas({
     <div
       ref={viewportRef}
       style={{
+        ['--fw-dot-x' as string]: `${dotOffX}px`,
+        ['--fw-dot-y' as string]: `${dotOffY}px`,
         position:   fillParent ? 'absolute' : 'fixed',
         top:        fillParent ? 0 : topOffset,
         left:       0,
@@ -1356,8 +1551,8 @@ export function FreeformCanvas({
         <defs>
           <pattern
             id="fw-dot-grid"
-            x={dotOffX}
-            y={dotOffY}
+            x="var(--fw-dot-x, 0)"
+            y="var(--fw-dot-y, 0)"
             width={dotSpacing}
             height={dotSpacing}
             patternUnits="userSpaceOnUse"
@@ -1388,7 +1583,7 @@ export function FreeformCanvas({
           position:       'absolute',
           inset:          0,
           transformOrigin: '0 0',
-          transform:      `translate(${safePanX}px, ${safePanY}px) scale(${safeZoom})`,
+          transform:      `translate(${displayPanX}px, ${displayPanY}px) scale(${safeZoom})`,
           willChange:     'transform',
         }}
       >
@@ -2122,16 +2317,20 @@ export function FreeformCanvas({
             blocks={blocks}
             positions={positions}
             zoom={safeZoom}
-            panX={safePanX}
-            panY={safePanY}
+            panX={displayPanX}
+            panY={displayPanY}
             viewportWidth={viewportSize.w}
             viewportHeight={viewportSize.h}
             selectedId={selectedId}
             connectionsEnabled={!!freeSpaceConnectionsEnabled}
             setViewport={setViewport}
+            followPanActive={followPanActive}
+            onToggleFollowPan={toggleFollowPan}
+            onStopFollowPan={stopFollowPan}
+            onSteeringZoneChange={handleMinimapZoneChange}
             presentationOpacityMul={focusMode && spatialAmbient ? focusAtm.minimapOpacityMul : 1}
             presentationScale={focusMode && spatialAmbient ? focusAtm.minimapScale : 1}
-            calmDuringInteraction={draggingId !== null}
+            calmDuringInteraction={draggingId !== null || followPanActive}
             chromeQuiet={deepFocusAtmosphere}
           />
         </WorkspaceSurfaceErrorBoundary>

@@ -6,11 +6,12 @@
 import {
   memo,
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import type { FollowPanZone } from '../../lib/followPanSteering';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { PositionMap } from '../../hooks/useBlockPositions';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
@@ -128,11 +129,17 @@ export interface FreeSpaceMiniMapProps {
   selectedId: string | null;
   connectionsEnabled: boolean;
   setViewport: (zoom: number, panX: number, panY: number) => void;
+  /** Follow-cursor navigation mode (driven by FreeformCanvas RAF loop). */
+  followPanActive?: boolean;
+  onToggleFollowPan?: (anchorX?: number, anchorY?: number) => void;
+  onStopFollowPan?: () => void;
+  /** Screen bounds of minimap panel — pan is strongest inside this zone. */
+  onSteeringZoneChange?: (zone: FollowPanZone | null) => void;
   /** Focus Mode: multiplies base minimap opacity curve. */
   presentationOpacityMul?: number;
   /** Focus Mode: scales the minimap panel. */
   presentationScale?: number;
-  /** Suspend expensive blur/opacity transitions during canvas drag/pan. */
+  /** Suspend expensive transitions during canvas drag/pan. */
   calmDuringInteraction?: boolean;
   /** Deep focus: panel recedes until hovered. */
   chromeQuiet?: boolean;
@@ -150,24 +157,47 @@ function FreeSpaceMiniMapInner({
   selectedId,
   connectionsEnabled,
   setViewport,
+  followPanActive = false,
+  onToggleFollowPan,
+  onStopFollowPan,
+  onSteeringZoneChange,
   presentationOpacityMul = 1,
   presentationScale = 1,
   calmDuringInteraction = false,
   chromeQuiet = false,
 }: FreeSpaceMiniMapProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [hovered, setHovered] = useState(false);
-  const dragRef = useRef<
-    | {
-        kind: 'pan';
-        lastMx: number;
-        lastMy: number;
-        lastPanX: number;
-        lastPanY: number;
-        scale: number;
+
+  useLayoutEffect(() => {
+    const report = () => {
+      const el = rootRef.current;
+      if (!el) {
+        onSteeringZoneChange?.(null);
+        return;
       }
-    | null
-  >(null);
+      const r = el.getBoundingClientRect();
+      onSteeringZoneChange?.({
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+      });
+    };
+    report();
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    window.addEventListener('scroll', report, true);
+    window.addEventListener('resize', report);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('scroll', report, true);
+      window.removeEventListener('resize', report);
+    };
+  }, [onSteeringZoneChange, presentationScale, followPanActive]);
 
   const innerW = W - PAD * 2;
   const innerH = H - PAD * 2;
@@ -244,8 +274,8 @@ function FreeSpaceMiniMapInner({
     const p1 = toSvg(vpWorld.x + vpWorld.w, vpWorld.y + vpWorld.h);
     const x = Math.min(p0.x, p1.x);
     const y = Math.min(p0.y, p1.y);
-    const rw = Math.max(3, Math.abs(p1.x - p0.x));
-    const rh = Math.max(3, Math.abs(p1.y - p0.y));
+    const rw = Math.max(4, Math.abs(p1.x - p0.x));
+    const rh = Math.max(4, Math.abs(p1.y - p0.y));
     return { x, y, w: rw, h: rh };
   }, [toSvg, vpWorld]);
 
@@ -276,7 +306,7 @@ function FreeSpaceMiniMapInner({
       pt.x = clientX;
       pt.y = clientY;
       const loc = pt.matrixTransform(ctm.inverse());
-      const slop = 5;
+      const slop = 6;
       return (
         loc.x >= vpSvg.x - slop &&
         loc.x <= vpSvg.x + vpSvg.w + slop &&
@@ -291,38 +321,31 @@ function FreeSpaceMiniMapInner({
     (e: React.PointerEvent) => {
       e.stopPropagation();
       e.preventDefault();
-      const svg = svgRef.current;
+
+      if (hitViewport(e.clientX, e.clientY)) {
+        onToggleFollowPan?.(e.clientX, e.clientY);
+        return;
+      }
+
+      if (followPanActive) {
+        onStopFollowPan?.();
+      }
+
       const vw = Math.max(1, viewportWidth);
       const vh = Math.max(1, viewportHeight);
-      if (hitViewport(e.clientX, e.clientY)) {
-        dragRef.current = {
-          kind: 'pan',
-          lastMx: e.clientX,
-          lastMy: e.clientY,
-          lastPanX: panX,
-          lastPanY: panY,
-          scale,
-        };
-        try {
-          svg?.setPointerCapture(e.pointerId);
-        } catch {
-          /* noop */
-        }
-      } else {
-        const w = clientToWorld(e.clientX, e.clientY);
-        if (w) {
-          const panX2 = vw / 2 - w.wx * zoom;
-          const panY2 = vh / 2 - w.wy * zoom;
-          setViewport(zoom, panX2, panY2);
-        }
+      const w = clientToWorld(e.clientX, e.clientY);
+      if (w) {
+        const panX2 = vw / 2 - w.wx * zoom;
+        const panY2 = vh / 2 - w.wy * zoom;
+        setViewport(zoom, panX2, panY2);
       }
     },
     [
       hitViewport,
       clientToWorld,
-      panX,
-      panY,
-      scale,
+      followPanActive,
+      onToggleFollowPan,
+      onStopFollowPan,
       zoom,
       setViewport,
       viewportWidth,
@@ -330,51 +353,16 @@ function FreeSpaceMiniMapInner({
     ],
   );
 
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      const d = dragRef.current;
-      if (!d || d.kind !== 'pan') return;
-      e.stopPropagation();
-      const dx = e.clientX - d.lastMx;
-      const dy = e.clientY - d.lastMy;
-      d.lastMx = e.clientX;
-      d.lastMy = e.clientY;
-      const dWorldX = dx / d.scale;
-      const dWorldY = dy / d.scale;
-      const panX2 = d.lastPanX - zoom * dWorldX;
-      const panY2 = d.lastPanY - zoom * dWorldY;
-      d.lastPanX = panX2;
-      d.lastPanY = panY2;
-      setViewport(zoom, panX2, panY2);
-    },
-    [zoom, setViewport],
-  );
-
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-    dragRef.current = null;
-    try {
-      svgRef.current?.releasePointerCapture(e.pointerId);
-    } catch {
-      /* noop */
-    }
-  }, []);
-
-  useEffect(() => {
-    const up = () => {
-      dragRef.current = null;
-    };
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-    return () => {
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-    };
-  }, []);
-
   const amber = tokens.accent;
+  const panelHot = hovered || followPanActive;
+  const vpTransition =
+    calmDuringInteraction || followPanActive
+      ? 'none'
+      : 'x 0.32s cubic-bezier(0.22, 1, 0.36, 1), y 0.32s cubic-bezier(0.22, 1, 0.36, 1), width 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1)';
 
   return (
     <div
+      ref={rootRef}
       style={{
         position: 'absolute',
         right: RIGHT,
@@ -384,34 +372,95 @@ function FreeSpaceMiniMapInner({
         zIndex: 32,
         borderRadius: 14,
         backgroundColor: tokens.cardBg,
-        border: `1px solid ${tokens.cardBorder}`,
-        boxShadow: '0 10px 32px rgba(0,0,0,0.32)',
+        border: `1px solid ${followPanActive ? `${amber}55` : tokens.cardBorder}`,
+        boxShadow: followPanActive
+          ? `0 12px 40px rgba(0,0,0,0.38), 0 0 0 1px ${amber}22, 0 0 28px ${tokens.accentGlow}`
+          : '0 10px 32px rgba(0,0,0,0.32)',
         opacity:
-          (chromeQuiet && !hovered ? 0.72 : calmDuringInteraction ? 0.94 : hovered ? 0.96 : 0.9) *
+          (chromeQuiet && !panelHot ? 0.72 : calmDuringInteraction ? 0.94 : panelHot ? 0.98 : 0.9) *
           Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
         transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
         transformOrigin: 'bottom right',
-        transition: calmDuringInteraction ? 'none' : 'opacity 0.35s ease, box-shadow 0.4s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: calmDuringInteraction ? 'none' : 'opacity 0.35s ease, box-shadow 0.4s ease, border-color 0.35s ease, transform 0.38s cubic-bezier(0.4, 0, 0.2, 1)',
         pointerEvents: 'auto',
-        overflow: 'hidden',
+        overflow: 'visible',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      title={
+        followPanActive
+          ? 'Drag on minimap · arrow shows direction · Esc to stop'
+          : hovered
+            ? 'Click viewport, drag on minimap to move'
+            : undefined
+      }
     >
+      {hovered && !followPanActive ? (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: -26,
+            transform: 'translateX(-50%)',
+            padding: '3px 8px',
+            borderRadius: 8,
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            whiteSpace: 'nowrap',
+            color: tokens.textMuted,
+            backgroundColor: tokens.cardBg,
+            border: `1px solid ${tokens.cardBorder}`,
+            boxShadow: '0 6px 18px rgba(0,0,0,0.28)',
+            pointerEvents: 'none',
+          }}
+        >
+          Click to navigate space
+        </div>
+      ) : null}
+
+      {followPanActive ? (
+        <div
+          role="status"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: -28,
+            transform: 'translateX(-50%)',
+            padding: '4px 9px',
+            borderRadius: 8,
+            fontSize: 9,
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            whiteSpace: 'nowrap',
+            color: amber,
+            backgroundColor: `${tokens.cardBg}fa`,
+            border: `1px solid ${amber}44`,
+            boxShadow: `0 8px 22px rgba(0,0,0,0.32), 0 0 16px ${tokens.accentGlow}`,
+            pointerEvents: 'none',
+          }}
+        >
+          Drag on minimap to travel · click to stop
+        </div>
+      ) : null}
+
       <svg
         ref={svgRef}
         width={W}
         height={H}
         viewBox={`0 0 ${W} ${H}`}
-        style={{ display: 'block', cursor: 'crosshair', touchAction: 'none' }}
+        style={{
+          display: 'block',
+          cursor: followPanActive ? 'grabbing' : 'crosshair',
+          touchAction: 'none',
+          overflow: 'visible',
+        }}
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
       >
         <defs>
           <filter id="fwMiniMapVpGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.4" result="blur" />
+            <feGaussianBlur stdDeviation={followPanActive ? 2.2 : 1.4} result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
@@ -474,38 +523,36 @@ function FreeSpaceMiniMapInner({
           );
         })}
 
-        <rect
-          x={vpSvg.x}
-          y={vpSvg.y}
-          width={vpSvg.w}
-          height={vpSvg.h}
-          fill="none"
-          stroke={amber}
-          strokeOpacity={0.72}
-          strokeWidth={1.2}
-          rx={2}
-          ry={2}
-          filter="url(#fwMiniMapVpGlow)"
-          style={{
-            transition:
-              'x 0.32s cubic-bezier(0.22, 1, 0.36, 1), y 0.32s cubic-bezier(0.22, 1, 0.36, 1), width 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-        />
+        {/* Viewport frame — click toggles follow-pan navigation */}
         <rect
           x={vpSvg.x}
           y={vpSvg.y}
           width={vpSvg.w}
           height={vpSvg.h}
           fill={amber}
-          fillOpacity={0.12}
-          stroke="none"
+          fillOpacity={followPanActive ? 0.2 : 0.1}
+          stroke={amber}
+          strokeOpacity={followPanActive ? 0.95 : 0.78}
+          strokeWidth={followPanActive ? 1.6 : 1.25}
+          rx={2.5}
+          ry={2.5}
+          filter="url(#fwMiniMapVpGlow)"
+          style={{
+            cursor: followPanActive ? 'grabbing' : 'grab',
+            transition: vpTransition,
+          }}
+        />
+        <rect
+          x={vpSvg.x + 1}
+          y={vpSvg.y + 1}
+          width={Math.max(0, vpSvg.w - 2)}
+          height={Math.max(0, vpSvg.h - 2)}
+          fill="none"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth={0.6}
           rx={2}
           ry={2}
-          style={{
-            transition:
-              'x 0.32s cubic-bezier(0.22, 1, 0.36, 1), y 0.32s cubic-bezier(0.22, 1, 0.36, 1), width 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1)',
-            pointerEvents: 'none',
-          }}
+          style={{ pointerEvents: 'none', transition: vpTransition }}
         />
       </svg>
     </div>
