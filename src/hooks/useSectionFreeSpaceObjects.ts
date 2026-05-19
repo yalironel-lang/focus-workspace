@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
+import { copyStudyFileBlob, deleteStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
+import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
   sanitizeCompanionPreferredSize,
@@ -19,6 +21,7 @@ export type ProjectObjectType =
   | 'calculator'
   | 'graph'
   | 'pdf'
+  | 'studyfile'
   | 'companion';
 
 export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
@@ -68,6 +71,19 @@ export type ProjectObjectContent =
       /** Display scale (1 = 100%) */
       zoom: number;
     }
+  | {
+      type: 'studyfile';
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+      fileKind: StudyFileKind;
+      role: StudyFileRole;
+      usageLabel: string;
+      externalUrl: string | null;
+      lastOpenedAt: number | null;
+      page: number;
+      zoom: number;
+    }
   | ({ type: 'companion' } & CompanionPanelContentFields);
 
 export interface ProjectSpaceObject {
@@ -91,6 +107,7 @@ const OBJECT_TYPES = new Set<ProjectObjectType>([
   'calculator',
   'graph',
   'pdf',
+  'studyfile',
   'companion',
 ]);
 
@@ -151,6 +168,23 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
           fileName: '',
           fileType: '',
           fileSize: 0,
+          lastOpenedAt: null,
+          page: 1,
+          zoom: 1,
+        },
+      };
+    case 'studyfile':
+      return {
+        title: 'Study file',
+        content: {
+          type: 'studyfile',
+          fileName: '',
+          fileType: '',
+          fileSize: 0,
+          fileKind: 'other',
+          role: 'general',
+          usageLabel: '',
+          externalUrl: null,
           lastOpenedAt: null,
           page: 1,
           zoom: 1,
@@ -296,6 +330,47 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         fileName,
         fileType,
         fileSize,
+        lastOpenedAt,
+        page,
+        zoom,
+      };
+    }
+    case 'studyfile': {
+      const d = makeDefaults('studyfile').content as Extract<ProjectObjectContent, { type: 'studyfile' }>;
+      const fileName = typeof r.fileName === 'string' ? r.fileName : d.fileName;
+      const fileType = typeof r.fileType === 'string' ? r.fileType : d.fileType;
+      const fileSize = Math.max(0, Math.floor(numOr(r.fileSize, d.fileSize)));
+      const fk = r.fileKind;
+      const fileKind: StudyFileKind =
+        fk === 'pdf' || fk === 'docx' || fk === 'pptx' || fk === 'xlsx' ||
+        fk === 'google-doc' || fk === 'google-sheet' || fk === 'google-slides' ||
+        fk === 'web' || fk === 'other'
+          ? fk
+          : d.fileKind;
+      const roleRaw = r.role;
+      const role: StudyFileRole =
+        roleRaw === 'lecture' || roleRaw === 'assignment' || roleRaw === 'lab' ||
+        roleRaw === 'reference' || roleRaw === 'general'
+          ? roleRaw
+          : d.role;
+      const usageLabel = typeof r.usageLabel === 'string' ? r.usageLabel : d.usageLabel;
+      const ext = r.externalUrl;
+      const externalUrl =
+        typeof ext === 'string' && ext.trim() ? ext.trim() : null;
+      const last = r.lastOpenedAt;
+      const lastOpenedAt =
+        typeof last === 'number' && Number.isFinite(last) ? last : null;
+      const page = Math.max(1, Math.floor(numOr(r.page, d.page)));
+      const zoom = Math.min(2.5, Math.max(0.5, numOr(r.zoom, d.zoom)));
+      return {
+        type: 'studyfile',
+        fileName,
+        fileType,
+        fileSize,
+        fileKind,
+        role,
+        usageLabel,
+        externalUrl,
         lastOpenedAt,
         page,
         zoom,
@@ -779,6 +854,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     setObjects(prev => {
       const victim = prev.find(o => o.id === id);
       if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
+      if (victim?.type === 'studyfile') void deleteStudyFileBlob(sectionId, id);
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
       schedulePersist(next, sectionId, boardId);
@@ -803,6 +879,9 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     if (source.type === 'pdf') {
       void copyPdfBlob(sectionId, source.id, copy.id);
+    }
+    if (source.type === 'studyfile') {
+      void copyStudyFileBlob(sectionId, source.id, copy.id);
     }
     setObjects(prev => {
       const next = [...prev, copy];
