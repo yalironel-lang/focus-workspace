@@ -78,6 +78,17 @@ export function plainMathToLatex(input: string): string {
 
   let s = raw;
 
+  const fnEq = s.match(/^([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*=\s*(.+)$/);
+  if (fnEq) {
+    const [, f, arg, rhs] = fnEq;
+    return `${f}(${arg}) = ${plainMathToLatex(rhs!.trim())}`;
+  }
+
+  const shortEq = s.match(/^([A-Z]{1,4})=([^\s].*)$/);
+  if (shortEq) {
+    return `${shortEq[1]} = ${plainMathToLatex(shortEq[2]!.trim())}`;
+  }
+
   // ∫ from a to b of … dx
   const intMatch = s.match(
     /^\s*int\s+(\S+)\s+to\s+(\S+)\s+(.+?)\s*d([a-zA-Z])\s*$/i,
@@ -87,10 +98,35 @@ export function plainMathToLatex(input: string): string {
     return `\\int_{${plainMathToLatex(lo)}}^{${plainMathToLatex(hi)}} ${plainMathToLatex(expr.trim())} \\, d${v}`;
   }
 
+  // d/dx f(x)
+  const derivMatch = s.match(/^\s*d\s*\/\s*d([a-zA-Z])\s+(.+)$/i);
+  if (derivMatch) {
+    const [, v, expr] = derivMatch;
+    return `\\frac{d}{d${v}} ${plainMathToLatex(expr!.trim())}`;
+  }
+
+  // partial P / partial Q
+  const partialMatch = s.match(
+    /^\s*partial\s+([a-zA-Z]+)\s*\/\s*partial\s+([a-zA-Z]+)\s*$/i,
+  );
+  if (partialMatch) {
+    const [, a, b] = partialMatch;
+    return `\\frac{\\partial ${a}}{\\partial ${b}}`;
+  }
+
   // lim x -> 0
   s = s.replace(/\blim\s+([a-zA-Z]+)\s*-?>\s*([^\s,;]+)/gi, (_, v, t) => {
     return `\\lim_{${v} \\to ${plainMathToLatex(t.trim())}}`;
   });
+
+  // sigma i=1 to n
+  s = s.replace(
+    /\bsigma\s+([a-zA-Z])\s*=\s*(\S+)\s+to\s+(\S+)(?:\s+(.+))?/gi,
+    (_, i, lo, hi, expr) => {
+      const body = expr?.trim() ? ` ${plainMathToLatex(expr)}` : '';
+      return `\\sum_{${i}=${plainMathToLatex(lo)}}^{${plainMathToLatex(hi)}}${body}`;
+    },
+  );
 
   // sum i=1 to n (expr) or sum i=1 to n expr
   s = s.replace(
@@ -137,7 +173,7 @@ export function splitPlainMathSpans(text: string): PlainSegment[] {
   if (!text) return [{ type: 'text', value: '' }];
 
   const pattern =
-    /(\bint\s+\S+\s+to\s+\S+\s+.+?\s+d[a-zA-Z]\b|\blim\s+[a-zA-Z]+\s*-?>\s*\S+|\bsqrt\s*\([^)]+\)|\bsum\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|[a-zA-Z]\s*\^[^\s,;.+]+|[a-zA-Z]_\d+|\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b(?:\s*[+\-]\s*\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b)*|[a-zA-Z0-9]+\s*\/\s*[a-zA-Z0-9]+|[a-zA-Z]=[^\s,;.]+)/gi;
+    /(\bd\s*\/\s*d[a-zA-Z]\s+[^\n,;]+|\bpartial\s+[a-zA-Z]+\s*\/\s*partial\s+[a-zA-Z]+|\bint\s+\S+\s+to\s+\S+\s+.+?\s+d[a-zA-Z]\b|\blim\s+[a-zA-Z]+\s*-?>\s*\S+|\bsqrt\s*\([^)]+\)|\bsum\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|\bsigma\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|[A-Z]\([A-Za-z]+\)=[^\s,;.]+|[A-Z]{1,3}=[^\s,;.]+|[a-zA-Z]\s*\^[^\s,;.+]+|[a-zA-Z]_\d+|\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b(?:\s*[+\-]\s*\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b)*|[a-zA-Z0-9]+\s*\/\s*[a-zA-Z0-9]+|[a-zA-Z]=[^\s,;.]+)/gi;
 
   const segments: PlainSegment[] = [];
   let last = 0;
@@ -164,6 +200,21 @@ export function textLikelyHasPlainMath(text: string): boolean {
 }
 
 /** True when the line is only math (display equation), not prose with math. */
+const PROSE_LEAD =
+  /^(the|a|an|this|that|when|where|why|how|we|i|you|if|so|but|and|or|for|with|from|in|on|at|to|of|is|are|was|were|have|has|had|will|can|should|could|would|note|chapter|section|read|see|think|because|demand curve is)\b/i;
+
+/** Auto-detect math lines without requiring math mode toggle. */
+export function isLikelyMathLine(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 160) return false;
+  if (isWholeLineMath(t)) return true;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 16) return false;
+  if (PROSE_LEAD.test(t) && !isWholeLineMath(t)) return false;
+  if (textLikelyHasPlainMath(t) && words.length <= 10) return true;
+  return false;
+}
+
 export function isWholeLineMath(text: string): boolean {
   const t = text.trim();
   if (!t) return false;

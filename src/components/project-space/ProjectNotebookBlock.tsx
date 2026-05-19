@@ -21,14 +21,23 @@ import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { MathInputToolbar } from '../notebook/MathInputToolbar';
 import { MathRichText } from '../notebook/MathRichText';
 import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
+import { MathStudyInsight } from '../notebook/MathStudyInsight';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
 import {
   getMathTemplate,
+  isLikelyMathLine,
   plainMathToLatex,
   textLikelyHasPlainMath,
   type MathTemplateId,
 } from '../../lib/mathInputAssistant';
+import { isEmptyMathStarterBody, MATH_CALCULUS_NOTEBOOK_SEED } from '../../lib/mathNotebookSeed';
+import {
+  getMathSlashFiltered,
+  MATH_SLASH_TEMPLATES,
+  tryMathTabExpansion,
+  type MathSlashId,
+} from '../../lib/mathStemShortcuts';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
@@ -543,11 +552,12 @@ function slashFilterTokenFromParagraph(text: string): string | null {
 }
 
 /** Body to keep after applying a slash command; removes `/token` and command word only. */
-function paragraphTextAfterSlashApply(fullParagraphText: string, _cmd: SlashCommandId): string {
+function paragraphTextAfterSlashApply(fullParagraphText: string, cmd: SlashCommandId): string {
   const parts = fullParagraphText.split(SOFT_BREAK);
   const p0 = parseSlashFirstSegment(parts[0] ?? '');
   if (!p0) return fullParagraphText;
-  const firstBody = p0.body;
+  const template = cmd in MATH_SLASH_TEMPLATES ? MATH_SLASH_TEMPLATES[cmd as MathSlashId] : null;
+  const firstBody = template ?? p0.body;
   return [firstBody, ...parts.slice(1)].join(SOFT_BREAK);
 }
 
@@ -580,7 +590,8 @@ type SlashCommandId =
   | 'summary'
   | 'concept'
   | 'review'
-  | 'formula';
+  | 'formula'
+  | MathSlashId;
 
 const SLASH_COMMAND_META: { id: SlashCommandId; label: string; hint: string }[] = [
   { id: 'title', label: 'Title', hint: 'Level 1 — focal heading' },
@@ -596,12 +607,21 @@ const SLASH_COMMAND_META: { id: SlashCommandId; label: string; hint: string }[] 
   { id: 'divider', label: 'Divider', hint: 'Horizontal rule' },
 ];
 
-function getSlashFiltered(query: string): { id: SlashCommandId; label: string; hint: string }[] {
-  return [...SLASH_COMMAND_META]
-    .map((c) => ({ c, s: fuzzySlashScore(query, c.label, c.hint) }))
-    .filter((x) => x.s > 0)
+function getSlashFiltered(
+  query: string,
+  mathMode: boolean,
+): { id: SlashCommandId; label: string; hint: string }[] {
+  const base = SLASH_COMMAND_META.map(c => ({ c, s: fuzzySlashScore(query, c.label, c.hint) }));
+  const math = mathMode
+    ? getMathSlashFiltered(query).map(c => ({
+        c: { id: c.id as SlashCommandId, label: c.label, hint: c.hint },
+        s: 2,
+      }))
+    : [];
+  return [...base, ...math]
+    .filter(x => x.s > 0)
     .sort((a, b) => b.s - a.s)
-    .map((x) => x.c);
+    .map(x => x.c);
 }
 
 interface EditableLineProps {
@@ -1044,7 +1064,7 @@ export function ProjectNotebookBlock({
     if (!rect || (rect.width === 0 && rect.height === 0)) {
       rect = el.getBoundingClientRect();
     }
-    const filtered = getSlashFiltered(token);
+    const filtered = getSlashFiltered(token, isMathNotebook);
     const margin = 10;
     const estW = 260;
     const estH = 240;
@@ -1071,7 +1091,7 @@ export function ProjectNotebookBlock({
         selected,
       };
     });
-  }, []);
+  }, [isMathNotebook]);
 
   const ensureNotebookBodyCaretVisible = useCallback(
     (host: HTMLElement) => {
@@ -1171,6 +1191,12 @@ export function ProjectNotebookBlock({
             pendingCaretRef.current = { id: pid, offset: rest.length };
             return next;
           }
+          default: {
+            if (!(cmd in MATH_SLASH_TEMPLATES)) return prev;
+            const mathRest = paragraphTextAfterSlashApply(cur.text, cmd);
+            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: mathRest }, ...prev.slice(i + 1)];
+            break;
+          }
         }
         const serialized = serializeBlocks(next);
         onChange({ ...content, body: serialized });
@@ -1226,8 +1252,8 @@ export function ProjectNotebookBlock({
   }, [editorMode, slashMenu, surfaceFocusBlockId, blocks]);
 
   const slashFiltered = useMemo(
-    () => (slashMenu ? getSlashFiltered(slashMenu.query) : []),
-    [slashMenu],
+    () => (slashMenu ? getSlashFiltered(slashMenu.query, isMathNotebook) : []),
+    [slashMenu, isMathNotebook],
   );
 
   const previewLines = useMemo(() => {
@@ -1257,7 +1283,7 @@ export function ProjectNotebookBlock({
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: isMathNotebook ? 'min(720px, 100%)' : 'min(600px, 100%)',
+      maxWidth: isMathNotebook ? 'min(760px, 100%)' : 'min(600px, 100%)',
       margin: '0 auto',
       width: '100%',
       paddingLeft: 'clamp(20px, 4vw, 44px)',
@@ -1478,15 +1504,45 @@ export function ProjectNotebookBlock({
   const handleEditorKeyCapture = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (editorMode !== 'edit') return;
-      if (e.key === 'Tab') return;
 
       const root = editorRootRef.current;
       if (!root) return;
       const blocks = blocksRef.current;
       const sm = slashMenuRef.current;
 
+      if (e.key === 'Tab' && isMathNotebook) {
+        const sel = window.getSelection();
+        if (sel?.rangeCount) {
+          let node: Node | null = sel.anchorNode;
+          let editable: HTMLElement | null = null;
+          while (node && node !== root) {
+            if (node instanceof HTMLElement && node.dataset.editableId) {
+              editable = node;
+              break;
+            }
+            node = node.parentNode;
+          }
+          if (editable) {
+            const blockId = editable.dataset.editableId!;
+            const blk = blocks.find(b => b.id === blockId);
+            if (blk?.kind === 'paragraph') {
+              const offset = getCaretOffsetIn(editable);
+              const expanded = tryMathTabExpansion(blk.text, offset);
+              if (expanded) {
+                e.preventDefault();
+                updateBlockText(blockId, expanded.text);
+                pendingCaretRef.current = { id: blockId, offset: expanded.caret };
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      if (e.key === 'Tab') return;
+
       if (sm) {
-        const filtered = getSlashFiltered(sm.query);
+        const filtered = getSlashFiltered(sm.query, isMathNotebook);
         if (e.key === 'Escape') {
           e.preventDefault();
           const { blockId } = sm;
@@ -1797,10 +1853,12 @@ export function ProjectNotebookBlock({
     },
     [
       editorMode,
+      isMathNotebook,
       persist,
       removeBlockAt,
       applySlashCommand,
       applyBlockLevel,
+      updateBlockText,
       content,
       onChange,
       onCreateRecallItem,
@@ -2064,15 +2122,24 @@ export function ProjectNotebookBlock({
                 <button
                   key={mode}
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    if (mode === 'math' && isEmptyMathStarterBody(content.body ?? '')) {
+                      onChange({
+                        ...content,
+                        notebookMode: 'math',
+                        paperStyle: 'grid',
+                        body: MATH_CALCULUS_NOTEBOOK_SEED,
+                      });
+                      return;
+                    }
                     onChange({
                       ...content,
                       notebookMode: mode,
                       ...(mode === 'math' && paperStyle === 'ruled'
                         ? { paperStyle: 'grid' as const }
                         : {}),
-                    })
-                  }
+                    });
+                  }}
                   style={{
                     border: 'none',
                     background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
@@ -2318,12 +2385,15 @@ export function ProjectNotebookBlock({
         >
           <div style={writingColumnStyle}>
           {isMathNotebook ? (
-            <MathInputToolbar
-              tokens={tokens}
-              textColor={notebookInk.headline}
-              onInsertSymbol={insertMathSnippet}
-              onApplyTemplate={applyMathTemplate}
-            />
+            <>
+              <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
+              <MathInputToolbar
+                tokens={tokens}
+                textColor={notebookInk.headline}
+                onInsertSymbol={insertMathSnippet}
+                onApplyTemplate={applyMathTemplate}
+              />
+            </>
           ) : null}
           {blocks.map((block, index) => {
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
@@ -2778,7 +2848,7 @@ export function ProjectNotebookBlock({
                 data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                 style={blockSurfaceChrome(block.id)}
               >
-                {isMathNotebook && !paraFine && !paraMuted ? (
+                {(isMathNotebook || isLikelyMathLine(block.text)) && !paraFine && !paraMuted ? (
                   <MathEditableParagraph
                     id={block.id}
                     text={block.text}
@@ -3150,7 +3220,8 @@ export function ProjectNotebookBlock({
                 >
                   {isMathNotebook ||
                   textHasMathDelimiters(line.text) ||
-                  textLikelyHasPlainMath(line.text) ? (
+                  textLikelyHasPlainMath(line.text) ||
+                  isLikelyMathLine(line.text) ? (
                     <MathRichText
                       text={line.text}
                       autoPlainMath={isMathNotebook}

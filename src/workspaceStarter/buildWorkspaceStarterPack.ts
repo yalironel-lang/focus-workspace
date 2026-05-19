@@ -7,6 +7,7 @@ import type {
 import type { WorkspaceStarterId } from './workspaceStarterTypes';
 import { WORKSPACE_STARTER_FOCUS } from './workspaceStarterTypes';
 import type { FocusMode } from '../focusMode/focusModeTypes';
+import { MATH_CALCULUS_NOTEBOOK_SEED } from '../lib/mathNotebookSeed';
 
 export interface WorkspaceStarterPack {
   objects: ProjectSpaceObject[];
@@ -153,7 +154,17 @@ export function buildWorkspaceStarterPack(starterId: WorkspaceStarterId): Worksp
     }
 
     case 'problem-solving': {
-      const notebook = obj('notebook', 'Workings', { type: 'notebook', body: '', paperStyle: 'grid' }, at());
+      const notebook = obj(
+        'notebook',
+        'Calculus',
+        {
+          type: 'notebook',
+          body: MATH_CALCULUS_NOTEBOOK_SEED,
+          paperStyle: 'grid',
+          notebookMode: 'math',
+        },
+        at(),
+      );
       const calculator = obj('calculator', 'Calculator', { type: 'calculator', input: '', history: [] }, at());
       const graph = obj(
         'graph',
