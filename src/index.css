@@ -9,6 +9,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* KaTeX in dark notebook surfaces */
+.katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+.katex-display {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.katex-error {
+  color: #f87171 !important;
+}
+
 /* ── Design System Tokens ─────────────────────────────────────────────────── */
 :root {
   /* Shadows — 4-level depth system */

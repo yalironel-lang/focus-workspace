@@ -26,8 +26,11 @@ export type MistakeVariant = 'mistake' | 'recall';
 
 export type CalculatorHistoryEntry = { expr: string; result: string };
 
+export type NotebookPaperStyle = 'blank' | 'ruled' | 'grid';
+export type NotebookMode = 'normal' | 'math';
+
 export type ProjectObjectContent =
-  | { type: 'notebook'; body: string; paperStyle: 'blank' | 'ruled' | 'grid' }
+  | { type: 'notebook'; body: string; paperStyle: NotebookPaperStyle; notebookMode?: NotebookMode }
   | { type: 'note'; body: string }
   | {
       type: 'mistake';
@@ -101,7 +104,11 @@ function uid(type: ProjectObjectType): string {
 
 function makeDefaults(type: ProjectObjectType): { title: string; content: ProjectObjectContent } {
   switch (type) {
-    case 'notebook': return { title: 'Notebook', content: { type: 'notebook', body: '', paperStyle: 'ruled' } };
+    case 'notebook':
+      return {
+        title: 'Notebook',
+        content: { type: 'notebook', body: '', paperStyle: 'ruled', notebookMode: 'normal' },
+      };
     case 'note': return { title: 'Note', content: { type: 'note', body: '' } };
     case 'mistake':
       return {
@@ -203,7 +210,9 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const ps = r.paperStyle;
       const paperStyle =
         ps === 'blank' || ps === 'ruled' || ps === 'grid' ? ps : 'ruled';
-      return { type: 'notebook', body, paperStyle };
+      const nm = r.notebookMode;
+      const notebookMode: NotebookMode = nm === 'math' ? 'math' : 'normal';
+      return { type: 'notebook', body, paperStyle, notebookMode };
     }
     case 'note':
       return { type: 'note', body: typeof r.body === 'string' ? r.body : '' };

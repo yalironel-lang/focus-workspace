@@ -17,6 +17,11 @@ import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
+import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
+import { MathSymbolBar } from '../notebook/MathSymbolBar';
+import { MathRichText } from '../notebook/MathRichText';
+import { KatexPreview } from '../notebook/KatexPreview';
+import { textHasMathDelimiters } from '../../lib/notebookMath';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
@@ -889,6 +894,8 @@ export function ProjectNotebookBlock({
   }, [morphPulseId]);
 
   const paperStyle = content.paperStyle ?? 'ruled';
+  const notebookMode = content.notebookMode ?? 'normal';
+  const isMathNotebook = notebookMode === 'math';
 
   const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 38px';
 
@@ -1243,13 +1250,13 @@ export function ProjectNotebookBlock({
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: 'min(600px, 100%)',
+      maxWidth: isMathNotebook ? 'min(720px, 100%)' : 'min(600px, 100%)',
       margin: '0 auto',
       width: '100%',
       paddingLeft: 'clamp(20px, 4vw, 44px)',
       paddingRight: 'clamp(20px, 4vw, 44px)',
     }),
-    [],
+    [isMathNotebook],
   );
 
   const editorSurfaceStyle = useMemo(
@@ -1404,6 +1411,22 @@ export function ProjectNotebookBlock({
       });
     },
     [content, onChange],
+  );
+
+  const insertMathSnippet = useCallback(
+    (snippet: string) => {
+      const blockId = surfaceFocusBlockId;
+      if (!blockId) return;
+      const blk = blocksRef.current.find(b => b.id === blockId);
+      if (!blk || blk.kind === 'divider') return;
+      const root = editorRootRef.current;
+      const el = root?.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
+      const offset = el ? getCaretOffsetIn(el) : blk.text.length;
+      const newText = blk.text.slice(0, offset) + snippet + blk.text.slice(offset);
+      updateBlockText(blockId, newText);
+      pendingCaretRef.current = { id: blockId, offset: offset + snippet.length };
+    },
+    [surfaceFocusBlockId, updateBlockText],
   );
 
   const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
@@ -2005,6 +2028,50 @@ export function ProjectNotebookBlock({
               border: '1px solid rgba(255,255,255,0.05)',
             }}
           >
+            {(['normal', 'math'] as const).map(mode => {
+              const active = notebookMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      ...content,
+                      notebookMode: mode,
+                      ...(mode === 'math' && paperStyle === 'ruled'
+                        ? { paperStyle: 'grid' as const }
+                        : {}),
+                    })
+                  }
+                  style={{
+                    border: 'none',
+                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
+                    color: active ? notebookInk.secondary : notebookInk.ghost,
+                    borderRadius: '7px',
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    letterSpacing: '0.07em',
+                    textTransform: 'uppercase',
+                    padding: '5px 9px',
+                    cursor: 'pointer',
+                    opacity: active ? 1 : 0.78,
+                  }}
+                >
+                  {mode === 'normal' ? 'Normal' : 'Math'}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            style={{
+              display: 'inline-flex',
+              padding: '3px',
+              gap: '2px',
+              borderRadius: '10px',
+              background: 'rgba(0,0,0,0.12)',
+              border: '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
             {(['blank', 'ruled', 'grid'] as const).map((style) => {
               const active = paperStyle === style;
 
@@ -2220,6 +2287,7 @@ export function ProjectNotebookBlock({
           style={editorSurfaceStyle}
         >
           <div style={writingColumnStyle}>
+          {isMathNotebook ? <MathSymbolBar tokens={tokens} onInsert={insertMathSnippet} /> : null}
           {blocks.map((block, index) => {
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
             if (block.kind === 'divider') {
@@ -2628,59 +2696,24 @@ export function ProjectNotebookBlock({
 
             if (block.kind === 'math') {
               return (
-                <div
+                <EquationBlockEditor
                   key={block.id}
-                  data-nb-surface-block
-                  data-block-id={block.id}
-                  data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
-                  style={{
-                    ...blockSurfaceChrome(block.id),
-                    margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
-                    padding: '15px 18px',
-                    borderRadius: '16px',
-                    border: `1px solid ${tokens.cardBorder}`,
-                    background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: `${typeScale.l5}px`,
-                      fontWeight: 700,
-                      letterSpacing: '0.12em',
-                      textTransform: 'uppercase',
-                      color: notebookInk.ghost,
-                      marginBottom: `${typeScale.s5 - 2}px`,
-                    }}
-                  >
-                    Formula
-                  </div>
-                  <EditableLine
-                    id={block.id}
-                    text={block.text}
-                    tokens={tokens}
-                    placeholder="x = ..."
-                    onUpdate={updateBlockText}
-                    onFocusIndex={setFocusIndexById}
-                    onAfterInput={(el) => onEditableAfterInput(block.id, el)}
-                    style={{
-                      width: '100%',
-                      border: 'none',
-                      outline: 'none',
-                      background: 'transparent',
-                      color: notebookInk.headline,
-                      fontSize: `${typeScale.l3}px`,
-                      fontWeight: 500,
-                      lineHeight: 1.78,
-                      letterSpacing: '0.02em',
-                      fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
-                      margin: 0,
-                      caretColor: tokens.accent,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  />
-                </div>
+                  blockId={block.id}
+                  text={block.text}
+                  tokens={tokens}
+                  notebookInk={notebookInk}
+                  typeScale={typeScale}
+                  marginStyle={{ margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0` }}
+                  surfaceChrome={blockSurfaceChrome(block.id)}
+                  isFocused={surfaceFocusBlockId === block.id}
+                  isMathNotebook={isMathNotebook}
+                  EditableLine={EditableLine}
+                  onUpdate={updateBlockText}
+                  onFocusIndex={setFocusIndexById}
+                  onAfterInput={el => onEditableAfterInput(block.id, el)}
+                  onDelete={() => removeBlockAt(index)}
+                  morphPulse={morphPulseId === block.id}
+                />
               );
             }
 
@@ -3013,21 +3046,14 @@ export function ProjectNotebookBlock({
                       marginBottom: `${typeScale.s5 - 2}px`,
                     }}
                   >
-                    Formula
+                    Equation
                   </div>
-                  <div
-                    style={{
-                      color: notebookInk.headline,
-                      fontSize: `${typeScale.l3}px`,
-                      fontWeight: 500,
-                      lineHeight: 1.78,
-                      letterSpacing: '0.02em',
-                      fontFamily: "'JetBrains Mono', 'SFMono-Regular', monospace",
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {line.text}
-                  </div>
+                  <KatexPreview
+                    latex={line.text}
+                    displayMode
+                    textColor={notebookInk.headline}
+                    mutedColor={tokens.textMuted}
+                  />
                 </div>
               );
             }
@@ -3049,7 +3075,15 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {line.text}
+                  {textHasMathDelimiters(line.text) ? (
+                    <MathRichText
+                      text={line.text}
+                      textColor={fine ? notebookInk.muted : muted ? notebookInk.secondary : notebookInk.primary}
+                      mutedColor={tokens.textMuted}
+                    />
+                  ) : (
+                    line.text
+                  )}
                 </p>
               );
             }
