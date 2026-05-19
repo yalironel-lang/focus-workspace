@@ -682,8 +682,8 @@ function NotebookBodyScroll({
           right: 0,
           top: 0,
           height: 16,
-          background: 'linear-gradient(180deg, rgba(0,0,0,0.28) 0%, transparent 100%)',
-          opacity: 0.25,
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.18) 0%, transparent 100%)',
+          opacity: 0.14,
         }}
       />
       <div
@@ -695,8 +695,8 @@ function NotebookBodyScroll({
           right: 0,
           bottom: 0,
           height: 20,
-          background: 'linear-gradient(0deg, rgba(0,0,0,0.26) 0%, transparent 100%)',
-          opacity: 0.3,
+          background: 'linear-gradient(0deg, rgba(0,0,0,0.16) 0%, transparent 100%)',
+          opacity: 0.16,
         }}
       />
     </div>
@@ -1911,23 +1911,26 @@ export function ProjectNotebookBlock({
                 boxSizing: 'border-box',
               }
             : { minHeight: '420px' }),
-          borderRadius: '22px',
+          borderRadius: context === 'free-space' ? 0 : '22px',
           position: 'relative',
-          backgroundColor: `${tokens.cardBg}ff`,
-          backgroundImage: `
-            radial-gradient(circle at 50% 0%, rgba(255,255,255,0.05), transparent 36%),
-            linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 34%)
+          ...(context === 'free-space'
+            ? {
+                backgroundColor: 'transparent',
+                backgroundImage: 'none',
+                boxShadow: 'none',
+              }
+            : {
+                backgroundColor: `${tokens.cardBg}ff`,
+                backgroundImage: `
+            radial-gradient(circle at 50% 0%, rgba(255,255,255,0.04), transparent 36%),
+            linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 34%)
           `,
-          boxShadow: context === 'free-space'
-            ? `
-            0 10px 28px rgba(0,0,0,0.2),
-            inset 0 1px 0 rgba(255,255,255,0.06)
-          `
-            : `
+                boxShadow: `
             0 22px 60px rgba(0,0,0,0.28),
             0 0 0 1px rgba(255,255,255,0.09),
             inset 0 1px 0 rgba(255,255,255,0.08)
           `,
+              }),
         }}
       >
       <div
@@ -2217,9 +2220,7 @@ export function ProjectNotebookBlock({
                 padding: '2px 4px',
                 borderRadius: '8px',
                 border: '1px solid rgba(255,255,255,0.06)',
-                background: 'rgba(12,14,18,0.82)',
-                backdropFilter: 'blur(12px) saturate(1.1)',
-                WebkitBackdropFilter: 'blur(12px) saturate(1.1)',
+                background: 'rgba(12,14,18,0.94)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
                 opacity: 0.55,
                 transition: 'opacity 0.2s ease',
@@ -2293,14 +2294,8 @@ export function ProjectNotebookBlock({
                 padding: '6px',
                 borderRadius: '14px',
                 border: '1px solid rgba(255,255,255,0.055)',
-                background: 'rgba(9,10,13,0.94)',
-                backdropFilter: 'blur(22px) saturate(1.35)',
-                WebkitBackdropFilter: 'blur(22px) saturate(1.35)',
-                boxShadow: `
-                  0 22px 56px rgba(0,0,0,0.58),
-                  0 0 0 1px ${tokens.accent}10,
-                  inset 0 1px 0 rgba(255,255,255,0.05)
-                `,
+                background: 'rgba(9,10,13,0.97)',
+                boxShadow: `0 18px 44px rgba(0,0,0,0.5), 0 0 0 1px ${tokens.accent}10`,
                 animation: 'nbSlashIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards',
               }}
             >
@@ -2758,8 +2753,7 @@ export function ProjectNotebookBlock({
                     padding: '15px 16px 15px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
-                    background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                    backgroundColor: `${tokens.wellBg}44`,
                   }}
                 >
                   <div
@@ -3131,8 +3125,7 @@ export function ProjectNotebookBlock({
                     padding: '15px 16px 15px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
-                    background: `linear-gradient(180deg, ${tokens.cardBg}ee 0%, ${tokens.wellBg}d0 100%)`,
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                    backgroundColor: `${tokens.wellBg}44`,
                   }}
                 >
                   <div
@@ -3170,8 +3163,7 @@ export function ProjectNotebookBlock({
                     padding: '15px 18px',
                     borderRadius: '16px',
                     border: `1px solid ${tokens.cardBorder}`,
-                    background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                    backgroundColor: `${tokens.wellBg}44`,
                   }}
                 >
                   {!isMathNotebook ? (

@@ -383,11 +383,9 @@ function FreeSpaceMiniMapInner({
         height: H,
         zIndex: 32,
         borderRadius: 14,
-        backgroundColor: calmDuringInteraction ? `${tokens.cardBg}fa` : `${tokens.cardBg}ec`,
-        border: `1px solid ${tokens.cardBorderHover}`,
-        boxShadow: `0 10px 36px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.07)`,
-        backdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
-        WebkitBackdropFilter: calmDuringInteraction ? 'none' : 'blur(14px) saturate(1.2)',
+        backgroundColor: tokens.cardBg,
+        border: `1px solid ${tokens.cardBorder}`,
+        boxShadow: '0 10px 32px rgba(0,0,0,0.32)',
         opacity:
           (chromeQuiet && !hovered ? 0.72 : calmDuringInteraction ? 0.94 : hovered ? 0.96 : 0.9) *
           Math.max(0.2, Math.min(1.35, presentationOpacityMul)),

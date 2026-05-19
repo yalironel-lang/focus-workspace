@@ -127,28 +127,24 @@ export function FreeformBlock({
   }
 
   const sheen = material.surfaceSheen;
-  const innerRim = `inset 0 1px 0 rgba(255,255,255,${(0.07 + sheen * 0.4).toFixed(3)})`;
-  const outerRim = engaged ? ', 0 0 0 1px rgba(255,255,255,0.032)' : '';
-  const innerHighlight = selected
-    ? `, inset 0 0 0 1px ${tokens.accent}12`
-    : hovered
-      ? `, inset 0 0 0 1px rgba(255,255,255,${(0.06 + sheen).toFixed(3)})`
-      : '';
+  const innerRim = engaged
+    ? `inset 0 1px 0 rgba(255,255,255,${(0.05 + sheen * 0.25).toFixed(3)})`
+    : '';
+  const innerHighlight = selected ? `, inset 0 0 0 1px ${tokens.accent}10` : '';
   const shadowBase = material.shadowMul * materialShadowMul;
-  let boxShadow = `${innerRim}${outerRim}, ${tokens.shadowMd}`;
+  const rimPrefix = innerRim ? `${innerRim}${innerHighlight}, ` : innerHighlight ? `${innerHighlight.slice(2)}, ` : '';
+  let boxShadow = `${rimPrefix}0 4px 14px rgba(0,0,0,${(0.14 * shadowBase).toFixed(2)})`;
   if (isDragging && activeGesture === 'resize') {
-    boxShadow = `${innerRim}${innerHighlight}, 0 8px 20px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)}), ${tokens.shadowLg}`;
+    boxShadow = `${rimPrefix}0 10px 28px rgba(0,0,0,${(0.24 * shadowBase).toFixed(2)})`;
   } else if (isDragging) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 8px 16px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)}), 0 22px 48px rgba(0,0,0,${(0.3 * shadowBase).toFixed(2)})`;
+    boxShadow = `${rimPrefix}0 12px 32px rgba(0,0,0,${(0.28 * shadowBase).toFixed(2)})`;
   } else if (selected) {
-    boxShadow = `${innerRim}${innerHighlight}, 0 6px 14px rgba(0,0,0,${(0.18 * shadowBase).toFixed(2)}), ${tokens.shadowLg}`;
+    boxShadow = `${rimPrefix}0 8px 22px rgba(0,0,0,${(0.2 * shadowBase).toFixed(2)})`;
   } else if (hovered) {
-    boxShadow = `${innerRim}${outerRim}, 0 6px 14px rgba(0,0,0,${(0.16 * shadowBase).toFixed(2)}), 0 16px 36px rgba(0,0,0,${(0.24 * shadowBase).toFixed(2)})`;
-  } else {
-    boxShadow = `${innerRim}, 0 4px 12px rgba(0,0,0,${(0.12 * shadowBase).toFixed(2)})`;
+    boxShadow = `${rimPrefix}0 6px 18px rgba(0,0,0,${(0.17 * shadowBase).toFixed(2)})`;
   }
   if (deepFocusAnchor && !isDragging) {
-    boxShadow = `${boxShadow}, 0 14px 36px rgba(0,0,0,0.26)`;
+    boxShadow = `${boxShadow}, 0 12px 30px rgba(0,0,0,0.22)`;
   }
 
   const borderColor = isConnectTargetHover

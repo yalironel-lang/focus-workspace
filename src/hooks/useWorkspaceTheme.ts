@@ -396,7 +396,6 @@ export function computeSurface(
   const glow     = opts.accentGlow ?? dt.accentGlow;
   const gm       = dt.glowMult;
   const r        = dt.radius;
-  const blurPx   = tokens.blur;
   const hasGlow  = (opts.glowEnabled ?? true) && gm > 0;
 
   const glowStr = hasGlow
@@ -410,8 +409,8 @@ export function computeSurface(
     bdr === 'glow'   ? `1px solid ${glow}` :
     `1px solid ${tokens.cardBorder}`;
 
-  // Inner top-edge highlight for depth
-  const innerHighlight = 'inset 0 1px 0 rgba(255,255,255,0.05)';
+  // Inner top-edge highlight for depth (engaged surfaces only — avoids double-rim with card chrome)
+  const innerHighlight = 'inset 0 1px 0 rgba(255,255,255,0.04)';
 
   const baseShadow = (s: string) => {
     const parts = [s, innerHighlight];
@@ -422,12 +421,10 @@ export function computeSurface(
   switch (surfaceStyle) {
     case 'glass':
       return {
-        backgroundColor:      `${tokens.cardBg}f5`,
-        backdropFilter:       `blur(${Math.max(blurPx, 12)}px)`,
-        WebkitBackdropFilter: `blur(${Math.max(blurPx, 12)}px)`,
+        backgroundColor: tokens.cardBg,
         border,
         borderRadius: `${r}px`,
-        boxShadow: baseShadow('0 4px 20px rgba(0,0,0,0.36)'),
+        boxShadow: baseShadow('0 4px 18px rgba(0,0,0,0.32)'),
       };
     case 'solid':
       return {
@@ -446,19 +443,14 @@ export function computeSurface(
       };
     case 'floating':
       return {
-        backgroundColor:      tokens.cardBg,
-        backdropFilter:       `blur(${Math.max(blurPx, 20)}px)`,
-        WebkitBackdropFilter: `blur(${Math.max(blurPx, 20)}px)`,
+        backgroundColor: tokens.cardBg,
         border:    bdr === 'default' ? `1px solid ${tokens.cardBorderHover}` : border,
         borderRadius: `${r}px`,
-        // Strong lift with inner highlight
-        boxShadow: baseShadow('0 14px 42px rgba(0,0,0,0.48), 0 2px 8px rgba(0,0,0,0.32)'),
+        boxShadow: baseShadow('0 12px 36px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.24)'),
       };
     case 'borderless':
       return {
-        backgroundColor:      `${tokens.cardBg}f2`,
-        backdropFilter:       'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
+        backgroundColor: tokens.cardBg,
         border:       '1px solid transparent',
         borderRadius: `${r}px`,
         boxShadow:    glowStr ? `${glowStr}, ${innerHighlight}` : innerHighlight,

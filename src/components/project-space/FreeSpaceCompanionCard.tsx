@@ -149,9 +149,9 @@ export function FreeSpaceCompanionCard({
       <div
         className="flex h-full flex-col rounded-2xl overflow-hidden"
         style={{
-          background: `linear-gradient(180deg, ${tokens.cardBg} 0%, ${tokens.wellBg} 100%)`,
-          border: `1px solid ${tokens.cardBorderHover}`,
-          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), 0 0 28px ${tokens.accentGlow}`,
+          backgroundColor: 'transparent',
+          border: 'none',
+          boxShadow: 'none',
         }}
       >
         <div
@@ -307,9 +307,9 @@ export function FreeSpaceCompanionCard({
     <div
       className="flex h-full min-h-[220px] flex-col rounded-2xl overflow-hidden"
       style={{
-        background: `linear-gradient(180deg, ${tokens.cardBg} 0%, ${tokens.wellBg} 100%)`,
-        border: `1px solid ${tokens.cardBorderHover}`,
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), 0 0 24px ${tokens.accentGlow}`,
+        backgroundColor: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
       }}
     >
       <div
@@ -412,7 +412,7 @@ export function FreeSpaceCompanionCard({
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center"
               style={{
-                background: `linear-gradient(180deg, ${tokens.cardBg}d8 0%, ${tokens.wellBg}f0 100%)`,
+                backgroundColor: tokens.wellBg,
               }}
             >
               <div

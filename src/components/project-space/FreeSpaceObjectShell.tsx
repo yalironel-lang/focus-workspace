@@ -39,8 +39,8 @@ export const FreeSpaceObjectShell = memo(function FreeSpaceObjectShell({ type, t
     <div
       className="flex flex-col h-full min-h-[120px] rounded-xl overflow-hidden"
       style={{
-        backgroundColor: `${tokens.cardBg}f2`,
-        border: `1px solid ${tokens.cardBorder}`,
+        backgroundColor: 'transparent',
+        border: 'none',
       }}
     >
       <div

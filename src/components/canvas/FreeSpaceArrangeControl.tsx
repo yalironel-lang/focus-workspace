@@ -100,16 +100,14 @@ export function FreeSpaceArrangeControl({
           padding: '8px 12px',
           borderRadius: '10px',
           border: `1px solid rgba(255,255,255,0.06)`,
-          background: `${tokens.cardBg}cc`,
+          backgroundColor: tokens.cardBg,
           color: tokens.textSecondary,
           fontSize: '11px',
           fontWeight: 600,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
           cursor: 'pointer',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          boxShadow: `0 8px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04)`,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.32)',
           transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease',
         }}
       >
@@ -137,10 +135,8 @@ export function FreeSpaceArrangeControl({
             padding: '6px',
             borderRadius: 12,
             border: `1px solid rgba(255,255,255,0.06)`,
-            background: `${tokens.cardBg}ee`,
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 16px 48px rgba(0,0,0,0.45)',
+            backgroundColor: tokens.cardBg,
+            boxShadow: '0 16px 44px rgba(0,0,0,0.4)',
           }}
         >
           {FREE_SPACE_TEMPLATES.map((t) => (

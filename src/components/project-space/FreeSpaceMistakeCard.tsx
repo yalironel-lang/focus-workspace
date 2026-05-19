@@ -94,8 +94,8 @@ export function FreeSpaceMistakeCard({
         padding: '14px 16px 12px',
         minHeight: 120,
         background: isRecall
-          ? `linear-gradient(165deg, ${tokens.accent}14 0%, transparent 44%), ${tokens.cardBg}`
-          : `linear-gradient(165deg, rgba(180,40,40,0.06) 0%, transparent 42%), ${tokens.cardBg}`,
+          ? `linear-gradient(165deg, ${tokens.accent}12 0%, transparent 48%)`
+          : `linear-gradient(165deg, rgba(180,40,40,0.05) 0%, transparent 46%)`,
         borderTop: isRecall
           ? `1px solid ${tokens.accent}26`
           : `1px solid rgba(248,113,113,0.12)`,

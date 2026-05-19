@@ -247,9 +247,9 @@ export function FreeSpaceStudyFileCard({
     <div
       className="flex flex-col h-full min-h-[200px] rounded-xl overflow-hidden"
       style={{
-        backgroundColor: `${tokens.cardBg}ff`,
-        border: `1px solid ${tokens.cardBorderHover}`,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        backgroundColor: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
       }}
       onDragOver={e => {
         if (!isOffice) return;

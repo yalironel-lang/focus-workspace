@@ -270,13 +270,11 @@ function CanvasControls({
         gap:                  '2px',
         padding:              '6px',
         borderRadius:         '16px',
-        backgroundColor:      `${tokens.cardBg}ee`,
+        backgroundColor:      tokens.cardBg,
         border:               `1px solid ${tokens.cardBorder}`,
-        backdropFilter:       'blur(24px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
         boxShadow:            chromeQuiet && !barHovered
-          ? '0 6px 20px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03)'
-          : '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
+          ? '0 6px 20px rgba(0,0,0,0.28)'
+          : '0 8px 28px rgba(0,0,0,0.36)',
         opacity:              visible ? quietOpacity : 0,
         visibility:           visible ? 'visible' : 'hidden',
         pointerEvents:        visible ? 'auto' : 'none',
@@ -1808,18 +1806,12 @@ export function FreeformCanvas({
                   borderRadius: '24px',
                   pointerEvents: 'none',
                   zIndex: 1,
-                  opacity: hasDeepFocus ? 1 : 0,
+                  opacity: hasDeepFocus && focusSurfaceActive ? 0.55 : 0,
                   background: focusSurfaceActive
-                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}06 0%, transparent 74%)`
-                    : deepInactive || distantFromCluster
-                      ? 'radial-gradient(120% 95% at 50% 36%, rgba(5,10,18,0.1) 0%, transparent 78%)'
-                      : 'transparent',
+                    ? `radial-gradient(120% 95% at 50% 36%, ${tokens.accent}05 0%, transparent 72%)`
+                    : 'transparent',
                   border: 'none',
-                  boxShadow: focusSurfaceActive
-                    ? `0 14px 40px rgba(0,0,0,0.26)`
-                    : deepInactive || distantFromCluster
-                      ? '0 8px 22px rgba(0,0,0,0.18)'
-                      : 'none',
+                  boxShadow: 'none',
                   transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1), background 0.6s cubic-bezier(0.4,0,0.2,1), border-color 0.5s cubic-bezier(0.4,0,0.2,1), box-shadow 0.55s cubic-bezier(0.4,0,0.2,1)',
                 }}
               />
@@ -1839,14 +1831,13 @@ export function FreeformCanvas({
                       ? 0
                       : item.kind === 'block'
                         ? continuityObjectSet.has(item.id)
-                          ? 0.78
+                          ? 0.35
                           : continuityClusterSet.has(item.id)
-                            ? 0.48
+                            ? 0.22
                             : 0
                         : 0,
-                  filter:
-                    canvasInteracting || scalePolicy?.glowAllowed === false ? 'none' : 'blur(22px)',
-                  background: `radial-gradient(ellipse at 50% 42%, ${tokens.accent}14 0%, ${tokens.accent}0a 26%, transparent 72%)`,
+                  filter: 'none',
+                  background: `radial-gradient(ellipse at 50% 42%, ${tokens.accent}10 0%, transparent 68%)`,
                   transition: canvasInteracting ? 'none' : 'opacity 0.35s ease',
                 }}
               />
@@ -1987,8 +1978,7 @@ export function FreeformCanvas({
                     padding: '6px 10px',
                     borderRadius: 999,
                     border: `1px solid ${tokens.cardBorder}`,
-                    backgroundColor: `${tokens.wellBg}dd`,
-                    backdropFilter: 'blur(10px)',
+                    backgroundColor: tokens.wellBg,
                   }}
                 >
                   {line}
@@ -2074,10 +2064,10 @@ export function FreeformCanvas({
           pointerEvents: 'none',
           zIndex:        1,
           boxShadow: deepFocusAtmosphere
-            ? `inset 0 0 72px rgba(7,11,20,0.14)`
+            ? `inset 0 0 56px rgba(7,11,20,0.1)`
             : focusMode && spatialAmbient
               ? focusAtm.insetShadow
-              : `inset 0 0 64px rgba(7,11,20,0.16)`,
+              : `inset 0 0 48px rgba(7,11,20,0.11)`,
           transition: focusMode && spatialAmbient
             ? `box-shadow ${focusAtm.transition}`
             : 'box-shadow 0.8s cubic-bezier(0.4,0,0.2,1)',

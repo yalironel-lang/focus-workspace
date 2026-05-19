@@ -56,9 +56,9 @@ export function FreeSpaceCalculator({ content, tokens, onChange }: Props) {
     <div
       className="flex flex-col h-full min-h-[200px] rounded-xl overflow-hidden"
       style={{
-        backgroundColor: `${tokens.cardBg}ee`,
-        border: `1px solid ${tokens.cardBorder}`,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        backgroundColor: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
       }}
     >
       <div

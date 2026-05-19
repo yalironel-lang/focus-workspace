@@ -206,7 +206,7 @@ function Section({
                 width: '100%',
                 textAlign: 'left',
                 border: `1px solid ${tokens.cardBorder}`,
-                background: `${tokens.wellBg}cc`,
+                backgroundColor: tokens.wellBg,
                 borderRadius: 12,
                 padding: '10px 11px',
                 cursor: onSelectObject ? 'pointer' : 'default',
@@ -217,13 +217,13 @@ function Section({
               }}
               onMouseEnter={e => {
                 const el = e.currentTarget;
-                el.style.background = `${tokens.cardBg}f0`;
+                el.style.backgroundColor = tokens.cardBg;
                 el.style.borderColor = tokens.cardBorderHover;
                 el.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={e => {
                 const el = e.currentTarget;
-                el.style.background = `${tokens.wellBg}cc`;
+                el.style.backgroundColor = tokens.wellBg;
                 el.style.borderColor = tokens.cardBorder;
                 el.style.transform = 'none';
               }}
@@ -312,10 +312,8 @@ export function NotebookContextSidebar({
         alignSelf: 'stretch',
         borderRadius: 18,
         border: `1px solid ${tokens.cardBorder}`,
-        background: `${tokens.cardBg}d9`,
-        boxShadow: `0 18px 48px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.06)`,
-        backdropFilter: 'blur(16px) saturate(1.1)',
-        WebkitBackdropFilter: 'blur(16px) saturate(1.1)',
+        backgroundColor: tokens.cardBg,
+        boxShadow: '0 14px 40px rgba(0,0,0,0.28)',
         padding: '14px 14px 16px',
         display: 'flex',
         flexDirection: 'column',
@@ -377,7 +375,7 @@ export function NotebookContextSidebar({
           padding: '10px 11px',
           borderRadius: 14,
           border: `1px solid ${tokens.cardBorder}`,
-          background: `${tokens.wellBg}cc`,
+          backgroundColor: tokens.wellBg,
         }}
       >
         <span
