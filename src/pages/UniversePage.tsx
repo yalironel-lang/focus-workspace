@@ -178,10 +178,10 @@ export function UniversePage() {
           <span style={{ width: 1, height: 18, backgroundColor: tokens.divider }} />
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: tokens.textGhost }}>
-              Universe
+              Labs · Universe
             </p>
             <p className="text-[13px] font-semibold truncate" style={{ color: tokens.textPrimary }}>
-              Workspace Universe
+              Project map
             </p>
           </div>
         </div>
@@ -220,7 +220,7 @@ export function UniversePage() {
         }}
       >
         <Sparkles className="w-3 h-3 inline mr-1.5 opacity-70" />
-        Spatial map of your projects — drag regions to arrange. Open a project to enter its workspace.
+        Advanced spatial overview — open a project to study in its workspace. Library is the daily home.
         <Link to={LIBRARY_ROUTE} className="ml-2 font-semibold" style={{ color: tokens.accent }}>
           List view
         </Link>

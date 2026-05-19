@@ -253,12 +253,13 @@ function workspaceBackPillStyle(
   };
 }
 
-function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', studySpaceActive = false, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
   isCustomizing: boolean;
   backLabel?: string;
+  studySpaceActive?: boolean;
   onBack: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
@@ -373,25 +374,32 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
               onClick={onOpenAppearance}
               style={{
                 ...NAV_BTN_BASE,
-                color: tokens.textMuted,
-                gap: 6,
-                padding: '0 12px',
+                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
+                gap: studySpaceActive ? 0 : 6,
+                padding: studySpaceActive ? '0 10px' : '0 12px',
                 minWidth: 'auto',
+                opacity: studySpaceActive ? 0.82 : 1,
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
             >
               <Palette className="w-4 h-4 shrink-0" style={{ color: tokens.accent }} />
-              <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.02em' }}>Scene</span>
+              {!studySpaceActive && (
+                <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.02em' }}>Scene</span>
+              )}
             </button>
             <button
               type="button"
               aria-label="Customize workspace"
               title="Customize workspace"
               onClick={onCustomize}
-              style={{ ...NAV_BTN_BASE, color: tokens.textMuted }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+              style={{
+                ...NAV_BTN_BASE,
+                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
+                opacity: studySpaceActive ? 0.82 : 1,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
             >
               <Sliders className="w-4 h-4" />
             </button>
@@ -401,6 +409,11 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
     </nav>
   );
 }
+
+const VIEW_MODE_OPTIONS = [
+  { id: 'free-space' as const, label: 'Workspace', hint: 'Sources, notes, tools' },
+  { id: 'work-surface' as const, label: 'Mission control', hint: 'Tasks & priorities' },
+];
 
 function WorkspaceViewModeBar({
   tokens,
@@ -413,6 +426,7 @@ function WorkspaceViewModeBar({
   onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
   focusMode: FocusMode | null;
 }) {
+  const activeHint = VIEW_MODE_OPTIONS.find(opt => opt.id === sectionViewMode)?.hint ?? '';
   return (
     <div
       style={{
@@ -420,6 +434,8 @@ function WorkspaceViewModeBar({
         borderBottom: `1px solid ${tokens.divider}`,
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
         padding: '0 20px',
         backgroundColor: tokens.navBg,
         position: 'relative',
@@ -456,32 +472,53 @@ function WorkspaceViewModeBar({
           backgroundColor: `${tokens.wellBg}f2`,
         }}
       >
-        {([
-          { id: 'work-surface' as const, label: 'Work Surface' },
-          { id: 'free-space' as const, label: 'Free Space' },
-        ]).map(opt => (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => onViewModeChange(opt.id)}
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.03em',
-              border: 'none',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              minWidth: 44,
-              minHeight: 40,
-              cursor: 'pointer',
-              backgroundColor: sectionViewMode === opt.id ? tokens.accent : 'transparent',
-              color: sectionViewMode === opt.id ? '#000' : tokens.textSecondary,
-            }}
-          >
-            {opt.label}
-          </button>
-        ))}
+        {VIEW_MODE_OPTIONS.map(opt => {
+          const isActive = sectionViewMode === opt.id;
+          const isPrimary = opt.id === 'free-space';
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onViewModeChange(opt.id)}
+              style={{
+                fontSize: '11px',
+                fontWeight: isActive ? 800 : 650,
+                letterSpacing: '0.02em',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                minWidth: 44,
+                minHeight: 36,
+                cursor: 'pointer',
+                backgroundColor: isActive
+                  ? (isPrimary ? tokens.accent : tokens.wellBg)
+                  : 'transparent',
+                color: isActive
+                  ? (isPrimary ? '#000' : tokens.textPrimary)
+                  : tokens.textMuted,
+                boxShadow: isActive && isPrimary ? `0 0 0 1px ${tokens.accentGlow}` : 'none',
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
+      {!focusMode && activeHint ? (
+        <p
+          style={{
+            margin: 0,
+            fontSize: '11px',
+            color: tokens.textGhost,
+            letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          {activeHint}
+          {sectionViewMode === 'free-space' ? ' · PDF → notebook → review' : ''}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -571,7 +608,7 @@ function FreeSpaceToolPalette({
             Choose a study object or tool.
           </h2>
           <p style={{ margin: '7px 0 0', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.48, maxWidth: 520 }}>
-            Sources, notes, review cards, and math tools all stay available on the same spatial canvas.
+            PDF → notebook → mistakes → review. Everything connects on one spatial desk.
           </p>
         </div>
         <button
@@ -654,6 +691,80 @@ function FreeSpaceToolPalette({
   );
 }
 
+function MissionControlStudyBridge({
+  tokens,
+  accent,
+  pdfCount,
+  notebookCount,
+  mistakeCount,
+  resumeHeadline,
+  onOpenStudySpace,
+}: {
+  tokens: ReturnType<typeof useAtmosphere>['tokens'];
+  accent: string;
+  pdfCount: number;
+  notebookCount: number;
+  mistakeCount: number;
+  resumeHeadline?: string | null;
+  onOpenStudySpace: () => void;
+}) {
+  const parts: string[] = [];
+  if (pdfCount > 0) parts.push(`${pdfCount} source${pdfCount === 1 ? '' : 's'}`);
+  if (notebookCount > 0) parts.push(`${notebookCount} notebook${notebookCount === 1 ? '' : 's'}`);
+  if (mistakeCount > 0) parts.push(`${mistakeCount} to review`);
+  const summary = parts.length > 0 ? parts.join(' · ') : 'Your spatial workspace lives here.';
+
+  return (
+    <div
+      style={{
+        marginBottom: 28,
+        padding: '14px 16px',
+        borderRadius: 14,
+        border: `1px solid ${tokens.cardBorder}`,
+        background: `linear-gradient(135deg, ${tokens.accentSubtle}, rgba(255,255,255,0.02))`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 14,
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ margin: '0 0 4px', fontSize: 9, fontWeight: 750, letterSpacing: '0.14em', textTransform: 'uppercase', color: tokens.accent }}>
+          Workspace
+        </p>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 650, color: tokens.textPrimary, letterSpacing: '-0.02em' }}>
+          {resumeHeadline ?? summary}
+        </p>
+        {resumeHeadline ? (
+          <p style={{ margin: '4px 0 0', fontSize: 11.5, color: tokens.textMuted, lineHeight: 1.4 }}>{summary}</p>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onOpenStudySpace}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '8px 14px',
+          borderRadius: 10,
+          border: 'none',
+          backgroundColor: accent,
+          color: '#000',
+          fontSize: 12,
+          fontWeight: 750,
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        Open workspace
+        <ArrowRight className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
 function FreeSpaceEmptyGuidance({
   tokens,
   onAddPdf,
@@ -691,13 +802,13 @@ function FreeSpaceEmptyGuidance({
       }}
     >
       <p style={{ margin: '0 0 5px', color: tokens.accent, fontSize: 10, fontWeight: 850, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-        Free Space
+        Workspace
       </p>
       <h2 style={{ margin: 0, color: tokens.textPrimary, fontSize: 20, fontWeight: 850, letterSpacing: '-0.03em' }}>
-        Start by adding a source, note, or tutor.
+        Add a source, write in a notebook, capture mistakes.
       </h2>
-      <p style={{ margin: '8px auto 15px', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.5, maxWidth: 380 }}>
-        Build a spatial study desk from the objects you actually need.
+      <p style={{ margin: '8px auto 15px', color: tokens.textSecondary, fontSize: 13, lineHeight: 1.5, maxWidth: 400 }}>
+        Your main study flow: read the PDF, take notes beside it, link tools, review what you missed.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
         {actions.map(action => (
@@ -788,6 +899,7 @@ function WorkspaceSectionChrome({
         tokens={tokens}
         isCustomizing={isCustomizing}
         backLabel={backLabel}
+        studySpaceActive={sectionViewMode === 'free-space'}
         onBack={onBack}
         onOpenAppearance={onOpenAppearance}
         onCustomize={onCustomize}
@@ -1091,7 +1203,7 @@ export function SectionPage() {
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() => {
     if (navState?.firstArrival) return 'free-space';
-    return sectionId ? loadSectionViewMode(sectionId) : 'work-surface';
+    return sectionId ? loadSectionViewMode(sectionId) : 'free-space';
   });
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space') => {
@@ -1187,6 +1299,15 @@ export function SectionPage() {
   const freeSpaceSurfaceVisible = sectionViewMode === 'free-space';
   const workSurfaceVisible = sectionViewMode !== 'free-space' && !designMode;
   const designSurfaceVisible = sectionViewMode !== 'free-space' && designMode;
+
+  const studySpaceStats = useMemo(() => {
+    const objects = sectionObjects.objects;
+    return {
+      pdfCount: objects.filter(o => o.type === 'pdf').length,
+      notebookCount: objects.filter(o => o.type === 'notebook' || o.type === 'note').length,
+      mistakeCount: objects.filter(o => o.type === 'mistake').length,
+    };
+  }, [sectionObjects.objects]);
 
   useEffect(() => {
     flickerDebugCount('SectionPage');
@@ -2377,7 +2498,7 @@ export function SectionPage() {
           onCustomize={() => {}}
           onExitCustomize={() => {}}
           onResetCustomize={() => {}}
-          sectionViewMode="work-surface"
+          sectionViewMode="free-space"
           onViewModeChange={() => {}}
           focusMode={null}
         />
@@ -2875,29 +2996,46 @@ export function SectionPage() {
           {/* ── RIGHT WORK SURFACE ───────────────────────────────────────── */}
           <main style={{ overflowY: 'auto', position: 'relative', backgroundColor: 'rgba(255,255,255,0.012)' }}>
 
-            {/* Session aura */}
+            {/* Subtle session hint — secondary to workspace */}
             <div style={{
               position: 'absolute', inset: 0,
               background: sessionIsThisCourse
-                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.055) 0%, transparent 65%)'
-                : 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.016) 0%, transparent 55%)',
+                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.035) 0%, transparent 65%)'
+                : 'none',
               pointerEvents: 'none', zIndex: 0, transition: 'background 1.4s cubic-bezier(0.4,0,0.2,1)',
             }} />
 
-            <div style={{ position: 'relative', zIndex: 1, padding: '42px 46px 88px', maxWidth: '680px' }}>
+            <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 88px', maxWidth: '720px' }}>
 
-              {/* ── IDENTITY HEADER ──────────────────────────────────────── */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '34px', paddingLeft: '15px', borderLeft: `2px solid ${accentColor}70` }}>
+              <MissionControlStudyBridge
+                tokens={tokens}
+                accent={accentColor}
+                pdfCount={studySpaceStats.pdfCount}
+                notebookCount={studySpaceStats.notebookCount}
+                mistakeCount={studySpaceStats.mistakeCount}
+                resumeHeadline={
+                  workspaceContinuity.continuityRecent && workspaceContinuity.resumeCopy
+                    ? workspaceContinuity.resumeCopy.headline
+                    : null
+                }
+                onOpenStudySpace={() => setSectionViewMode('free-space')}
+              />
+
+              {/* ── MISSION CONTROL HEADER ─────────────────────────────── */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px', paddingLeft: '14px', borderLeft: `2px solid ${accentColor}55` }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: '0 0 6px', fontSize: 9, fontWeight: 750, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.55)' }}>
+                    Today&apos;s priorities
+                  </p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                     {customization.icon && (
                       <span style={{ fontSize: '16px', lineHeight: 1 }} role="img">{customization.icon}</span>
                     )}
-                    <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em', margin: 0 }}>
+                    <h1 style={{ fontSize: '18px', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em', margin: 0 }}>
                       {section.title}
                     </h1>
                     {spaceAge(section.created_at) && (
-                      <span style={{ fontSize: '10px', color: '#1a2230', fontWeight: 400, letterSpacing: '0.02em', flexShrink: 0, userSelect: 'none' }}>
+                      <span style={{ fontSize: '10px', color: '#374151', fontWeight: 500, flexShrink: 0, userSelect: 'none' }}>
                         {spaceAge(section.created_at)}
                       </span>
                     )}
@@ -2990,7 +3128,7 @@ export function SectionPage() {
               {todayPlan.length > 0 && (
                 <div style={{ borderLeft: '1.5px solid rgba(245,158,11,0.45)', backgroundColor: 'rgba(245,158,11,0.014)', borderRadius: '0 3px 3px 0', marginBottom: '36px' }}>
                   <div style={{ padding: '6px 16px 0', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '9px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.5)', fontWeight: 600 }}>now</span>
+                    <span style={{ fontSize: '9px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.5)', fontWeight: 600 }}>Do next</span>
                   </div>
 
                   <button
@@ -3026,21 +3164,30 @@ export function SectionPage() {
                     </button>
                   ))}
 
-                  <div style={{ padding: '10px 16px 12px' }}>
+                  <div style={{ padding: '10px 16px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <button
+                      type="button"
+                      onClick={() => setSectionViewMode('free-space')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '6px', backgroundColor: accentColor, color: '#000', fontSize: '11px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                    >
+                      Open workspace
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleStartSession}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '6px', backgroundColor: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: '11px', fontWeight: 600, border: '1px solid rgba(245,158,11,0.2)', cursor: 'pointer', transition: 'background-color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
-                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.2)')}
-                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.12)')}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', color: '#6b7280', fontSize: '11px', fontWeight: 600, border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.14)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#6b7280'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'; }}
                     >
                       <PlayCircle className="w-3 h-3" />
-                      {sessionIsThisCourse ? 'Resume' : 'Begin session'}
+                      {sessionIsThisCourse ? 'Resume focus session' : 'Focus session'}
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* ── WORK SURFACE ─────────────────────────────────────────── */}
+              {/* ── TASKS & CAPTURE ────────────────────────────────────── */}
               <div style={{ marginBottom: '40px' }}>
 
                 {exercisesGroup ? (

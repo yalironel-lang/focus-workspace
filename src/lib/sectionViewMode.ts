@@ -3,14 +3,14 @@ const VIEW_MODE_KEY = 'fw_section_view_mode_v1';
 export type SectionViewMode = 'work-surface' | 'free-space';
 
 export function loadSectionViewMode(sectionId: string): SectionViewMode {
-  if (!sectionId || typeof window === 'undefined') return 'work-surface';
+  if (!sectionId || typeof window === 'undefined') return 'free-space';
   try {
     const raw = sessionStorage.getItem(VIEW_MODE_KEY);
-    if (!raw) return 'work-surface';
+    if (!raw) return 'free-space';
     const map = JSON.parse(raw) as Record<string, string>;
-    return map[sectionId] === 'free-space' ? 'free-space' : 'work-surface';
+    return map[sectionId] === 'work-surface' ? 'work-surface' : 'free-space';
   } catch {
-    return 'work-surface';
+    return 'free-space';
   }
 }
 
