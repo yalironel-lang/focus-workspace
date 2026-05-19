@@ -18,10 +18,17 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
-import { MathSymbolBar } from '../notebook/MathSymbolBar';
+import { MathInputToolbar } from '../notebook/MathInputToolbar';
 import { MathRichText } from '../notebook/MathRichText';
+import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
+import {
+  getMathTemplate,
+  plainMathToLatex,
+  textLikelyHasPlainMath,
+  type MathTemplateId,
+} from '../../lib/mathInputAssistant';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
@@ -1419,14 +1426,37 @@ export function ProjectNotebookBlock({
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
       if (!blk || blk.kind === 'divider') return;
+      if (blk.kind === 'math') {
+        const latex = plainMathToLatex(snippet);
+        updateBlockText(blockId, latex);
+        return;
+      }
       const root = editorRootRef.current;
       const el = root?.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
       const offset = el ? getCaretOffsetIn(el) : blk.text.length;
-      const newText = blk.text.slice(0, offset) + snippet + blk.text.slice(offset);
+      const insert = snippet.endsWith(' ') ? snippet : `${snippet} `;
+      const newText = blk.text.slice(0, offset) + insert + blk.text.slice(offset);
       updateBlockText(blockId, newText);
-      pendingCaretRef.current = { id: blockId, offset: offset + snippet.length };
+      pendingCaretRef.current = { id: blockId, offset: offset + insert.length };
     },
     [surfaceFocusBlockId, updateBlockText],
+  );
+
+  const applyMathTemplate = useCallback(
+    (templateId: MathTemplateId, values: Record<string, string>) => {
+      const template = getMathTemplate(templateId);
+      if (!template) return;
+      const blockId = surfaceFocusBlockId;
+      if (blockId) {
+        const blk = blocksRef.current.find(b => b.id === blockId);
+        if (blk?.kind === 'math') {
+          updateBlockText(blockId, template.buildLatex(values));
+          return;
+        }
+      }
+      insertMathSnippet(template.buildSimple(values));
+    },
+    [insertMathSnippet, surfaceFocusBlockId, updateBlockText],
   );
 
   const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
@@ -2287,7 +2317,14 @@ export function ProjectNotebookBlock({
           style={editorSurfaceStyle}
         >
           <div style={writingColumnStyle}>
-          {isMathNotebook ? <MathSymbolBar tokens={tokens} onInsert={insertMathSnippet} /> : null}
+          {isMathNotebook ? (
+            <MathInputToolbar
+              tokens={tokens}
+              textColor={notebookInk.headline}
+              onInsertSymbol={insertMathSnippet}
+              onApplyTemplate={applyMathTemplate}
+            />
+          ) : null}
           {blocks.map((block, index) => {
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
             if (block.kind === 'divider') {
@@ -2741,31 +2778,62 @@ export function ProjectNotebookBlock({
                 data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                 style={blockSurfaceChrome(block.id)}
               >
-                <EditableLine
-                  id={block.id}
-                  text={block.text}
-                  tokens={tokens}
-                  placeholder={paragraphPlaceholder}
-                  onUpdate={updateBlockText}
-                  onFocusIndex={setFocusIndexById}
-                  onAfterInput={(el) => onEditableAfterInput(block.id, el)}
-                  style={{
-                    width: '100%',
-                    border: 'none',
-                    outline: 'none',
-                    background: 'transparent',
-                    color: paraFine ? notebookInk.muted : paraMuted ? notebookInk.secondary : notebookInk.primary,
-                    fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
-                    fontWeight: paraMuted ? 500 : 400,
-                    lineHeight: paraFine ? 1.7 : 1.84,
-                    letterSpacing: paraFine ? '0.024em' : '0.004em',
-                    margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
-                    opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
-                    caretColor: tokens.accent,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                />
+                {isMathNotebook && !paraFine && !paraMuted ? (
+                  <MathEditableParagraph
+                    id={block.id}
+                    text={block.text}
+                    tokens={tokens}
+                    placeholder={paragraphPlaceholder}
+                    onUpdate={updateBlockText}
+                    onFocusIndex={setFocusIndexById}
+                    onAfterInput={el => onEditableAfterInput(block.id, el)}
+                    EditableLine={EditableLine}
+                    textColor={notebookInk.primary}
+                    mutedColor={tokens.textMuted}
+                    style={{
+                      width: '100%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: notebookInk.primary,
+                      fontSize: `${typeScale.l3}px`,
+                      fontWeight: 400,
+                      lineHeight: 1.84,
+                      letterSpacing: '0.004em',
+                      margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
+                      opacity: 1,
+                      caretColor: tokens.accent,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  />
+                ) : (
+                  <EditableLine
+                    id={block.id}
+                    text={block.text}
+                    tokens={tokens}
+                    placeholder={paragraphPlaceholder}
+                    onUpdate={updateBlockText}
+                    onFocusIndex={setFocusIndexById}
+                    onAfterInput={el => onEditableAfterInput(block.id, el)}
+                    style={{
+                      width: '100%',
+                      border: 'none',
+                      outline: 'none',
+                      background: 'transparent',
+                      color: paraFine ? notebookInk.muted : paraMuted ? notebookInk.secondary : notebookInk.primary,
+                      fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
+                      fontWeight: paraMuted ? 500 : 400,
+                      lineHeight: paraFine ? 1.7 : 1.84,
+                      letterSpacing: paraFine ? '0.024em' : '0.004em',
+                      margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
+                      opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
+                      caretColor: tokens.accent,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -3036,24 +3104,29 @@ export function ProjectNotebookBlock({
                     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: `${typeScale.l5}px`,
-                      fontWeight: 700,
-                      letterSpacing: '0.12em',
-                      textTransform: 'uppercase',
-                      color: notebookInk.ghost,
-                      marginBottom: `${typeScale.s5 - 2}px`,
-                    }}
-                  >
-                    Equation
+                  {!isMathNotebook ? (
+                    <div
+                      style={{
+                        fontSize: `${typeScale.l5}px`,
+                        fontWeight: 700,
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase',
+                        color: notebookInk.ghost,
+                        marginBottom: `${typeScale.s5 - 2}px`,
+                      }}
+                    >
+                      Equation
+                    </div>
+                  ) : null}
+                  <div className={isMathNotebook ? 'math-nb-hero' : undefined}>
+                    <KatexPreview
+                      latex={plainMathToLatex(line.text)}
+                      displayMode
+                      hero={isMathNotebook}
+                      textColor={notebookInk.headline}
+                      mutedColor={tokens.textMuted}
+                    />
                   </div>
-                  <KatexPreview
-                    latex={line.text}
-                    displayMode
-                    textColor={notebookInk.headline}
-                    mutedColor={tokens.textMuted}
-                  />
                 </div>
               );
             }
@@ -3075,9 +3148,12 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {textHasMathDelimiters(line.text) ? (
+                  {isMathNotebook ||
+                  textHasMathDelimiters(line.text) ||
+                  textLikelyHasPlainMath(line.text) ? (
                     <MathRichText
                       text={line.text}
+                      autoPlainMath={isMathNotebook}
                       textColor={fine ? notebookInk.muted : muted ? notebookInk.secondary : notebookInk.primary}
                       mutedColor={tokens.textMuted}
                     />

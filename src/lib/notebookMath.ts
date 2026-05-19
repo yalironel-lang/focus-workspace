@@ -3,6 +3,7 @@
  */
 
 import katex from 'katex';
+import { plainMathToLatex } from './mathInputAssistant';
 
 export type MathSegment =
   | { type: 'text'; value: string }
@@ -94,9 +95,5 @@ export function renderKatexHtml(latex: string, displayMode: boolean): KatexRende
 
 /** Normalize student shorthand to LaTeX when no backslashes present. */
 export function normalizeMathInput(raw: string): string {
-  const t = raw.trim();
-  if (!t || t.includes('\\')) return raw;
-  return t
-    .replace(/\^(\d+)/g, '^{$1}')
-    .replace(/sqrt\(([^)]+)\)/gi, '\\sqrt{$1}');
+  return plainMathToLatex(raw);
 }

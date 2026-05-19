@@ -58,6 +58,10 @@ function previewForObject(obj: ProjectSpaceObject): string {
       return content.caption || content.alt || 'Visual reference';
     case 'companion':
       return content.description || content.url || 'External companion';
+    case 'studyfile':
+      return content.fileName || content.externalUrl || 'Study file';
+    default:
+      return 'Object';
   }
 }
 

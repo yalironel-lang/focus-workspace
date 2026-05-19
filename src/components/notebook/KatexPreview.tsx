@@ -4,20 +4,25 @@ import { renderKatexHtml } from '../../lib/notebookMath';
 interface Props {
   latex: string;
   displayMode?: boolean;
+  /** Larger display for whole-line equations in math notebook */
+  hero?: boolean;
   /** Fallback text color for errors */
   mutedColor?: string;
   textColor?: string;
   className?: string;
   style?: React.CSSProperties;
+  emptyHint?: string;
 }
 
 export const KatexPreview = memo(function KatexPreview({
   latex,
   displayMode = false,
+  hero = false,
   mutedColor = '#94a3b8',
   textColor = 'inherit',
   className,
   style,
+  emptyHint = 'Type an expression…',
 }: Props) {
   const { html, error } = useMemo(
     () => renderKatexHtml(latex, displayMode),
@@ -30,7 +35,7 @@ export const KatexPreview = memo(function KatexPreview({
         className={className}
         style={{ ...style, color: mutedColor, fontSize: 12, fontStyle: 'italic' }}
       >
-        Enter LaTeX…
+        {emptyHint}
       </div>
     );
   }
@@ -68,9 +73,11 @@ export const KatexPreview = memo(function KatexPreview({
     );
   }
 
+  const heroClass = hero && displayMode ? 'math-katex-hero' : '';
+
   return (
     <div
-      className={className}
+      className={[className, heroClass].filter(Boolean).join(' ') || undefined}
       style={{
         ...style,
         color: textColor,

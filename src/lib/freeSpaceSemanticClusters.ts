@@ -32,6 +32,7 @@ const PROFILE_BY_TYPE: Record<ProjectObjectType, SemanticProfile> = {
   notebook: { lane: 'core', hierarchy: 'primary', weight: 124, intimacy: 1.36 },
   note: { lane: 'core', hierarchy: 'secondary', weight: 94, intimacy: 1.08 },
   pdf: { lane: 'source', hierarchy: 'secondary', weight: 108, intimacy: 1.14 },
+  studyfile: { lane: 'source', hierarchy: 'secondary', weight: 104, intimacy: 1.1 },
   image: { lane: 'source', hierarchy: 'secondary', weight: 82, intimacy: 0.94 },
   link: { lane: 'source', hierarchy: 'utility', weight: 66, intimacy: 0.8 },
   companion: { lane: 'source', hierarchy: 'secondary', weight: 92, intimacy: 1.02 },
