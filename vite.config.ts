@@ -56,16 +56,17 @@ export default defineConfig({
         //   runtime cache would store old bundles for up to 7 days, serving
         //   stale code to users even after a fresh deploy.
         runtimeCaching: [
-          // Supabase API — network first, 10s timeout, 24h fallback
-          {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api-v1',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
-              networkTimeoutSeconds: 10,
-            },
-          },
+          // ── Supabase API is intentionally NOT cached by the service worker ──
+          // Reasons:
+          //   1. Auth-protected responses lose their CORS headers when served
+          //      from Cache API storage, causing browser CORS rejections.
+          //   2. POST/PATCH/DELETE responses cannot be cached by the Cache API.
+          //   3. Stale auth tokens served from cache break session state.
+          //   4. The x-retry-count header (postgrest-js) triggers CORS preflight;
+          //      caching the non-preflight response then serving it for a
+          //      subsequent preflight-triggered request causes CORS failures.
+          // All *.supabase.co requests pass through to the network directly.
+
           // Google Fonts stylesheet — stale-while-revalidate (changes rarely)
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
