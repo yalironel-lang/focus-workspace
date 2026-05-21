@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { ATMOSPHERES } from '../../hooks/useAtmosphere';
 import type { GlobalTheme } from '../../hooks/useWorkspaceTheme';
+import { atmosphereSelectionPatch } from '../../lib/atmospherePreview';
+import { AtmospherePresetCard } from './AtmospherePresetCard';
 import { LivingBackgroundStudio } from './LivingBackgroundStudio';
 
 type AppearanceScope = 'global' | 'workspace';
@@ -36,6 +38,14 @@ export function WorkspaceAppearancePanel({
   open, tokens, atmosphereId, global, onClose, onSetAtmosphere, onUpdateGlobal,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const selectAtmosphere = useCallback(
+    (id: string) => {
+      onSetAtmosphere(id);
+      onUpdateGlobal(atmosphereSelectionPatch(id));
+    },
+    [onSetAtmosphere, onUpdateGlobal],
+  );
 
   if (!open) return null;
 
@@ -97,35 +107,12 @@ export function WorkspaceAppearancePanel({
             gap: 8, marginBottom: 24,
           }}>
             {ATMOSPHERES.map(a => (
-              <button
+              <AtmospherePresetCard
                 key={a.id}
-                type="button"
-                onClick={() => onSetAtmosphere(a.id)}
-                style={{
-                  background: `linear-gradient(135deg, ${a.pageBg}, ${a.cardBg})`,
-                  border: atmosphereId === a.id
-                    ? `1.5px solid ${a.accent}`
-                    : `1px solid ${a.cardBorder}`,
-                  borderRadius: 10,
-                  padding: '12px 12px 10px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'border-color 0.15s, transform 0.1s',
-                  transform: atmosphereId === a.id ? 'scale(1.02)' : 'scale(1)',
-                }}
-              >
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8, alignItems: 'center' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.accent, display: 'inline-block' }} />
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.cardBorder, display: 'inline-block' }} />
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', opacity: 0.5, background: a.ambientGlow1 || a.accent, display: 'inline-block' }} />
-                </div>
-                <p style={{ fontSize: 13, fontWeight: 500, color: a.textPrimary, margin: 0, lineHeight: 1.2 }}>
-                  {a.name}
-                </p>
-                <p style={{ fontSize: 10, color: a.textMuted, margin: '3px 0 0', lineHeight: 1.4 }}>
-                  {a.description}
-                </p>
-              </button>
+                atmosphere={a}
+                active={atmosphereId === a.id}
+                onClick={() => selectAtmosphere(a.id)}
+              />
             ))}
           </div>
 
