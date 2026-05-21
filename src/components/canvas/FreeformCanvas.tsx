@@ -2358,10 +2358,10 @@ export function FreeformCanvas({
           display:         'flex',
           alignItems:      'center',
           justifyContent:  'center',
-          boxShadow:       deepFocusAtmosphere && !addChromeHovered
-            ? `0 2px 10px rgba(0,0,0,0.35), 0 0 0 1px ${tokens.accent}22`
-            : `0 3px 14px rgba(0,0,0,0.32), 0 0 0 1px ${tokens.accent}28`,
-          opacity:         deepFocusAtmosphere && !addChromeHovered ? 0.52 : 1,
+          boxShadow:       addChromeHovered
+            ? `0 4px 16px rgba(0,0,0,0.30), 0 0 0 1px ${tokens.accent}28`
+            : `0 2px 8px rgba(0,0,0,0.22), 0 0 0 1px ${tokens.accent}18`,
+          opacity:         addChromeHovered ? 1 : deepFocusAtmosphere ? 0.40 : 0.62,
           transform:       'scale(1)',
           transition:      'opacity 0.35s ease, box-shadow 0.35s ease, transform 0.3s cubic-bezier(0.34,1.2,0.64,1), background-color 0.25s ease',
           fontWeight:      300,

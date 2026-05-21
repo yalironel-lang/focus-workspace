@@ -70,6 +70,20 @@ export type ProjectObjectContent =
       page: number;
       /** Display scale (1 = 100%) */
       zoom: number;
+      // ── Spatial ingestion fields (Stage 1) ───────────────────────────────
+      /** Total page count from PDF.js metadata. Populated after client-side extraction. */
+      pageCount?: number;
+      /** Title from PDF document metadata — may differ from the filename. */
+      documentTitle?: string;
+      /** First-page JPEG thumbnail as data URL (~10–20 KB). */
+      thumbnailDataUrl?: string;
+      /**
+       * Ingestion lifecycle phase.
+       * 'materializing' — object created, extraction in progress.
+       * 'ready'         — extraction complete (or timed out gracefully).
+       * Absent on objects created before this feature.
+       */
+      ingestionPhase?: 'materializing' | 'ready';
     }
   | {
       type: 'studyfile';
@@ -325,6 +339,11 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         typeof last === 'number' && Number.isFinite(last) ? last : null;
       const page = Math.max(1, Math.floor(numOr(r.page, d.page)));
       const zoom = Math.min(2.5, Math.max(0.5, numOr(r.zoom, d.zoom)));
+      // Optional spatial ingestion fields — preserved as-is, no coercion needed
+      const pageCount      = typeof r.pageCount      === 'number' && r.pageCount > 0 ? r.pageCount : undefined;
+      const documentTitle  = typeof r.documentTitle  === 'string' && r.documentTitle.trim() ? r.documentTitle.trim() : undefined;
+      const thumbnailDataUrl = typeof r.thumbnailDataUrl === 'string' && r.thumbnailDataUrl.startsWith('data:') ? r.thumbnailDataUrl : undefined;
+      const ingestionPhase = r.ingestionPhase === 'materializing' || r.ingestionPhase === 'ready' ? r.ingestionPhase : undefined;
       return {
         type: 'pdf',
         fileName,
@@ -333,6 +352,10 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         lastOpenedAt,
         page,
         zoom,
+        ...(pageCount         !== undefined ? { pageCount }         : {}),
+        ...(documentTitle     !== undefined ? { documentTitle }     : {}),
+        ...(thumbnailDataUrl  !== undefined ? { thumbnailDataUrl }  : {}),
+        ...(ingestionPhase    !== undefined ? { ingestionPhase }    : {}),
       };
     }
     case 'studyfile': {

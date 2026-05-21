@@ -54,12 +54,12 @@ export const AtmosphereOverlays = memo(function AtmosphereOverlays({
             position: 'absolute',
             inset: '-5%',
             pointerEvents: 'none',
-            opacity: overlayOpacity(reactions, 0.65),
+            opacity: overlayOpacity(reactions, 0.82),
             background: `
               radial-gradient(ellipse 120% 55% at 50% 100%, rgba(200,230,220,${0.16 * p}) 0%, transparent 65%),
               radial-gradient(ellipse 80% 40% at 30% 80%, rgba(180,210,200,${0.1 * p}) 0%, transparent 60%)
             `,
-            filter: 'blur(28px)',
+            filter: 'blur(14px)',
           }}
         />
       )}

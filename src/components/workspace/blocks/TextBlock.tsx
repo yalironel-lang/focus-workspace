@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import type { BlockContent } from '../../../hooks/useCustomBlocks';
+import { useSmartTextarea } from '../../../hooks/useSmartTextarea';
 
 type Content = Extract<BlockContent, { type: 'text' }>;
 
@@ -38,6 +39,9 @@ const ALIGN_SVG: Record<string, React.ReactNode> = {
 
 export function TextBlock({ content, tokens, onChange }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  const handleChange = (newBody: string) => onChange({ ...content, body: newBody });
+  const { onKeyDown: smartKeyDown } = useSmartTextarea({ value: content.body, onChange: handleChange });
 
   const autoResize = () => {
     const el = ref.current;
@@ -91,7 +95,8 @@ export function TextBlock({ content, tokens, onChange }: Props) {
       <textarea
         ref={ref}
         value={content.body}
-        onChange={e => { onChange({ ...content, body: e.target.value }); autoResize(); }}
+        onChange={e => { handleChange(e.target.value); autoResize(); }}
+        onKeyDown={smartKeyDown}
         onFocus={autoResize}
         placeholder="Start writing…"
         rows={3}

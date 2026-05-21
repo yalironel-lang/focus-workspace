@@ -133,7 +133,7 @@ export function FreeformBlock({
   const innerHighlight = selected ? `, inset 0 0 0 1px ${tokens.accent}10` : '';
   const shadowBase = material.shadowMul * materialShadowMul;
   const rimPrefix = innerRim ? `${innerRim}${innerHighlight}, ` : innerHighlight ? `${innerHighlight.slice(2)}, ` : '';
-  let boxShadow = `${rimPrefix}0 4px 14px rgba(0,0,0,${(0.14 * shadowBase).toFixed(2)})`;
+  let boxShadow = `${rimPrefix}0 6px 20px rgba(0,0,0,${(0.20 * shadowBase).toFixed(2)}), 0 20px 48px rgba(0,0,0,${(0.10 * shadowBase).toFixed(2)})`;
   if (isDragging && activeGesture === 'resize') {
     boxShadow = `${rimPrefix}0 10px 28px rgba(0,0,0,${(0.24 * shadowBase).toFixed(2)})`;
   } else if (isDragging) {

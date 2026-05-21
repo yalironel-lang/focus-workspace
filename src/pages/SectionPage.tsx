@@ -76,6 +76,7 @@ import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOve
 import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
 import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
 import { isAcceptablePdfFile, savePdfBlob } from '../lib/freeSpacePdfIdb';
+import { extractPdfSpatialData } from '../lib/pdfIngestion';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
 import {
@@ -1742,31 +1743,70 @@ export function SectionPage() {
         toast.error('Only PDF files are supported for now.');
         return;
       }
+
       const obj = addSpaceObject('pdf');
       const x = Math.max(20, Math.round(worldX - 260));
       const y = Math.max(20, Math.round(worldY - 230));
       initPos(obj.id, { x, y, w: 520, h: 460 });
       setSpaceSelectedId(obj.id);
-      try {
-        await savePdfBlob(sectionId, obj.id, file);
-        updateSpaceObjectFields(obj.id, {
-          title: file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name,
-          content: {
-            type: 'pdf',
-            fileName: file.name,
-            fileType: file.type || 'application/pdf',
-            fileSize: file.size,
-            lastOpenedAt: Date.now(),
-            page: 1,
-            zoom: 1,
-          },
-        });
-        applyStudyLinksForObject(obj.id, 'pdf');
-      } catch {
-        toast.error('Could not store this PDF on this device.');
-        removeSpaceObject(obj.id);
-        removePos(obj.id);
-      }
+
+      // Materialise immediately with filename — workspace makes room, object arrives.
+      // ingestionPhase:'materializing' signals the card to show a shimmer.
+      const safeTitle = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
+      updateSpaceObjectFields(obj.id, {
+        title: safeTitle,
+        content: {
+          type: 'pdf',
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: file.size,
+          lastOpenedAt: Date.now(),
+          page: 1,
+          zoom: 1,
+          ingestionPhase: 'materializing',
+        },
+      });
+
+      // Run storage and client-side extraction in parallel.
+      // Neither blocks the other — object is already visible.
+      let storageFailed = false;
+      const [, spatialData] = await Promise.allSettled([
+        savePdfBlob(sectionId, obj.id, file).catch(() => {
+          storageFailed = true;
+          toast.error('Could not store this PDF on this device.');
+          removeSpaceObject(obj.id);
+          removePos(obj.id);
+        }),
+        extractPdfSpatialData(file),
+      ]);
+
+      // If storage failed, the object was already removed — nothing more to do.
+      if (storageFailed) return;
+
+      // Apply spatial data quietly — no toast, no signal, just the object knowing more.
+      // If extraction failed or timed out, spatialData.value holds zeros/nulls; still 'ready'.
+      const spatial = spatialData.status === 'fulfilled' ? spatialData.value : null;
+      updateSpaceObjectFields(obj.id, {
+        // Only override the title if the PDF has a richer document title than the filename
+        ...(spatial?.documentTitle && spatial.documentTitle !== file.name
+          ? { title: spatial.documentTitle.length > 80 ? `${spatial.documentTitle.slice(0, 78)}…` : spatial.documentTitle }
+          : {}),
+        content: {
+          type: 'pdf',
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: file.size,
+          lastOpenedAt: Date.now(),
+          page: 1,
+          zoom: 1,
+          ingestionPhase: 'ready',
+          ...(spatial?.pageCount        ? { pageCount:       spatial.pageCount }        : {}),
+          ...(spatial?.documentTitle    ? { documentTitle:   spatial.documentTitle }    : {}),
+          ...(spatial?.thumbnailDataUrl ? { thumbnailDataUrl: spatial.thumbnailDataUrl } : {}),
+        },
+      });
+
+      applyStudyLinksForObject(obj.id, 'pdf');
     },
     [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
   );

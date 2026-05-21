@@ -29,6 +29,7 @@ import { LibrarySpatialAtmosphere } from './spatial/LibrarySpatialAtmosphere';
 import { SPATIAL_LIBRARY_KEYFRAMES } from './spatial/librarySpatialKeyframes';
 import { SpatialLibraryCard } from './spatial/SpatialLibraryCard';
 import './libraryLayout.css';
+import { HomeGuideCompanion, HomeGuideTrigger } from './HomeGuideCompanion';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -240,6 +241,7 @@ function WorkspaceLibraryView() {
   const [mounted,         setMounted]         = useState(false);
   const [deleteTarget,    setDeleteTarget]    = useState<SectionWithProgress | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [guideOpen,       setGuideOpen]       = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setMounted(true), 40); return () => clearTimeout(t); }, []);
 
@@ -476,15 +478,18 @@ function WorkspaceLibraryView() {
               marginBottom: 42, position: 'relative', zIndex: 2,
               animation: 'libFadeIn 0.5s 0.05s ease both',
             }}>
-              {sidebar.isMobile && (
-                <LibraryMobileMenuButton accent={sA} onOpen={sidebar.openMobile} />
-              )}
-              <span style={{ fontSize: 9.5, fontWeight: 900, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.20)' }}>
-                {getGreeting()}{displayName ? `, ${displayName}` : ''} ·{' '}
-                <span style={{ color: sA, transition: 'color 1.2s ease' }}>
-                  {sections.length > 0 ? `${sections.length} study space${sections.length > 1 ? 's' : ''}` : 'calm study space'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {sidebar.isMobile && (
+                  <LibraryMobileMenuButton accent={sA} onOpen={sidebar.openMobile} />
+                )}
+                <span data-guide-home="greeting" style={{ fontSize: 9.5, fontWeight: 900, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.20)' }}>
+                  {getGreeting()}{displayName ? `, ${displayName}` : ''} ·{' '}
+                  <span style={{ color: sA, transition: 'color 1.2s ease' }}>
+                    {sections.length > 0 ? `${sections.length} study space${sections.length > 1 ? 's' : ''}` : 'calm study space'}
+                  </span>
                 </span>
-              </span>
+                <HomeGuideTrigger onClick={() => setGuideOpen(true)} accent={sA} />
+              </div>
 
               {/* Search */}
               <div
@@ -526,6 +531,7 @@ function WorkspaceLibraryView() {
             {/* FEATURED WORKSPACE PORTAL */}
             {resumeWorkspace && !search && (
               <div
+                data-guide-home="hero-portal"
                 onMouseEnter={() => spatial.setFocusRegion('hero')}
                 onMouseLeave={() => spatial.setFocusRegion(null)}
                 style={{
@@ -912,7 +918,7 @@ function WorkspaceLibraryView() {
                 opacity: 0.85,
               }} />
             )}
-            <div style={{ position: 'relative', zIndex: 1 }}>
+            <div data-guide-home="workspace-grid" style={{ position: 'relative', zIndex: 1 }}>
             {loading ? (
               <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 64 }}>
                 <Loader2 style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.16)', animation: 'spin 1s linear infinite' }} />
@@ -972,6 +978,13 @@ function WorkspaceLibraryView() {
             if (!deletingWorkspace) setDeleteTarget(null);
           }}
           onConfirm={handleConfirmDeleteWorkspace}
+        />
+
+        {/* Home guide companion — amber figure + narrator bubble */}
+        <HomeGuideCompanion
+          isOpen={guideOpen}
+          onClose={() => setGuideOpen(false)}
+          accent={sA}
         />
       </div>
     </>

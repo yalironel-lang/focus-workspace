@@ -76,8 +76,8 @@ function ReadabilityOverlay({
   presence: number;
 }) {
   const r = visual.readability ?? {};
-  const v = (r.vignetteStrength ?? 0.44) * presence;
-  const e = (r.edgeDarken ?? 0.28) * presence;
+  const v = (r.vignetteStrength ?? 0.62) * presence;
+  const e = (r.edgeDarken ?? 0.44) * presence;
   const lift = (r.centerLift ?? 0.06) * presence;
 
   return (
@@ -198,6 +198,7 @@ function CinematicEnvironmentLayersInner({
         visual={visual}
         reactions={reactions}
         paused={paused}
+        opacityMul={0.80}
       />
       {visual.midLayerImage && (
         <SceneImageLayer

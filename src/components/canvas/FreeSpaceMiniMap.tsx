@@ -374,10 +374,10 @@ function FreeSpaceMiniMapInner({
         backgroundColor: tokens.cardBg,
         border: `1px solid ${followPanActive ? `${amber}55` : tokens.cardBorder}`,
         boxShadow: followPanActive
-          ? `0 12px 40px rgba(0,0,0,0.38), 0 0 0 1px ${amber}22, 0 0 28px ${tokens.accentGlow}`
-          : '0 10px 32px rgba(0,0,0,0.32)',
+          ? `0 10px 32px rgba(0,0,0,0.32), 0 0 0 1px ${amber}22, 0 0 14px ${tokens.accentGlow}`
+          : '0 6px 20px rgba(0,0,0,0.20)',
         opacity:
-          (chromeQuiet && !panelHot ? 0.72 : calmDuringInteraction ? 0.94 : panelHot ? 0.98 : 0.9) *
+          (chromeQuiet && !panelHot ? 0.50 : calmDuringInteraction ? 0.74 : panelHot ? 0.88 : 0.64) *
           Math.max(0.2, Math.min(1.35, presentationOpacityMul)),
         transform: `scale(${Math.max(0.72, Math.min(1.2, presentationScale))})`,
         transformOrigin: 'bottom right',

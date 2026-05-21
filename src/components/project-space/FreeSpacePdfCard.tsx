@@ -202,7 +202,7 @@ export function FreeSpacePdfCard({
       >
         <FileText className="w-4 h-4 shrink-0" strokeWidth={2} style={{ color: tokens.accent }} />
         <span className="text-[12px] font-semibold truncate flex-1 min-w-0" style={{ color: tokens.textPrimary }}>
-          {content.fileName || 'PDF'}
+          {content.documentTitle || content.fileName || 'PDF'}
         </span>
         <button
           type="button"
@@ -262,7 +262,7 @@ export function FreeSpacePdfCard({
           <ChevronLeft className="w-4 h-4" />
         </button>
         <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-          Page {content.page}
+          {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
         </span>
         <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
           <ChevronRight className="w-4 h-4" />
@@ -280,12 +280,28 @@ export function FreeSpacePdfCard({
       </div>
 
       <div className="flex-1 min-h-0 relative" style={{ backgroundColor: tokens.wellBg }}>
-        {loadState === 'loading' && (
+        {/* Shimmer — shown while ingestion is in progress (brief, resolves to thumbnail) */}
+        {content.ingestionPhase === 'materializing' && (
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute', inset: 0, zIndex: 12, pointerEvents: 'none',
+              background: `linear-gradient(
+                90deg,
+                ${tokens.wellBg} 0%,
+                rgba(255,255,255,0.04) 40%,
+                ${tokens.wellBg} 80%
+              )`,
+              backgroundSize: '200% 100%',
+              animation: 'fw-pdf-shimmer 1.6s ease-in-out infinite',
+            }}
+          />
+        )}
+
+        {/* Loading state (blob fetching from IDB) */}
+        {loadState === 'loading' && content.ingestionPhase !== 'materializing' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 z-10" style={{ backgroundColor: `${tokens.pageBg}cc` }}>
             <Loader2 className="w-7 h-7 animate-spin" style={{ color: tokens.textMuted }} />
-            <span className="text-[11px]" style={{ color: tokens.textMuted }}>
-              Loading…
-            </span>
           </div>
         )}
 
@@ -335,12 +351,30 @@ export function FreeSpacePdfCard({
 
         {suspendViewer && loadState === 'ready' && (
           <div
-            className="flex-1 flex items-center justify-center px-4 py-8"
-            style={{ backgroundColor: tokens.wellBg, minHeight: 200 }}
+            className="absolute inset-0 flex items-center justify-center overflow-hidden"
+            style={{ backgroundColor: tokens.wellBg }}
           >
-            <p className="text-[11px] text-center" style={{ color: tokens.textGhost }}>
-              PDF paused — select to view
-            </p>
+            {content.thumbnailDataUrl ? (
+              /* Thumbnail — first page preview at rest, no label, no decoration */
+              <img
+                src={content.thumbnailDataUrl}
+                alt=""
+                aria-hidden
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  objectPosition: 'top center',
+                  opacity: 0.55,
+                  display: 'block',
+                }}
+              />
+            ) : (
+              /* Fallback when no thumbnail was extracted */
+              <p className="text-[11px] text-center" style={{ color: tokens.textGhost }}>
+                PDF paused — select to view
+              </p>
+            )}
           </div>
         )}
 

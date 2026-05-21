@@ -1813,6 +1813,33 @@ export function ProjectNotebookBlock({
         return;
       }
 
+      // ── Arrow text transforms on Space ──────────────────────────────────────
+      // ->→  =>→  <=>↔  <=←  <-←
+      if (e.key === ' ' && block.kind !== 'divider') {
+        const offset = getCaretOffsetIn(editable);
+        const text   = editable.textContent ?? '';
+        const before = text.slice(0, offset);
+        const ARROW_TRANSFORMS: [string, string][] = [
+          ['<=>', '↔'],
+          ['=>',  '→'],
+          ['->',  '→'],
+          ['<=',  '←'],
+          ['<-',  '←'],
+        ];
+        for (const [pattern, replacement] of ARROW_TRANSFORMS) {
+          if (before.endsWith(pattern)) {
+            e.preventDefault();
+            const newText = before.slice(0, before.length - pattern.length) + replacement + ' ' + text.slice(offset);
+            updateBlockText(id, newText);
+            pendingCaretRef.current = {
+              id,
+              offset: offset - pattern.length + replacement.length + 1,
+            };
+            return;
+          }
+        }
+      }
+
       if (e.key === 'Backspace') {
         const offset = getCaretOffsetIn(editable);
         const text = editable.textContent ?? '';

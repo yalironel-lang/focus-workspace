@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import type { BlockContent } from '../../../hooks/useCustomBlocks';
+import { useSmartTextarea } from '../../../hooks/useSmartTextarea';
 
 type Content = Extract<BlockContent, { type: 'note' }>;
 
@@ -15,6 +16,9 @@ export function NoteBlock({ content, tokens, onChange }: Props) {
 
   // Line height kept in sync for the lined-paper grid
   const LINE_H = 26; // px
+
+  const handleChange = (newBody: string) => onChange({ ...content, body: newBody });
+  const { onKeyDown: smartKeyDown } = useSmartTextarea({ value: content.body, onChange: handleChange });
 
   const autoResize = () => {
     const el = ref.current;
@@ -58,7 +62,8 @@ export function NoteBlock({ content, tokens, onChange }: Props) {
       <textarea
         ref={ref}
         value={content.body}
-        onChange={e => { onChange({ ...content, body: e.target.value }); autoResize(); }}
+        onChange={e => { handleChange(e.target.value); autoResize(); }}
+        onKeyDown={smartKeyDown}
         onFocus={autoResize}
         placeholder="Your note…"
         rows={4}

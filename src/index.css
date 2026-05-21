@@ -529,3 +529,50 @@
     }
   }
 }
+
+/* ── FreeSpaceCallout — atmospheric spatial anchoring ─────────────────────── */
+
+/* Narrator bubble entrance: slow atmospheric slide */
+@keyframes fw-callout-bubble-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fw-callout-bubble-enter {
+  animation: fw-callout-bubble-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Ambient node: slow glow breath — present but not demanding */
+@keyframes fw-callout-node-breathe {
+  0%, 100% { opacity: 0.38; box-shadow: 0 0 5px rgba(245,158,11,0.15); }
+  50%       { opacity: 0.80; box-shadow: 0 0 12px rgba(245,158,11,0.28); }
+}
+.fw-callout-ambient-node {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: fw-callout-node-breathe 5s ease-in-out infinite;
+}
+
+/* Trigger hover — reveals itself without demanding attention */
+.fw-callout-trigger:hover {
+  background: rgba(245,158,11,0.07) !important;
+  border-color: rgba(245,158,11,0.32) !important;
+  box-shadow: 0 0 18px rgba(245,158,11,0.07) !important;
+}
+
+/* ── PDF spatial ingestion ─────────────────────────────────────────────────── */
+
+/* Shimmer sweep — runs while ingestionPhase === 'materializing'.
+   Fades when the thumbnail arrives. Asks nothing of the user. */
+@keyframes fw-pdf-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Thumbnail fade-in — quiet resolution, not an announcement */
+@keyframes fw-pdf-thumb-in {
+  from { opacity: 0; }
+  to   { opacity: 0.55; }
+}

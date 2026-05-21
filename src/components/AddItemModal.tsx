@@ -49,11 +49,12 @@ export function AddItemModal({
   defaultType, defaultTitle,
   onAdd, onPushItem, onRefresh,
 }: AddItemModalProps) {
-  const [activeTab, setActiveTab] = useState<ItemType>(defaultType ?? 'task');
-  const [title,     setTitle]     = useState(defaultTitle ?? '');
-  const [content,   setContent]   = useState('');
-  const [file,      setFile]      = useState<File | null>(null);
-  const [loading,   setLoading]   = useState(false);
+  const [activeTab,  setActiveTab]  = useState<ItemType>(defaultType ?? 'task');
+  const [title,      setTitle]      = useState(defaultTitle ?? '');
+  const [content,    setContent]    = useState('');
+  const [file,       setFile]       = useState<File | null>(null);
+  const [loading,    setLoading]    = useState(false);
+  const [dragOver,   setDragOver]   = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { uploadFile } = useFileUpload();
@@ -115,6 +116,35 @@ export function AddItemModal({
     if (f.type !== 'application/pdf') { toast.error('Only PDF files are allowed'); return; }
     setFile(f);
     if (!title) setTitle(f.name.replace(/\.pdf$/i, ''));
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (!f) return;
+    if (f.type !== 'application/pdf') { toast.error('Only PDF files are allowed'); return; }
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.pdf$/i, ''));
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024)       return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   return (
@@ -196,20 +226,93 @@ export function AddItemModal({
                      style={{ color: '#374151' }}>
                 PDF File
               </label>
+
+              {/* Drop zone — cinematic amber glow on drag */}
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl p-6 text-center cursor-pointer transition-all"
-                style={{ border: '2px dashed #263043' }}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = '#f59e0b')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = '#263043')}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className="rounded-xl cursor-pointer transition-all"
+                style={{
+                  border:     dragOver ? '2px dashed #f59e0b' : '2px dashed #263043',
+                  background: dragOver ? 'rgba(245,158,11,0.06)' : 'transparent',
+                  boxShadow:  dragOver ? '0 0 32px rgba(245,158,11,0.12)' : 'none',
+                  transition: 'border-color 0.2s, background 0.2s, box-shadow 0.2s',
+                  padding:    file ? '14px 18px' : '24px 18px',
+                }}
+                onMouseEnter={e => { if (!dragOver && !file) e.currentTarget.style.borderColor = '#f59e0b40'; }}
+                onMouseLeave={e => { if (!dragOver && !file) e.currentTarget.style.borderColor = '#263043'; }}
               >
-                <Upload className="w-6 h-6 mx-auto mb-2" style={{ color: '#374151' }} />
-                <p className="text-sm font-medium" style={{ color: file ? '#f8fafc' : '#94a3b8' }}>
-                  {file ? file.name : 'Click to select PDF'}
-                </p>
-                {!file && <p className="text-xs mt-1" style={{ color: '#374151' }}>PDF files only</p>}
-                {file && <p className="text-xs mt-1 font-medium" style={{ color: '#10b981' }}>✓ Ready to upload</p>}
+                {file ? (
+                  /* Materialized PDF artifact card */
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {/* PDF icon */}
+                    <div style={{
+                      width: 40, height: 48, borderRadius: 6, flexShrink: 0,
+                      background: 'rgba(239,68,68,0.12)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center', gap: 3,
+                    }}>
+                      <FileText className="w-4 h-4" style={{ color: '#ef4444' }} />
+                      <span style={{ fontSize: 8, fontWeight: 700, color: '#ef4444', letterSpacing: '0.05em' }}>PDF</span>
+                    </div>
+                    {/* File details */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontSize: 13, fontWeight: 500, color: '#f8fafc',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        margin: 0,
+                      }}>
+                        {file.name}
+                      </p>
+                      <p style={{ fontSize: 11, color: '#6b7280', margin: '2px 0 0' }}>
+                        {formatFileSize(file.size)}
+                      </p>
+                    </div>
+                    {/* Replace indicator */}
+                    <div style={{
+                      fontSize: 10, color: '#10b981', fontWeight: 600,
+                      background: 'rgba(16,185,129,0.10)',
+                      border: '1px solid rgba(16,185,129,0.20)',
+                      borderRadius: 6, padding: '3px 8px', flexShrink: 0,
+                    }}>
+                      Ready
+                    </div>
+                  </div>
+                ) : (
+                  /* Empty drop zone */
+                  <div style={{ textAlign: 'center' }}>
+                    <Upload className="w-6 h-6 mx-auto mb-2" style={{
+                      color: dragOver ? '#f59e0b' : '#374151',
+                      transition: 'color 0.2s',
+                    }} />
+                    <p className="text-sm font-medium" style={{ color: dragOver ? '#f8fafc' : '#6b7280' }}>
+                      {dragOver ? 'Drop to add PDF' : 'Drop PDF here, or click to select'}
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: '#374151' }}>PDF files only</p>
+                  </div>
+                )}
               </div>
+
+              {/* Click to replace when file already selected */}
+              {file && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    fontSize: 11, color: '#4b5563', marginTop: 6, padding: 0,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#9ca3af')}
+                  onMouseLeave={e => (e.currentTarget.style.color = '#4b5563')}
+                >
+                  Replace file
+                </button>
+              )}
+
               <input ref={fileInputRef} type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
             </div>
           )}
