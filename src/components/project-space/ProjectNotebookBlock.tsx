@@ -930,6 +930,8 @@ export function ProjectNotebookBlock({
   const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
+  const [headerHovered, setHeaderHovered] = useState(false);
+  const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -1495,8 +1497,9 @@ export function ProjectNotebookBlock({
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease, border-color 0.24s ease, box-shadow 0.24s ease',
+      ...(isMathNotebook ? { borderLeft: '2px solid rgba(129,140,248,0.20)' } : {}),
     }),
-    [context, fontStack, writingSurfaceBackground, notebookInk.primary, typeScale.l3],
+    [context, fontStack, writingSurfaceBackground, notebookInk.primary, typeScale.l3, isMathNotebook],
   );
 
   const contextSummaryChips = useMemo(
@@ -2325,6 +2328,8 @@ export function ProjectNotebookBlock({
         }}
       >
       <div
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
         style={{
           display: 'flex',
           alignItems: 'flex-start',
@@ -2353,7 +2358,7 @@ export function ProjectNotebookBlock({
           </div>
 
           {/* Identity row: icon · subtitle · timestamp */}
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, opacity: headerHovered ? 1 : 0.65, transition: 'opacity 0.4s ease' }}>
             <button
               type="button"
               onClick={() => {
@@ -2429,21 +2434,24 @@ export function ProjectNotebookBlock({
             justifyContent: 'flex-end',
           }}
         >
-          <button
-            type="button"
-            title="Focus mode"
-            onClick={() => setIsFocusModeOpen(true)}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.65)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.28)'; }}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
-              borderRadius: '4px', color: 'rgba(255,248,235,0.28)',
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
+          <span style={{ opacity: headerHovered ? 1 : 0.55, transition: 'opacity 0.4s ease' }}>
+            <button
+              type="button"
+              title="Focus mode"
+              onClick={() => setIsFocusModeOpen(true)}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.65)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.28)'; }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+                borderRadius: '4px', color: 'rgba(255,248,235,0.28)',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </span>
+          <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? 1 : 0.32, transition: 'opacity 0.4s ease' }}>
           {context === 'free-space' ? (
             <button
               type="button"
@@ -2515,13 +2523,6 @@ export function ProjectNotebookBlock({
               fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
           >Aa</button>
-          {notebookMode === 'math' && (
-            <span style={{
-              fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-              color: '#818cf8', background: 'rgba(129,140,248,0.10)',
-              borderRadius: 4, padding: '2px 6px', userSelect: 'none',
-            }}>∑ Math</span>
-          )}
           <button
             type="button"
             onClick={() => {
@@ -2546,7 +2547,8 @@ export function ProjectNotebookBlock({
             title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
             style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
-              borderRadius: 4, color: notebookMode === 'math' ? tokens.accent : 'rgba(255,248,235,0.28)',
+              borderRadius: 4, color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.28)',
+              fontWeight: notebookMode === 'math' ? 600 : 400,
               fontSize: 13, transition: 'color 0.15s',
             }}
           >√</button>
@@ -2578,6 +2580,7 @@ export function ProjectNotebookBlock({
                 ))}
               </div>
             )}
+          </div>
           </div>
         </div>
       </div>
@@ -3326,30 +3329,34 @@ export function ProjectNotebookBlock({
             if (block.kind === 'image-ref') {
               const src = nbImageGet(block.key);
               return (
-                <div key={block.id} style={{ margin: '12px 0', userSelect: 'none' }}>
+                <div key={block.id} style={{ margin: '20px 0', userSelect: 'none' }}>
                   {src ? (
                     <div
-                      style={{
-                        borderRadius: 10, overflow: 'hidden',
-                        border: '1px solid rgba(255,255,255,0.07)',
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.32)',
-                        cursor: 'zoom-in',
-                      }}
+                      className="nb-img-block"
                       onClick={() => setExpandedImage(src)}
+                      style={{
+                        borderRadius: 12, overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.38), 0 2px 8px rgba(0,0,0,0.20)',
+                        cursor: 'zoom-in',
+                        transition: 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease',
+                      }}
                     >
                       <img
                         src={src}
                         alt={block.alt}
                         style={{
                           width: '100%', display: 'block',
-                          maxHeight: 480, objectFit: 'contain',
-                          background: 'rgba(0,0,0,0.2)',
+                          maxHeight: 520, objectFit: 'contain',
+                          background: 'rgba(0,0,0,0.15)',
                         }}
                       />
                       {block.alt && (
                         <p style={{
-                          padding: '6px 12px 8px', fontSize: 11, margin: 0,
-                          color: 'rgba(255,248,235,0.32)', fontStyle: 'italic',
+                          padding: '8px 16px 10px', fontSize: 11, margin: 0,
+                          color: 'rgba(255,248,235,0.28)', fontStyle: 'italic',
+                          letterSpacing: '0.02em',
+                          background: 'rgba(0,0,0,0.08)',
                         }}>
                           {block.alt}
                         </p>
@@ -3357,9 +3364,10 @@ export function ProjectNotebookBlock({
                     </div>
                   ) : (
                     <div style={{
-                      padding: '16px', textAlign: 'center', fontSize: 12,
-                      color: 'rgba(255,255,255,0.2)', borderRadius: 8,
-                      border: '1px dashed rgba(255,255,255,0.08)',
+                      padding: '20px', textAlign: 'center', fontSize: 11,
+                      color: 'rgba(255,255,255,0.18)', borderRadius: 10,
+                      border: '1px dashed rgba(255,255,255,0.06)',
+                      letterSpacing: '0.04em',
                     }}>
                       Image no longer available
                     </div>
@@ -3927,19 +3935,9 @@ export function ProjectNotebookBlock({
             position: 'fixed', inset: 0, zIndex: 9991, overflowY: 'auto',
           }}
         >
-          <button
-            type="button"
-            onClick={() => setIsFocusModeOpen(false)}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.70)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.35)'; }}
-            style={{
-              position: 'fixed', top: 24, right: 32, background: 'none', border: 'none',
-              cursor: 'pointer', color: 'rgba(255,248,235,0.35)', fontSize: 20,
-            }}
-          >×</button>
           {focusAnnouncement && (
             <span className="nb-focus-announce" style={{
-              position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)',
+              position: 'fixed', top: 52, left: '50%', transform: 'translateX(-50%)',
               fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase',
               color: 'rgba(255,248,235,0.30)',
               pointerEvents: 'none',
@@ -3949,8 +3947,70 @@ export function ProjectNotebookBlock({
           )}
           <div
             onKeyDownCapture={handleEditorKeyCapture}
-            style={{ maxWidth: 720, margin: '0 auto', padding: '72px 40px 120px' }}
+            style={{ maxWidth: 640, margin: '0 auto', padding: '80px 48px 140px' }}
           >
+            {/* Ghost toolbar — hover top edge to reveal controls */}
+            <div
+              style={{
+                position: 'fixed', top: 0, left: 0, right: 0,
+                zIndex: 9995,
+                display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+                gap: 12, padding: '14px 32px',
+                opacity: focusToolbarHovered ? 0.85 : 0.14,
+                transition: 'opacity 0.45s ease',
+                pointerEvents: 'auto',
+              }}
+              onMouseEnter={() => setFocusToolbarHovered(true)}
+              onMouseLeave={() => setFocusToolbarHovered(false)}
+            >
+              {/* Math mode toggle */}
+              <button
+                type="button"
+                title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
+                onClick={() => {
+                  if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
+                    onChange({ ...content, notebookMode: 'math', paperStyle: 'grid', body: MATH_CALCULUS_NOTEBOOK_SEED });
+                    return;
+                  }
+                  const nextMode = notebookMode === 'math' ? 'normal' : 'math';
+                  onChange({
+                    ...content, notebookMode: nextMode,
+                    ...(nextMode === 'math' && paperStyle === 'ruled' ? { paperStyle: 'grid' as const } : {}),
+                  });
+                }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.80)',
+                  fontSize: 14, fontWeight: notebookMode === 'math' ? 600 : 400,
+                }}
+              >√</button>
+
+              {/* Paper style cycle */}
+              <button
+                type="button"
+                title={`Paper: ${paperStyle}`}
+                onClick={() => {
+                  const styles: ('blank' | 'ruled' | 'grid')[] = ['blank', 'ruled', 'grid'];
+                  const next = styles[(styles.indexOf(paperStyle as 'blank' | 'ruled' | 'grid') + 1) % styles.length];
+                  onChange({ ...content, paperStyle: next });
+                }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  color: 'rgba(255,248,235,0.80)', fontSize: 11, letterSpacing: '0.06em', textTransform: 'capitalize',
+                }}
+              >{paperStyle}</button>
+
+              {/* Close */}
+              <button
+                type="button"
+                title="Close (Esc)"
+                onClick={() => setIsFocusModeOpen(false)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  color: 'rgba(255,248,235,0.80)', fontSize: 18, lineHeight: 1,
+                }}
+              >×</button>
+            </div>
             <h1 style={{
               fontFamily: 'Georgia, serif', fontSize: 32, fontWeight: 400,
               color: 'rgba(255,248,235,0.88)', marginBottom: 40, lineHeight: 1.3,

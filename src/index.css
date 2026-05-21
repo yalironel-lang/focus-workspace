@@ -596,3 +596,9 @@
 .nb-focus-announce {
   animation: nb-focus-announce 1.8s ease forwards;
 }
+
+/* ── Notebook image block hover ─────────────────────────────── */
+.nb-img-block:hover {
+  transform: scale(1.006);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.44), 0 3px 10px rgba(0,0,0,0.24) !important;
+}
