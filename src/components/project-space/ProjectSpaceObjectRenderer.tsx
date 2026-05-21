@@ -102,6 +102,7 @@ function ProjectSpaceObjectRendererInner({
             context="free-space"
             objectId={object.id}
             objectTitle={object.title}
+            objectUpdatedAt={object.updatedAt}
             allObjects={allObjects}
             onRequestSelectObject={onRequestSelectObject}
             onCreateRecallItem={

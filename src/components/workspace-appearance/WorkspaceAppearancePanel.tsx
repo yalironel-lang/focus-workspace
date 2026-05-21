@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import { ATMOSPHERES } from '../../hooks/useAtmosphere';
 import type { GlobalTheme } from '../../hooks/useWorkspaceTheme';
-import { resolveBackgroundPresetId } from '../../lib/workspaceBackgroundStudio';
 import { LivingBackgroundStudio } from './LivingBackgroundStudio';
 
 type AppearanceScope = 'global' | 'workspace';
@@ -18,24 +19,30 @@ interface Props {
   onUpdateGlobal: (patch: Partial<GlobalTheme>) => void;
 }
 
-export function WorkspaceAppearancePanel({
-  open,
-  tokens,
-  atmosphereId,
-  global,
-  scope = 'workspace',
-  workspaceTitle,
-  onClose,
-  onUpdateGlobal,
-}: Props) {
-  const activeBackgroundId = resolveBackgroundPresetId(global);
+const INTENSITY_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Still',     value: 0 },
+  { label: 'Active',    value: 0.45 },
+  { label: 'Immersive', value: 1.0 },
+];
 
-  // Unmount when closed — no invisible backdrop left in the tree.
+function getIntensityLabel(val: number | undefined): string {
+  if (val === undefined || val === null) return 'Active';
+  if (val <= 0.1) return 'Still';
+  if (val >= 0.8) return 'Immersive';
+  return 'Active';
+}
+
+export function WorkspaceAppearancePanel({
+  open, tokens, atmosphereId, global, onClose, onSetAtmosphere, onUpdateGlobal,
+}: Props) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   if (!open) return null;
+
+  const activeIntensityLabel = getIntensityLabel(global.environmentIntensity);
 
   return (
     <>
-      {/* z-[400]/[410] stay below SectionPage WorkspaceSectionChrome (z-index 600). */}
       <div
         className="fixed inset-0 z-[400]"
         style={{ backgroundColor: 'rgba(4,6,10,0.38)', pointerEvents: 'auto' }}
@@ -45,7 +52,7 @@ export function WorkspaceAppearancePanel({
       <aside
         className="fixed top-0 right-0 z-[410] h-full flex flex-col"
         style={{
-          width: 'min(440px, 100vw)',
+          width: 'min(400px, 100vw)',
           backgroundColor: tokens.cardBg,
           borderLeft: `1px solid ${tokens.cardBorder}`,
           color: tokens.textPrimary,
@@ -53,50 +60,126 @@ export function WorkspaceAppearancePanel({
         }}
         role="dialog"
         aria-modal="true"
-        aria-label="Workspace appearance"
+        aria-label="Workspace environment"
       >
-        <header className="flex items-start justify-between px-6 pt-6 pb-4 shrink-0">
+        {/* Header */}
+        <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '24px 24px 16px' }}>
           <div>
-            <p
-              className="text-[10px] font-semibold uppercase tracking-[0.16em] mb-1"
-              style={{ color: tokens.textGhost }}
-            >
-              Appearance
+            <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: tokens.textGhost, marginBottom: 4 }}>
+              Environment
             </p>
-            <h2 className="text-[22px] font-semibold tracking-tight leading-tight">
-              Living Background
+            <h2 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, lineHeight: 1.2 }}>
+              Atmosphere
             </h2>
-            <p className="text-[12px] mt-2 leading-relaxed max-w-[280px]" style={{ color: tokens.textMuted }}>
-              {scope === 'global'
-                ? 'Applies across Library and every workspace. Open a workspace and switch to Free Space to see the full cinematic scene.'
-                : workspaceTitle
-                  ? `Applies to “${workspaceTitle}” and its Free Space. Changes save to your device and sync with your account theme.`
-                  : 'Applies to this workspace and its Free Space. Switch to Free Space to see the full scene.'}
+            <p style={{ fontSize: 11, marginTop: 6, color: tokens.textMuted, lineHeight: 1.5 }}>
+              Your workspace, your feeling.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2.5 rounded-xl transition-colors"
-            style={{ color: tokens.textMuted, backgroundColor: tokens.wellBg }}
+            style={{
+              padding: 8, borderRadius: 10, border: 'none', cursor: 'pointer',
+              color: tokens.textMuted, background: tokens.wellBg, transition: 'opacity 0.15s',
+            }}
             aria-label="Close"
           >
-            <X className="w-4 h-4" />
+            <X size={14} />
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-8">
-          <LivingBackgroundStudio tokens={tokens} global={global} onUpdateGlobal={onUpdateGlobal} />
-        </div>
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 32px' }}>
 
-        <footer
-          className="shrink-0 px-6 py-4 text-[10px]"
-          style={{ color: tokens.textGhost, borderTop: `1px solid ${tokens.divider}` }}
-        >
-          <span style={{ color: tokens.textMuted }}>{activeBackgroundId}</span>
-          <span className="mx-1.5">·</span>
-          <span style={{ color: tokens.textMuted }}>{atmosphereId}</span>
-        </footer>
+          {/* Atmosphere preset cards */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 8, marginBottom: 24,
+          }}>
+            {ATMOSPHERES.map(a => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => onSetAtmosphere(a.id)}
+                style={{
+                  background: `linear-gradient(135deg, ${a.pageBg}, ${a.cardBg})`,
+                  border: atmosphereId === a.id
+                    ? `1.5px solid ${a.accent}`
+                    : `1px solid ${a.cardBorder}`,
+                  borderRadius: 10,
+                  padding: '12px 12px 10px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'border-color 0.15s, transform 0.1s',
+                  transform: atmosphereId === a.id ? 'scale(1.02)' : 'scale(1)',
+                }}
+              >
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8, alignItems: 'center' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.accent, display: 'inline-block' }} />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.cardBorder, display: 'inline-block' }} />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', opacity: 0.5, background: a.ambientGlow1 || a.accent, display: 'inline-block' }} />
+                </div>
+                <p style={{ fontSize: 13, fontWeight: 500, color: a.textPrimary, margin: 0, lineHeight: 1.2 }}>
+                  {a.name}
+                </p>
+                <p style={{ fontSize: 10, color: a.textMuted, margin: '3px 0 0', lineHeight: 1.4 }}>
+                  {a.description}
+                </p>
+              </button>
+            ))}
+          </div>
+
+          {/* Intensity control */}
+          <div style={{ marginBottom: 24 }}>
+            <p style={{
+              fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: tokens.textGhost, marginBottom: 10,
+            }}>
+              Intensity
+            </p>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {INTENSITY_OPTIONS.map(opt => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => onUpdateGlobal({ environmentIntensity: opt.value })}
+                  style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 8, border: 'none',
+                    cursor: 'pointer', fontSize: 12, fontWeight: 500,
+                    background: activeIntensityLabel === opt.label
+                      ? `${tokens.accentSubtle}`
+                      : tokens.wellBg,
+                    color: activeIntensityLabel === opt.label
+                      ? tokens.accent
+                      : tokens.textMuted,
+                    transition: 'background 0.15s, color 0.15s',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Advanced toggle */}
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen(v => !v)}
+            style={{
+              width: '100%', padding: '8px 0', background: 'none', border: 'none',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, color: tokens.textGhost, letterSpacing: '0.06em', marginBottom: 8,
+              borderTop: `1px solid ${tokens.divider}`,
+            }}
+          >
+            <span>Advanced</span>
+            <span>{advancedOpen ? '↑' : '↓'}</span>
+          </button>
+
+          {advancedOpen && (
+            <LivingBackgroundStudio tokens={tokens} global={global} onUpdateGlobal={onUpdateGlobal} />
+          )}
+        </div>
       </aside>
     </>
   );

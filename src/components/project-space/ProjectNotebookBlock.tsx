@@ -24,6 +24,7 @@ import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
 import { MathStudyInsight } from '../notebook/MathStudyInsight';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
+import { nbImageGet, nbImageSet } from '../../lib/notebookImageStore';
 import {
   getMathTemplate,
   isLikelyMathLine,
@@ -55,6 +56,7 @@ type NotebookLine =
   | { kind: 'quote'; text: string }
   | { kind: 'callout'; tone: CalloutTone; text: string }
   | { kind: 'math'; text: string }
+  | { kind: 'image-ref'; key: string; alt: string }
   | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
@@ -115,6 +117,9 @@ function parseNotebookLine(raw: string): NotebookLine {
   const mathMatch = trimmed.match(/^\$\$\s*(.*)$/);
   if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
 
+  const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
+  if (imgMatch) return { kind: 'image-ref', key: imgMatch[1]!, alt: imgMatch[2] ?? '' };
+
   /** Pilcrow prefixes — editorial tone scale (not shown in contenteditable; storage + paste only). */
   if (trimmed.startsWith('\u00b6\u00b6')) {
     const rest = trimmed.slice(2).trimStart();
@@ -137,6 +142,7 @@ type Block =
   | { id: string; kind: 'quote'; text: string }
   | { id: string; kind: 'callout'; tone: CalloutTone; text: string }
   | { id: string; kind: 'math'; text: string }
+  | { id: string; kind: 'image-ref'; key: string; alt: string }
   | { id: string; kind: 'divider' }
   | { id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
@@ -253,6 +259,8 @@ function lineToBlock(line: string): Block {
       return { id, kind: 'callout', tone: parsed.tone, text: parsed.text };
     case 'math':
       return { id, kind: 'math', text: parsed.text };
+    case 'image-ref':
+      return { id, kind: 'image-ref', key: parsed.key, alt: parsed.alt };
     case 'paragraph':
       return {
         id,
@@ -292,6 +300,8 @@ function blockToLine(b: Block): string {
       return `!${b.tone} ${b.text}`;
     case 'math':
       return `$$ ${b.text}`;
+    case 'image-ref':
+      return `::img::${b.key}::${b.alt}::`;
     case 'divider':
       return '---';
     case 'paragraph':
@@ -347,6 +357,7 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
     if (parsed.kind === 'quote') return { id: blockId, kind: 'quote', text: parsed.text };
     if (parsed.kind === 'callout') return { id: blockId, kind: 'callout', tone: parsed.tone, text: parsed.text };
     if (parsed.kind === 'math') return { id: blockId, kind: 'math', text: parsed.text };
+    if (parsed.kind === 'image-ref') return { id: blockId, kind: 'image-ref', key: parsed.key, alt: parsed.alt };
     return { id: blockId, kind: 'paragraph', text: normalized };
   }
   return normalized.split(/\r?\n/).map((ln) => lineToBlock(ln));
@@ -411,7 +422,8 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
 }
 
 function blockTextLen(b: Block): number {
-  return b.kind === 'divider' ? 0 : b.text.length;
+  if (b.kind === 'divider' || b.kind === 'image-ref') return 0;
+  return b.text.length;
 }
 
 function getCaretOffsetIn(el: HTMLElement): number {
@@ -527,8 +539,8 @@ function caretAtVisualLineEnd(el: HTMLElement): boolean {
 const SOFT_BREAK = '\u2028';
 
 function mergeBlocks(prev: Block, next: Block): Block {
-  if (prev.kind === 'divider') return next;
-  const nextText = next.kind === 'divider' ? '' : next.text;
+  if (prev.kind === 'divider' || prev.kind === 'image-ref') return next;
+  const nextText = next.kind === 'divider' || next.kind === 'image-ref' ? '' : next.text;
   const mergedText = prev.text + nextText;
   switch (prev.kind) {
     case 'title':
@@ -857,6 +869,7 @@ interface Props {
   onChange: (content: NotebookContent) => void;
   objectId?: string;
   objectTitle?: string;
+  objectUpdatedAt?: number;
   allObjects?: ProjectSpaceObject[];
   onRequestSelectObject?: (id: string) => void;
   onCreateRecallItem?: (prompt: string) => void;
@@ -869,12 +882,23 @@ interface Props {
   onEditingChange?: (isEditing: boolean) => void;
 }
 
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 2) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
 export function ProjectNotebookBlock({
   content,
   tokens,
   onChange,
   objectId,
   objectTitle,
+  objectUpdatedAt,
   allObjects,
   onRequestSelectObject,
   onCreateRecallItem,
@@ -904,6 +928,8 @@ export function ProjectNotebookBlock({
   } | null>(null);
   const [paperPopoverOpen, setPaperPopoverOpen] = useState(false);
   const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [focusAnnouncement, setFocusAnnouncement] = useState(false);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -924,11 +950,11 @@ export function ProjectNotebookBlock({
     [blocks, surfaceFocusBlockId],
   );
   const activeRecallPrompt = useMemo(() => {
-    const focused = activeNotebookBlock && activeNotebookBlock.kind !== 'divider'
+    const focused = activeNotebookBlock && activeNotebookBlock.kind !== 'divider' && activeNotebookBlock.kind !== 'image-ref'
       ? activeNotebookBlock
       : null;
     const fallback = blocks[focusIndexRef.current];
-    const source = focused ?? (fallback && fallback.kind !== 'divider' ? fallback : null);
+    const source = focused ?? (fallback && fallback.kind !== 'divider' && fallback.kind !== 'image-ref' ? fallback : null);
     if (!source) return '';
     return normalizeRecallPromptText(source.text);
   }, [activeNotebookBlock, blocks]);
@@ -950,6 +976,51 @@ export function ProjectNotebookBlock({
     if (!hasNotebookContext && contextPanelOpen) setContextPanelOpen(false);
   }, [hasNotebookContext, contextPanelOpen]);
 
+  const insertImageBlock = useCallback((key: string, alt: string) => {
+    const focusedId = surfaceFocusBlockId ?? (blocks.length > 0 ? blocks[blocks.length - 1]!.id : null);
+    const newBlock: Block = { id: newBlockId(), kind: 'image-ref', key, alt };
+    setBlocks(prev => {
+      const idx = focusedId ? prev.findIndex(b => b.id === focusedId) : prev.length - 1;
+      const insertIdx = idx < 0 ? prev.length : idx + 1;
+      const next = [...prev];
+      next.splice(insertIdx, 0, newBlock);
+      return next;
+    });
+  }, [blocks, surfaceFocusBlockId]);
+
+  const handleNotebookPaste = useCallback((e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items ?? []);
+    const imageItem = items.find(i => i.type.startsWith('image/'));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      nbImageSet(key, dataUrl);
+      insertImageBlock(key, '');
+    };
+    reader.readAsDataURL(file);
+  }, [insertImageBlock]);
+
+  const handleWritingAreaDrop = useCallback((e: React.DragEvent) => {
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      nbImageSet(key, dataUrl);
+      const cleanName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+      insertImageBlock(key, cleanName);
+    };
+    reader.readAsDataURL(file);
+  }, [insertImageBlock]);
+
   const persist = useCallback(
     (next: Block[]) => {
       const normalized = normalizeOrderedSequences(next);
@@ -966,7 +1037,7 @@ export function ProjectNotebookBlock({
         const i = prev.findIndex((b) => b.id === blockId);
         if (i === -1) return prev;
         const cur = prev[i]!;
-        if (cur.kind === 'divider') return prev;
+        if (cur.kind === 'divider' || cur.kind === 'image-ref') return prev;
         const text = cur.text;
         let nb: Block;
         if (level === 1) nb = { id: blockId, kind: 'title', text };
@@ -998,9 +1069,15 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!isFocusModeOpen) return;
+    // Show announcement for 1.8s
+    setFocusAnnouncement(true);
+    const t = setTimeout(() => setFocusAnnouncement(false), 1800);
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFocusModeOpen(false); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      clearTimeout(t);
+    };
   }, [isFocusModeOpen]);
 
   const paperStyle = content.paperStyle ?? 'ruled';
@@ -1451,7 +1528,7 @@ export function ProjectNotebookBlock({
             pendingCaretRef.current = {
               id: last.id,
               offset:
-                last.kind === 'divider'
+                last.kind === 'divider' || last.kind === 'image-ref'
                   ? 0
                   : last.kind === 'title' ||
                       last.kind === 'section' ||
@@ -1466,9 +1543,11 @@ export function ProjectNotebookBlock({
             transformed.kind !== 'paragraph' || block.kind !== 'paragraph'
               ? true
               : (transformed.variant ?? undefined) === (block.variant ?? undefined);
+          const transformedText = (transformed as { text?: string }).text ?? '';
+          const blockText = (block as { text?: string }).text ?? '';
           const sameShape =
             transformed.kind === block.kind &&
-            transformed.text === block.text &&
+            transformedText === blockText &&
             transformed.id === block.id &&
             variantMatch;
           if (sameShape) return prev;
@@ -1477,7 +1556,7 @@ export function ProjectNotebookBlock({
           pendingCaretRef.current = {
             id: transformed.id,
             offset:
-              transformed.kind === 'divider'
+              transformed.kind === 'divider' || transformed.kind === 'image-ref'
                 ? 0
                 : transformed.kind === 'title' ||
                     transformed.kind === 'section' ||
@@ -1491,9 +1570,11 @@ export function ProjectNotebookBlock({
 
         const singleLine = text.includes('\n') ? (text.split('\n')[0] ?? '') : text;
         const edited: Block = applyVisualEditToStructuredBlock(block, singleLine);
+        const editedText = (edited as { text?: string }).text ?? '';
+        const blockText2 = (block as { text?: string }).text ?? '';
         const same =
           edited.kind === block.kind &&
-          edited.text === block.text &&
+          editedText === blockText2 &&
           (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked)) &&
           (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
         if (same) return prev;
@@ -1529,7 +1610,7 @@ export function ProjectNotebookBlock({
         onChange({ ...content, body: serializeBlocks(filled) });
         const focusIdx = Math.max(0, index - 1);
         const focusBlock = filled[focusIdx];
-        if (focusBlock && focusBlock.kind !== 'divider') {
+        if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref') {
           pendingCaretRef.current = {
             id: focusBlock.id,
             offset:
@@ -1552,7 +1633,7 @@ export function ProjectNotebookBlock({
       const blockId = surfaceFocusBlockId;
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider') return;
+      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') return;
       if (blk.kind === 'math') {
         const latex = plainMathToLatex(snippet);
         updateBlockText(blockId, latex);
@@ -1591,6 +1672,7 @@ export function ProjectNotebookBlock({
       (root.querySelector(`[data-divider-row][data-block-id="${block.id}"]`) as HTMLElement | null)?.focus();
       return;
     }
+    if (block.kind === 'image-ref') return;
     const len = block.text.length;
     const o = Math.max(0, Math.min(offset, len));
     pendingCaretRef.current = { id: block.id, offset: o };
@@ -1755,7 +1837,7 @@ export function ProjectNotebookBlock({
                 e.preventDefault();
                 const tb = blocks[ti]!;
                 const off =
-                  tb.kind === 'divider' ? 0 : e.key === 'ArrowUp' ? tb.text.length : 0;
+                  tb.kind === 'divider' || tb.kind === 'image-ref' ? 0 : e.key === 'ArrowUp' ? tb.text.length : 0;
                 focusEditableBlock(root, tb, off);
               }
             }
@@ -1769,6 +1851,7 @@ export function ProjectNotebookBlock({
       const index = blocks.findIndex((b) => b.id === id);
       if (index === -1) return;
       const block = blocks[index]!;
+      if (block.kind === 'image-ref') return;
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
         if (block.kind === 'divider') return;
@@ -1816,7 +1899,7 @@ export function ProjectNotebookBlock({
           if (pi === -1) return;
           e.preventDefault();
           const pb = blocks[pi]!;
-          const col = pb.kind === 'divider' ? 0 : Math.min(offset, pb.text.length);
+          const col = pb.kind === 'divider' || pb.kind === 'image-ref' ? 0 : Math.min(offset, pb.text.length);
           focusEditableBlock(root, pb, col);
           return;
         }
@@ -1825,7 +1908,7 @@ export function ProjectNotebookBlock({
         if (ni === -1) return;
         e.preventDefault();
         const nb = blocks[ni]!;
-        const col = nb.kind === 'divider' ? 0 : Math.min(offset, nb.text.length);
+        const col = nb.kind === 'divider' || nb.kind === 'image-ref' ? 0 : Math.min(offset, nb.text.length);
         focusEditableBlock(root, nb, col);
         return;
       }
@@ -2045,7 +2128,7 @@ export function ProjectNotebookBlock({
           const merged = mergeBlocks(prev, block);
           const next = [...blocks.slice(0, index - 1), merged, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: merged.id, offset: prev.text.length };
+          pendingCaretRef.current = { id: merged.id, offset: prev.kind === 'image-ref' ? 0 : prev.text.length };
         }
       }
     },
@@ -2171,6 +2254,15 @@ export function ProjectNotebookBlock({
           </div>
         );
       }
+      // image-ref in focus mode: show a simple placeholder
+      if (block.kind === 'image-ref') {
+        const src = nbImageGet(block.key);
+        return src ? (
+          <div key={block.id} style={{ margin: '12px 0', userSelect: 'none' }}>
+            <img src={src} alt={block.alt} style={{ width: '100%', display: 'block', maxHeight: 480, objectFit: 'contain', borderRadius: 8 }} />
+          </div>
+        ) : null;
+      }
       // Default: paragraph (and other block kinds)
       return (
         <EditableLine
@@ -2198,6 +2290,7 @@ export function ProjectNotebookBlock({
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
       <div
         ref={shellRef}
+        onPaste={handleNotebookPaste}
         style={{
           padding: context === 'free-space' ? '18px 18px 18px' : '18px 24px 28px',
           ...(context === 'free-space'
@@ -2240,7 +2333,7 @@ export function ProjectNotebookBlock({
           flexWrap: 'wrap',
           padding: '4px 6px 14px',
           marginBottom: '8px',
-          borderBottom: '1px solid rgba(255,255,255,0.055)',
+          borderBottom: `1px solid ${notebookMode === 'math' ? 'rgba(129,140,248,0.18)' : 'rgba(255,255,255,0.055)'}`,
           ...(context === 'free-space' ? { flexShrink: 0 } : {}),
         }}
       >
@@ -2257,6 +2350,49 @@ export function ProjectNotebookBlock({
             {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}{hasNotebookContext
               ? ` · ${contextData.totalCount} connected`
               : ''}
+          </div>
+
+          {/* Identity row: icon · subtitle · timestamp */}
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const icons = ['◈','∑','✕','→','∂','∫','⊞','◎'];
+                const curr = content.icon ?? '◈';
+                const next = icons[(icons.indexOf(curr) + 1) % icons.length];
+                onChange({ ...content, icon: next });
+              }}
+              title="Change icon"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 13, padding: '0 2px',
+                opacity: content.icon ? 1 : 0.28, transition: 'opacity 0.15s',
+                color: tokens.textSecondary,
+              }}
+            >{content.icon ?? '◈'}</button>
+
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={e => {
+                const text = e.currentTarget.textContent?.trim() ?? '';
+                if (text !== (content.subtitle ?? '')) onChange({ ...content, subtitle: text || undefined });
+              }}
+              style={{
+                fontSize: 11, color: tokens.textGhost, outline: 'none',
+                fontStyle: 'italic', minWidth: 40, maxWidth: 180,
+                whiteSpace: 'nowrap', overflow: 'hidden',
+              }}
+              data-placeholder="add a subtitle…"
+            >{content.subtitle ?? ''}</div>
+
+            <div style={{ flex: 1 }} />
+
+            {objectUpdatedAt && (
+              <span style={{ fontSize: 10, color: tokens.textGhost }}>
+                {formatRelativeTime(objectUpdatedAt)}
+              </span>
+            )}
           </div>
 
           {contextSummaryChips.length ? (
@@ -2379,6 +2515,13 @@ export function ProjectNotebookBlock({
               fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
           >Aa</button>
+          {notebookMode === 'math' && (
+            <span style={{
+              fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: '#818cf8', background: 'rgba(129,140,248,0.10)',
+              borderRadius: 4, padding: '2px 6px', userSelect: 'none',
+            }}>∑ Math</span>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -2635,6 +2778,8 @@ export function ProjectNotebookBlock({
 
       <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
       <div
+        onDrop={handleWritingAreaDrop}
+        onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
         style={{
           position: 'relative',
           display: showNotebookContext && canDockContext ? 'grid' : 'block',
@@ -3178,6 +3323,51 @@ export function ProjectNotebookBlock({
               );
             }
 
+            if (block.kind === 'image-ref') {
+              const src = nbImageGet(block.key);
+              return (
+                <div key={block.id} style={{ margin: '12px 0', userSelect: 'none' }}>
+                  {src ? (
+                    <div
+                      style={{
+                        borderRadius: 10, overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.07)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.32)',
+                        cursor: 'zoom-in',
+                      }}
+                      onClick={() => setExpandedImage(src)}
+                    >
+                      <img
+                        src={src}
+                        alt={block.alt}
+                        style={{
+                          width: '100%', display: 'block',
+                          maxHeight: 480, objectFit: 'contain',
+                          background: 'rgba(0,0,0,0.2)',
+                        }}
+                      />
+                      {block.alt && (
+                        <p style={{
+                          padding: '6px 12px 8px', fontSize: 11, margin: 0,
+                          color: 'rgba(255,248,235,0.32)', fontStyle: 'italic',
+                        }}>
+                          {block.alt}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '16px', textAlign: 'center', fontSize: 12,
+                      color: 'rgba(255,255,255,0.2)', borderRadius: 8,
+                      border: '1px dashed rgba(255,255,255,0.08)',
+                    }}>
+                      Image no longer available
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
             const paraMuted = block.variant === 'muted';
             const paraFine = block.variant === 'fine';
             const paraTop =
@@ -3301,7 +3491,9 @@ export function ProjectNotebookBlock({
                 ? `blank-${index}`
                 : line.kind === 'divider'
                   ? `divider-${index}`
-                  : `${line.kind}-${index}-${line.text.slice(0, 24)}`;
+                  : line.kind === 'image-ref'
+                    ? `image-ref-${index}-${line.key}`
+                    : `${line.kind}-${index}-${line.text.slice(0, 24)}`;
             const prevLine = index > 0 ? previewLines[index - 1] : undefined;
             const prevKind =
               prevLine && prevLine.kind !== 'blank' ? prevLine.kind : undefined;
@@ -3602,6 +3794,50 @@ export function ProjectNotebookBlock({
                 </div>
               );
             }
+            if (line.kind === 'image-ref') {
+              const src = nbImageGet(line.key);
+              return (
+                <div key={lineKey} style={{ margin: '12px 0', userSelect: 'none' }}>
+                  {src ? (
+                    <div
+                      style={{
+                        borderRadius: 10, overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.07)',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.32)',
+                        cursor: 'zoom-in',
+                      }}
+                      onClick={() => setExpandedImage(src)}
+                    >
+                      <img
+                        src={src}
+                        alt={line.alt}
+                        style={{
+                          width: '100%', display: 'block',
+                          maxHeight: 480, objectFit: 'contain',
+                          background: 'rgba(0,0,0,0.2)',
+                        }}
+                      />
+                      {line.alt && (
+                        <p style={{
+                          padding: '6px 12px 8px', fontSize: 11, margin: 0,
+                          color: 'rgba(255,248,235,0.32)', fontStyle: 'italic',
+                        }}>
+                          {line.alt}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '16px', textAlign: 'center', fontSize: 12,
+                      color: 'rgba(255,255,255,0.2)', borderRadius: 8,
+                      border: '1px dashed rgba(255,255,255,0.08)',
+                    }}>
+                      Image no longer available
+                    </div>
+                  )}
+                </div>
+              );
+            }
             if (line.kind === 'paragraph') {
               const fine = line.variant === 'fine';
               const muted = line.variant === 'muted';
@@ -3679,8 +3915,10 @@ export function ProjectNotebookBlock({
         <div
           onClick={() => setIsFocusModeOpen(false)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 9990,
-            background: 'rgba(14,10,6,0.94)',
+            position:'fixed', inset:0, zIndex:9990,
+            background:'rgba(14,10,6,0.88)',
+            backdropFilter: 'blur(32px) saturate(0.45)',
+            WebkitBackdropFilter: 'blur(32px) saturate(0.45)',
           }}
         />
         <div
@@ -3699,22 +3937,83 @@ export function ProjectNotebookBlock({
               cursor: 'pointer', color: 'rgba(255,248,235,0.35)', fontSize: 20,
             }}
           >×</button>
+          {focusAnnouncement && (
+            <span className="nb-focus-announce" style={{
+              position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)',
+              fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: 'rgba(255,248,235,0.30)',
+              pointerEvents: 'none',
+            }}>
+              Deep Focus
+            </span>
+          )}
           <div
             onKeyDownCapture={handleEditorKeyCapture}
             style={{ maxWidth: 720, margin: '0 auto', padding: '72px 40px 120px' }}
           >
             <h1 style={{
-              fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 400,
+              fontFamily: 'Georgia, serif', fontSize: 32, fontWeight: 400,
               color: 'rgba(255,248,235,0.88)', marginBottom: 40, lineHeight: 1.3,
             }}>
               {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
             </h1>
+            {content.subtitle && (
+              <p style={{
+                fontSize: 13, fontStyle: 'italic',
+                color: 'rgba(255,248,235,0.38)',
+                marginTop: -28, marginBottom: 36, letterSpacing: '0.03em',
+              }}>
+                {content.subtitle}
+              </p>
+            )}
+            {notebookMode === 'math' && (
+              <p style={{
+                fontSize: 10, color: 'rgba(129,140,248,0.55)',
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                marginBottom: 20,
+              }}>∑ Math mode</p>
+            )}
             {renderFocusModeBlocks()}
+            <div style={{
+              marginTop: 48, paddingTop: 16,
+              borderTop: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,248,235,0.22)', letterSpacing: '0.08em' }}>
+                {objectTitle ?? 'Notebook'}
+              </span>
+              {objectUpdatedAt && (
+                <span style={{ fontSize: 10, color: 'rgba(255,248,235,0.18)' }}>
+                  {formatRelativeTime(objectUpdatedAt)}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </>,
       document.body,
     ) : null}
+    {expandedImage !== null && typeof document !== 'undefined' && createPortal(
+      <div
+        onClick={() => setExpandedImage(null)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 10060,
+          background: 'rgba(0,0,0,0.88)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'zoom-out',
+        }}
+      >
+        <img
+          src={expandedImage}
+          alt=""
+          style={{
+            maxWidth: '90vw', maxHeight: '90vh',
+            borderRadius: 8, boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
+          }}
+        />
+      </div>,
+      document.body
+    )}
     </Fragment>
   );
 }

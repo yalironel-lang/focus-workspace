@@ -33,7 +33,15 @@ export type NotebookPaperStyle = 'blank' | 'ruled' | 'grid';
 export type NotebookMode = 'normal' | 'math';
 
 export type ProjectObjectContent =
-  | { type: 'notebook'; body: string; paperStyle: NotebookPaperStyle; notebookMode?: NotebookMode }
+  | {
+      type: 'notebook';
+      body: string;
+      paperStyle: NotebookPaperStyle;
+      notebookMode?: NotebookMode;
+      icon?: string;
+      accentColor?: string;
+      subtitle?: string;
+    }
   | { type: 'note'; body: string }
   | {
       type: 'mistake';
@@ -260,7 +268,15 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ps === 'blank' || ps === 'ruled' || ps === 'grid' ? ps : 'ruled';
       const nm = r.notebookMode;
       const notebookMode: NotebookMode = nm === 'math' ? 'math' : 'normal';
-      return { type: 'notebook', body, paperStyle, notebookMode };
+      const icon = typeof r.icon === 'string' && r.icon ? r.icon : undefined;
+      const accentColor = typeof r.accentColor === 'string' && r.accentColor ? r.accentColor : undefined;
+      const subtitle = typeof r.subtitle === 'string' && r.subtitle ? r.subtitle : undefined;
+      return {
+        type: 'notebook', body, paperStyle, notebookMode,
+        ...(icon !== undefined ? { icon } : {}),
+        ...(accentColor !== undefined ? { accentColor } : {}),
+        ...(subtitle !== undefined ? { subtitle } : {}),
+      };
     }
     case 'note':
       return { type: 'note', body: typeof r.body === 'string' ? r.body : '' };

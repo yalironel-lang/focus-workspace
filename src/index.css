@@ -585,3 +585,14 @@
 .nb-focus-enter {
   animation: nb-focus-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* ── Notebook Focus Mode enhancements ─────────────────────── */
+@keyframes nb-focus-announce {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  20%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  70%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(0); }
+}
+.nb-focus-announce {
+  animation: nb-focus-announce 1.8s ease forwards;
+}
