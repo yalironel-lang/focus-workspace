@@ -76,6 +76,12 @@ import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOve
 import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
 import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
 import { isAcceptablePdfFile, savePdfBlob } from '../lib/freeSpacePdfIdb';
+import {
+  fitImageFrame,
+  isAcceptableImageFile,
+  readImageDimensions,
+  saveImageBlob,
+} from '../lib/freeSpaceImageIdb';
 import { extractPdfSpatialData } from '../lib/pdfIngestion';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
@@ -1811,6 +1817,54 @@ export function SectionPage() {
     [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
   );
 
+  const handleImageDroppedOnCanvas = useCallback(
+    async (file: File, worldX: number, worldY: number) => {
+      if (!isAcceptableImageFile(file)) {
+        toast.error('Only PNG, JPEG, WebP, or GIF images are supported.');
+        return;
+      }
+
+      const obj = addSpaceObject('image');
+      const dims = await readImageDimensions(file);
+      const frame = fitImageFrame(dims.w, dims.h);
+      const x = Math.max(20, Math.round(worldX - frame.w / 2));
+      const y = Math.max(20, Math.round(worldY - frame.h / 2));
+      initPos(obj.id, { x, y, w: frame.w, h: frame.h });
+      setSpaceSelectedId(obj.id);
+
+      const safeTitle = file.name.length > 64 ? `${file.name.slice(0, 62)}…` : file.name;
+      updateSpaceObjectFields(obj.id, {
+        title: safeTitle,
+        content: {
+          type: 'image',
+          url: '',
+          fileName: file.name,
+          fileSize: file.size,
+          naturalWidth: dims.w,
+          naturalHeight: dims.h,
+        },
+      });
+
+      try {
+        await saveImageBlob(sectionId, obj.id, file);
+        applyStudyLinksForObject(obj.id, 'image');
+      } catch {
+        toast.error('Could not store this image on this device.');
+        removeSpaceObject(obj.id);
+        removePos(obj.id);
+      }
+    },
+    [
+      sectionId,
+      addSpaceObject,
+      initPos,
+      updateSpaceObjectFields,
+      removeSpaceObject,
+      removePos,
+      applyStudyLinksForObject,
+    ],
+  );
+
   const createQuickCaptureNote = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -2148,6 +2202,39 @@ export function SectionPage() {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [connectSourceId, cancelConnectMode]);
+
+  useEffect(() => {
+    if (!id || sectionViewMode !== 'free-space') return;
+
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      let file: File | null = null;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item?.kind === 'file' && item.type.startsWith('image/')) {
+          file = item.getAsFile();
+          break;
+        }
+      }
+      if (!file || !isAcceptableImageFile(file)) return;
+
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) {
+        if (active.closest('[contenteditable="true"]')) return;
+        if (active.closest('[data-nb-editor-root]')) return;
+        const tag = active.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+
+      e.preventDefault();
+      const center = viewportCenterWorld(0, 0);
+      void handleImageDroppedOnCanvas(file, center.x, center.y);
+    };
+
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [id, sectionViewMode, handleImageDroppedOnCanvas, viewportCenterWorld]);
 
   useEffect(() => {
     if (sectionViewMode !== 'free-space') cancelConnectMode();
@@ -2942,6 +3029,7 @@ export function SectionPage() {
               onCancelConnectMode={cancelConnectMode}
               spatialMinimapEnabled
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
+              onImageDroppedOnCanvas={handleImageDroppedOnCanvas}
               focusMode={freeSpaceSurfaceVisible ? focusMode : null}
               surfaceActive={freeSpaceSurfaceVisible}
               calmEffects={performanceCalm}

@@ -9,7 +9,7 @@ import {
 import { NoteBlock } from '../workspace/blocks/NoteBlock';
 import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
-import { ImageBlock } from '../workspace/blocks/ImageBlock';
+import { FreeSpaceImageCard } from './FreeSpaceImageCard';
 import { ProjectNotebookBlock } from './ProjectNotebookBlock';
 import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
@@ -180,16 +180,13 @@ function ProjectSpaceObjectRendererInner({
     case 'image':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Image">
-          <div>
-            <div style={{ fontSize: '10px', color: tokens.textMuted, padding: '10px 14px 0' }}>
-              Hover image to change source.
-            </div>
-            <ImageBlock
-              content={content}
-              tokens={tokens}
-              onChange={c => onChange(c)}
-            />
-          </div>
+          <FreeSpaceImageCard
+            objectId={object.id}
+            content={content}
+            tokens={tokens}
+            sectionId={freeSpaceSectionId ?? ''}
+            onChange={c => onChange(c)}
+          />
         </WorkspaceSurfaceErrorBoundary>
       );
     case 'calculator':

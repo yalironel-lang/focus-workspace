@@ -94,6 +94,8 @@ import {
 import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../../focusMode/objectRelevance';
 import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
 import { resolveFreeSpaceMaterialTier } from '../../lib/freeSpaceMaterials';
+import { isAcceptablePdfFile } from '../../lib/freeSpacePdfIdb';
+import { isAcceptableImageFile } from '../../lib/freeSpaceImageIdb';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 import { flickerDebugCount } from '../../lib/flickerDebug';
 import {
@@ -200,6 +202,8 @@ interface Props {
   spatialMinimapEnabled?: boolean;
   /** Section Free Space: drop a PDF onto empty canvas → new PDF window at world coordinates. */
   onPdfDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
+  /** Section Free Space: drop an image onto canvas → spatial memory object at world coordinates. */
+  onImageDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
   /** Cognitive Focus Mode — presentation only; does not move objects or change persistence layout. */
   focusMode?: FocusMode | null;
   /** Workspace continuity: recently used objects keep a faint presence. */
@@ -398,6 +402,7 @@ export function FreeformCanvas({
   onCancelConnectMode,
   spatialMinimapEnabled = false,
   onPdfDroppedOnCanvas,
+  onImageDroppedOnCanvas,
   focusMode = null,
   continuityObjectIds = [],
   continuityClusterIds = [],
@@ -1491,7 +1496,7 @@ export function FreeformCanvas({
         ...canvasBackgroundStyle,
       }}
       onDragOver={
-        onPdfDroppedOnCanvas
+        onPdfDroppedOnCanvas || onImageDroppedOnCanvas
           ? e => {
               if (![...e.dataTransfer.types].includes('Files')) return;
               e.preventDefault();
@@ -1500,7 +1505,7 @@ export function FreeformCanvas({
           : undefined
       }
       onDrop={
-        onPdfDroppedOnCanvas
+        onPdfDroppedOnCanvas || onImageDroppedOnCanvas
           ? e => {
               e.preventDefault();
               const f = e.dataTransfer.files?.[0];
@@ -1511,7 +1516,11 @@ export function FreeformCanvas({
               const ly = e.clientY - rect.top;
               const worldX = (lx - safePanX) / safeZoom;
               const worldY = (ly - safePanY) / safeZoom;
-              onPdfDroppedOnCanvas(f, worldX, worldY);
+              if (isAcceptablePdfFile(f)) {
+                onPdfDroppedOnCanvas?.(f, worldX, worldY);
+              } else if (isAcceptableImageFile(f)) {
+                onImageDroppedOnCanvas?.(f, worldX, worldY);
+              }
             }
           : undefined
       }

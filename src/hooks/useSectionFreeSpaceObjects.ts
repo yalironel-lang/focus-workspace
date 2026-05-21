@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
+import { copyImageBlob, deleteImageBlob } from '../lib/freeSpaceImageIdb';
 import { copyStudyFileBlob, deleteStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
@@ -30,6 +31,8 @@ export type MistakeVariant = 'mistake' | 'recall';
 export type CalculatorHistoryEntry = { expr: string; result: string };
 
 export type NotebookPaperStyle = 'blank' | 'ruled' | 'grid';
+/** Document page vs dark spatial writing surface. */
+export type NotebookSurface = 'spatial' | 'paper';
 export type NotebookMode = 'normal' | 'math';
 
 export type ProjectObjectContent =
@@ -37,6 +40,7 @@ export type ProjectObjectContent =
       type: 'notebook';
       body: string;
       paperStyle: NotebookPaperStyle;
+      notebookSurface?: NotebookSurface;
       notebookMode?: NotebookMode;
       icon?: string;
       accentColor?: string;
@@ -58,7 +62,16 @@ export type ProjectObjectContent =
     }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
-  | { type: 'image'; url: string; alt?: string; caption?: string }
+  | {
+      type: 'image';
+      url: string;
+      alt?: string;
+      caption?: string;
+      fileName?: string;
+      fileSize?: number;
+      naturalWidth?: number;
+      naturalHeight?: number;
+    }
   | { type: 'calculator'; input: string; history: CalculatorHistoryEntry[] }
   | {
       type: 'graph';
@@ -146,7 +159,13 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
     case 'notebook':
       return {
         title: 'Notebook',
-        content: { type: 'notebook', body: '', paperStyle: 'ruled', notebookMode: 'normal' },
+        content: {
+          type: 'notebook',
+          body: '',
+          paperStyle: 'ruled',
+          notebookSurface: 'spatial',
+          notebookMode: 'normal',
+        },
       };
     case 'note': return { title: 'Note', content: { type: 'note', body: '' } };
     case 'mistake':
@@ -268,11 +287,13 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ps === 'blank' || ps === 'ruled' || ps === 'grid' ? ps : 'ruled';
       const nm = r.notebookMode;
       const notebookMode: NotebookMode = nm === 'math' ? 'math' : 'normal';
+      const ns = r.notebookSurface;
+      const notebookSurface: NotebookSurface = ns === 'paper' ? 'paper' : 'spatial';
       const icon = typeof r.icon === 'string' && r.icon ? r.icon : undefined;
       const accentColor = typeof r.accentColor === 'string' && r.accentColor ? r.accentColor : undefined;
       const subtitle = typeof r.subtitle === 'string' && r.subtitle ? r.subtitle : undefined;
       return {
-        type: 'notebook', body, paperStyle, notebookMode,
+        type: 'notebook', body, paperStyle, notebookMode, notebookSurface,
         ...(icon !== undefined ? { icon } : {}),
         ...(accentColor !== undefined ? { accentColor } : {}),
         ...(subtitle !== undefined ? { subtitle } : {}),
@@ -325,7 +346,22 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const url = typeof r.url === 'string' ? r.url : '';
       const alt = typeof r.alt === 'string' ? r.alt : undefined;
       const caption = typeof r.caption === 'string' ? r.caption : undefined;
-      return { type: 'image', url, alt, caption };
+      const fileName = typeof r.fileName === 'string' ? r.fileName : undefined;
+      const fileSize = typeof r.fileSize === 'number' && Number.isFinite(r.fileSize) ? r.fileSize : undefined;
+      const naturalWidth =
+        typeof r.naturalWidth === 'number' && Number.isFinite(r.naturalWidth) ? r.naturalWidth : undefined;
+      const naturalHeight =
+        typeof r.naturalHeight === 'number' && Number.isFinite(r.naturalHeight) ? r.naturalHeight : undefined;
+      return {
+        type: 'image',
+        url,
+        ...(alt !== undefined ? { alt } : {}),
+        ...(caption !== undefined ? { caption } : {}),
+        ...(fileName !== undefined ? { fileName } : {}),
+        ...(fileSize !== undefined ? { fileSize } : {}),
+        ...(naturalWidth !== undefined ? { naturalWidth } : {}),
+        ...(naturalHeight !== undefined ? { naturalHeight } : {}),
+      };
     }
     case 'calculator': {
       const input = typeof r.input === 'string' ? r.input : '';
@@ -893,6 +929,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     setObjects(prev => {
       const victim = prev.find(o => o.id === id);
       if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
+      if (victim?.type === 'image') void deleteImageBlob(sectionId, id);
       if (victim?.type === 'studyfile') void deleteStudyFileBlob(sectionId, id);
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
@@ -918,6 +955,9 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     if (source.type === 'pdf') {
       void copyPdfBlob(sectionId, source.id, copy.id);
+    }
+    if (source.type === 'image') {
+      void copyImageBlob(sectionId, source.id, copy.id);
     }
     if (source.type === 'studyfile') {
       void copyStudyFileBlob(sectionId, source.id, copy.id);
