@@ -191,6 +191,23 @@ function normalizeRecallPromptText(text: string): string {
   return text.replace(/\u2028/g, '\n').trim();
 }
 
+function tryAcademicAutoTransform(text: string): { tone: CalloutTone; body: string } | null {
+  const m = text.match(
+    /^(Definition|Theorem|Lemma|Corollary|Proposition|Proof|Example|Mistake|Error|Note|Concept|Summary|Review)\s*[\uff1a:]\s*(.*)$/i
+  );
+  if (!m) return null;
+  const kw = (m[1] ?? '').toLowerCase();
+  const body = (m[2] ?? '').trim();
+  if (kw === 'definition') return { tone: 'definition', body };
+  if (['theorem','lemma','corollary','proposition','proof'].includes(kw)) return { tone: 'theorem', body };
+  if (kw === 'example') return { tone: 'example', body };
+  if (kw === 'mistake' || kw === 'error') return { tone: 'mistake', body };
+  if (kw === 'note' || kw === 'concept') return { tone: 'concept', body };
+  if (kw === 'summary') return { tone: 'summary', body };
+  if (kw === 'review') return { tone: 'review', body };
+  return null;
+}
+
 function normalizeOrderedSequences(blocks: Block[]): Block[] {
   let changed = false;
   const out: Block[] = [];
@@ -885,6 +902,8 @@ export function ProjectNotebookBlock({
     blockId: string;
     level: 1 | 2 | 3 | 4 | 5;
   } | null>(null);
+  const [paperPopoverOpen, setPaperPopoverOpen] = useState(false);
+  const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -976,6 +995,13 @@ export function ProjectNotebookBlock({
     const t = window.setTimeout(() => setMorphPulseId(null), 420);
     return () => window.clearTimeout(t);
   }, [morphPulseId]);
+
+  useEffect(() => {
+    if (!isFocusModeOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFocusModeOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFocusModeOpen]);
 
   const paperStyle = content.paperStyle ?? 'ruled';
   const notebookMode = content.notebookMode ?? 'normal';
@@ -1358,7 +1384,7 @@ export function ProjectNotebookBlock({
 
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: isMathNotebook ? 'min(760px, 100%)' : 'min(680px, 100%)',
+      maxWidth: isMathNotebook ? 'min(760px, 100%)' : 'min(700px, 100%)',
       margin: '0 auto',
       width: '100%',
       paddingLeft: 'clamp(20px, 4vw, 44px)',
@@ -1378,14 +1404,14 @@ export function ProjectNotebookBlock({
       backgroundSize: writingSurfaceBackground.size,
       color: notebookInk.primary,
       fontSize: `${typeScale.l3}px`,
-      lineHeight: 1.92,
+      lineHeight: 1.96,
       letterSpacing: '0.005em',
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
       border: '1px solid rgba(255,255,255,0.055)',
       borderRadius: 22,
       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
-      paddingTop: '32px',
+      paddingTop: '24px',
       paddingBottom: '88px',
       outline: 'none',
       WebkitFontSmoothing: 'antialiased',
@@ -1899,6 +1925,21 @@ export function ProjectNotebookBlock({
           return;
         }
 
+        // Academic auto-transform: "Definition: text" → callout block on Enter
+        if (block.kind === 'paragraph') {
+          const transform = tryAcademicAutoTransform(block.text);
+          if (transform) {
+            e.preventDefault();
+            setBlocks(prev => prev.map(b =>
+              b.id === id
+                ? { ...b, kind: 'callout' as const, tone: transform.tone, text: transform.body }
+                : b
+            ));
+            pendingCaretRef.current = { id, offset: transform.body.length };
+            return;
+          }
+        }
+
         const before = text.slice(0, offset);
         const after = autoCapitalizeParagraphStart(text.slice(offset));
         const updated: Block = { ...block, text: before };
@@ -2052,6 +2093,106 @@ export function ProjectNotebookBlock({
     onEditingChange(editorMode === 'edit');
   }, [context, editorMode, onEditingChange]);
 
+  function renderFocusModeBlocks() {
+    return blocks.map((block) => {
+      if (block.kind === 'divider') {
+        return (
+          <div key={block.id} style={{ display: 'flex', alignItems: 'center', margin: '28px 0' }}>
+            <div style={{ flex: 1, height: '1px', background: 'rgba(255,248,235,0.12)' }} />
+          </div>
+        );
+      }
+      if (block.kind === 'title') {
+        return (
+          <EditableLine
+            key={block.id}
+            id={block.id}
+            text={block.text}
+            tokens={tokens}
+            placeholder="Untitled"
+            onUpdate={updateBlockText}
+            onFocusIndex={setFocusIndexById}
+            onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              fontFamily: 'Georgia, serif', fontSize: '28px', fontWeight: 400, lineHeight: 1.3,
+              color: 'rgba(255,248,235,0.88)', marginBottom: '40px', caretColor: tokens.accent,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}
+          />
+        );
+      }
+      if (block.kind === 'section') {
+        return (
+          <div key={block.id} style={{ borderBottom: '1px solid rgba(245,158,11,0.18)', paddingBottom: 6, marginBottom: 24 }}>
+            <EditableLine
+              id={block.id}
+              text={block.text}
+              tokens={tokens}
+              placeholder="Section label…"
+              onUpdate={updateBlockText}
+              onFocusIndex={setFocusIndexById}
+              onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+              style={{
+                width: '100%', border: 'none', outline: 'none', background: 'transparent',
+                fontFamily: 'Georgia, serif', fontSize: '13px', textTransform: 'uppercase',
+                letterSpacing: '0.12em', color: 'rgba(245,158,11,0.75)', margin: 0,
+                caretColor: tokens.accent, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            />
+          </div>
+        );
+      }
+      if (block.kind === 'callout') {
+        const ct = calloutToneTokens(block.tone);
+        return (
+          <div key={block.id} style={{
+            borderLeft: `3px solid ${ct.bar}`,
+            background: ct.bg,
+            padding: '16px 18px 16px 20px',
+            borderRadius: '0 8px 8px 0',
+            marginBottom: 10,
+          }}>
+            <EditableLine
+              id={block.id}
+              text={block.text}
+              tokens={tokens}
+              placeholder={`${calloutLabel(block.tone)}…`}
+              onUpdate={updateBlockText}
+              onFocusIndex={setFocusIndexById}
+              onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+              style={{
+                width: '100%', border: 'none', outline: 'none', background: 'transparent',
+                color: 'rgba(255,248,235,0.82)', fontSize: '17px', fontWeight: 400,
+                lineHeight: 1.96, margin: 0, caretColor: tokens.accent,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            />
+          </div>
+        );
+      }
+      // Default: paragraph (and other block kinds)
+      return (
+        <EditableLine
+          key={block.id}
+          id={block.id}
+          text={block.text}
+          tokens={tokens}
+          placeholder="Write…"
+          onUpdate={updateBlockText}
+          onFocusIndex={setFocusIndexById}
+          onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+          style={{
+            width: '100%', border: 'none', outline: 'none', background: 'transparent',
+            color: 'rgba(255,248,235,0.82)', fontSize: '17px', fontWeight: 400,
+            lineHeight: 1.96, marginBottom: '10px', caretColor: tokens.accent,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}
+        />
+      );
+    });
+  }
+
   return (
     <Fragment>
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
@@ -2106,19 +2247,6 @@ export function ProjectNotebookBlock({
         <div style={{ minWidth: 0, flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div
             style={{
-              fontSize: '10px',
-              fontWeight: 700,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: notebookInk.ghost,
-              opacity: 0.92,
-            }}
-          >
-            Thinking surface
-          </div>
-
-          <div
-            style={{
               fontSize: '13px',
               color: notebookInk.secondary,
               letterSpacing: '0.01em',
@@ -2128,10 +2256,7 @@ export function ProjectNotebookBlock({
           >
             {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}{hasNotebookContext
               ? ` · ${contextData.totalCount} connected`
-              : ''}{' '}
-            <span style={{ color: notebookInk.muted }}>
-              Slash commands · Alt + ↑↓ for levels · Cmd/Ctrl + Shift + R for recall
-            </span>
+              : ''}
           </div>
 
           {contextSummaryChips.length ? (
@@ -2168,6 +2293,21 @@ export function ProjectNotebookBlock({
             justifyContent: 'flex-end',
           }}
         >
+          <button
+            type="button"
+            title="Focus mode"
+            onClick={() => setIsFocusModeOpen(true)}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.65)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.28)'; }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+              borderRadius: '4px', color: 'rgba(255,248,235,0.28)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
           {context === 'free-space' ? (
             <button
               type="button"
@@ -2202,6 +2342,7 @@ export function ProjectNotebookBlock({
               type="button"
               disabled={!hasNotebookContext}
               onClick={() => setContextPanelOpen(v => !v)}
+              title={!hasNotebookContext ? 'No context yet' : showNotebookContext ? 'Hide sources' : 'Show sources'}
               style={{
                 border: '1px solid rgba(255,255,255,0.06)',
                 background: !hasNotebookContext
@@ -2215,147 +2356,85 @@ export function ProjectNotebookBlock({
                     ? notebookInk.primary
                     : notebookInk.secondary,
                 borderRadius: '10px',
-                fontSize: '10px',
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
                 padding: '7px 10px',
                 cursor: !hasNotebookContext ? 'default' : 'pointer',
                 opacity: !hasNotebookContext ? 0.62 : 1,
                 transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
-              {!hasNotebookContext ? 'No context yet' : showNotebookContext ? 'Hide context' : 'Show context'}
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="1" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.2"/>
+                <line x1="9.5" y1="1" x2="9.5" y2="13" stroke="currentColor" strokeWidth="1.2"/>
+              </svg>
             </button>
           ) : null}
-          <div
+          <button
+            type="button"
+            onClick={() => setEditorMode(editorMode === 'edit' ? 'preview' : 'edit')}
+            title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
             style={{
-              display: 'inline-flex',
-              padding: '3px',
-              gap: '2px',
-              borderRadius: '10px',
-              background: 'rgba(0,0,0,0.16)',
-              border: '1px solid rgba(255,255,255,0.055)',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
+              borderRadius: 4, color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+              fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
-          >
-            {(['edit', 'preview'] as const).map((mode) => {
-              const active = editorMode === mode;
-              const label = mode === 'edit' ? 'Edit' : 'Preview';
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setEditorMode(mode)}
-                  style={{
-                    border: 'none',
-                    background: active ? 'rgba(255,255,255,0.09)' : 'transparent',
-                    color: active ? notebookInk.primary : notebookInk.ghost,
-                    borderRadius: '7px',
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    padding: '6px 11px',
-                    cursor: 'pointer',
-                    opacity: active ? 1 : 0.82,
-                    transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <div
+          >Aa</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
+                onChange({
+                  ...content,
+                  notebookMode: 'math',
+                  paperStyle: 'grid',
+                  body: MATH_CALCULUS_NOTEBOOK_SEED,
+                });
+                return;
+              }
+              const nextMode = notebookMode === 'math' ? 'normal' : 'math';
+              onChange({
+                ...content,
+                notebookMode: nextMode,
+                ...(nextMode === 'math' && paperStyle === 'ruled'
+                  ? { paperStyle: 'grid' as const }
+                  : {}),
+              });
+            }}
+            title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
             style={{
-              display: 'inline-flex',
-              padding: '3px',
-              gap: '2px',
-              borderRadius: '10px',
-              background: 'rgba(0,0,0,0.12)',
-              border: '1px solid rgba(255,255,255,0.05)',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
+              borderRadius: 4, color: notebookMode === 'math' ? tokens.accent : 'rgba(255,248,235,0.28)',
+              fontSize: 13, transition: 'color 0.15s',
             }}
-          >
-            {(['normal', 'math'] as const).map(mode => {
-              const active = notebookMode === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => {
-                    if (mode === 'math' && isEmptyMathStarterBody(content.body ?? '')) {
-                      onChange({
-                        ...content,
-                        notebookMode: 'math',
-                        paperStyle: 'grid',
-                        body: MATH_CALCULUS_NOTEBOOK_SEED,
-                      });
-                      return;
-                    }
-                    onChange({
-                      ...content,
-                      notebookMode: mode,
-                      ...(mode === 'math' && paperStyle === 'ruled'
-                        ? { paperStyle: 'grid' as const }
-                        : {}),
-                    });
-                  }}
-                  style={{
-                    border: 'none',
-                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
-                    color: active ? notebookInk.secondary : notebookInk.ghost,
-                    borderRadius: '7px',
-                    fontSize: '9px',
-                    fontWeight: 600,
-                    letterSpacing: '0.07em',
-                    textTransform: 'uppercase',
-                    padding: '5px 9px',
-                    cursor: 'pointer',
-                    opacity: active ? 1 : 0.78,
-                  }}
-                >
-                  {mode === 'normal' ? 'Normal' : 'Math'}
-                </button>
-              );
-            })}
-          </div>
-          <div
-            style={{
-              display: 'inline-flex',
-              padding: '3px',
-              gap: '2px',
-              borderRadius: '10px',
-              background: 'rgba(0,0,0,0.12)',
-              border: '1px solid rgba(255,255,255,0.05)',
-            }}
-          >
-            {(['blank', 'ruled', 'grid'] as const).map((style) => {
-              const active = paperStyle === style;
-
-              return (
-                <button
-                  key={style}
-                  type="button"
-                  onClick={() => onChange({ ...content, paperStyle: style })}
-                  style={{
-                    border: 'none',
-                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
-                    color: active ? notebookInk.secondary : notebookInk.ghost,
-                    borderRadius: '7px',
-                    fontSize: '9px',
-                    fontWeight: 600,
-                    letterSpacing: '0.07em',
-                    textTransform: 'uppercase',
-                    padding: '5px 9px',
-                    cursor: 'pointer',
-                    opacity: active ? 1 : 0.78,
-                    transition: 'background 0.18s ease, color 0.18s ease, opacity 0.18s ease',
-                  }}
-                >
-                  {style}
-                </button>
-              );
-            })}
+          >√</button>
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setPaperPopoverOpen(p => !p)}
+              title="Paper style"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
+                borderRadius: 4, color: 'rgba(255,248,235,0.28)', fontSize: 10, transition: 'color 0.15s',
+              }}
+            >≡</button>
+            {paperPopoverOpen && (
+              <div style={{
+                position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 200,
+                background: 'rgba(20,16,12,0.95)', border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 8, padding: '4px', display: 'flex', flexDirection: 'column', gap: 2,
+              }}>
+                {(['blank','ruled','grid'] as const).map(s => (
+                  <button key={s} type="button" onClick={() => { onChange({ ...content, paperStyle: s }); setPaperPopoverOpen(false); }}
+                    style={{
+                      background: paperStyle === s ? 'rgba(245,158,11,0.12)' : 'none',
+                      border: 'none', borderRadius: 5, cursor: 'pointer', padding: '5px 12px',
+                      color: paperStyle === s ? tokens.accent : 'rgba(255,248,235,0.50)',
+                      fontSize: 11, textAlign: 'left', whiteSpace: 'nowrap',
+                    }}
+                  >{s.charAt(0).toUpperCase() + s.slice(1)}</button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2703,7 +2782,7 @@ export function ProjectNotebookBlock({
                 >
                   <div style={{
                     paddingBottom: '7px',
-                    marginBottom: `${typeScale.s4}px`,
+                    marginBottom: '20px',
                     borderBottom: `1px solid ${tokens.accent}28`,
                   }}>
                     <EditableLine
@@ -3145,7 +3224,7 @@ export function ProjectNotebookBlock({
                       fontWeight: 400,
                       lineHeight: 1.84,
                       letterSpacing: '0.004em',
-                      margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
+                      margin: `${paraTop}px 0 10px`,
                       opacity: 1,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -3169,9 +3248,9 @@ export function ProjectNotebookBlock({
                       color: paraFine ? notebookInk.muted : paraMuted ? notebookInk.secondary : notebookInk.primary,
                       fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
                       fontWeight: paraMuted ? 500 : 400,
-                      lineHeight: paraFine ? 1.7 : 1.84,
+                      lineHeight: paraFine ? 1.7 : 1.96,
                       letterSpacing: paraFine ? '0.024em' : '0.004em',
-                      margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
+                      margin: `${paraTop}px 0 10px`,
                       opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
                       caretColor: tokens.accent,
                       whiteSpace: 'pre-wrap',
@@ -3594,6 +3673,48 @@ export function ProjectNotebookBlock({
       </div>
       </NotebookBodyScroll>
     </div>
+
+    {isFocusModeOpen && typeof document !== 'undefined' ? createPortal(
+      <>
+        <div
+          onClick={() => setIsFocusModeOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9990,
+            background: 'rgba(14,10,6,0.94)',
+          }}
+        />
+        <div
+          className="nb-focus-enter"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9991, overflowY: 'auto',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setIsFocusModeOpen(false)}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.70)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.35)'; }}
+            style={{
+              position: 'fixed', top: 24, right: 32, background: 'none', border: 'none',
+              cursor: 'pointer', color: 'rgba(255,248,235,0.35)', fontSize: 20,
+            }}
+          >×</button>
+          <div
+            onKeyDownCapture={handleEditorKeyCapture}
+            style={{ maxWidth: 720, margin: '0 auto', padding: '72px 40px 120px' }}
+          >
+            <h1 style={{
+              fontFamily: 'Georgia, serif', fontSize: 28, fontWeight: 400,
+              color: 'rgba(255,248,235,0.88)', marginBottom: 40, lineHeight: 1.3,
+            }}>
+              {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+            </h1>
+            {renderFocusModeBlocks()}
+          </div>
+        </div>
+      </>,
+      document.body,
+    ) : null}
     </Fragment>
   );
 }
