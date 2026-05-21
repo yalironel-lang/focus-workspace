@@ -14,6 +14,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useSections } from '../../hooks/useSections';
 import { useDeadlines } from '../../hooks/useDeadlines';
 import { useAtmosphere } from '../../hooks/useAtmosphere';
+import { useCommandPalette } from '../../command/CommandPaletteContext';
 import { useWorkspaceTheme, mergeAccent } from '../../hooks/useWorkspaceTheme';
 import { WorkspaceAppearancePanel } from '../workspace-appearance/WorkspaceAppearancePanel';
 import { useWorkspaceFolders } from '../../hooks/useWorkspaceFolders';
@@ -223,6 +224,7 @@ function WorkspaceLibraryView() {
   const { sections, loading, error, fetchSections, createSection, deleteSection } = useSections();
   const { deadlines } = useDeadlines();
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
+  const { openPalette } = useCommandPalette();
   const { design, global, updateGlobal } = useWorkspaceTheme();
   const tokens = useMemo(() => mergeAccent(atmTokens, design), [atmTokens, design]);
   const homeTone = useMemo(() => resolveLibraryHomeTone(global, atmTokens), [global, atmTokens]);
@@ -403,6 +405,7 @@ function WorkspaceLibraryView() {
           hasWorkspaces={hasWorkspaces}
           appearanceOpen={appearanceOpen}
           onOpenAppearance={() => setAppearanceOpen(true)}
+          onOpenNotebookSearch={openPalette}
           onSignOut={() => void handleSignOut()}
           spatial={spatial}
           sidebarParallax={sidebarParallax}

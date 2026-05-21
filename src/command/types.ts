@@ -45,4 +45,6 @@ export interface FreeSpaceCommandHandlers {
   openMistakeReviewNeglected?: () => void;
   openMistakeReviewLowConfidence?: () => void;
   convertSelectedNoteToMistake?: () => void;
+  /** Pan canvas to a notebook and select it (current section only). */
+  focusNotebook?: (objectId: string, boardId?: string) => void;
 }

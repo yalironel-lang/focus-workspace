@@ -37,6 +37,14 @@ import { WorkspaceRecoveryModal } from '../components/recovery/WorkspaceRecovery
 import { isCommandPaletteBlockedTarget } from './isBlockedTarget';
 import { filterAndSortCommands } from './matchCommands';
 import {
+  buildNotebookSearchIndex,
+  formatNotebookEditedAt,
+  notebookSearchSnippet,
+  searchNotebooks,
+  setPendingNotebookFocus,
+  type NotebookSearchHit,
+} from '../lib/notebookSearchIndex';
+import {
   useCommandPalette,
   getFreeSpaceHandlersSnapshot,
   getAIWorkspaceHandlersSnapshot,
@@ -895,7 +903,51 @@ export function GlobalCommandPalette() {
     openArrivalExperience,
   ]);
 
-  const filtered = useMemo(() => filterAndSortCommands(query, commands), [commands, query]);
+  const notebookIndex = useMemo(
+    () => buildNotebookSearchIndex(sections.map(s => ({ id: s.id, title: s.title }))),
+    [sections],
+  );
+
+  const notebookHits = useMemo(
+    () => searchNotebooks(notebookIndex, query, 14),
+    [notebookIndex, query],
+  );
+
+  type PaletteRow =
+    | { kind: 'notebook'; hit: NotebookSearchHit }
+    | { kind: 'command'; item: CommandItem };
+
+  const rows = useMemo((): PaletteRow[] => {
+    const q = query.trim();
+    if (q) return notebookHits.map(hit => ({ kind: 'notebook' as const, hit }));
+    return filterAndSortCommands('', commands).map(item => ({ kind: 'command' as const, item }));
+  }, [query, notebookHits, commands]);
+
+  const goToNotebook = useCallback(
+    (hit: NotebookSearchHit) => {
+      closePalette();
+      const fs = getFreeSpaceHandlersSnapshot();
+      if (sectionIdFromRoute === hit.sectionId && fs?.focusNotebook) {
+        fs.focusNotebook(hit.objectId, hit.boardId);
+        return;
+      }
+      setPendingNotebookFocus({
+        sectionId: hit.sectionId,
+        boardId: hit.boardId,
+        objectId: hit.objectId,
+      });
+      navigate(`/section/${hit.sectionId}`);
+    },
+    [closePalette, sectionIdFromRoute, navigate],
+  );
+
+  const runRow = useCallback(
+    (row: PaletteRow) => {
+      if (row.kind === 'notebook') goToNotebook(row.hit);
+      else if (!row.item.disabled) row.item.run();
+    },
+    [goToNotebook],
+  );
 
   useEffect(() => {
     if (!paletteOpen) return;
@@ -907,10 +959,10 @@ export function GlobalCommandPalette() {
 
   useEffect(() => {
     setActiveIndex(i => {
-      if (filtered.length === 0) return 0;
-      return Math.min(i, filtered.length - 1);
+      if (rows.length === 0) return 0;
+      return Math.min(i, rows.length - 1);
     });
-  }, [filtered.length, query]);
+  }, [rows.length, query]);
 
   useEffect(() => {
     setWorkspaceRecoveryOpen(false);
@@ -940,24 +992,25 @@ export function GlobalCommandPalette() {
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveIndex(i => (filtered.length === 0 ? 0 : (i + 1) % filtered.length));
+        setActiveIndex(i => (rows.length === 0 ? 0 : (i + 1) % rows.length));
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         setActiveIndex(i =>
-          filtered.length === 0 ? 0 : (i - 1 + filtered.length) % filtered.length,
+          rows.length === 0 ? 0 : (i - 1 + rows.length) % rows.length,
         );
       }
       if (e.key === 'Enter') {
-        const item = filtered[activeIndex];
-        if (!item || item.disabled) return;
+        const row = rows[activeIndex];
+        if (!row) return;
+        if (row.kind === 'command' && row.item.disabled) return;
         e.preventDefault();
-        item.run();
+        runRow(row);
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [paletteOpen, filtered, activeIndex, closePalette]);
+  }, [paletteOpen, rows, activeIndex, closePalette, runRow]);
 
   useEffect(() => {
     if (!paletteOpen || !listRef.current) return;
@@ -967,22 +1020,14 @@ export function GlobalCommandPalette() {
 
   const runIndex = useCallback(
     (idx: number) => {
-      const item = filtered[idx];
-      if (!item || item.disabled) return;
-      item.run();
+      const row = rows[idx];
+      if (!row) return;
+      runRow(row);
     },
-    [filtered],
+    [rows, runRow],
   );
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, { label: string; items: { item: CommandItem; index: number }[] }>();
-    filtered.forEach((item, index) => {
-      const key = item.group;
-      if (!map.has(key)) map.set(key, { label: item.groupLabel, items: [] });
-      map.get(key)!.items.push({ item, index });
-    });
-    return [...map.entries()];
-  }, [filtered]);
+  const isNotebookSearch = query.trim().length > 0;
 
   return (
     <>
@@ -1021,7 +1066,7 @@ export function GlobalCommandPalette() {
                 type="text"
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Search commands and workspaces…"
+                placeholder="Search notebooks…"
                 className="flex-1 min-w-0 bg-transparent outline-none text-sm"
                 style={{ color: tokens.textPrimary }}
                 autoComplete="off"
@@ -1041,7 +1086,7 @@ export function GlobalCommandPalette() {
 
             <div className="px-3 pt-2 pb-1 flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: tokens.textGhost }}>
-                Command
+                {isNotebookSearch ? 'Notebooks' : 'Commands'}
               </span>
               <div className="flex items-center gap-2">
                 <Kbd>↑↓</Kbd>
@@ -1051,68 +1096,143 @@ export function GlobalCommandPalette() {
             </div>
 
             <div ref={listRef} className="flex-1 overflow-y-auto px-2 pb-3 min-h-[200px]">
-              {filtered.length === 0 ? (
+              {rows.length === 0 ? (
                 <p className="text-sm px-3 py-8 text-center" style={{ color: tokens.textMuted }}>
-                  No matches
+                  {isNotebookSearch ? 'No notebooks found' : 'No matches'}
                 </p>
-              ) : (
-                grouped.map(([groupKey, { label, items }]) => (
-                  <div key={groupKey} className="mb-2">
-                    <p
-                      className="text-[10px] font-bold tracking-[0.16em] uppercase px-2 py-1.5"
-                      style={{ color: tokens.textGhost }}
+              ) : isNotebookSearch ? (
+                rows.map((row, index) => {
+                  if (row.kind !== 'notebook') return null;
+                  const hit = row.hit;
+                  const active = index === activeIndex;
+                  const snippet = notebookSearchSnippet(hit.bodyPlain, query);
+                  const meta = [
+                    hit.sectionTitle,
+                    hit.boardName !== 'Main' ? hit.boardName : null,
+                    formatNotebookEditedAt(hit.updatedAt),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <button
+                      key={`${hit.sectionId}-${hit.boardId}-${hit.objectId}`}
+                      type="button"
+                      data-cmd-index={index}
+                      onClick={() => runIndex(index)}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      className="w-full flex items-start gap-3 px-2.5 py-2.5 rounded-xl text-left transition-colors"
+                      style={{
+                        backgroundColor: active ? `${tokens.accent}12` : 'transparent',
+                        border: active ? `1px solid ${tokens.accent}22` : '1px solid transparent',
+                      }}
                     >
-                      {label}
-                    </p>
-                    {items.map(({ item, index }) => {
-                      const active = index === activeIndex;
-                      const Icon = item.icon ?? ChevronRight;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          data-cmd-index={index}
-                          disabled={item.disabled}
-                          onClick={() => runIndex(index)}
-                          onMouseEnter={() => setActiveIndex(index)}
-                          className="w-full flex items-start gap-3 px-2.5 py-2 rounded-xl text-left transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
-                          style={{
-                            backgroundColor: active ? `${tokens.accent}12` : 'transparent',
-                            border: active ? `1px solid ${tokens.accent}22` : '1px solid transparent',
-                          }}
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                        style={{
+                          backgroundColor: active ? `${tokens.accent}18` : tokens.wellBg,
+                          border: `1px solid ${active ? `${tokens.accent}30` : tokens.cardBorder}`,
+                        }}
+                      >
+                        <BookOpen
+                          className="w-3.5 h-3.5"
+                          strokeWidth={2}
+                          style={{ color: active ? tokens.accent : tokens.textMuted }}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className="text-[13px] font-medium leading-tight truncate"
+                          style={{ color: tokens.textPrimary }}
                         >
-                          <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                          {hit.title}
+                        </div>
+                        {hit.subtitle ? (
+                          <div className="text-[11px] leading-snug mt-0.5 truncate" style={{ color: tokens.textSecondary }}>
+                            {hit.subtitle}
+                          </div>
+                        ) : null}
+                        {snippet ? (
+                          <div className="text-[11px] leading-snug mt-1 line-clamp-2" style={{ color: tokens.textMuted }}>
+                            {snippet}
+                          </div>
+                        ) : null}
+                        <div className="text-[10px] mt-1.5 truncate" style={{ color: tokens.textGhost }}>
+                          {meta}
+                        </div>
+                      </div>
+                      {active && (
+                        <ChevronRight className="w-4 h-4 shrink-0 mt-1.5" style={{ color: tokens.textGhost }} />
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                (() => {
+                  const map = new Map<string, { label: string; items: { item: CommandItem; index: number }[] }>();
+                  rows.forEach((row, index) => {
+                    if (row.kind !== 'command') return;
+                    const key = row.item.group;
+                    if (!map.has(key)) map.set(key, { label: row.item.groupLabel, items: [] });
+                    map.get(key)!.items.push({ item: row.item, index });
+                  });
+                  return [...map.entries()].map(([groupKey, { label, items }]) => (
+                    <div key={groupKey} className="mb-2">
+                      <p
+                        className="text-[10px] font-bold tracking-[0.16em] uppercase px-2 py-1.5"
+                        style={{ color: tokens.textGhost }}
+                      >
+                        {label}
+                      </p>
+                      {items.map(({ item, index }) => {
+                        const active = index === activeIndex;
+                        const Icon = item.icon ?? ChevronRight;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            data-cmd-index={index}
+                            disabled={item.disabled}
+                            onClick={() => runIndex(index)}
+                            onMouseEnter={() => setActiveIndex(index)}
+                            className="w-full flex items-start gap-3 px-2.5 py-2 rounded-xl text-left transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
                             style={{
-                              backgroundColor: active ? `${tokens.accent}18` : tokens.wellBg,
-                              border: `1px solid ${active ? `${tokens.accent}30` : tokens.cardBorder}`,
+                              backgroundColor: active ? `${tokens.accent}12` : 'transparent',
+                              border: active ? `1px solid ${tokens.accent}22` : '1px solid transparent',
                             }}
                           >
-                            <Icon
-                              className="w-3.5 h-3.5"
-                              strokeWidth={2}
-                              style={{ color: active ? tokens.accent : tokens.textMuted }}
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0 pt-0.5">
                             <div
-                              className="text-[13px] font-medium leading-tight truncate"
-                              style={{ color: item.disabled ? tokens.textGhost : tokens.textPrimary }}
+                              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                              style={{
+                                backgroundColor: active ? `${tokens.accent}18` : tokens.wellBg,
+                                border: `1px solid ${active ? `${tokens.accent}30` : tokens.cardBorder}`,
+                              }}
                             >
-                              {item.label}
+                              <Icon
+                                className="w-3.5 h-3.5"
+                                strokeWidth={2}
+                                style={{ color: active ? tokens.accent : tokens.textMuted }}
+                              />
                             </div>
-                            <div className="text-[11px] leading-snug mt-0.5" style={{ color: tokens.textMuted }}>
-                              {item.disabled ? item.disabledHint ?? item.subtitle : item.subtitle}
+                            <div className="flex-1 min-w-0 pt-0.5">
+                              <div
+                                className="text-[13px] font-medium leading-tight truncate"
+                                style={{ color: item.disabled ? tokens.textGhost : tokens.textPrimary }}
+                              >
+                                {item.label}
+                              </div>
+                              <div className="text-[11px] leading-snug mt-0.5" style={{ color: tokens.textMuted }}>
+                                {item.disabled ? item.disabledHint ?? item.subtitle : item.subtitle}
+                              </div>
                             </div>
-                          </div>
-                          {active && !item.disabled && (
-                            <ChevronRight className="w-4 h-4 shrink-0 mt-1.5" style={{ color: tokens.textGhost }} />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))
+                            {active && !item.disabled && (
+                              <ChevronRight className="w-4 h-4 shrink-0 mt-1.5" style={{ color: tokens.textGhost }} />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ));
+                })()
               )}
             </div>
           </div>

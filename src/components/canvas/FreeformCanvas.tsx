@@ -206,6 +206,8 @@ interface Props {
   onImageDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
   /** Cognitive Focus Mode — presentation only; does not move objects or change persistence layout. */
   focusMode?: FocusMode | null;
+  /** Brief highlight pulse on an object (e.g. notebook search jump). */
+  pulseObjectId?: string | null;
   /** Workspace continuity: recently used objects keep a faint presence. */
   continuityObjectIds?: string[];
   /** Workspace continuity: last active cluster glows slightly warmer. */
@@ -404,6 +406,7 @@ export function FreeformCanvas({
   onPdfDroppedOnCanvas,
   onImageDroppedOnCanvas,
   focusMode = null,
+  pulseObjectId = null,
   continuityObjectIds = [],
   continuityClusterIds = [],
   continuityEdgeKeys = [],
@@ -540,6 +543,15 @@ export function FreeformCanvas({
     const timer = setTimeout(() => setReturnId(null), 1800);
     return () => clearTimeout(timer);
   }, [returnId]);
+
+  useEffect(() => {
+    if (!pulseObjectId) return;
+    setRevisitId(pulseObjectId);
+    const timer = setTimeout(() => {
+      setRevisitId(prev => (prev === pulseObjectId ? null : prev));
+    }, 2600);
+    return () => clearTimeout(timer);
+  }, [pulseObjectId]);
 
   const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
 

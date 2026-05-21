@@ -37,6 +37,11 @@ import {
   type WorkspaceNavigationState,
 } from '../lib/workspaceUniverse/types';
 import { pruneStaleSectionReferences } from '../lib/persistenceHealth';
+import {
+  consumePendingNotebookFocus,
+  type PendingNotebookFocus,
+} from '../lib/notebookSearchIndex';
+import { panViewportToBlock } from '../lib/notebookCanvasFocus';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -98,6 +103,7 @@ import {
   Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
   Sliders,
+  Search,
   Palette,
   FileText,
   BookOpen,
@@ -266,7 +272,7 @@ function workspaceBackPillStyle(
   };
 }
 
-function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', studySpaceActive = false, onBack, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
+function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', studySpaceActive = false, onBack, onOpenSearch, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
   title: string;
   accent: string;
   tokens: ReturnType<typeof useAtmosphere>['tokens'];
@@ -274,6 +280,7 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
   backLabel?: string;
   studySpaceActive?: boolean;
   onBack: () => void;
+  onOpenSearch: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
   onExitCustomize: () => void;
@@ -380,6 +387,21 @@ function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library',
           </>
         ) : (
           <>
+            <button
+              type="button"
+              aria-label="Search notebooks"
+              title="Search notebooks (⌘K)"
+              onClick={onOpenSearch}
+              style={{
+                ...NAV_BTN_BASE,
+                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
+                opacity: studySpaceActive ? 0.82 : 1,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
+            >
+              <Search className="w-4 h-4" />
+            </button>
             <button
               type="button"
               aria-label="Scene — living background"
@@ -863,6 +885,7 @@ function WorkspaceSectionChrome({
   isCustomizing,
   backLabel = 'Library',
   onBack,
+  onOpenSearch,
   onOpenAppearance,
   onCustomize,
   onExitCustomize,
@@ -882,6 +905,7 @@ function WorkspaceSectionChrome({
   isCustomizing: boolean;
   backLabel?: string;
   onBack: () => void;
+  onOpenSearch: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
   onExitCustomize: () => void;
@@ -914,6 +938,7 @@ function WorkspaceSectionChrome({
         backLabel={backLabel}
         studySpaceActive={sectionViewMode === 'free-space'}
         onBack={onBack}
+        onOpenSearch={onOpenSearch}
         onOpenAppearance={onOpenAppearance}
         onCustomize={onCustomize}
         onExitCustomize={onExitCustomize}
@@ -1199,6 +1224,7 @@ export function SectionPage() {
     paletteOpen,
     sessionModalOpen,
     dismissTransientUi,
+    openPalette,
   } = useCommandPalette();
   const { focusMode, setFocusMode } = useFocusMode(sectionId);
   const focusModeLiveRef = useRef(focusMode);
@@ -1232,6 +1258,8 @@ export function SectionPage() {
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
   const spaceSelectedIdRef = useRef<string | null>(null);
   spaceSelectedIdRef.current = spaceSelectedId;
+  const [notebookSearchPulseId, setNotebookSearchPulseId] = useState<string | null>(null);
+  const pendingNotebookFocusRef = useRef<PendingNotebookFocus | null>(null);
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
@@ -1540,7 +1568,32 @@ export function SectionPage() {
           convertNoteToMistake,
           clearConnectionsForObject,
           removeObject: removeSpaceObject } = sectionObjects;
-  const { initPos, positions: spacePositions, removePos } = sectionPositions;
+  const { initPos, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
+
+  const focusNotebookOnCanvas = useCallback(
+    (objectId: string) => {
+      setSectionViewMode('free-space');
+      seedMissingPositions([objectId]);
+      let pos = spacePositions[objectId];
+      if (!pos) {
+        initPos(objectId, { x: 120, y: 120, w: 520, h: 460 });
+        pos = spacePositions[objectId] ?? { x: 120, y: 120, w: 520, h: 460 };
+      }
+      const vpW = window.innerWidth;
+      const vpH = Math.max(360, window.innerHeight - 112);
+      const view = panViewportToBlock(pos, vpW, vpH, sectionCanvas.zoom);
+      sectionCanvas.setViewport(view.zoom, view.panX, view.panY);
+      setSpaceSelectedId(objectId);
+      setNotebookSearchPulseId(objectId);
+    },
+    [
+      setSectionViewMode,
+      seedMissingPositions,
+      spacePositions,
+      initPos,
+      sectionCanvas,
+    ],
+  );
 
   const applyStudyLinksForObject = useCallback(
     (newObjectId: string, type: ProjectObjectType) => {
@@ -2245,6 +2298,33 @@ export function SectionPage() {
   }, [id, cancelConnectMode]);
 
   useEffect(() => {
+    const pending = consumePendingNotebookFocus();
+    if (pending?.sectionId === sectionId) {
+      pendingNotebookFocusRef.current = pending;
+    }
+  }, [sectionId]);
+
+  useEffect(() => {
+    const pending = pendingNotebookFocusRef.current;
+    if (!pending || pending.sectionId !== sectionId) return;
+    if (pending.boardId !== sectionBoards.activeBoardId) {
+      sectionBoards.setActiveBoardId(pending.boardId);
+      return;
+    }
+    if (!sectionObjects.getObject(pending.objectId)) return;
+    pendingNotebookFocusRef.current = null;
+    const t = window.setTimeout(() => focusNotebookOnCanvas(pending.objectId), 80);
+    return () => window.clearTimeout(t);
+  }, [
+    sectionId,
+    sectionBoards.activeBoardId,
+    sectionObjects.objects,
+    sectionObjects,
+    focusNotebookOnCanvas,
+    sectionBoards.setActiveBoardId,
+  ]);
+
+  useEffect(() => {
     if (!id) {
       registerFreeSpace(null);
       return;
@@ -2257,7 +2337,6 @@ export function SectionPage() {
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
       addPdf: () => requestFreeSpaceAdd('pdf'),
-      // Use ref so selection changes don't re-register (which bumps freeSpaceVersion → re-renders all consumers)
       getFreeSpaceSelectedId: () => spaceSelectedIdRef.current,
       startConnectFromSelected,
       clearConnectionsForSelected,
@@ -2265,10 +2344,19 @@ export function SectionPage() {
       openMistakeReviewNeglected: () => openMistakeReview('neglected'),
       openMistakeReviewLowConfidence: () => openMistakeReview('low'),
       convertSelectedNoteToMistake,
+      focusNotebook: (objectId: string, boardId?: string) => {
+        if (boardId && boardId !== sectionBoards.activeBoardId) {
+          pendingNotebookFocusRef.current = { sectionId, boardId, objectId };
+          sectionBoards.setActiveBoardId(boardId);
+          return;
+        }
+        focusNotebookOnCanvas(objectId);
+      },
     });
     return () => registerFreeSpace(null);
   }, [
     id,
+    sectionId,
     registerFreeSpace,
     requestFreeSpaceAdd,
     requestCompanionComposer,
@@ -2276,6 +2364,9 @@ export function SectionPage() {
     clearConnectionsForSelected,
     openMistakeReview,
     convertSelectedNoteToMistake,
+    focusNotebookOnCanvas,
+    sectionBoards.activeBoardId,
+    sectionBoards.setActiveBoardId,
   ]);
 
   const mistakeInsights = useMemo(
@@ -2701,6 +2792,7 @@ export function SectionPage() {
           isCustomizing={false}
           backLabel={workspaceBackLabel}
           onBack={handleWorkspaceBack}
+          onOpenSearch={openPalette}
           onOpenAppearance={() => setAppearanceOpen(true)}
           onCustomize={() => {}}
           onExitCustomize={() => {}}
@@ -2877,6 +2969,7 @@ export function SectionPage() {
         isCustomizing={designMode}
         backLabel={workspaceBackLabel}
         onBack={handleWorkspaceBack}
+        onOpenSearch={openPalette}
         onOpenAppearance={() => setAppearanceOpen(true)}
         onCustomize={enterDesignMode}
         onExitCustomize={exitDesignMode}
@@ -3031,6 +3124,7 @@ export function SectionPage() {
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
               onImageDroppedOnCanvas={handleImageDroppedOnCanvas}
               focusMode={freeSpaceSurfaceVisible ? focusMode : null}
+              pulseObjectId={notebookSearchPulseId}
               surfaceActive={freeSpaceSurfaceVisible}
               calmEffects={performanceCalm}
               workspaceClarity={freeSpaceClarity}
