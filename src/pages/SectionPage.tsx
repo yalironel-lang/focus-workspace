@@ -2863,7 +2863,7 @@ export function SectionPage() {
         </div>
       </div>
       <div style={surfaceShellStyle(designSurfaceVisible)}>
-        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
           <div style={{ maxWidth: '896px', margin: '0 auto', padding: '24px 24px 64px' }}>
 
             <DesignModeBar
