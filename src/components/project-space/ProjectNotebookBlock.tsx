@@ -998,6 +998,37 @@ export function ProjectNotebookBlock({
   slashMenuRef.current = slashMenu;
   const focusIndexRef = useRef(0);
   const pendingCaretRef = useRef<{ id: string; offset: number } | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const notebookPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
+
+  const flushNotebookPersist = useCallback(() => {
+    if (notebookPersistTimerRef.current) {
+      clearTimeout(notebookPersistTimerRef.current);
+      notebookPersistTimerRef.current = null;
+    }
+    const pending = pendingNotebookContentRef.current;
+    if (!pending) return;
+    pendingNotebookContentRef.current = null;
+    onChangeRef.current(pending);
+  }, []);
+
+  const pushContent = useCallback(
+    (next: NotebookContent) => {
+      if (next.body === content.body) {
+        flushNotebookPersist();
+        onChangeRef.current(next);
+        return;
+      }
+      pendingNotebookContentRef.current = next;
+      if (notebookPersistTimerRef.current) clearTimeout(notebookPersistTimerRef.current);
+      notebookPersistTimerRef.current = setTimeout(flushNotebookPersist, 420);
+    },
+    [content.body, flushNotebookPersist],
+  );
+
+  useEffect(() => () => flushNotebookPersist(), [flushNotebookPersist]);
 
   const contextData = useMemo(
     () => deriveNotebookContextData(objectId, allObjects),
@@ -1083,9 +1114,9 @@ export function ProjectNotebookBlock({
     (next: Block[]) => {
       const normalized = normalizeOrderedSequences(next);
       setBlocks(normalized);
-      onChange({ ...content, body: serializeBlocks(normalized) });
+      pushContent({ ...content, body: serializeBlocks(normalized) });
     },
-    [content, onChange],
+    [content, pushContent],
   );
 
   const getEditorRoot = useCallback((): HTMLElement | null => {
@@ -1136,12 +1167,12 @@ export function ProjectNotebookBlock({
         else if (level === 4) nb = { id: blockId, kind: 'paragraph', text, variant: 'muted' };
         else nb = { id: blockId, kind: 'paragraph', text, variant: 'fine' };
         const next = [...prev.slice(0, i), nb, ...prev.slice(i + 1)];
-        onChange({ ...content, body: serializeBlocks(next) });
+        pushContent({ ...content, body: serializeBlocks(next) });
         if (caretBefore !== null) scheduleCaret(nb, caretBefore);
         return next;
       });
     },
-    [content, onChange, captureCaretForBlock, scheduleCaret],
+    [content, pushContent, captureCaretForBlock, scheduleCaret],
   );
 
   useEffect(() => {
@@ -1502,7 +1533,7 @@ export function ProjectNotebookBlock({
             const pid = newBlockId();
             next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
             const serialized = serializeBlocks(next);
-            onChange({ ...content, body: serialized });
+            pushContent({ ...content, body: serialized });
             pendingCaretRef.current = { id: pid, offset: rest.length };
             return next;
           }
@@ -1514,13 +1545,13 @@ export function ProjectNotebookBlock({
           }
         }
         const serialized = serializeBlocks(next);
-        onChange({ ...content, body: serialized });
+        pushContent({ ...content, body: serialized });
         const nb = next[i]!;
         pendingCaretRef.current = { id: nb.id, offset: rest.length };
         return next;
       });
     },
-    [content, onChange],
+    [content, pushContent],
   );
 
   useLayoutEffect(() => {
@@ -1698,7 +1729,7 @@ export function ProjectNotebookBlock({
           const transformed = morphParagraphLine(text, block.id);
           if (Array.isArray(transformed)) {
             const next = [...prev.slice(0, i), ...transformed, ...prev.slice(i + 1)];
-            onChange({ ...content, body: serializeBlocks(next) });
+            pushContent({ ...content, body: serializeBlocks(next) });
             const last = transformed[transformed.length - 1]!;
             if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref') {
               scheduleCaret(last, caretBefore);
@@ -1718,7 +1749,7 @@ export function ProjectNotebookBlock({
             variantMatch;
           if (sameShape && text === blockText) return prev;
           const next = [...prev.slice(0, i), transformed, ...prev.slice(i + 1)];
-          onChange({ ...content, body: serializeBlocks(next) });
+          pushContent({ ...content, body: serializeBlocks(next) });
           if (caretBefore !== null && transformed.kind !== 'divider' && transformed.kind !== 'image-ref') {
             scheduleCaret(transformed, caretBefore);
           }
@@ -1736,12 +1767,12 @@ export function ProjectNotebookBlock({
           (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
         if (same && text === blockText2) return prev;
         const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
-        onChange({ ...content, body: serializeBlocks(next) });
+        pushContent({ ...content, body: serializeBlocks(next) });
         if (caretBefore !== null) scheduleCaret(edited, caretBefore);
         return next;
       });
     },
-    [content, onChange, captureCaretForBlock, scheduleCaret],
+    [content, pushContent, captureCaretForBlock, scheduleCaret],
   );
 
   const toggleTask = useCallback(
@@ -1752,11 +1783,11 @@ export function ProjectNotebookBlock({
         const block = prev[i]!;
         if (block.kind !== 'task') return prev;
         const next = [...prev.slice(0, i), { ...block, checked: !block.checked }, ...prev.slice(i + 1)];
-        onChange({ ...content, body: serializeBlocks(next) });
+        pushContent({ ...content, body: serializeBlocks(next) });
         return next;
       });
     },
-    [content, onChange],
+    [content, pushContent],
   );
 
   const removeBlockAt = useCallback(
@@ -1765,7 +1796,7 @@ export function ProjectNotebookBlock({
         if (index < 0 || index >= prev.length) return prev;
         const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
         const filled = next.length === 0 ? parseBodyToBlocks('') : next;
-        onChange({ ...content, body: serializeBlocks(filled) });
+        pushContent({ ...content, body: serializeBlocks(filled) });
         const focusIdx = Math.max(0, index - 1);
         const focusBlock = filled[focusIdx];
         if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref') {
@@ -1783,7 +1814,7 @@ export function ProjectNotebookBlock({
         return filled;
       });
     },
-    [content, onChange],
+    [content, pushContent],
   );
 
   const insertMathSnippet = useCallback(
@@ -1915,7 +1946,7 @@ export function ProjectNotebookBlock({
                   if (bi === -1) return prev;
                   const nb = { ...tabBlk, depth: newDepth };
                   const next = [...prev.slice(0, bi), nb, ...prev.slice(bi + 1)];
-                  onChange({ ...content, body: serializeBlocks(next) });
+                  pushContent({ ...content, body: serializeBlocks(next) });
                   scheduleCaret(nb, caretBefore);
                   return next;
                 });
@@ -1941,7 +1972,7 @@ export function ProjectNotebookBlock({
             const nt = stripSlashInvocationForEscape(b.text);
             if (nt === b.text) return prev;
             const next = [...prev.slice(0, i), { ...b, text: nt }, ...prev.slice(i + 1)];
-            onChange({ ...content, body: serializeBlocks(next) });
+            pushContent({ ...content, body: serializeBlocks(next) });
             pendingCaretRef.current = { id: blockId, offset: 0 };
             return next;
           });

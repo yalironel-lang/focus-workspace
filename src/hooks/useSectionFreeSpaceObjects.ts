@@ -3,6 +3,7 @@ import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
 import { copyImageBlob, deleteImageBlob } from '../lib/freeSpaceImageIdb';
+import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
 import { copyStudyFileBlob, deleteStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
@@ -692,7 +693,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       if (!pending) return;
       pendingPersistRef.current = null;
       persist(pending.sectionId, pending.boardId, pending.objects);
-    }, 180);
+    }, 400);
   }, []);
 
   useEffect(() => {
@@ -701,6 +702,8 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   }, [sectionId, boardId, flushPersist]);
 
   useEffect(() => () => flushPersist(), [flushPersist]);
+
+  useEffect(() => registerFreeSpacePersistFlush(flushPersist), [flushPersist]);
 
   const appendObjects = useCallback((incoming: ProjectSpaceObject[]) => {
     if (!incoming.length) return;

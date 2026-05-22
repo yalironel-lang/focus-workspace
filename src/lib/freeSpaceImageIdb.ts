@@ -57,6 +57,43 @@ export async function loadImageBlob(sectionId: string, objectId: string): Promis
   });
 }
 
+export async function listImageBlobKeys(): Promise<string[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = () => {
+      db.close();
+      resolve((req.result as IDBValidKey[]).map(String));
+    };
+    req.onerror = () => {
+      db.close();
+      reject(req.error);
+    };
+  });
+}
+
+export async function deleteAllImageBlobsForSection(sectionId: string): Promise<void> {
+  const prefix = `${sectionId}::`;
+  const keys = await listImageBlobKeys();
+  const targets = keys.filter(k => k.startsWith(prefix));
+  if (!targets.length) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    const store = tx.objectStore(STORE);
+    for (const k of targets) store.delete(k);
+  });
+}
+
 export async function deleteImageBlob(sectionId: string, objectId: string): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {

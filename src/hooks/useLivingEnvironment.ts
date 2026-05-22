@@ -6,6 +6,7 @@ import {
   resolveLivingEnvironment,
   type LivingEnvironmentSnapshot,
 } from '../lib/livingEnvironment';
+import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
 
 export interface LivingEnvironmentSignals {
   panX: number;
@@ -30,6 +31,7 @@ export function useLivingEnvironment(
   const [timePhase, setTimePhase] = useState(() => performance.now());
 
   const motionWanted =
+    !isStabilityFeatureDisabled('disableLivingEnvironmentMotion') &&
     global.environmentMotion !== false &&
     !signals.reduceMotion &&
     signals.surfaceActive;

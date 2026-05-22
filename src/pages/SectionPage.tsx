@@ -7,6 +7,9 @@ import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
+import { buildStudyOsDemoPack } from '../workspaceStarter/buildStudyOsDemoPack';
+import { seedStudyOsDemoArtifacts } from '../workspaceStarter/seedStudyOsDemoArtifacts';
+import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
@@ -1273,6 +1276,7 @@ export function SectionPage() {
   const [starterRevealReady, setStarterRevealReady] = useState(false);
   const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
   const firstArrivalHandledRef = useRef(false);
+  const studyOsDemoHandledRef = useRef(false);
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
@@ -2005,6 +2009,7 @@ export function SectionPage() {
     resumeSeedKeyRef.current = seedKey;
     setResumeVisible(
       !!(
+        !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') &&
         !isResumeDismissed(sectionId) &&
         workspaceContinuity.continuityRecent &&
         workspaceContinuity.resumeCopy &&
@@ -2456,6 +2461,56 @@ export function SectionPage() {
     setStarterDismissed(true);
   }, [sectionId]);
 
+  const applyStudyOsDemo = useCallback(
+    async (opts?: { silent?: boolean; skipToast?: boolean }) => {
+      const pack = buildStudyOsDemoPack();
+      let positions = { ...pack.positions };
+      if (sectionObjects.objects.length > 0) {
+        const ids = pack.objects.map(o => o.id);
+        const refId = ids[0];
+        const refPos = refId ? positions[refId] : undefined;
+        if (refPos) {
+          const nf = sectionPositions.nextFreePos(sectionPositions.positions);
+          const dx = nf.x - refPos.x;
+          const dy = nf.y - refPos.y;
+          for (const oid of ids) {
+            const p = positions[oid];
+            if (p) positions[oid] = { ...p, x: Math.max(24, p.x + dx), y: Math.max(24, p.y + dy) };
+          }
+        }
+      }
+      sectionObjects.appendObjects(pack.objects);
+      sectionPositions.applyPositions(positions);
+      if (sectionId) {
+        try {
+          await seedStudyOsDemoArtifacts(sectionId, pack.objects);
+        } catch {
+          /* demo image optional */
+        }
+      }
+      if (!opts?.silent) {
+        setFocusMode(pack.focusSuggestion);
+        setStarterHints(pack.hints);
+      }
+      setSectionViewMode('free-space');
+      setSpaceSelectedId(pack.objects[0]?.id ?? null);
+      setStarterExpanded(false);
+      setStarterDockVisible(false);
+      if (!opts?.skipToast) {
+        toast.success('Example study room ready');
+      }
+    },
+    [
+      sectionId,
+      sectionObjects.appendObjects,
+      sectionObjects.objects.length,
+      sectionPositions.applyPositions,
+      sectionPositions.nextFreePos,
+      sectionPositions.positions,
+      setFocusMode,
+    ],
+  );
+
   const applyWorkspaceStarter = useCallback(
     (starterId: WorkspaceStarterId, opts?: { silent?: boolean; skipToast?: boolean }) => {
       const pack = buildWorkspaceStarterPack(starterId);
@@ -2520,7 +2575,7 @@ export function SectionPage() {
     saveSectionViewMode(sectionId, 'free-space');
 
     if (sectionObjects.objects.length === 0) {
-      applyWorkspaceStarter('research-thinking', { silent: true, skipToast: true });
+      void applyStudyOsDemo({ silent: true, skipToast: true });
       requestAnimationFrame(() => {
         requestAnimationFrame(() => frameArrivalScene());
       });
@@ -2536,7 +2591,7 @@ export function SectionPage() {
     const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
     return () => window.clearTimeout(quietTimer);
   }, [
-    applyWorkspaceStarter,
+    applyStudyOsDemo,
     frameArrivalScene,
     loading,
     location.pathname,
@@ -2546,6 +2601,35 @@ export function SectionPage() {
     sectionId,
     sectionObjects.objects.length,
   ]);
+
+  useEffect(() => {
+    if (!navState?.studyOsDemo || !sectionId || loading || studyOsDemoHandledRef.current) return;
+    if (sectionObjects.objects.length > 0) {
+      studyOsDemoHandledRef.current = true;
+      return;
+    }
+    studyOsDemoHandledRef.current = true;
+    void applyStudyOsDemo({ silent: true, skipToast: true }).then(() => {
+      requestAnimationFrame(() => frameArrivalScene());
+    });
+    navigate(location.pathname, {
+      replace: true,
+      state: { ...navState, studyOsDemo: false },
+    });
+  }, [
+    applyStudyOsDemo,
+    frameArrivalScene,
+    loading,
+    location.pathname,
+    navigate,
+    navState,
+    sectionId,
+    sectionObjects.objects.length,
+  ]);
+
+  useEffect(() => {
+    studyOsDemoHandledRef.current = false;
+  }, [sectionId]);
 
   useEffect(() => {
     if (sectionViewMode !== 'free-space' || sectionObjects.objects.length > 0 || starterDismissed) {
@@ -2871,13 +2955,17 @@ export function SectionPage() {
 
   const examDays = section.exam_date ? daysUntil(section.exam_date) : null;
 
+  const starterChromeOff = isStabilityFeatureDisabled('disableWorkspaceStarterChrome');
+
   const showWorkspaceStarter =
+    !starterChromeOff &&
     sectionViewMode === 'free-space' &&
     sectionObjects.objects.length === 0 &&
     !starterDismissed &&
     starterExpanded;
 
   const showStarterDock =
+    !starterChromeOff &&
     sectionViewMode === 'free-space' &&
     sectionObjects.objects.length === 0 &&
     !starterDismissed &&
@@ -3094,7 +3182,7 @@ export function SectionPage() {
               designMode={true}
               selectedId={spaceSelectedId}
               focusEditingId={spaceEditingId}
-              spatialAmbient
+              spatialAmbient={!isStabilityFeatureDisabled('disableFreeSpaceSpatialAmbient')}
               onSetPos={sectionPositions.setPos}
               onSelect={id => setSpaceSelectedId(id)}
               onRemoveModule={() => {}}
@@ -3120,7 +3208,7 @@ export function SectionPage() {
               onBeginConnectFromBlock={sid => setConnectSourceId(sid)}
               onConnectPairComplete={completeFreeSpaceConnect}
               onCancelConnectMode={cancelConnectMode}
-              spatialMinimapEnabled
+              spatialMinimapEnabled={!isStabilityFeatureDisabled('disableFreeSpaceMiniMap')}
               onPdfDroppedOnCanvas={handlePdfDroppedOnCanvas}
               onImageDroppedOnCanvas={handleImageDroppedOnCanvas}
               focusMode={freeSpaceSurfaceVisible ? focusMode : null}

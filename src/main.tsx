@@ -4,6 +4,7 @@ import App from './App.tsx'
 import './index.css'
 import 'katex/dist/katex.min.css'
 import { logAppBuildInfo } from './lib/appBuildInfo'
+import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
@@ -44,11 +45,17 @@ if ('serviceWorker' in navigator) {
 
     const reload = () => {
       ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true
+      flushAllFreeSpacePersistence()
       if (import.meta.env.DEV) {
         console.info('[SW] Controller changed — reloading to pick up new assets')
       }
       window.location.reload()
     }
+
+    const flushOnHide = () => {
+      if (document.visibilityState === 'hidden') flushAllFreeSpacePersistence()
+    }
+    document.addEventListener('visibilitychange', flushOnHide)
 
     // Defer reload until idle to avoid a visible flash mid-interaction (common in installed PWA).
     const schedule = () => {
@@ -61,7 +68,14 @@ if ('serviceWorker' in navigator) {
       }
     };
     if (document.visibilityState === 'visible') schedule()
-    else document.addEventListener('visibilitychange', () => schedule(), { once: true })
+    else {
+      const onVisible = () => {
+        if (document.visibilityState !== 'visible') return
+        document.removeEventListener('visibilitychange', onVisible)
+        schedule()
+      }
+      document.addEventListener('visibilitychange', onVisible)
+    }
   })
 
   // ── Dev-only diagnostics ──────────────────────────────────────────────────

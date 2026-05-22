@@ -5,6 +5,7 @@ import { useCommandPalette } from '../../command/CommandPaletteContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useSections } from '../../hooks/useSections';
 import { hasSeenArrivalExperience, markArrivalExperienceSeen } from '../../lib/arrivalExperience';
+import { isStabilityFeatureDisabled } from '../../lib/stabilityBaseline';
 import { navDebugLog } from '../../lib/navigationDebug';
 import { ArrivalExperienceLayer, type ArrivalExperienceAction } from './ArrivalExperienceLayer';
 
@@ -89,7 +90,7 @@ export function ArrivalExperienceGate() {
     [closeAndPersist, navigate],
   );
 
-  if (!open) return null;
+  if (isStabilityFeatureDisabled('disableArrivalExperienceGate') || !open) return null;
 
   return (
     <ArrivalExperienceLayer

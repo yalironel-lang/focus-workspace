@@ -9,6 +9,7 @@ import {
   introQueryOverride,
   markIntroExperienceSeen,
 } from '../../lib/introExperience';
+import { isStabilityFeatureDisabled } from '../../lib/stabilityBaseline';
 import { IntroExperience } from './IntroExperience';
 
 interface Props {
@@ -16,8 +17,13 @@ interface Props {
 }
 
 export function IntroExperienceGate({ children }: Props) {
-  const [showIntro, setShowIntro] = useState(() => !hasSeenIntroExperience());
-  const [revealed, setRevealed] = useState(() => hasSeenIntroExperience());
+  const introDisabled = isStabilityFeatureDisabled('disableIntroExperience');
+  const [showIntro, setShowIntro] = useState(
+    () => !introDisabled && !hasSeenIntroExperience(),
+  );
+  const [revealed, setRevealed] = useState(
+    () => introDisabled || hasSeenIntroExperience(),
+  );
 
   useEffect(() => {
     const q = introQueryOverride();

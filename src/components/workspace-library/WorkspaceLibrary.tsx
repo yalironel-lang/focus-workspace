@@ -31,6 +31,8 @@ import { SPATIAL_LIBRARY_KEYFRAMES } from './spatial/librarySpatialKeyframes';
 import { SpatialLibraryCard } from './spatial/SpatialLibraryCard';
 import './libraryLayout.css';
 import { HomeGuideCompanion, HomeGuideTrigger } from './HomeGuideCompanion';
+import { InstallAppBanner } from '../install/InstallAppBanner';
+import { LIBRARY_OPEN_CREATE_FLAG } from '../../command/constants';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -295,6 +297,41 @@ function WorkspaceLibraryView() {
     ...folders.map(f => ({ id: f.id, label: f.name })),
   ], [folders]);
 
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(LIBRARY_OPEN_CREATE_FLAG) !== '1') return;
+      sessionStorage.removeItem(LIBRARY_OPEN_CREATE_FLAG);
+      setShowNew(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleExploreDemo = async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreating(true);
+    try {
+      const created = await createSection('Example study room');
+      if (!created) {
+        toast.error('Could not create example workspace');
+        return;
+      }
+      toast.success('Opening example study room…', {
+        style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
+      });
+      const navState: WorkspaceNavigationState = isFirstWorkspaceEntryPending()
+        ? { firstArrival: true, studyOsDemo: true }
+        : { studyOsDemo: true };
+      navigate(`/section/${created.id}`, { state: navState });
+    } catch {
+      toast.error('Could not create example workspace');
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || creatingRef.current) return;
@@ -306,7 +343,9 @@ function WorkspaceLibraryView() {
         style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
       });
       setNewTitle(''); setShowNew(false);
-      const navState: WorkspaceNavigationState | undefined = isFirstWorkspaceEntryPending() ? { firstArrival: true } : undefined;
+      const navState: WorkspaceNavigationState | undefined = isFirstWorkspaceEntryPending()
+        ? { firstArrival: true, studyOsDemo: true }
+        : undefined;
       navigate(`/section/${created.id}`, navState ? { state: navState } : undefined);
     } catch { toast.error('Could not create workspace'); }
     finally { creatingRef.current = false; setCreating(false); }
@@ -706,7 +745,7 @@ function WorkspaceLibraryView() {
             {!hasWorkspaces && libraryReady && !error && (
               <div style={{ position: 'relative', zIndex: 2, animation: 'libFadeUp 0.52s 0.12s ease both' }}>
                 <p style={{ fontSize: 9.5, fontWeight: 900, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)', margin: '0 0 14px' }}>
-                  workspace OS · ready
+                  installable study OS · local-first
                 </p>
                 <h2
                   className="library-hero-title-empty"
@@ -714,16 +753,31 @@ function WorkspaceLibraryView() {
                   fontWeight: 920, letterSpacing: '-0.072em',
                   color: tokens.textPrimary, margin: '0 0 16px', maxWidth: 560,
                 }}>
-                  Your thinking<br />
+                  Your study room<br />
                   <span style={{ background: `linear-gradient(100deg, ${sA}, rgba(255,255,255,0.82))`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                    universe
+                    on your computer
                   </span>
                 </h2>
-                <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.36)', maxWidth: 440, lineHeight: 1.78, margin: '0 0 28px' }}>
-                  Create a workspace for any course, project, or focus area.
-                  Each gets a structured work surface and a spatial Free Space.
+                <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.36)', maxWidth: 480, lineHeight: 1.78, margin: '0 0 20px' }}>
+                  Notes, PDFs, screenshots, and recall cards stay in one spatial workspace — saved on
+                  this device. Open the example room to see how it works in about a minute.
                 </p>
-                <button type="button" onClick={() => setShowNew(true)}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleExploreDemo()}
+                    disabled={creating}
+                    style={{
+                      height: 48, padding: '0 22px', display: 'inline-flex', alignItems: 'center', gap: 7,
+                      borderRadius: 15, border: `1px solid ${sA}55`,
+                      background: `${sA}18`, color: tokens.textPrimary,
+                      fontSize: 14, fontWeight: 800, cursor: creating ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {creating ? <Loader2 style={{ width: 16, height: 16 }} className="animate-spin" /> : <ArrowRight style={{ width: 16, height: 16 }} strokeWidth={2.5} />}
+                    Explore example study room
+                  </button>
+                  <button type="button" onClick={() => setShowNew(true)}
                   style={{
                     height: 48, padding: '0 26px', display: 'inline-flex', alignItems: 'center', gap: 7,
                     borderRadius: 15, border: 'none', background: sA, color: '#020508',
@@ -735,9 +789,13 @@ function WorkspaceLibraryView() {
                   onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.filter = 'none'; }}
                 >
                   <Plus style={{ width: 16, height: 16 }} strokeWidth={2.5} />
-                  Create your first workspace
+                  Create your own workspace
                 </button>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 22, maxWidth: 440 }}>
+                </div>
+                <div style={{ maxWidth: 520, marginBottom: 18 }}>
+                  <InstallAppBanner tokens={tokens} compact />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 8, maxWidth: 440 }}>
                   {coreWorkflow.map(action => (
                     <div key={action} style={{
                       border: '1px solid rgba(255,255,255,0.085)',
@@ -791,6 +849,12 @@ function WorkspaceLibraryView() {
               </div>
             )}
           </div>
+
+          {hasWorkspaces && (
+            <div className="library-page-pad" style={{ paddingTop: 10, paddingBottom: 4, flexShrink: 0 }}>
+              <InstallAppBanner tokens={tokens} compact />
+            </div>
+          )}
 
           {/* COMMAND STRIP */}
           {hasWorkspaces && (
@@ -869,6 +933,19 @@ function WorkspaceLibraryView() {
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                 <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.16)' }}>{filteredSections.length} / {sections.length}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleExploreDemo()}
+                  disabled={creating}
+                  style={{
+                    height: 28, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 5,
+                    borderRadius: 8, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.04)',
+                    color: 'rgba(255,255,255,0.72)', fontSize: 11, fontWeight: 700, cursor: creating ? 'wait' : 'pointer',
+                  }}
+                >
+                  <ArrowRight style={{ width: 12, height: 12 }} strokeWidth={2} />
+                  Example room
+                </button>
                 <button type="button" onClick={() => { setShowNew(s => !s); setNewTitle(''); }}
                   style={{
                     height: 28, padding: '0 13px', display: 'flex', alignItems: 'center', gap: 5,

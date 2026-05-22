@@ -1235,6 +1235,37 @@ export function GlobalCommandPalette() {
                 })()
               )}
             </div>
+
+            {!isNotebookSearch && (
+              <div
+                className="px-4 py-2.5 shrink-0"
+                style={{ borderTop: `1px solid ${tokens.cardBorder}` }}
+              >
+                <p
+                  className="text-[10px] font-semibold tracking-widest uppercase mb-2"
+                  style={{ color: tokens.textGhost }}
+                >
+                  Shortcuts
+                </p>
+                <div
+                  className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px]"
+                  style={{ color: tokens.textMuted }}
+                >
+                  <span>
+                    <Kbd>⌘K</Kbd> Command palette
+                  </span>
+                  <span>
+                    <Kbd>⌘K</Kbd> then type — search notebooks
+                  </span>
+                  <span>
+                    <Kbd>↑↓ ↵</Kbd> Navigate · run
+                  </span>
+                  <span>
+                    <Kbd>esc</Kbd> Close
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

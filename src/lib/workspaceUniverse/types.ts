@@ -17,6 +17,8 @@ export interface WorkspaceNavigationState {
   subspaceId?: string;
   /** First workspace: open Free Space with a calm arrival scene. */
   firstArrival?: boolean;
+  /** Apply the built-in study OS demo layout (spatial teaching workspace). */
+  studyOsDemo?: boolean;
 }
 
 export interface UniversePortalRecord {

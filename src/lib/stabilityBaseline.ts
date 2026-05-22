@@ -1,11 +1,11 @@
 /**
- * Temporary stabilization switches — establish a boring, reliable baseline first.
- * Re-enable one flag at a time after idle + navigation flows are proven stable.
- *
- * All default `true` = subsystem OFF for maximum stability.
+ * Product stability switches — disable heavy or fragmented subsystems by default.
+ * Set a flag to `false` to re-enable that feature when ready.
  */
 export const STABILITY_BASELINE = {
-  /** Skip arrival gate overlay tree (full experience only). */
+  /** Skip dashboard cinematic intro on first visit. */
+  disableIntroExperience: true,
+  /** Skip arrival gate overlay tree. */
   disableArrivalExperienceGate: true,
   /** No living-environment time interval / timePhase updates. */
   disableLivingEnvironmentMotion: true,
@@ -16,18 +16,25 @@ export const STABILITY_BASELINE = {
   /** Do not mount Free Space minimap. */
   disableFreeSpaceMiniMap: true,
   /** Softer Free Space canvas (no spatial ambient extras). */
-  disableFreeSpaceSpatialAmbient: true,
+  disableFreeSpaceSpatialAmbient: false,
 } as const;
+
+export type StabilityFeatureKey = keyof typeof STABILITY_BASELINE;
+
+/** When baseline[key] is true, that subsystem is disabled. */
+export function isStabilityFeatureDisabled(key: StabilityFeatureKey): boolean {
+  return STABILITY_BASELINE[key];
+}
 
 const loggedStabilityDisables = new Set<string>();
 
 export function logStabilityDisabledOnce(feature: string, reason: string): void {
   if (!import.meta.env.DEV) return;
-  const key = `${feature}:${reason}`;
-  if (loggedStabilityDisables.has(key)) return;
-  loggedStabilityDisables.add(key);
+  const token = `${feature}:${reason}`;
+  if (loggedStabilityDisables.has(token)) return;
+  loggedStabilityDisables.add(token);
   // eslint-disable-next-line no-console
-  console.warn(`[fw:stability] ${feature} disabled by ${reason}`);
+  console.warn(`[fw:stability] ${feature} disabled (${reason})`);
 }
 
 /** DEV-only: trace suspected effect → setState chains (no-op in production). */

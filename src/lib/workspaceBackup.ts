@@ -19,6 +19,11 @@ import {
   sanitizeViewport,
 } from './freeSpacePersistence';
 import {
+  deleteAllImageBlobsForSection,
+  loadImageBlob,
+  saveImageBlob,
+} from './freeSpaceImageIdb';
+import {
   base64ToPdfBlob,
   deleteAllPdfBlobsForSection,
   loadPdfBlob,
@@ -55,6 +60,8 @@ export interface WorkspaceBackupV1 {
   library?: { folderAssignment: string | null; folderName?: string };
   /** PDF object id → base64 (no data: URL prefix). */
   pdfBlobs?: Record<string, string>;
+  /** Free Space image object id → base64 PNG/JPEG bytes. */
+  imageBlobs?: Record<string, string>;
 }
 
 function readLibrarySlice(sectionId: string): WorkspaceBackupV1['library'] | undefined {
@@ -138,6 +145,18 @@ export async function buildWorkspaceBackupV1(
     }
   }
 
+  const imageBlobs: Record<string, string> = {};
+  for (const o of objects) {
+    if (o.type !== 'image') continue;
+    try {
+      const blob = await loadImageBlob(sectionId, o.id);
+      if (!blob) continue;
+      imageBlobs[o.id] = await pdfBlobToBase64(blob);
+    } catch {
+      fwPersistWarn(`Backup: skipped image bytes for object "${o.id}"`);
+    }
+  }
+
   return {
     format: WORKSPACE_BACKUP_FORMAT,
     version: WORKSPACE_BACKUP_VERSION,
@@ -148,6 +167,7 @@ export async function buildWorkspaceBackupV1(
     customization,
     library,
     pdfBlobs: Object.keys(pdfBlobs).length ? pdfBlobs : undefined,
+    imageBlobs: Object.keys(imageBlobs).length ? imageBlobs : undefined,
   };
 }
 
@@ -221,6 +241,9 @@ export function validateWorkspaceBackup(data: unknown):
   }
   if (o.pdfBlobs != null && (typeof o.pdfBlobs !== 'object' || Array.isArray(o.pdfBlobs))) {
     return { ok: false, message: 'Backup PDF attachment map is invalid.' };
+  }
+  if (o.imageBlobs != null && (typeof o.imageBlobs !== 'object' || Array.isArray(o.imageBlobs))) {
+    return { ok: false, message: 'Backup image attachment map is invalid.' };
   }
   if (o.library != null && typeof o.library !== 'object') {
     return { ok: false, message: 'Backup library block is invalid.' };
@@ -332,16 +355,30 @@ export async function applyWorkspaceBackupToSection(
   }
 
   await deleteAllPdfBlobsForSection(targetSectionId);
-  const blobs = fixed.pdfBlobs ?? {};
+  await deleteAllImageBlobsForSection(targetSectionId);
+  const pdfBlobMap = fixed.pdfBlobs ?? {};
   for (const obj of fixed.freeSpace.objects) {
     if (obj.type !== 'pdf') continue;
-    const b64 = blobs[obj.id];
+    const b64 = pdfBlobMap[obj.id];
     if (!b64 || typeof b64 !== 'string') continue;
     try {
       const blob = base64ToPdfBlob(b64);
       await savePdfBlob(targetSectionId, obj.id, blob);
     } catch (e) {
       fwPersistWarn(`Import: could not restore PDF for "${obj.id}": ${String(e)}`);
+    }
+  }
+
+  const imageBlobMap = fixed.imageBlobs ?? {};
+  for (const obj of fixed.freeSpace.objects) {
+    if (obj.type !== 'image') continue;
+    const b64 = imageBlobMap[obj.id];
+    if (!b64 || typeof b64 !== 'string') continue;
+    try {
+      const blob = base64ToPdfBlob(b64, 'image/png');
+      await saveImageBlob(targetSectionId, obj.id, blob);
+    } catch (e) {
+      fwPersistWarn(`Import: could not restore image for "${obj.id}": ${String(e)}`);
     }
   }
 
