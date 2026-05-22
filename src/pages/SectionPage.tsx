@@ -8,7 +8,7 @@ import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
 import { buildStudyOsDemoPack } from '../workspaceStarter/buildStudyOsDemoPack';
-import { seedStudyOsDemoArtifacts } from '../workspaceStarter/seedStudyOsDemoArtifacts';
+import { DEMO_SCENE_CENTER } from '../workspaceStarter/buildStudyOsDemoPack';
 import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
@@ -931,6 +931,7 @@ function WorkspaceSectionChrome({
         flexShrink: 0,
         isolation: 'isolate',
         pointerEvents: 'auto', // chrome wins hit-testing over lower z-index overlays
+        backgroundColor: tokens.pageBg,
       }}
     >
       <SpaceNav
@@ -2481,13 +2482,10 @@ export function SectionPage() {
       }
       sectionObjects.appendObjects(pack.objects);
       sectionPositions.applyPositions(positions);
-      if (sectionId) {
-        try {
-          await seedStudyOsDemoArtifacts(sectionId, pack.objects);
-        } catch {
-          /* demo image optional */
-        }
-      }
+      setFirstSessionQuiet(false);
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+      const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
+      sectionCanvas.centerView(DEMO_SCENE_CENTER.x, DEMO_SCENE_CENTER.y, vw, vh);
       if (!opts?.silent) {
         setFocusMode(pack.focusSuggestion);
         setStarterHints(pack.hints);
@@ -2556,7 +2554,7 @@ export function SectionPage() {
   const frameArrivalScene = useCallback(() => {
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
-    sectionCanvas.centerView(1520, 780, vw, vh);
+    sectionCanvas.centerView(DEMO_SCENE_CENTER.x, DEMO_SCENE_CENTER.y, vw, vh);
   }, [sectionCanvas]);
 
   useEffect(() => {
@@ -3118,7 +3116,7 @@ export function SectionPage() {
 
 
       {/* ── VIEW SURFACES (mounted; visibility switch — preserves iframes/PDF) ── */}
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate' }}>
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate', overflow: 'hidden' }}>
       <div style={surfaceShellStyle(freeSpaceSurfaceVisible)}>
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {resumeVisible && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (

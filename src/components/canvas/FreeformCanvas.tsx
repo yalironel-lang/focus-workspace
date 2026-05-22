@@ -2242,7 +2242,7 @@ export function FreeformCanvas({
               ? `radial-gradient(ellipse at ${vignetteFocal.x}% ${vignetteFocal.y}%, transparent 38%, ${tokens.pageBg}a6 100%)`
               : focusMode && spatialAmbient
                 ? `radial-gradient(ellipse at ${vignetteFocal.x}% ${vignetteFocal.y}%, transparent ${focusAtm.vignetteInnerPct}%, ${tokens.pageBg}${focusAtm.vignetteEdgeAlpha} 100%)`
-                : `radial-gradient(ellipse at ${vignetteFocal.x}% ${vignetteFocal.y}%, transparent 56%, ${tokens.pageBg}${scaleVignetteEdgeAlpha('52', fogMul)} 100%)`,
+                : `radial-gradient(ellipse at ${vignetteFocal.x}% ${vignetteFocal.y}%, transparent 68%, ${tokens.pageBg}${scaleVignetteEdgeAlpha('28', fogMul)} 100%)`,
           transition: reduceEffects ? 'none' : 'background 2.2s cubic-bezier(0.4,0,0.2,1)',
         }}
       />
@@ -2259,15 +2259,15 @@ export function FreeformCanvas({
             ? 0.28
             : focusMode && spatialAmbient
               ? focusAtm.edgeFadeOpacity * 0.92
-              : 0.4 * fogMul,
+              : 0.16 * fogMul,
           transition: reduceEffects
             ? 'none'
             : focusMode && spatialAmbient
               ? `opacity ${focusAtm.transition}`
               : 'opacity 0.6s ease',
           background: `
-            linear-gradient(180deg, ${tokens.pageBg}18 0%, transparent 6%, transparent 94%, ${tokens.pageBg}18 100%),
-            linear-gradient(90deg,  ${tokens.pageBg}14 0%, transparent 5%, transparent 95%, ${tokens.pageBg}14 100%)
+            linear-gradient(180deg, transparent 0%, transparent 10%, transparent 90%, ${tokens.pageBg}10 100%),
+            linear-gradient(90deg,  transparent 0%, transparent 6%, transparent 94%, ${tokens.pageBg}08 100%)
           `,
         }}
       />

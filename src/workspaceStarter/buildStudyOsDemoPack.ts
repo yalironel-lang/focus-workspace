@@ -5,6 +5,7 @@ import type {
   ProjectObjectContent,
 } from '../hooks/useSectionFreeSpaceObjects';
 import type { WorkspaceStarterPack } from './buildWorkspaceStarterPack';
+import { DEMO_SCREENSHOT_DATA_URL } from './demoAssets';
 
 let idCounter = 0;
 
@@ -31,7 +32,7 @@ function obj(
   };
 }
 
-/** Rich spatial demo — the workspace teaches the product (no modals). */
+/** Centered, calm demo — three objects, obvious relationships, no broken blobs. */
 export function buildStudyOsDemoPack(): WorkspaceStarterPack {
   const t0 = Date.now();
   let tick = 0;
@@ -41,14 +42,13 @@ export function buildStudyOsDemoPack(): WorkspaceStarterPack {
   };
 
   const notebookBody = [
-    '# Biochemistry — spatial study',
-    '¶ This is your **study OS**: notebooks, sources, screenshots, and recall live in one room — not scattered tabs.',
-    '## Try in under a minute',
-    '- **Paper mode** is on for this notebook (warm page, ruled lines). Toggle Spatial | Paper in the toolbar.',
-    '- Press **⌘K** (Ctrl+K) and search **spatial** — command palette finds notebook text only.',
-    '- **Connections** link this note to the PDF, screenshot, and recall cards beside it.',
-    '- Drop your own PDF on the canvas, or paste a screenshot with **⌘V** while the canvas is focused.',
-    '¶ Everything here is saved on this device. Install the app from the library to open it like desktop software.',
+    '# Your study notebook',
+    '¶ Notes, sources, and screenshots stay in one spatial room on this device.',
+    '## Try this',
+    '- **Paper mode** is on — toggle Spatial | Paper in the toolbar above.',
+    '- Press **⌘K** and search **spatial** to jump back here.',
+    '- Lines connect this note to the source and screenshot on the right.',
+    '- Drop a real PDF on the canvas, or paste a screenshot with **⌘V**.',
   ].join('\n');
 
   const notebook = obj(
@@ -64,17 +64,12 @@ export function buildStudyOsDemoPack(): WorkspaceStarterPack {
     at(),
   );
 
-  const pdf = obj(
-    'pdf',
-    'Sample lecture PDF',
+  const source = obj(
+    'note',
+    'Reading source',
     {
-      type: 'pdf',
-      fileName: 'Sample_lecture.pdf',
-      fileType: 'application/pdf',
-      fileSize: 2400000,
-      lastOpenedAt: null,
-      page: 1,
-      zoom: 1,
+      type: 'note',
+      body: 'PDFs and articles sit here beside your notes.\n\nDrop a PDF onto the canvas — files stay on this device only.',
     },
     at(),
   );
@@ -84,61 +79,22 @@ export function buildStudyOsDemoPack(): WorkspaceStarterPack {
     'Sample screenshot',
     {
       type: 'image',
-      url: '',
-      fileName: 'diagram_capture.png',
-      fileSize: 128000,
-      naturalWidth: 480,
-      naturalHeight: 320,
-    },
-    at(),
-  );
-
-  const mistake = obj(
-    'mistake',
-    'Common slip',
-    {
-      type: 'mistake',
-      variant: 'mistake',
-      whatWrong: 'Confused oxidation with reduction in the last step.',
-      correction: 'OIL RIG: oxidation loses electrons; reduction gains.',
-      whyConfused: 'Similar arrow directions in both half-reactions.',
-      tags: ['exam', 'redox'],
-      confidence: 'medium',
-      timesReviewed: 1,
-      lastReviewedAt: t0 - 86400000,
-    },
-    at(),
-  );
-
-  const recall = obj(
-    'mistake',
-    'Recall card',
-    {
-      type: 'mistake',
-      variant: 'recall',
-      whatWrong: 'What is the rate-limiting step in glycolysis?',
-      correction: 'Phosphofructokinase-1 (PFK-1) — ATP-sensitive control point.',
-      whyConfused: '',
-      tags: ['recall'],
-      confidence: 'low',
-      timesReviewed: 0,
-      lastReviewedAt: null,
+      url: DEMO_SCREENSHOT_DATA_URL,
+      alt: 'Sample diagram beside your notes',
     },
     at(),
   );
 
   const notebookLinked = {
     ...notebook,
-    connections: [pdf.id, image.id, mistake.id, recall.id],
+    connections: [source.id, image.id],
   };
 
-  const objects = [notebookLinked, pdf, image, mistake, recall];
+  const objects = [notebookLinked, source, image];
   const positions: Record<string, BlockPos> = {
-    [notebook.id]: { x: 120, y: 80, w: 620, h: 520 },
-    [pdf.id]: { x: 780, y: 72, w: 480, h: 440 },
-    [image.id]: { x: 120, y: 640, w: 400, h: 300 },
-    [mistake.id]: { x: 560, y: 640, w: 360, h: 300 },
-    [recall.id]: { x: 960, y: 540, w: 360, h: 280 },
+    [notebook.id]: { x: 140, y: 140, w: 540, h: 460 },
+    [source.id]: { x: 720, y: 140, w: 360, h: 280 },
+    [image.id]: { x: 720, y: 460, w: 360, h: 260 },
   };
 
   return {
@@ -146,9 +102,11 @@ export function buildStudyOsDemoPack(): WorkspaceStarterPack {
     positions,
     focusSuggestion: 'thinking',
     hints: [
-      'Objects stay where you put them — spatial memory beats folder hunting.',
-      '⌘K searches notebook title, subtitle, and body on this device.',
-      'Mistake and recall cards resurface beside the work they came from.',
+      'Three objects, one room — spatial memory without folder hunting.',
+      '⌘K searches this notebook on your device.',
     ],
   };
 }
+
+/** World-space focal point for framing the demo cluster. */
+export const DEMO_SCENE_CENTER = { x: 520, y: 380 };

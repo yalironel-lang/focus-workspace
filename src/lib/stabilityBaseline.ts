@@ -16,7 +16,7 @@ export const STABILITY_BASELINE = {
   /** Do not mount Free Space minimap. */
   disableFreeSpaceMiniMap: true,
   /** Softer Free Space canvas (no spatial ambient extras). */
-  disableFreeSpaceSpatialAmbient: false,
+  disableFreeSpaceSpatialAmbient: true,
 } as const;
 
 export type StabilityFeatureKey = keyof typeof STABILITY_BASELINE;
