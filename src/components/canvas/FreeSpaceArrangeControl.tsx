@@ -81,7 +81,7 @@ export function FreeSpaceArrangeControl({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: inShell ? 'absolute' : 'fixed',
-        top: inShell ? 10 : topOffset + 10,
+        top: inShell ? 82 : topOffset + 10,
         left: 18,
         zIndex: 45,
         opacity: quietOpacity,

@@ -1,14 +1,19 @@
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useFocusMode } from '../hooks/useFocusMode';
 import { useWorkspaceContinuity } from '../hooks/useWorkspaceContinuity';
-import { FOCUS_MODE_BADGE, type FocusMode } from '../focusMode/focusModeTypes';
 import { useCommandPalette } from '../command/CommandPaletteContext';
 import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
-import { buildStudyOsDemoPack } from '../workspaceStarter/buildStudyOsDemoPack';
-import { DEMO_SCENE_CENTER } from '../workspaceStarter/buildStudyOsDemoPack';
+import { buildExploreFocusPack } from '../workspaceStarter/buildExploreFocusPack';
+import {
+  EXPLORE_FOCUS_SCENE_CENTER,
+  isExploreFocusWorkspace,
+} from '../lib/exploreFocus';
+import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWorkspaceShell';
+import { WORKSPACE_SHELL_TOP_INSET } from '../components/workspace-shell/shellGlass';
+import { ExploreFocusGuide } from '../components/explore-focus/ExploreFocusGuide';
 import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
@@ -61,7 +66,6 @@ import {
   ensureProjectObjectContent,
 } from '../hooks/useSectionFreeSpaceObjects';
 import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
-import { ProjectSpacesRow } from '../components/project-space/ProjectSpacesRow';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
@@ -103,11 +107,8 @@ import {
 import { AIAssistanceResultModal } from '../components/ai/AIAssistanceResultModal';
 import type { GroupWithItems } from '../types';
 import {
-  Loader2, ArrowLeft, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
+  Loader2, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
   AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
-  Sliders,
-  Search,
-  Palette,
   FileText,
   BookOpen,
   FileUp,
@@ -202,364 +203,6 @@ function urgencyLabel(d: Deadline): { text: string; color: string } {
 const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 
-// ── Workspace chrome (header) ─────────────────────────────────────────────────
-// Back lives in this sticky header (not a portal) so hit-testing stays predictable.
-// Chrome z-index must stay above section modals (appearance ≤410, others ≤315).
-
-/** Above workspace modals/drawers (≤410) so header controls stay clickable. */
-const WORKSPACE_CHROME_Z = 600;
-
-const NAV_BTN_BASE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minWidth: 44,
-  minHeight: 44,
-  padding: '0 10px',
-  border: 'none',
-  borderRadius: 10,
-  cursor: 'pointer',
-  background: 'transparent',
-  transition: 'color 0.15s ease, background-color 0.15s ease, transform 0.1s ease',
-};
-
-/** Stable workspace escape control — pill material, generous hit target, fast tactile feedback. */
-function workspaceBackPillStyle(
-  tokens: ReturnType<typeof useAtmosphere>['tokens'],
-  phase: 'idle' | 'hover' | 'pressed',
-): CSSProperties {
-  const idle = {
-    color: tokens.textSecondary,
-    backgroundColor: `${tokens.wellBg}f0`,
-    borderColor: tokens.cardBorder,
-    boxShadow: '0 1px 2px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.07)',
-    transform: 'translateY(0)',
-  };
-  const hover = {
-    color: tokens.textPrimary,
-    backgroundColor: tokens.wellBg,
-    borderColor: tokens.cardBorderHover,
-    boxShadow: '0 2px 6px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.09)',
-    transform: 'translateY(0)',
-  };
-  const pressed = {
-    color: tokens.textPrimary,
-    backgroundColor: `${tokens.wellBg}ee`,
-    borderColor: tokens.cardBorderHover,
-    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.22)',
-    transform: 'translateY(0.5px)',
-  };
-  const visual = phase === 'pressed' ? pressed : phase === 'hover' ? hover : idle;
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    flexShrink: 0,
-    position: 'relative',
-    zIndex: 2,
-    minWidth: 112,
-    minHeight: 44,
-    padding: '0 14px 0 12px',
-    margin: 0,
-    border: '1px solid',
-    borderRadius: 999,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    WebkitTapHighlightColor: 'transparent',
-    touchAction: 'manipulation',
-    pointerEvents: 'auto',
-    transition:
-      'color 0.1s ease, background-color 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease, transform 0.08s ease',
-    ...visual,
-  };
-}
-
-function SpaceNav({ title, accent, tokens, isCustomizing, backLabel = 'Library', studySpaceActive = false, onBack, onOpenSearch, onOpenAppearance, onCustomize, onExitCustomize, onResetCustomize }: {
-  title: string;
-  accent: string;
-  tokens: ReturnType<typeof useAtmosphere>['tokens'];
-  isCustomizing: boolean;
-  backLabel?: string;
-  studySpaceActive?: boolean;
-  onBack: () => void;
-  onOpenSearch: () => void;
-  onOpenAppearance: () => void;
-  onCustomize: () => void;
-  onExitCustomize: () => void;
-  onResetCustomize: () => void;
-}) {
-  const [backPhase, setBackPhase] = useState<'idle' | 'hover' | 'pressed'>('idle');
-
-  return (
-    <nav style={{
-      height: '48px', backgroundColor: tokens.navBg,
-      borderBottom: `1px solid ${tokens.divider}`,
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 18px 0 20px', flexShrink: 0,
-    }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          minWidth: 0,
-          flex: 1,
-          overflow: 'hidden',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label={`Back to ${backLabel}`}
-          title={`Back to ${backLabel}`}
-          style={workspaceBackPillStyle(tokens, backPhase)}
-          onMouseEnter={() => setBackPhase(p => (p === 'pressed' ? 'pressed' : 'hover'))}
-          onMouseLeave={() => setBackPhase('idle')}
-          onMouseDown={() => setBackPhase('pressed')}
-          onMouseUp={() => setBackPhase('hover')}
-          onPointerCancel={() => setBackPhase('idle')}
-          onBlur={() => setBackPhase('idle')}
-        >
-          <ArrowLeft className="w-4 h-4 shrink-0" strokeWidth={2.35} aria-hidden />
-          <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1 }}>
-            {backLabel}
-          </span>
-        </button>
-        <span
-          aria-hidden
-          style={{
-            width: '1px',
-            height: '18px',
-            backgroundColor: tokens.divider,
-            flexShrink: 0,
-            opacity: 0.85,
-          }}
-        />
-        <span
-          style={{
-            fontSize: '12px',
-            fontWeight: 500,
-            color: tokens.textSecondary,
-            letterSpacing: '-0.01em',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            minWidth: 0,
-            flex: 1,
-            pointerEvents: 'none',
-            userSelect: 'none',
-          }}
-        >
-          {title}
-        </span>
-        <span
-          aria-hidden
-          style={{
-            width: '4px',
-            height: '4px',
-            borderRadius: '50%',
-            backgroundColor: accent,
-            flexShrink: 0,
-            opacity: 0.55,
-            pointerEvents: 'none',
-          }}
-        />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
-        {isCustomizing ? (
-          <>
-            <button
-              type="button"
-              onClick={onResetCustomize}
-              style={{ ...NAV_BTN_BASE, fontSize: '11px', color: tokens.textMuted, minWidth: 44 }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
-            >
-              Reset
-            </button>
-            <button
-              type="button"
-              onClick={onExitCustomize}
-              style={{ ...NAV_BTN_BASE, fontSize: '11px', fontWeight: 700, color: '#000', backgroundColor: '#f59e0b', minWidth: 48 }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#fbbf24'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#f59e0b'; }}
-            >
-              Done
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              aria-label="Search notebooks"
-              title="Search notebooks (⌘K)"
-              onClick={onOpenSearch}
-              style={{
-                ...NAV_BTN_BASE,
-                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
-                opacity: studySpaceActive ? 0.82 : 1,
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
-            >
-              <Search className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="Scene — living background"
-              title="Scene — living background"
-              onClick={onOpenAppearance}
-              style={{
-                ...NAV_BTN_BASE,
-                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
-                gap: studySpaceActive ? 0 : 6,
-                padding: studySpaceActive ? '0 10px' : '0 12px',
-                minWidth: 'auto',
-                opacity: studySpaceActive ? 0.82 : 1,
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
-            >
-              <Palette className="w-4 h-4 shrink-0" style={{ color: tokens.accent }} />
-              {!studySpaceActive && (
-                <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '-0.02em' }}>Scene</span>
-              )}
-            </button>
-            <button
-              type="button"
-              aria-label="Customize workspace"
-              title="Customize workspace"
-              onClick={onCustomize}
-              style={{
-                ...NAV_BTN_BASE,
-                color: studySpaceActive ? tokens.textGhost : tokens.textMuted,
-                opacity: studySpaceActive ? 0.82 : 1,
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = tokens.textSecondary; (e.currentTarget as HTMLElement).style.backgroundColor = tokens.wellBg; (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = studySpaceActive ? tokens.textGhost : tokens.textMuted; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.opacity = studySpaceActive ? '0.82' : '1'; }}
-            >
-              <Sliders className="w-4 h-4" />
-            </button>
-          </>
-        )}
-      </div>
-    </nav>
-  );
-}
-
-const VIEW_MODE_OPTIONS = [
-  { id: 'free-space' as const, label: 'Workspace', hint: 'Sources, notes, tools' },
-  { id: 'work-surface' as const, label: 'Mission control', hint: 'Tasks & priorities' },
-];
-
-function WorkspaceViewModeBar({
-  tokens,
-  sectionViewMode,
-  onViewModeChange,
-  focusMode,
-}: {
-  tokens: ReturnType<typeof useAtmosphere>['tokens'];
-  sectionViewMode: 'work-surface' | 'free-space';
-  onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
-  focusMode: FocusMode | null;
-}) {
-  const activeHint = VIEW_MODE_OPTIONS.find(opt => opt.id === sectionViewMode)?.hint ?? '';
-  return (
-    <div
-      style={{
-        height: '40px',
-        borderBottom: `1px solid ${tokens.divider}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        padding: '0 20px',
-        backgroundColor: tokens.navBg,
-        position: 'relative',
-        flexShrink: 0,
-      }}
-    >
-      {focusMode ? (
-        <div
-          title="Reduce distraction while keeping nearby context visible."
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: tokens.textSecondary,
-            pointerEvents: 'none',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Focus · {FOCUS_MODE_BADGE[focusMode as keyof typeof FOCUS_MODE_BADGE] ?? focusMode}
-        </div>
-      ) : null}
-      <div
-        style={{
-          display: 'inline-flex',
-          borderRadius: '8px',
-          border: `1px solid ${tokens.cardBorder}`,
-          padding: '2px',
-          gap: '2px',
-          backgroundColor: `${tokens.wellBg}f2`,
-        }}
-      >
-        {VIEW_MODE_OPTIONS.map(opt => {
-          const isActive = sectionViewMode === opt.id;
-          const isPrimary = opt.id === 'free-space';
-          return (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => onViewModeChange(opt.id)}
-              style={{
-                fontSize: '11px',
-                fontWeight: isActive ? 800 : 650,
-                letterSpacing: '0.02em',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '6px 12px',
-                minWidth: 44,
-                minHeight: 36,
-                cursor: 'pointer',
-                backgroundColor: isActive
-                  ? (isPrimary ? tokens.accent : tokens.wellBg)
-                  : 'transparent',
-                color: isActive
-                  ? (isPrimary ? '#000' : tokens.textPrimary)
-                  : tokens.textMuted,
-                boxShadow: isActive && isPrimary ? `0 0 0 1px ${tokens.accentGlow}` : 'none',
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
-      {!focusMode && activeHint ? (
-        <p
-          style={{
-            margin: 0,
-            fontSize: '11px',
-            color: tokens.textGhost,
-            letterSpacing: '-0.01em',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          {activeHint}
-          {sectionViewMode === 'free-space' ? ' · PDF → notebook → review' : ''}
-        </p>
-      ) : null}
-    </div>
-  );
-}
 
 type FreeSpacePaletteItemId =
   | ProjectObjectType
@@ -576,6 +219,7 @@ type FreeSpacePaletteGroup = {
     icon: React.ReactNode;
   }>;
 };
+
 
 function FreeSpaceToolPalette({
   tokens,
@@ -878,97 +522,6 @@ function FreeSpaceEmptyGuidance({
         Press <kbd style={{ border: `1px solid ${tokens.cardBorder}`, borderRadius: 6, padding: '1px 6px', color: tokens.textMuted, background: tokens.wellBg }}>A</kbd> to add tools.
       </p>
     </div>
-  );
-}
-
-function WorkspaceSectionChrome({
-  title,
-  accent,
-  tokens,
-  isCustomizing,
-  backLabel = 'Library',
-  onBack,
-  onOpenSearch,
-  onOpenAppearance,
-  onCustomize,
-  onExitCustomize,
-  onResetCustomize,
-  sectionViewMode,
-  onViewModeChange,
-  focusMode,
-  showViewTabs = true,
-  boards,
-  activeBoardId,
-  onSelectBoard,
-  onCreateBoard,
-}: {
-  title: string;
-  accent: string;
-  tokens: ReturnType<typeof useAtmosphere>['tokens'];
-  isCustomizing: boolean;
-  backLabel?: string;
-  onBack: () => void;
-  onOpenSearch: () => void;
-  onOpenAppearance: () => void;
-  onCustomize: () => void;
-  onExitCustomize: () => void;
-  onResetCustomize: () => void;
-  sectionViewMode: 'work-surface' | 'free-space';
-  onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
-  focusMode: FocusMode | null;
-  showViewTabs?: boolean;
-  boards?: import('../hooks/useSectionFreeSpaceBoards').FreeSpaceBoard[];
-  activeBoardId?: string;
-  onSelectBoard?: (id: string) => void;
-  onCreateBoard?: (name: string) => void;
-}) {
-  return (
-    <header
-      style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: WORKSPACE_CHROME_Z,
-        flexShrink: 0,
-        isolation: 'isolate',
-        pointerEvents: 'auto', // chrome wins hit-testing over lower z-index overlays
-        backgroundColor: tokens.pageBg,
-      }}
-    >
-      <SpaceNav
-        title={title}
-        accent={accent}
-        tokens={tokens}
-        isCustomizing={isCustomizing}
-        backLabel={backLabel}
-        studySpaceActive={sectionViewMode === 'free-space'}
-        onBack={onBack}
-        onOpenSearch={onOpenSearch}
-        onOpenAppearance={onOpenAppearance}
-        onCustomize={onCustomize}
-        onExitCustomize={onExitCustomize}
-        onResetCustomize={onResetCustomize}
-      />
-      {showViewTabs && (
-        <>
-          {sectionViewMode === 'free-space' && boards && activeBoardId != null && onSelectBoard && onCreateBoard && (
-            <div style={{ padding: '6px 16px 0' }}>
-              <ProjectSpacesRow
-                boards={boards}
-                activeBoardId={activeBoardId}
-                onSelect={onSelectBoard}
-                onCreate={onCreateBoard}
-              />
-            </div>
-          )}
-          <WorkspaceViewModeBar
-            tokens={tokens}
-            sectionViewMode={sectionViewMode}
-            onViewModeChange={onViewModeChange}
-            focusMode={focusMode}
-          />
-        </>
-      )}
-    </header>
   );
 }
 
@@ -2462,9 +2015,11 @@ export function SectionPage() {
     setStarterDismissed(true);
   }, [sectionId]);
 
-  const applyStudyOsDemo = useCallback(
+  const isExploreFocus = isExploreFocusWorkspace(section?.title, navState);
+
+  const applyExploreFocus = useCallback(
     async (opts?: { silent?: boolean; skipToast?: boolean }) => {
-      const pack = buildStudyOsDemoPack();
+      const pack = buildExploreFocusPack();
       let positions = { ...pack.positions };
       if (sectionObjects.objects.length > 0) {
         const ids = pack.objects.map(o => o.id);
@@ -2483,19 +2038,22 @@ export function SectionPage() {
       sectionObjects.appendObjects(pack.objects);
       sectionPositions.applyPositions(positions);
       setFirstSessionQuiet(false);
+      setStarterHints(pack.hints);
       const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
-      const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
-      sectionCanvas.centerView(DEMO_SCENE_CENTER.x, DEMO_SCENE_CENTER.y, vw, vh);
+      const vh =
+        typeof window !== 'undefined'
+          ? Math.max(480, window.innerHeight - WORKSPACE_SHELL_TOP_INSET)
+          : 720;
+      sectionCanvas.centerView(EXPLORE_FOCUS_SCENE_CENTER.x, EXPLORE_FOCUS_SCENE_CENTER.y, vw, vh);
       if (!opts?.silent) {
         setFocusMode(pack.focusSuggestion);
-        setStarterHints(pack.hints);
       }
       setSectionViewMode('free-space');
       setSpaceSelectedId(pack.objects[0]?.id ?? null);
       setStarterExpanded(false);
       setStarterDockVisible(false);
       if (!opts?.skipToast) {
-        toast.success('Example study room ready');
+        toast.success('Explore Focus is ready');
       }
     },
     [
@@ -2553,8 +2111,11 @@ export function SectionPage() {
 
   const frameArrivalScene = useCallback(() => {
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    const vh = typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 120) : 720;
-    sectionCanvas.centerView(DEMO_SCENE_CENTER.x, DEMO_SCENE_CENTER.y, vw, vh);
+    const vh =
+      typeof window !== 'undefined'
+        ? Math.max(480, window.innerHeight - WORKSPACE_SHELL_TOP_INSET)
+        : 720;
+    sectionCanvas.centerView(EXPLORE_FOCUS_SCENE_CENTER.x, EXPLORE_FOCUS_SCENE_CENTER.y, vw, vh);
   }, [sectionCanvas]);
 
   useEffect(() => {
@@ -2573,7 +2134,7 @@ export function SectionPage() {
     saveSectionViewMode(sectionId, 'free-space');
 
     if (sectionObjects.objects.length === 0) {
-      void applyStudyOsDemo({ silent: true, skipToast: true });
+      void applyExploreFocus({ silent: true, skipToast: true });
       requestAnimationFrame(() => {
         requestAnimationFrame(() => frameArrivalScene());
       });
@@ -2589,7 +2150,7 @@ export function SectionPage() {
     const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
     return () => window.clearTimeout(quietTimer);
   }, [
-    applyStudyOsDemo,
+    applyExploreFocus,
     frameArrivalScene,
     loading,
     location.pathname,
@@ -2601,21 +2162,28 @@ export function SectionPage() {
   ]);
 
   useEffect(() => {
-    if (!navState?.studyOsDemo || !sectionId || loading || studyOsDemoHandledRef.current) return;
+    if (
+      (!navState?.exploreFocus && !navState?.studyOsDemo) ||
+      !sectionId ||
+      loading ||
+      studyOsDemoHandledRef.current
+    ) {
+      return;
+    }
     if (sectionObjects.objects.length > 0) {
       studyOsDemoHandledRef.current = true;
       return;
     }
     studyOsDemoHandledRef.current = true;
-    void applyStudyOsDemo({ silent: true, skipToast: true }).then(() => {
+    void applyExploreFocus({ silent: true, skipToast: true }).then(() => {
       requestAnimationFrame(() => frameArrivalScene());
     });
     navigate(location.pathname, {
       replace: true,
-      state: { ...navState, studyOsDemo: false },
+      state: { ...navState, exploreFocus: false, studyOsDemo: false },
     });
   }, [
-    applyStudyOsDemo,
+    applyExploreFocus,
     frameArrivalScene,
     loading,
     location.pathname,
@@ -2867,7 +2435,7 @@ export function SectionPage() {
           backgroundColor: tokens.pageBg,
         }}
       >
-        <WorkspaceSectionChrome
+        <FloatingWorkspaceShell
           title="Workspace"
           accent={tokens.accent}
           tokens={tokens}
@@ -3048,11 +2616,12 @@ export function SectionPage() {
       }}
     >
 
-      <WorkspaceSectionChrome
+      <FloatingWorkspaceShell
         title={section.title}
         accent={accentColor}
         tokens={tokens}
         isCustomizing={designMode}
+        isExploreFocus={isExploreFocus}
         backLabel={workspaceBackLabel}
         onBack={handleWorkspaceBack}
         onOpenSearch={openPalette}
@@ -3068,6 +2637,10 @@ export function SectionPage() {
         onSelectBoard={sectionBoards.setActiveBoardId}
         onCreateBoard={sectionBoards.createBoard}
       />
+
+      {isExploreFocus && (
+        <ExploreFocusGuide tokens={tokens} hints={starterHints ?? []} accent={accentColor} />
+      )}
 
       <QuickCaptureOverlay
         open={quickCaptureOpen}
@@ -3118,8 +2691,17 @@ export function SectionPage() {
       {/* ── VIEW SURFACES (mounted; visibility switch — preserves iframes/PDF) ── */}
       <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate', overflow: 'hidden' }}>
       <div style={surfaceShellStyle(freeSpaceSurfaceVisible)}>
-        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {resumeVisible && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
+        <div
+          style={{
+            position: 'relative',
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            paddingTop: WORKSPACE_SHELL_TOP_INSET,
+          }}
+        >
+          {resumeVisible && !isExploreFocus && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
             <WorkspaceResumeLayer
               tokens={tokens}
               inShell
@@ -3146,7 +2728,7 @@ export function SectionPage() {
                 onDismiss={() => setStudyLoopDismissed(true)}
               />
             )}
-          {!showWorkspaceStarter && !showStarterDock && !resumeVisible && (
+          {!isExploreFocus && !showWorkspaceStarter && !showStarterDock && !resumeVisible && (
             <WorkspaceGuidanceBar
               sectionId={sectionId}
               tokens={tokens}
@@ -3380,7 +2962,7 @@ export function SectionPage() {
         </div>
       </div>
       <div style={surfaceShellStyle(workSurfaceVisible)}>
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%' }}>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%', paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
 
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
           <aside

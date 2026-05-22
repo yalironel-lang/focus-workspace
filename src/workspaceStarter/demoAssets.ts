@@ -1,6 +1,6 @@
 /**
  * Built-in demo visuals — no IndexedDB, no reconnect flows.
- * Stored inline so the example room works on every device/session.
+ * Stored inline so Explore Focus works on every device/session.
  */
 
 const DEMO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320">

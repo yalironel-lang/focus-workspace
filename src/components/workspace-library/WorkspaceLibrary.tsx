@@ -33,6 +33,8 @@ import './libraryLayout.css';
 import { HomeGuideCompanion, HomeGuideTrigger } from './HomeGuideCompanion';
 import { InstallAppBanner } from '../install/InstallAppBanner';
 import { LIBRARY_OPEN_CREATE_FLAG } from '../../command/constants';
+import { EXPLORE_FOCUS_SECTION_TITLE, exploreFocusNavState } from '../../lib/exploreFocus';
+import { ExploreFocusCTA } from './ExploreFocusCTA';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -307,25 +309,23 @@ function WorkspaceLibraryView() {
     }
   }, []);
 
-  const handleExploreDemo = async () => {
+  const handleExploreFocus = async () => {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setCreating(true);
     try {
-      const created = await createSection('Example study room');
+      const created = await createSection(EXPLORE_FOCUS_SECTION_TITLE);
       if (!created) {
-        toast.error('Could not create example workspace');
+        toast.error('Could not open Explore Focus');
         return;
       }
-      toast.success('Opening example study room…', {
+      toast.success('Entering Explore Focus…', {
         style: { background: tokens.cardBg, border: `1px solid ${tokens.cardBorder}`, color: tokens.textPrimary },
       });
-      const navState: WorkspaceNavigationState = isFirstWorkspaceEntryPending()
-        ? { firstArrival: true, studyOsDemo: true }
-        : { studyOsDemo: true };
+      const navState = exploreFocusNavState(isFirstWorkspaceEntryPending());
       navigate(`/section/${created.id}`, { state: navState });
     } catch {
-      toast.error('Could not create example workspace');
+      toast.error('Could not open Explore Focus');
     } finally {
       creatingRef.current = false;
       setCreating(false);
@@ -344,7 +344,7 @@ function WorkspaceLibraryView() {
       });
       setNewTitle(''); setShowNew(false);
       const navState: WorkspaceNavigationState | undefined = isFirstWorkspaceEntryPending()
-        ? { firstArrival: true, studyOsDemo: true }
+        ? { firstArrival: true }
         : undefined;
       navigate(`/section/${created.id}`, navState ? { state: navState } : undefined);
     } catch { toast.error('Could not create workspace'); }
@@ -759,39 +759,32 @@ function WorkspaceLibraryView() {
                   </span>
                 </h2>
                 <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.36)', maxWidth: 480, lineHeight: 1.78, margin: '0 0 20px' }}>
-                  Notes, PDFs, screenshots, and recall cards stay in one spatial workspace — saved on
-                  this device. Open the example room to see how it works in about a minute.
+                  Notes, sources, and recall live in one spatial room on this device. Start with
+                  Explore Focus — the space teaches the system in about a minute.
                 </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-                  <button
-                    type="button"
-                    onClick={() => void handleExploreDemo()}
+                <div style={{ marginBottom: 16, maxWidth: 560 }}>
+                  <ExploreFocusCTA
+                    tokens={tokens}
+                    accent={sA}
                     disabled={creating}
-                    style={{
-                      height: 48, padding: '0 22px', display: 'inline-flex', alignItems: 'center', gap: 7,
-                      borderRadius: 15, border: `1px solid ${sA}55`,
-                      background: `${sA}18`, color: tokens.textPrimary,
-                      fontSize: 14, fontWeight: 800, cursor: creating ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {creating ? <Loader2 style={{ width: 16, height: 16 }} className="animate-spin" /> : <ArrowRight style={{ width: 16, height: 16 }} strokeWidth={2.5} />}
-                    Explore example study room
-                  </button>
-                  <button type="button" onClick={() => setShowNew(true)}
+                    dominant
+                    onExplore={() => void handleExploreFocus()}
+                  />
+                </div>
+                <button type="button" onClick={() => setShowNew(true)}
                   style={{
-                    height: 48, padding: '0 26px', display: 'inline-flex', alignItems: 'center', gap: 7,
-                    borderRadius: 15, border: 'none', background: sA, color: '#020508',
-                    fontSize: 14, fontWeight: 860, cursor: 'pointer',
-                    boxShadow: `0 8px 32px ${sA}48, inset 0 1px 0 rgba(255,255,255,0.20)`,
-                    transition: 'transform 150ms ease, filter 150ms ease',
+                    height: 44, padding: '0 22px', display: 'inline-flex', alignItems: 'center', gap: 7,
+                    borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)',
+                    color: 'rgba(255,255,255,0.78)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    marginBottom: 20,
+                    transition: 'border-color 150ms ease, background 150ms ease',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.filter = 'brightness(1.08)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.filter = 'none'; }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = `${sA}44`; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
                 >
-                  <Plus style={{ width: 16, height: 16 }} strokeWidth={2.5} />
+                  <Plus style={{ width: 15, height: 15 }} strokeWidth={2.5} />
                   Create your own workspace
                 </button>
-                </div>
                 <div style={{ maxWidth: 520, marginBottom: 18 }}>
                   <InstallAppBanner tokens={tokens} compact />
                 </div>
@@ -853,6 +846,21 @@ function WorkspaceLibraryView() {
           {hasWorkspaces && (
             <div className="library-page-pad" style={{ paddingTop: 10, paddingBottom: 4, flexShrink: 0 }}>
               <InstallAppBanner tokens={tokens} compact />
+            </div>
+          )}
+
+          {hasWorkspaces && libraryReady && !error && (
+            <div
+              className="library-page-pad"
+              style={{ paddingTop: 8, paddingBottom: 6, flexShrink: 0, animation: 'libFadeUp 0.4s 0.14s ease both' }}
+            >
+              <ExploreFocusCTA
+                tokens={tokens}
+                accent={sA}
+                disabled={creating}
+                dominant
+                onExplore={() => void handleExploreFocus()}
+              />
             </div>
           )}
 
@@ -935,16 +943,16 @@ function WorkspaceLibraryView() {
                 <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.16)' }}>{filteredSections.length} / {sections.length}</span>
                 <button
                   type="button"
-                  onClick={() => void handleExploreDemo()}
+                  onClick={() => void handleExploreFocus()}
                   disabled={creating}
                   style={{
                     height: 28, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 5,
-                    borderRadius: 8, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.04)',
-                    color: 'rgba(255,255,255,0.72)', fontSize: 11, fontWeight: 700, cursor: creating ? 'wait' : 'pointer',
+                    borderRadius: 8, border: `1px solid ${sA}38`, background: `${sA}12`,
+                    color: tokens.textPrimary, fontSize: 11, fontWeight: 700, cursor: creating ? 'wait' : 'pointer',
                   }}
                 >
                   <ArrowRight style={{ width: 12, height: 12 }} strokeWidth={2} />
-                  Example room
+                  Explore Focus
                 </button>
                 <button type="button" onClick={() => { setShowNew(s => !s); setNewTitle(''); }}
                   style={{
