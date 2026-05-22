@@ -46,24 +46,31 @@ export function buildExploreFocusPack(): WorkspaceStarterPack {
 
   const notebookBody = [
     '# Neural pathways — lecture 4',
-    '¶ Still working through how **long-term potentiation** ties to spatial memory — not folders, not tabs.',
-    '## Open thread',
-    '- Hippocampus maps context; notes stay beside the source, not in another app.',
-    '- The diagram on the right is the reference I keep returning to.',
-    '- !note Compare LTP curve to the graph — same slope, different scale?',
-    '¶ Unfinished: why does consolidation feel slower when material is scattered?',
-    '## This room',
-    '- Objects stay where you left them — continuity, not chaos.',
-    '- Press **⌘K** and search **neural** to find this notebook instantly.',
+    '',
+    'Still working through how **long-term potentiation** ties to spatial memory formation. The Squire model makes sense in isolation — harder to see how it connects to encoding speed.',
+    '',
+    '## Questions I\'m tracking',
+    '',
+    '- Hippocampus as index, not storage: it maps *where* in cortex the memory lives. But what defines "context" in a spatial sense?',
+    '- The diagram to the right — the LTP slope looks similar to the consolidation curve in Squire. Same mechanism or coincidence?',
+    '- !note Still unresolved: why does studying with scattered material feel slower to consolidate than studying in one place?',
+    '',
+    '## What I have so far',
+    '',
+    'If the hippocampus encodes spatial context during learning, items studied near each other share retrieval coordinates. Proximity during encoding may create shared access pathways later.',
+    '',
+    '---',
+    '',
+    '*Stopped here. Return to the LTP comparison before next lecture.*',
   ].join('\n');
 
   const notebook = obj(
     'notebook',
-    'Active notes',
+    'Working notes',
     {
       type: 'notebook',
       body: notebookBody,
-      subtitle: 'Spatial memory · search: neural',
+      subtitle: 'Lecture 4 · in progress',
       paperStyle: 'ruled',
       notebookSurface: 'paper',
     },
@@ -72,28 +79,40 @@ export function buildExploreFocusPack(): WorkspaceStarterPack {
 
   const source = obj(
     'note',
-    'Reading — Chapter 4',
+    'Source material',
     {
       type: 'note',
-      body: 'Source material lives beside your thinking.\n\nIn a real workspace, drop a PDF or article here — it stays on this device, anchored to your notes.\n\nYou read and write in the same visual field.',
+      body: [
+        'Squire & Zola-Morgan (1991)',
+        '',
+        '> "The hippocampus provides the binding that allows distributed cortical representations to be retrieved together as a coherent experience."',
+        '',
+        'My read: it\'s a coordinator, not a container. The actual memory is spread across cortex — hippocampus holds the assembly instructions.',
+        '',
+        'Open question: if encoding context matters for retrieval, what counts as context? Location? Time? Co-present material?',
+        '',
+        '→ See working notes — comparing to LTP curve in the lecture diagram.',
+        '',
+        '*(paused here — are the decay timescales actually comparable?)*',
+      ].join('\n'),
     },
     at(),
   );
 
   const image = obj(
     'image',
-    'Reference diagram',
+    'LTP curve — lecture 4',
     {
       type: 'image',
       url: DEMO_SCREENSHOT_DATA_URL,
-      alt: 'LTP reference curve',
+      alt: 'LTP curve from lecture 4 slides',
     },
     at(),
   );
 
   const recall = obj(
     'mistake',
-    'Review later',
+    'Something to return to',
     {
       type: 'mistake',
       variant: 'recall',
@@ -110,15 +129,19 @@ export function buildExploreFocusPack(): WorkspaceStarterPack {
 
   const notebookLinked = {
     ...notebook,
-    connections: [source.id, image.id, recall.id],
+    connections: [source.id, image.id],
   };
 
   const objects = [notebookLinked, source, image, recall];
   const positions: Record<string, BlockPos> = {
-    [notebook.id]: { x: 260, y: 180, w: 560, h: 500 },
-    [source.id]: { x: 860, y: 150, w: 340, h: 300 },
-    [image.id]: { x: 860, y: 480, w: 320, h: 260 },
-    [recall.id]: { x: 280, y: 720, w: 300, h: 200 },
+    // Notebook: dominant left anchor — large enough to read as "what I was working on"
+    [notebook.id]: { x: 116, y:  58, w: 638, h: 598 },
+    // Source: upper-right — close enough to suggest active reference, not a sidebar
+    [source.id]:   { x: 797, y:  36, w: 358, h: 292 },
+    // Image: right-middle, intentionally offset from source x — breaks grid alignment
+    [image.id]:    { x: 828, y: 355, w: 302, h: 252 },
+    // Recall: low and to the side — flagged and set aside, visible as a sliver at the fold
+    [recall.id]:   { x: 238, y: 714, w: 254, h: 168 },
   };
 
   return {
@@ -126,9 +149,9 @@ export function buildExploreFocusPack(): WorkspaceStarterPack {
     positions,
     focusSuggestion: 'thinking',
     hints: [
-      'Notes, sources, and recall share one continuous room.',
-      'Connection lines show intentional relationships — not random tiles.',
-      '⌘K searches notebook text on this device only.',
+      'All your material for this subject lives here — and the space remembers how you were thinking, not just what you saved.',
+      'Where you place things carries meaning. Objects near each other are in relation — and that stays.',
+      'Open any object to read or write inside it. The space extends further than the screen — drag to explore.',
     ],
   };
 }

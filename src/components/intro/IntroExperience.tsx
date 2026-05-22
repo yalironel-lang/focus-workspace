@@ -83,7 +83,6 @@ export function IntroExperience({ onComplete, onSkip }: Props) {
 
   const showRings = phase !== 'void';
   const showTitle = phase === 'reveal' || phase === 'exit';
-  const showSubtitle = phase === 'reveal' || phase === 'exit';
   const exiting = phase === 'exit';
 
   const titleMotion = useMemo(
@@ -264,20 +263,6 @@ export function IntroExperience({ onComplete, onSkip }: Props) {
           >
             Focus Workspace
           </motion.h1>
-        )}
-        {showSubtitle && (
-          <motion.p
-            className="mt-4 text-center font-sans text-[11px] font-semibold uppercase tracking-[0.32em]"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{
-              opacity: exiting ? 0 : 0.72,
-              y: exiting ? -4 : 0,
-            }}
-            transition={{ delay: 0.12, duration: 0.65, ease: EASE_OUT }}
-            style={{ color: 'rgba(148,163,184,0.85)' }}
-          >
-            Entering workspace
-          </motion.p>
         )}
       </motion.div>
 

@@ -6,6 +6,12 @@
 import { useEffect, useState } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 
+const FALLBACK_HINTS = [
+  'All your material for this subject lives here — and the space remembers how you were thinking, not just what you saved.',
+  'Where you place things carries meaning. Objects near each other are in relation — and that stays.',
+  'Open any object to read or write inside it. The space extends further than the screen — drag to explore.',
+];
+
 interface Props {
   tokens: AtmosphereTokens;
   hints: string[];
@@ -15,15 +21,9 @@ interface Props {
 export function ExploreFocusGuide({ tokens, hints, accent }: Props) {
   const [index, setIndex] = useState(0);
   const [visible, setVisible] = useState(true);
+  const [glowBoosted, setGlowBoosted] = useState(true);
 
-  const messages =
-    hints.length > 0
-      ? hints
-      : [
-          'This is a spatial study room — objects stay where you place them.',
-          'Connections preserve how ideas relate across sources.',
-          'Press ⌘K to search notebooks on this device.',
-        ];
+  const messages = hints.length > 0 ? hints : FALLBACK_HINTS;
 
   useEffect(() => {
     if (messages.length <= 1) return;
@@ -36,6 +36,11 @@ export function ExploreFocusGuide({ tokens, hints, accent }: Props) {
     }, 9000);
     return () => window.clearInterval(id);
   }, [messages.length]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setGlowBoosted(false), 9000);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const text = messages[index] ?? messages[0];
 
@@ -61,11 +66,14 @@ export function ExploreFocusGuide({ tokens, hints, accent }: Props) {
           gap: 12,
           padding: '12px 16px 12px 12px',
           borderRadius: 16,
-          border: `1px solid ${tokens.cardBorder}99`,
+          border: `1px solid ${glowBoosted ? `${tokens.cardBorderHover}` : `${tokens.cardBorder}99`}`,
           background: `linear-gradient(145deg, ${tokens.cardBg}d0, ${tokens.pageBg}b0)`,
           backdropFilter: 'blur(18px) saturate(1.35)',
           WebkitBackdropFilter: 'blur(18px) saturate(1.35)',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06)',
+          boxShadow: glowBoosted
+            ? `0 12px 40px rgba(0,0,0,0.28), 0 0 0 1px ${accent}22, inset 0 1px 0 rgba(255,255,255,0.08)`
+            : '0 12px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06)',
+          transition: 'border-color 1.4s ease, box-shadow 1.4s ease',
         }}
       >
         <div
@@ -77,7 +85,10 @@ export function ExploreFocusGuide({ tokens, hints, accent }: Props) {
             marginTop: 4,
             flexShrink: 0,
             background: accent,
-            boxShadow: `0 0 16px ${accent}88, 0 0 32px ${accent}33`,
+            boxShadow: glowBoosted
+              ? `0 0 20px ${accent}bb, 0 0 40px ${accent}55`
+              : `0 0 16px ${accent}88, 0 0 32px ${accent}33`,
+            transition: 'box-shadow 1.4s ease',
             animation: 'fwGuidePulse 3.2s ease-in-out infinite',
           }}
         />
@@ -92,7 +103,7 @@ export function ExploreFocusGuide({ tokens, hints, accent }: Props) {
               color: tokens.textGhost,
             }}
           >
-            Spatial OS
+            Focus
           </p>
           <p
             style={{

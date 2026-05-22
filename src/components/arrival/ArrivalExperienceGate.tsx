@@ -9,67 +9,40 @@ import { isStabilityFeatureDisabled } from '../../lib/stabilityBaseline';
 import { navDebugLog } from '../../lib/navigationDebug';
 import { ArrivalExperienceLayer, type ArrivalExperienceAction } from './ArrivalExperienceLayer';
 
-function isEligibleAutoRoute(pathname: string): boolean {
-  return pathname === '/dashboard';
-}
-
 export function ArrivalExperienceGate() {
   const { user, loading } = useAuth();
-  const { sections, loading: sectionsLoading, error: sectionsError } = useSections();
+  const { sections: _sections, loading: sectionsLoading, error: sectionsError } = useSections();
   const location = useLocation();
   const navigate = useNavigate();
   const { tokens, arrivalExperienceOpen, closeArrivalExperience } = useCommandPalette();
   const [seen, setSeen] = useState<boolean>(() => hasSeenArrivalExperience());
-  const [autoOpen, setAutoOpen] = useState(false);
   const prevPathRef = useRef(location.pathname);
-  const suppressAutoOpenRef = useRef(false);
 
   useEffect(() => {
-    if (!user) {
-      setAutoOpen(false);
-      return;
-    }
+    if (!user) return;
     setSeen(hasSeenArrivalExperience());
   }, [user]);
 
   useEffect(() => {
     const prev = prevPathRef.current;
     if (prev !== location.pathname) {
-      if (autoOpen || arrivalExperienceOpen) suppressAutoOpenRef.current = true;
       navDebugLog('arrival-route-reset', { from: prev, to: location.pathname });
-      setAutoOpen(false);
-      closeArrivalExperience();
+      if (arrivalExperienceOpen) closeArrivalExperience();
     }
     prevPathRef.current = location.pathname;
-  }, [location.pathname, autoOpen, arrivalExperienceOpen, closeArrivalExperience]);
+  }, [location.pathname, arrivalExperienceOpen, closeArrivalExperience]);
 
-  useEffect(() => {
-    if (suppressAutoOpenRef.current) return;
-    if (loading || sectionsLoading || !user || seen || arrivalExperienceOpen || sectionsError) return;
-    if (!isEligibleAutoRoute(location.pathname)) return;
-    if (sections.length > 0) return;
-    setAutoOpen(true);
-  }, [
-    arrivalExperienceOpen,
-    loading,
-    location.pathname,
-    seen,
-    sections.length,
-    sectionsError,
-    sectionsLoading,
-    user,
-  ]);
-
+  // Auto-open on first visit removed: IntroExperience + the library empty state
+  // already orient new users. The arrival experience remains accessible via
+  // command palette (arrivalExperienceOpen).
   const open = useMemo(() => {
-    if (loading || !user || location.pathname === '/') return false;
-    if (arrivalExperienceOpen) return true;
-    return autoOpen && isEligibleAutoRoute(location.pathname);
-  }, [arrivalExperienceOpen, autoOpen, loading, location.pathname, user]);
+    if (loading || sectionsLoading || sectionsError || !user || seen || location.pathname === '/') return false;
+    return arrivalExperienceOpen;
+  }, [arrivalExperienceOpen, loading, sectionsLoading, sectionsError, location.pathname, seen, user]);
 
   const closeAndPersist = useCallback(() => {
     markArrivalExperienceSeen();
     setSeen(true);
-    setAutoOpen(false);
     closeArrivalExperience();
   }, [closeArrivalExperience]);
 
@@ -95,7 +68,7 @@ export function ArrivalExperienceGate() {
   return (
     <ArrivalExperienceLayer
       tokens={tokens}
-      reopened={!autoOpen}
+      reopened={true}
       onAction={handleAction}
     />
   );

@@ -662,9 +662,9 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
   return (
     <>
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#263043' }}>
+            <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#3d5068' }}>
               Dates
             </span>
             {urgentCount > 0 && (
@@ -673,17 +673,17 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
               </span>
             )}
           </div>
-          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#f59e0b')}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
+          <button onClick={() => setShowAdd(true)} style={{ fontSize: '13px', lineHeight: 1, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#f59e0b'; (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.08)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#3d5068'; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}>
             +
           </button>
         </div>
 
         {pending.length === 0 ? (
-          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#1a2230', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#374151')}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#1a2230')}>
+          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0' }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
             + Add a date
           </button>
         ) : (
@@ -705,10 +705,10 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
                   </div>
                   <button
                     onClick={() => toggleDeadline(d.id, !d.completed).catch(() => {})}
-                    style={{ flexShrink: 0, color: '#1a2230', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '1px' }}
+                    style={{ flexShrink: 0, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '4px' }}
                     title="Mark done"
                     onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#10b981')}
-                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#1a2230')}>
+                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
                     <CheckCircle2 className="w-3 h-3" />
                   </button>
                 </div>
@@ -2962,7 +2962,7 @@ export function SectionPage() {
         </div>
       </div>
       <div style={surfaceShellStyle(workSurfaceVisible)}>
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[220px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%', paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[248px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%', paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
 
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
           <aside

@@ -64,7 +64,7 @@ export function ExploreFocusCTA({ tokens, accent, disabled = false, onExplore, d
             color: `${accent}cc`,
           }}
         >
-          Interactive onboarding
+          Start here
         </p>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>

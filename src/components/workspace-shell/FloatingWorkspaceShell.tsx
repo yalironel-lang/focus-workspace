@@ -93,10 +93,11 @@ export function FloatingWorkspaceShell({
           justifyContent: 'space-between',
           gap: 12,
           flexWrap: 'wrap',
+          pointerEvents: 'none',
         }}
       >
         {/* Primary — orientation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px', pointerEvents: 'none' }}>
           <button
             type="button"
             onClick={onBack}
@@ -120,6 +121,7 @@ export function FloatingWorkspaceShell({
               padding: '7px 14px 8px',
               borderRadius: 14,
               maxWidth: 280,
+              pointerEvents: 'none',
             }}
           >
             <span
@@ -158,6 +160,7 @@ export function FloatingWorkspaceShell({
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
                 color: accent,
+                pointerEvents: 'none',
               }}
             >
               Explore Focus
@@ -174,6 +177,7 @@ export function FloatingWorkspaceShell({
               gap: 6,
               flexWrap: 'wrap',
               flex: '0 1 auto',
+              pointerEvents: 'none',
             }}
           >
             <span
@@ -184,6 +188,7 @@ export function FloatingWorkspaceShell({
                 textTransform: 'uppercase',
                 color: tokens.textGhost,
                 marginRight: 2,
+                pointerEvents: 'none',
               }}
             >
               Spaces
@@ -229,7 +234,7 @@ export function FloatingWorkspaceShell({
         )}
 
         {/* View mode + secondary tools */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, pointerEvents: 'none' }}>
           {isCustomizing ? (
             <div style={{ ...glassIsland(tokens, 'primary', 'idle'), gap: 6 }}>
               <button type="button" onClick={onResetCustomize} style={shellIconBtn(tokens)}>
@@ -338,6 +343,7 @@ export function FloatingWorkspaceShell({
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
             color: tokens.textSecondary,
+            pointerEvents: 'none',
           }}
         >
           Focus · {FOCUS_MODE_BADGE[focusMode as keyof typeof FOCUS_MODE_BADGE] ?? focusMode}

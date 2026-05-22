@@ -62,62 +62,6 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-// ─── FLOATING GLASS BUBBLE ────────────────────────────────────────────────────
-// Absolute-positioned context element that floats around the hero portal.
-// These are NOT cards — they're ambient data surfacing from the workspace world.
-
-interface FloatingGlassBubbleProps {
-  label: string;
-  value: string;
-  accent: string;
-  top?: string | number;
-  right?: string | number;
-  bottom?: string | number;
-  left?: string | number;
-  animName: 'libFloat1' | 'libFloat2' | 'libFloat3';
-  animDuration: number;
-  animDelay: number;
-}
-
-function FloatingGlassBubble({
-  label, value, accent,
-  top, right, bottom, left,
-  animName, animDuration, animDelay,
-}: FloatingGlassBubbleProps) {
-  return (
-    <div style={{
-      position: 'absolute',
-      top, right, bottom, left,
-      padding: '10px 15px',
-      borderRadius: 16,
-      background: 'linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.032))',
-      border: '1px solid rgba(255,255,255,0.135)',
-      backdropFilter: 'blur(22px) saturate(1.7) brightness(1.07)',
-      WebkitBackdropFilter: 'blur(22px) saturate(1.7) brightness(1.07)',
-      boxShadow: '0 12px 36px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.10)',
-      pointerEvents: 'none',
-      zIndex: 4,
-      animation: `${animName} ${animDuration}s ${animDelay}s ease-in-out infinite`,
-      overflow: 'hidden',
-    }}>
-      {/* Glass shimmer strip */}
-      <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: 'linear-gradient(105deg, transparent 38%, rgba(255,255,255,0.12) 50%, transparent 62%)',
-        animation: 'libGlassShimmer 6s ease-in-out infinite',
-        animationDelay: `${animDelay + 1}s`,
-      }} />
-      <p style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: `${accent}bb`, margin: '0 0 3px' }}>
-        {label}
-      </p>
-      <p style={{ fontSize: 14, fontWeight: 780, color: 'rgba(255,255,255,0.88)', margin: 0, letterSpacing: '-0.02em', lineHeight: 1.2 }}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
-
 function DeleteWorkspaceDialog({
   section,
   tokens,
@@ -413,8 +357,6 @@ function WorkspaceLibraryView() {
   const sCompleted = resumeWorkspace?.completed_items ?? 0;
   const sNearest   = resumeWorkspace ? deadlinesFor(resumeWorkspace.id).filter(d => !d.completed).sort((a, b) => a.due_date.localeCompare(b.due_date))[0] : undefined;
   const stagePath  = resumeWorkspace ? `/section/${resumeWorkspace.id}` : '#';
-  const showLibraryContextBubbles = false;
-  const coreWorkflow = ['Upload source/PDF', 'Write notes', 'Ask tutor', 'Start focus timer'];
   const heroParallax = spatialParallaxOffset(spatial, 0.55);
   const sidebarParallax = spatialParallaxOffset(spatial, 0.12);
   const spatialEase = 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)';
@@ -560,12 +502,10 @@ function WorkspaceLibraryView() {
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
                 />
-                {search ? (
+                {search && (
                   <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.28)', padding: 0, display: 'flex', alignItems: 'center' }}>
                     <X style={{ width: 12, height: 12 }} />
                   </button>
-                ) : (
-                  <span style={{ border: '1px solid rgba(255,255,255,0.09)', borderRadius: 5, padding: '2px 5px', color: 'rgba(255,255,255,0.18)', fontSize: 9, fontWeight: 800, letterSpacing: '0.06em', flexShrink: 0 }}>⌘K</span>
                 )}
               </div>
             </div>
@@ -690,54 +630,9 @@ function WorkspaceLibraryView() {
                       Enter workspace
                       <ArrowRight style={{ width: 17, height: 17 }} strokeWidth={2.5} />
                     </a>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
-                      {coreWorkflow.map(action => (
-                        <span key={action} style={{
-                          border: '1px solid rgba(255,255,255,0.085)',
-                          background: 'rgba(255,255,255,0.034)',
-                          borderRadius: 999,
-                          padding: '7px 10px',
-                          color: 'rgba(255,255,255,0.58)',
-                          fontSize: 11,
-                          fontWeight: 700,
-                        }}>
-                          {action}
-                        </span>
-                      ))}
-                    </div>
                   </div>
                 </div>
 
-                {/* Secondary context stays hidden by default; users can discover details inside a workspace. */}
-                {showLibraryContextBubbles && resumeWorkspace.next_item_title && (
-                  <FloatingGlassBubble
-                    label="Next task"
-                    value={resumeWorkspace.next_item_title.length > 28
-                      ? resumeWorkspace.next_item_title.slice(0, 28) + '…'
-                      : resumeWorkspace.next_item_title}
-                    accent={sA}
-                    top="6%" right="4%"
-                    animName="libFloat1" animDuration={8} animDelay={0.3}
-                  />
-                )}
-                {showLibraryContextBubbles && sTotal > 0 && (
-                  <FloatingGlassBubble
-                    label="Progress"
-                    value={`${sCompleted} / ${sTotal} complete`}
-                    accent={sA}
-                    top={resumeWorkspace.next_item_title ? '38%' : '14%'} right="8%"
-                    animName="libFloat2" animDuration={10} animDelay={1.2}
-                  />
-                )}
-                {showLibraryContextBubbles && sNearest && (
-                  <FloatingGlassBubble
-                    label="Due"
-                    value={sNearest.due_date}
-                    accent="#fb7185"
-                    top="64%" right="3%"
-                    animName="libFloat3" animDuration={7} animDelay={0.6}
-                  />
-                )}
               </div>
             )}
 
@@ -788,22 +683,6 @@ function WorkspaceLibraryView() {
                 <div style={{ maxWidth: 520, marginBottom: 18 }}>
                   <InstallAppBanner tokens={tokens} compact />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 8, maxWidth: 440 }}>
-                  {coreWorkflow.map(action => (
-                    <div key={action} style={{
-                      border: '1px solid rgba(255,255,255,0.085)',
-                      background: 'rgba(255,255,255,0.035)',
-                      borderRadius: 12,
-                      padding: '10px 12px',
-                      color: 'rgba(255,255,255,0.72)',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      letterSpacing: '-0.01em',
-                    }}>
-                      {action}
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
@@ -846,21 +725,6 @@ function WorkspaceLibraryView() {
           {hasWorkspaces && (
             <div className="library-page-pad" style={{ paddingTop: 10, paddingBottom: 4, flexShrink: 0 }}>
               <InstallAppBanner tokens={tokens} compact />
-            </div>
-          )}
-
-          {hasWorkspaces && libraryReady && !error && (
-            <div
-              className="library-page-pad"
-              style={{ paddingTop: 8, paddingBottom: 6, flexShrink: 0, animation: 'libFadeUp 0.4s 0.14s ease both' }}
-            >
-              <ExploreFocusCTA
-                tokens={tokens}
-                accent={sA}
-                disabled={creating}
-                dominant
-                onExplore={() => void handleExploreFocus()}
-              />
             </div>
           )}
 

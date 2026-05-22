@@ -7,8 +7,8 @@ export const EXPLORE_FOCUS_TAGLINE = 'Spatial study OS';
 
 export const EXPLORE_FOCUS_LIBRARY_SUBTEXT = 'See how spatial studying works · ~60 seconds';
 
-/** World-space focal point for the curated scene. */
-export const EXPLORE_FOCUS_SCENE_CENTER = { x: 640, y: 420 };
+/** World-space focal point for the curated scene — offset toward notebook-source gap, not notebook center. */
+export const EXPLORE_FOCUS_SCENE_CENTER = { x: 538, y: 368 };
 
 export function isExploreFocusWorkspace(
   sectionTitle: string | undefined,

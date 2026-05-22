@@ -248,7 +248,7 @@ function LinkRow({ link, onEdit, onDelete }: { link: CourseLink; onEdit: () => v
 
   return (
     <div
-      className="group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+      className="group flex items-center gap-3 px-3 py-3 rounded-xl transition-all"
       style={{ backgroundColor: '#111d2e', border: '1px solid #1a2638' }}
       onMouseEnter={e => (e.currentTarget.style.borderColor = '#2a3a54')}
       onMouseLeave={e => (e.currentTarget.style.borderColor = '#1a2638')}
@@ -427,7 +427,7 @@ export function CourseHub({ sectionId }: Props) {
 
         {/* Saved links */}
         {hasLinks && (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {links.map(link =>
               editingId === link.id ? (
                 <EditForm
