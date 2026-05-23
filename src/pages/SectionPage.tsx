@@ -7,6 +7,7 @@ import type { AIWorkspaceHandlers } from '../command/aiWorkspaceHandlersRef';
 import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
 import { buildExploreFocusPack } from '../workspaceStarter/buildExploreFocusPack';
+import { MissionControlView } from '../components/mission-control/MissionControlView';
 import {
   EXPLORE_FOCUS_SCENE_CENTER,
   isExploreFocusWorkspace,
@@ -373,79 +374,6 @@ function FreeSpaceToolPalette({
   );
 }
 
-function MissionControlStudyBridge({
-  tokens,
-  accent,
-  pdfCount,
-  notebookCount,
-  mistakeCount,
-  resumeHeadline,
-  onOpenStudySpace,
-}: {
-  tokens: ReturnType<typeof useAtmosphere>['tokens'];
-  accent: string;
-  pdfCount: number;
-  notebookCount: number;
-  mistakeCount: number;
-  resumeHeadline?: string | null;
-  onOpenStudySpace: () => void;
-}) {
-  const parts: string[] = [];
-  if (pdfCount > 0) parts.push(`${pdfCount} source${pdfCount === 1 ? '' : 's'}`);
-  if (notebookCount > 0) parts.push(`${notebookCount} notebook${notebookCount === 1 ? '' : 's'}`);
-  if (mistakeCount > 0) parts.push(`${mistakeCount} to review`);
-  const summary = parts.length > 0 ? parts.join(' · ') : 'Your spatial workspace lives here.';
-
-  return (
-    <div
-      style={{
-        marginBottom: 28,
-        padding: '14px 16px',
-        borderRadius: 14,
-        border: `1px solid ${tokens.cardBorder}`,
-        background: `linear-gradient(135deg, ${tokens.accentSubtle}, rgba(255,255,255,0.02))`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 14,
-        flexWrap: 'wrap',
-      }}
-    >
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <p style={{ margin: '0 0 4px', fontSize: 9, fontWeight: 750, letterSpacing: '0.14em', textTransform: 'uppercase', color: tokens.accent }}>
-          Workspace
-        </p>
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 650, color: tokens.textPrimary, letterSpacing: '-0.02em' }}>
-          {resumeHeadline ?? summary}
-        </p>
-        {resumeHeadline ? (
-          <p style={{ margin: '4px 0 0', fontSize: 11.5, color: tokens.textMuted, lineHeight: 1.4 }}>{summary}</p>
-        ) : null}
-      </div>
-      <button
-        type="button"
-        onClick={onOpenStudySpace}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '8px 14px',
-          borderRadius: 10,
-          border: 'none',
-          backgroundColor: accent,
-          color: '#000',
-          fontSize: 12,
-          fontWeight: 750,
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        Open workspace
-        <ArrowRight className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
 
 function FreeSpaceEmptyGuidance({
   tokens,
@@ -900,14 +828,6 @@ export function SectionPage() {
   const workSurfaceVisible = sectionViewMode !== 'free-space' && !designMode;
   const designSurfaceVisible = sectionViewMode !== 'free-space' && designMode;
 
-  const studySpaceStats = useMemo(() => {
-    const objects = sectionObjects.objects;
-    return {
-      pdfCount: objects.filter(o => o.type === 'pdf').length,
-      notebookCount: objects.filter(o => o.type === 'notebook' || o.type === 'note').length,
-      mistakeCount: objects.filter(o => o.type === 'mistake').length,
-    };
-  }, [sectionObjects.objects]);
 
   useEffect(() => {
     flickerDebugCount('SectionPage');
@@ -2990,18 +2910,13 @@ export function SectionPage() {
 
             <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 88px', maxWidth: '720px' }}>
 
-              <MissionControlStudyBridge
-                tokens={tokens}
+              <MissionControlView
+                objects={sectionObjects.objects}
                 accent={accentColor}
-                pdfCount={studySpaceStats.pdfCount}
-                notebookCount={studySpaceStats.notebookCount}
-                mistakeCount={studySpaceStats.mistakeCount}
-                resumeHeadline={
-                  workspaceContinuity.continuityRecent && workspaceContinuity.resumeCopy
-                    ? workspaceContinuity.resumeCopy.headline
-                    : null
-                }
-                onOpenStudySpace={() => setSectionViewMode('free-space')}
+                onOpenObject={(id) => {
+                  setSectionViewMode('free-space');
+                  setSpaceSelectedId(id);
+                }}
               />
 
               {/* ── MISSION CONTROL HEADER ─────────────────────────────── */}
