@@ -608,31 +608,31 @@ function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionT
         </div>
 
         {pending.length === 0 ? (
-          <button onClick={() => setShowAdd(true)} style={{ fontSize: '11px', color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0' }}
+          <button onClick={() => setShowAdd(true)} style={{ fontSize: '12px', color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0' }}
             onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
             onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
             + Add a date
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {pending.map(d => {
               const lbl = urgencyLabel(d);
               const dot = urgencyDot(d);
               return (
-                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: dot, flexShrink: 0, marginTop: '4px' }} />
+                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: dot, flexShrink: 0, marginTop: '5px' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: '11px', fontWeight: 600, color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+                    <p style={{ fontSize: '12px', fontWeight: 600, color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
                       {d.title}
                     </p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '1px' }}>
-                      <span style={{ fontSize: '10px', color: '#263043' }}>{formatDueDate(d.due_date)}</span>
-                      {lbl.text && <span style={{ fontSize: '10px', color: lbl.color, fontWeight: 600 }}>· {lbl.text}</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
+                      <span style={{ fontSize: '11px', color: '#263043' }}>{formatDueDate(d.due_date)}</span>
+                      {lbl.text && <span style={{ fontSize: '11px', color: lbl.color, fontWeight: 600 }}>· {lbl.text}</span>}
                     </div>
                   </div>
                   <button
                     onClick={() => toggleDeadline(d.id, !d.completed).catch(() => {})}
-                    style={{ flexShrink: 0, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '4px' }}
+                    style={{ flexShrink: 0, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '6px' }}
                     title="Mark done"
                     onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#10b981')}
                     onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
@@ -2845,7 +2845,7 @@ export function SectionPage() {
           >
             <CourseHub sectionId={section.id} />
 
-            <div style={{ margin: '20px 0 12px', height: '1px', backgroundColor: 'rgba(255,255,255,0.04)' }} />
+            <div style={{ margin: '24px 0 16px', height: '1px', backgroundColor: 'rgba(255,255,255,0.04)' }} />
 
             <AmbientDates sectionId={section.id} sectionTitle={section.title} />
           </aside>

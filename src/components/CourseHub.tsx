@@ -427,7 +427,7 @@ export function CourseHub({ sectionId }: Props) {
 
         {/* Saved links */}
         {hasLinks && (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {links.map(link =>
               editingId === link.id ? (
                 <EditForm
@@ -472,18 +472,19 @@ export function CourseHub({ sectionId }: Props) {
         {/* Add more row */}
         {hasLinks && !showingForm && editingId === null && (
           <div
-            className="mt-2.5 pt-2.5 flex flex-wrap gap-1.5"
+            className="mt-3 pt-3 flex flex-wrap gap-2"
             style={{ borderTop: '1px solid #111d2e' }}
           >
             {COURSE_STARTERS
               .filter(s => !links.some(l => l.type === s.type))
+              .slice(0, 3)
               .map(s => {
                 const m = TYPE_META[s.type];
                 return (
                   <button
                     key={s.type}
                     onClick={() => setAddState({ type: s.type, label: s.label, placeholder: s.placeholder })}
-                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg transition-all"
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg transition-all"
                     style={{ border: '1px solid #1a2638', color: '#475569' }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = '#2a3a54'; e.currentTarget.style.backgroundColor = '#111d2e'; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = '#1a2638'; e.currentTarget.style.backgroundColor = 'transparent'; }}
