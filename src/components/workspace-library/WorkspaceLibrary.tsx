@@ -18,6 +18,7 @@ import { useCommandPalette } from '../../command/CommandPaletteContext';
 import { useWorkspaceTheme, mergeAccent } from '../../hooks/useWorkspaceTheme';
 import { WorkspaceAppearancePanel } from '../workspace-appearance/WorkspaceAppearancePanel';
 import { useWorkspaceFolders } from '../../hooks/useWorkspaceFolders';
+import { useRecentWorkspaces } from '../../hooks/useRecentWorkspaces';
 import { getWorkspaceCustomization } from '../../hooks/useWorkspaceCustomization';
 import type { WorkspaceNavigationState } from '../../lib/workspaceUniverse/types';
 import { isAdvancedLibraryNavUnlocked, isFirstWorkspaceEntryPending } from '../../lib/firstSessionPrefs';
@@ -42,17 +43,8 @@ const ACCENT_POOL = ['#6366f1', '#8b5cf6', '#f59e0b', '#3b82f6', '#a78bfa', '#06
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-function baselineOpenLog(sectionId: string, target: string, label: string) {
-  void sectionId; void target; void label;
-}
 function accentForTitle(title: string): string {
   return ACCENT_POOL[[...title].reduce((a, c) => a + c.charCodeAt(0), 0) % ACCENT_POOL.length];
-}
-function initials(title: string) {
-  return title.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('');
-}
-function workspaceKind(section: SectionWithProgress): string {
-  return section.exam_date ? 'Course' : 'Workspace';
 }
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -60,6 +52,19 @@ function getGreeting(): string {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const mins  = Math.floor(ms / 60_000);
+  const hours = Math.floor(ms / 3_600_000);
+  const days  = Math.floor(ms / 86_400_000);
+  if (mins  < 2)  return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  === 1) return 'yesterday';
+  return `${days}d ago`;
 }
 
 function DeleteWorkspaceDialog({
@@ -171,6 +176,7 @@ function WorkspaceLibraryView() {
   const { user, signOut } = useAuth();
   const { sections, loading, error, fetchSections, createSection, deleteSection } = useSections();
   const { deadlines } = useDeadlines();
+  const { recentIdsOrdered, openedAt } = useRecentWorkspaces();
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { openPalette } = useCommandPalette();
   const { design, global, updateGlobal } = useWorkspaceTheme();
@@ -232,10 +238,10 @@ function WorkspaceLibraryView() {
     return { byFolder, unfiled };
   }, [sections, search, folders, filterFolder, getFolderForSection]);
 
-  const resumeWorkspace = useMemo(() => {
-    if (!sections.length) return null;
-    return [...sections].sort((a, b) => (b.progress || 0) - (a.progress || 0))[0];
-  }, [sections]);
+  const continueWorkspace = useMemo(() => {
+    if (!recentIdsOrdered.length) return null;
+    return sections.find(s => s.id === recentIdsOrdered[0]) ?? null;
+  }, [recentIdsOrdered, sections]);
 
   const filterChips = useMemo(() => [
     { id: 'all' as const, label: 'All' },
@@ -326,11 +332,11 @@ function WorkspaceLibraryView() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: asymmetric ? '2fr 1fr' : '1fr', gap: 14 }}>
           <div style={{ animation: `libFadeUp 0.38s ${baseDelay}s ease both` }}>
-            <SpatialLibraryCard section={first} deadlines={deadlinesFor(first.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(first.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} wide />
+            <SpatialLibraryCard section={first} deadlines={deadlinesFor(first.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(first.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(first.id) ?? undefined} wide />
           </div>
           {rest[0] && (
             <div style={{ animation: `libFadeUp 0.38s ${baseDelay + 0.05}s ease both` }}>
-              <SpatialLibraryCard section={rest[0]} deadlines={deadlinesFor(rest[0].id)} tokens={tokens} folders={folders} folderId={getFolderForSection(rest[0].id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} />
+              <SpatialLibraryCard section={rest[0]} deadlines={deadlinesFor(rest[0].id)} tokens={tokens} folders={folders} folderId={getFolderForSection(rest[0].id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(rest[0].id) ?? undefined} />
             </div>
           )}
         </div>
@@ -338,7 +344,7 @@ function WorkspaceLibraryView() {
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, ${minCard})`, gap: 14 }}>
             {rest.slice(1).map((s, i) => (
               <div key={s.id} style={{ animation: `libFadeUp 0.36s ${baseDelay + 0.10 + i * 0.04}s ease both` }}>
-                <SpatialLibraryCard section={s} deadlines={deadlinesFor(s.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(s.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} />
+                <SpatialLibraryCard section={s} deadlines={deadlinesFor(s.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(s.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(s.id) ?? undefined} />
               </div>
             ))}
           </div>
@@ -347,19 +353,11 @@ function WorkspaceLibraryView() {
     );
   };
 
-  // ─── Stage accent (responds to featured workspace identity) ────────────────
-  const sA = resumeWorkspace
-    ? (getWorkspaceCustomization(resumeWorkspace.id).accent || accentForTitle(resumeWorkspace.title))
+  // ─── Environment accent — follows most-recently-opened workspace ─────────────
+  const sA = continueWorkspace
+    ? (getWorkspaceCustomization(continueWorkspace.id).accent || accentForTitle(continueWorkspace.title))
     : tokens.accent;
-  const sCustom    = resumeWorkspace ? getWorkspaceCustomization(resumeWorkspace.id) : null;
-  const sProgress  = resumeWorkspace?.progress ?? 0;
-  const sTotal     = resumeWorkspace?.total_items ?? 0;
-  const sCompleted = resumeWorkspace?.completed_items ?? 0;
-  const sNearest   = resumeWorkspace ? deadlinesFor(resumeWorkspace.id).filter(d => !d.completed).sort((a, b) => a.due_date.localeCompare(b.due_date))[0] : undefined;
-  const stagePath  = resumeWorkspace ? `/section/${resumeWorkspace.id}` : '#';
-  const heroParallax = spatialParallaxOffset(spatial, 0.55);
   const sidebarParallax = spatialParallaxOffset(spatial, 0.12);
-  const spatialEase = 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)';
 
   return (
     <>
@@ -377,7 +375,7 @@ function WorkspaceLibraryView() {
       }}>
 
 
-        <LibrarySpatialAtmosphere accent={sA} featured={!!resumeWorkspace && !search} homeTone={homeTone} />
+        <LibrarySpatialAtmosphere accent={sA} featured={!!continueWorkspace && !search} homeTone={homeTone} />
         <LibrarySidebar
           tokens={tokens}
           accent={sA}
@@ -404,62 +402,23 @@ function WorkspaceLibraryView() {
         ═══════════════════════════════════════════════════════════════ */}
         <main className="library-main" style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          {/* CINEMATIC HERO STAGE — min-height 58vh */}
+          {/* ENVIRONMENT ENTRY */}
           <div
-            className="library-hero-stage library-page-pad"
+            className="library-page-pad"
             style={{
             flexShrink: 0,
             position: 'relative',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden',
             paddingBottom: 0,
           }}>
-
-            {/* Stage-local nebula */}
-            {/* Hero depth stack — featured workspace pedestal */}
-            {resumeWorkspace && !search && (
-              <>
-                <div style={{
-                  position: 'absolute', left: '-8%', top: '-18%',
-                  width: '72%', height: '130%',
-                  borderRadius: '50%',
-                  background: `radial-gradient(ellipse 55% 50% at 38% 48%, ${sA}1e, transparent 66%)`,
-                  pointerEvents: 'none', zIndex: 0,
-                  animation: spatial.reducedMotion ? 'none' : `libBreath2 ${spatial.idle ? 26 : 20}s ease-in-out infinite`,
-                  transition: 'background 1.6s cubic-bezier(0.22, 1, 0.36, 1)',
-                }} />
-                <div style={{
-                  position: 'absolute', left: '8%', top: '18%',
-                  width: 'min(52vw, 560px)', height: 'min(42vh, 380px)',
-                  borderRadius: '50%',
-                  background: `radial-gradient(ellipse at 42% 50%, ${sA}24, ${sA}08 45%, transparent 72%)`,
-                  pointerEvents: 'none', zIndex: 0,
-                  opacity: 0.85 + spatial.engagement * 0.15,
-                  transition: 'opacity 1s ease, background 1.6s ease',
-                }} />
-              </>
-            )}
-            {/* Center-right void anchor */}
-            {resumeWorkspace && !search && (
-              <div style={{
-                position: 'absolute', right: '-4%', top: '6%',
-                width: 'min(48vw, 540px)', height: 'min(50vh, 440px)',
-                pointerEvents: 'none', zIndex: 0,
-                background: `
-                  radial-gradient(ellipse 65% 58% at 55% 45%, rgba(99,102,241,0.11), transparent 70%),
-                  radial-gradient(ellipse 45% 40% at 35% 60%, ${sA}0a, transparent 68%)
-                `,
-                opacity: 0.7 + spatial.engagement * 0.2,
-              }} />
-            )}
 
             {/* TOP BAR */}
             <div
               className="library-top-bar"
               style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 42, position: 'relative', zIndex: 2,
+              marginBottom: 28, position: 'relative', zIndex: 2,
               animation: 'libFadeIn 0.5s 0.05s ease both',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -510,131 +469,44 @@ function WorkspaceLibraryView() {
               </div>
             </div>
 
-            {/* FEATURED WORKSPACE PORTAL */}
-            {resumeWorkspace && !search && (
-              <div
-                data-guide-home="hero-portal"
-                onMouseEnter={() => spatial.setFocusRegion('hero')}
-                onMouseLeave={() => spatial.setFocusRegion(null)}
-                style={{
-                position: 'relative', zIndex: 2, animation: 'libFadeUp 0.52s 0.10s ease both',
-                transform: spatial.reducedMotion
-                  ? undefined
-                  : `translate3d(${heroParallax.x * 0.2}px, ${heroParallax.y * 0.14}px, 0)`,
-                transition: spatial.reducedMotion ? undefined : spatialEase,
-              }}>
-                <div style={{
-                  position: 'absolute', left: '-4%', top: '-8%', right: '12%', bottom: '-12%',
-                  pointerEvents: 'none', zIndex: 0,
-                  background: `radial-gradient(ellipse 70% 55% at 36% 52%, ${sA}18, transparent 68%)`,
-                  opacity: 0.9,
-                }} />
-                <div className="library-hero-portal" style={{ display: 'flex', alignItems: 'flex-end', gap: 32, position: 'relative', zIndex: 1 }}>
-
-                  {/* Orbit system */}
-                  <div style={{ position: 'relative', flexShrink: 0, marginBottom: 6 }}>
-                    <div style={{
-                      position: 'absolute', inset: -28,
-                      borderRadius: '50%',
-                      border: `1px solid ${sA}0c`,
-                      animation: spatial.reducedMotion ? 'none' : `libOrbit ${spatial.idle ? 48 : 36}s linear infinite`,
-                      transition: 'border-color 1.6s ease',
-                    }} />
-                    <div style={{
-                      position: 'absolute', inset: -16,
-                      borderRadius: '50%',
-                      border: `1px solid ${sA}06`,
-                      animation: spatial.reducedMotion ? 'none' : `libOrbitRev ${spatial.idle ? 64 : 52}s linear infinite`,
-                      transition: 'border-color 1.6s ease',
-                    }} />
-                    {/* Avatar */}
-                    <div style={{
-                      width: 80, height: 80, borderRadius: 24,
-                      background: `radial-gradient(circle at 32% 24%, rgba(255,255,255,0.24), transparent 38%),
-                                   linear-gradient(135deg, ${sA}54, ${sA}1c)`,
-                      border: `1px solid ${sA}48`,
-                      boxShadow: `0 0 0 1px ${sA}28, 0 20px 56px ${sA}32, inset 0 1px 0 rgba(255,255,255,0.16)`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      animation: spatial.reducedMotion ? 'none' : `libAvatarFloat ${spatial.idle ? 9 : 7}s ease-in-out infinite`,
-                      transition: 'background 1.2s ease, border-color 1.2s ease, box-shadow 1.2s ease',
-                    }}>
-                      {sCustom?.icon
-                        ? <span style={{ fontSize: 28, lineHeight: 1 }} role="img" aria-hidden>{sCustom.icon}</span>
-                        : <span style={{ fontSize: 18, fontWeight: 900, color: sA, transition: 'color 1.2s ease' }}>{initials(resumeWorkspace.title)}</span>
-                      }
-                    </div>
+            {/* RE-ENTRY TRACE — a mark left by the last session, not a component */}
+            {continueWorkspace && !search && (() => {
+              const ts = openedAt(continueWorkspace.id);
+              return (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/section/${continueWorkspace.id}`)}
+                  aria-label={`Return to ${continueWorkspace.title}`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 11,
+                    background: 'none', border: 'none', padding: '2px 0',
+                    cursor: 'pointer', textAlign: 'left',
+                    marginBottom: 32,
+                    transition: 'filter 0.2s ease',
+                    animation: 'libFadeIn 0.5s 0.12s ease both',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.22)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.filter = 'none'; }}
+                >
+                  {/* The thread — a vertical accent mark, not a border */}
+                  <div style={{
+                    width: 2, height: 28, borderRadius: 2, flexShrink: 0,
+                    background: `linear-gradient(180deg, ${sA}cc 0%, ${sA}44 60%, transparent 100%)`,
+                    transition: 'background 1.2s ease',
+                  }} />
+                  <div>
+                    <span style={{ fontSize: 12.5, fontWeight: 450, color: 'rgba(255,255,255,0.46)', letterSpacing: '-0.01em' }}>
+                      ↩ {continueWorkspace.title}
+                    </span>
+                    {ts && (
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginLeft: 8 }}>
+                        · {relativeTime(ts)}
+                      </span>
+                    )}
                   </div>
-
-                  {/* Title + context + CTA */}
-                  <div style={{ paddingBottom: 4, maxWidth: 580 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-                      <span style={{
-                        width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-                        background: sA, animation: 'libPulse 3s ease-in-out infinite',
-                        boxShadow: `0 0 8px ${sA}cc`,
-                        transition: 'background 1.2s ease, box-shadow 1.2s ease',
-                      }} />
-                      <span style={{ fontSize: 9, fontWeight: 920, letterSpacing: '0.28em', textTransform: 'uppercase', color: sA, transition: 'color 1.2s ease' }}>
-                        continue studying
-                      </span>
-                    </div>
-
-                    <h2
-                      className="library-hero-title"
-                      style={{
-                      fontWeight: 920,
-                      letterSpacing: '-0.074em',
-                      color: tokens.textPrimary,
-                      margin: '0 0 20px',
-                      textShadow: `0 0 48px ${sA}30, 0 2px 24px rgba(0,0,0,0.45)`,
-                      transition: 'text-shadow 1.6s ease',
-                    }}>
-                      {resumeWorkspace.title}
-                    </h2>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)' }}>
-                        {workspaceKind(resumeWorkspace)}
-                      </span>
-                      <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} />
-                      <span style={{ fontSize: 10, fontWeight: 700, color: sA, transition: 'color 1.2s ease' }}>
-                        {Math.round(sProgress)}% complete
-                      </span>
-                      {sTotal > 0 && <>
-                        <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} />
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.40)' }}>
-                          {sTotal - sCompleted} task{sTotal - sCompleted !== 1 ? 's' : ''} remaining
-                        </span>
-                      </>}
-                      {sNearest && <>
-                        <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} />
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#fb7185' }}>Due {sNearest.due_date}</span>
-                      </>}
-                    </div>
-
-                    <a
-                      href={stagePath}
-                      onClick={() => baselineOpenLog(resumeWorkspace.id, stagePath, 'stage-enter')}
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 9,
-                        height: 48, padding: '0 24px', borderRadius: 15,
-                        background: sA, color: '#020508',
-                        fontSize: 14, fontWeight: 860, letterSpacing: '-0.01em',
-                        textDecoration: 'none',
-                        boxShadow: `0 8px 32px ${sA}4c, inset 0 1px 0 rgba(255,255,255,0.22)`,
-                        transition: 'transform 150ms ease, filter 150ms ease, background 1.2s ease, box-shadow 1.2s ease',
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.filter = 'brightness(1.09)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.filter = 'none'; }}
-                    >
-                      Enter workspace
-                      <ArrowRight style={{ width: 17, height: 17 }} strokeWidth={2.5} />
-                    </a>
-                  </div>
-                </div>
-
-              </div>
-            )}
+                </button>
+              );
+            })()}
 
             {/* EMPTY STATE HERO */}
             {!hasWorkspaces && libraryReady && !error && (
@@ -706,20 +578,6 @@ function WorkspaceLibraryView() {
               </div>
             )}
 
-            {/* Horizon separator */}
-            {hasWorkspaces && (
-              <div style={{
-                position: 'relative', zIndex: 2,
-                marginTop: 'auto', paddingTop: 36, paddingBottom: 1,
-              }}>
-                <div style={{
-                  height: 1,
-                  background: `linear-gradient(90deg, transparent, ${sA}38 16%, rgba(255,255,255,0.08) 50%, ${sA}28 84%, transparent)`,
-                  boxShadow: `0 0 32px ${sA}18`,
-                  transition: 'background 1.6s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 1.6s ease',
-                }} />
-              </div>
-            )}
           </div>
 
           {hasWorkspaces && (

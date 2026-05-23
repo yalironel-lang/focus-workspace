@@ -1,5 +1,5 @@
 import { motion, useMotionTemplate, useMotionValue, useSpring, useTransform } from 'framer-motion';
-import { Calendar, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { getWorkspaceCustomization } from '../../../hooks/useWorkspaceCustomization';
 import type { mergeAccent } from '../../../hooks/useWorkspaceTheme';
@@ -25,6 +25,19 @@ function baselineOpenLog(sectionId: string, target: string, label: string) {
   void label;
 }
 
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const mins  = Math.floor(ms / 60_000);
+  const hours = Math.floor(ms / 3_600_000);
+  const days  = Math.floor(ms / 86_400_000);
+  if (mins  < 2)  return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  === 1) return 'yesterday';
+  return `${days}d ago`;
+}
+
 interface SceneCapProps {
   accent: string;
   custom: ReturnType<typeof getWorkspaceCustomization>;
@@ -34,10 +47,15 @@ interface SceneCapProps {
   hovered: boolean;
   wide?: boolean;
   liftY: number;
+  presence: 'present' | 'warm' | 'fading';
 }
 
-function SceneCap({ accent, custom, section, total, completed, hovered, wide, liftY }: SceneCapProps) {
+function SceneCap({ accent, custom, section, total, completed, hovered, wide, liftY, presence }: SceneCapProps) {
   const h = wide ? 88 : 70;
+  const glowOuter = presence === 'present' ? '2e' : presence === 'warm' ? '1e' : '0e';
+  const glowInner = presence === 'present' ? '10' : presence === 'warm' ? '0a' : '06';
+  const dotAlpha  = presence === 'present' ? '45' : presence === 'warm' ? '30' : '1e';
+  const dotGlow   = presence === 'present' ? '88' : presence === 'warm' ? '55' : '33';
   const taskDots = useMemo(() => {
     const count = Math.min(10, total);
     return Array.from({ length: count }, (_, i) => ({
@@ -55,8 +73,8 @@ function SceneCap({ accent, custom, section, total, completed, hovered, wide, li
         overflow: 'hidden',
         flexShrink: 0,
         background: `
-        radial-gradient(ellipse 110% 160% at 50% -20%, ${accent}2e, transparent 60%),
-        linear-gradient(180deg, ${accent}10 0%, transparent 100%)
+        radial-gradient(ellipse 110% 160% at 50% -20%, ${accent}${glowOuter}, transparent 60%),
+        linear-gradient(180deg, ${accent}${glowInner} 0%, transparent 100%)
       `,
         transform: `translateY(${liftY}px)`,
         transition: 'transform 220ms cubic-bezier(0.22,1,0.36,1)',
@@ -96,8 +114,8 @@ function SceneCap({ accent, custom, section, total, completed, hovered, wide, li
             width: dot.done ? 5 : 3,
             height: dot.done ? 5 : 3,
             borderRadius: '50%',
-            background: dot.done ? accent : `${accent}45`,
-            boxShadow: dot.done ? `0 0 6px ${accent}88` : 'none',
+            background: dot.done ? accent : `${accent}${dotAlpha}`,
+            boxShadow: dot.done ? `0 0 6px ${accent}${dotGlow}` : 'none',
             transform: `translateY(${hovered ? -2 : 0}px)`,
             transition: `transform ${180 + i * 12}ms cubic-bezier(0.22, 1, 0.36, 1)`,
           }}
@@ -145,6 +163,7 @@ export interface SpatialLibraryCardProps {
   onFolderChange: (sectionId: string, folderId: string | null) => void;
   onDelete: (section: SectionWithProgress) => void;
   wide?: boolean;
+  openedAt?: string;
 }
 
 export function SpatialLibraryCard({
@@ -156,6 +175,7 @@ export function SpatialLibraryCard({
   onFolderChange,
   onDelete,
   wide,
+  openedAt,
 }: SpatialLibraryCardProps) {
   const reducedMotion = usePrefersReducedMotion();
   const { setFocusRegion } = useLibrarySpatial();
@@ -166,7 +186,6 @@ export function SpatialLibraryCard({
   const custom = getWorkspaceCustomization(section.id);
   const accent = custom.accent || accentForTitle(section.title);
   const kind = workspaceKind(section);
-  const progress = section.progress ?? 0;
   const total = section.total_items ?? 0;
   const completed = section.completed_items ?? 0;
   const nearest = deadlines
@@ -177,6 +196,15 @@ export function SpatialLibraryCard({
     : null;
   const urgentDl = daysUntil !== null && daysUntil <= 3;
   const sectionPath = `/section/${section.id}`;
+
+  // ── Spatial presence — warm/fading based on recency ─────────────────────────
+  const presence: 'present' | 'warm' | 'fading' = useMemo(() => {
+    if (!openedAt) return 'fading';
+    const ms = Date.now() - new Date(openedAt).getTime();
+    if (ms < 24 * 3_600_000) return 'present';
+    if (ms < 7  * 86_400_000) return 'warm';
+    return 'fading';
+  }, [openedAt]);
 
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
@@ -224,7 +252,10 @@ export function SpatialLibraryCard({
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 20,
-        border: `1px solid ${hovered ? `${accent}40` : `${accent}14`}`,
+        border: `1px solid ${hovered
+          ? `${accent}${presence === 'present' ? '44' : presence === 'warm' ? '34' : '22'}`
+          : `${accent}${presence === 'present' ? '1c' : presence === 'warm' ? '14' : '0a'}`}`,
+        opacity: presence === 'fading' ? 0.78 : presence === 'warm' ? 0.92 : 1,
         background: `linear-gradient(152deg, rgba(14,20,34,0.94) 0%, rgba(5,7,14,0.97) 100%)`,
         backdropFilter: 'blur(18px) saturate(1.35)',
         WebkitBackdropFilter: 'blur(18px) saturate(1.35)',
@@ -299,6 +330,7 @@ export function SpatialLibraryCard({
         hovered={hovered}
         wide={wide}
         liftY={0}
+        presence={presence}
       />
 
       <div
@@ -347,7 +379,7 @@ export function SpatialLibraryCard({
                 margin: '3px 0 0',
               }}
             >
-              {kind} · {Math.round(progress)}%
+              {kind}{openedAt ? ` · ${relativeTime(openedAt)}` : ''}
             </p>
           </div>
           <button
@@ -380,66 +412,26 @@ export function SpatialLibraryCard({
           </button>
         </motion.div>
 
-        <div style={{ marginBottom: 10 }}>
-          <div
-            style={{
-              height: 3,
-              borderRadius: 999,
-              background: 'rgba(255,255,255,0.052)',
-              overflow: 'hidden',
-            }}
-          >
-            <motion.div
-              style={{
-                height: '100%',
-                borderRadius: 999,
-                background: `linear-gradient(90deg, ${accent}, ${accent}cc)`,
-                boxShadow: `0 0 10px ${accent}55`,
-              }}
-              initial={false}
-              animate={{ width: total > 0 ? `${progress}%` : '0%' }}
-              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            />
-          </div>
-        </div>
-
         <motion.div style={{ flex: 1, marginBottom: 12, minHeight: 18 }} animate={{ opacity: hovered ? 1 : 0.88 }}>
           {nearest ? (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 9.5,
-                fontWeight: 700,
-                padding: '3px 8px',
-                borderRadius: 6,
-                background: urgentDl ? 'rgba(251,113,133,0.11)' : 'rgba(255,255,255,0.042)',
-                color: urgentDl ? '#fb7185' : 'rgba(255,255,255,0.34)',
-                border: `1px solid ${urgentDl ? 'rgba(251,113,133,0.22)' : 'rgba(255,255,255,0.062)'}`,
-              }}
-            >
-              <Calendar style={{ width: 8, height: 8 }} strokeWidth={2} />
-              {nearest.due_date}
+            <span style={{ fontSize: 10, color: urgentDl ? '#fb7185' : 'rgba(255,255,255,0.28)', letterSpacing: '0.01em' }}>
+              due {nearest.due_date}
             </span>
           ) : section.next_item_title ? (
             <span
               style={{
                 fontSize: 10.5,
-                color: 'rgba(255,255,255,0.28)',
+                fontStyle: 'italic',
+                color: presence === 'fading' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.24)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 display: 'block',
               }}
             >
-              → {section.next_item_title}
+              {section.next_item_title}
             </span>
-          ) : (
-            <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.12)' }}>
-              {total === 0 ? 'Ready for tasks' : 'No upcoming deadlines'}
-            </span>
-          )}
+          ) : null}
         </motion.div>
 
         <motion.a
