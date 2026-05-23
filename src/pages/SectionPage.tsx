@@ -2913,10 +2913,7 @@ export function SectionPage() {
               <MissionControlView
                 objects={sectionObjects.objects}
                 accent={accentColor}
-                onOpenObject={(id) => {
-                  setSectionViewMode('free-space');
-                  setSpaceSelectedId(id);
-                }}
+                onOpenObject={focusNotebookOnCanvas}
               />
 
               {/* ── MISSION CONTROL HEADER ─────────────────────────────── */}
