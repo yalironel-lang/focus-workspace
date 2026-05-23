@@ -61,7 +61,6 @@ export function FloatingWorkspaceShell({
   onSelectBoard,
   onCreateBoard,
 }: Props) {
-  const [libHover, setLibHover] = useState(false);
   const [searchHover, setSearchHover] = useState(false);
   const [sceneHover, setSceneHover] = useState(false);
   const [settingsHover, setSettingsHover] = useState(false);
@@ -97,14 +96,12 @@ export function FloatingWorkspaceShell({
         }}
       >
         {/* Primary — orientation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px', pointerEvents: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px' }}>
           <button
             type="button"
             onClick={onBack}
             aria-label={`Back to ${backLabel}`}
-            style={glassIsland(tokens, 'primary', libHover ? 'hover' : 'idle')}
-            onMouseEnter={() => setLibHover(true)}
-            onMouseLeave={() => setLibHover(false)}
+            style={{ ...glassIsland(tokens, 'primary', 'idle'), pointerEvents: 'auto' }}
           >
             <ArrowLeft size={16} strokeWidth={2.25} style={{ color: tokens.textPrimary, flexShrink: 0 }} />
             <span style={{ fontSize: 13, fontWeight: 650, color: tokens.textPrimary, letterSpacing: '-0.02em' }}>

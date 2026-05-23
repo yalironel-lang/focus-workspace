@@ -39,7 +39,6 @@ import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
 import { surfaceShellStyle } from '../lib/surfaceShellStyle';
 import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
-import { navDebugLog, navDebugRouteCheck } from '../lib/navigationDebug';
 import {
   LIBRARY_ROUTE,
   UNIVERSE_ROUTE,
@@ -708,7 +707,6 @@ export function SectionPage() {
     registerWorkspaceStarter,
     paletteOpen,
     sessionModalOpen,
-    dismissTransientUi,
     openPalette,
   } = useCommandPalette();
   const { focusMode, setFocusMode } = useFocusMode(sectionId);
@@ -1571,53 +1569,9 @@ export function SectionPage() {
     setConnectHoverId(null);
   }, []);
 
-  const dismissSectionTransientUi = useCallback(() => {
-    pendingCompanionComposerRef.current = false;
-    aiRunRef.current?.abort();
-    aiRunRef.current = null;
-    setShowSpaceAdd(false);
-    setCompanionComposerOpen(false);
-    setQuickCaptureOpen(false);
-    setQuickCaptureVariant('note');
-    setMistakeReviewOpen(false);
-    setMistakeReviewQueue([]);
-    setMistakeReviewIndex(0);
-    setResumeVisible(false);
-    setAppearanceOpen(false);
-    setDesignMode(false);
-    setShowCustomize(false);
-    setAiAssistResult(null);
-    setStarterHints(null);
-    setSpaceEditingId(null);
-    setConnectHoverId(null);
-    setFocusMode(null);
-    cancelConnectMode();
-    navDebugLog('workspace-transient-ui-dismissed');
-  }, [cancelConnectMode, setFocusMode]);
-
   const handleWorkspaceBack = useCallback(() => {
-    const pathBefore = window.location.pathname;
-    const returnTo = navState?.returnTo ?? 'library';
-    navDebugLog('workspace-back-click', { sectionId, pathBefore, returnTo });
-    pulsePerformancePressure('route');
-    const destination = returnTo === 'universe' ? UNIVERSE_ROUTE : LIBRARY_ROUTE;
-    navigate(destination, { replace: false });
-    queueMicrotask(() => {
-      try {
-        dismissSectionTransientUi();
-      } catch {
-        /* navigation must not depend on cleanup */
-      }
-      try {
-        dismissTransientUi();
-      } catch {
-        /* navigation must not depend on cleanup */
-      }
-    });
-    if (import.meta.env.DEV) {
-      queueMicrotask(() => navDebugRouteCheck(pathBefore, window.location.pathname));
-    }
-  }, [dismissSectionTransientUi, dismissTransientUi, navigate, navState?.returnTo, sectionId]);
+    navigate(navState?.returnTo === 'universe' ? UNIVERSE_ROUTE : LIBRARY_ROUTE);
+  }, [navigate, navState?.returnTo]);
 
   const completeFreeSpaceConnect = useCallback(
     (from: string, to: string) => {
