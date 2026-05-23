@@ -14,7 +14,7 @@ import {
   type FadingItem,
 } from '../../lib/deriveMissionControlSections';
 
-// ── Colour tokens (matches existing Mission Control palette) ──────────────────
+// ── Colour tokens ─────────────────────────────────────────────────────────────
 const C = {
   textPrimary:   '#e2e8f0',
   textTertiary:  '#cbd5e1',
@@ -22,12 +22,14 @@ const C = {
   textHint:      '#374151',
   textGhost:     '#263043',
   textNearBlack: '#1e2a38',
-  border:        'rgba(255,255,255,0.022)',
-  borderFaint:   'rgba(255,255,255,0.015)',
-  hoverBg:       'rgba(255,255,255,0.018)',
-  hoverBgFaint:  'rgba(255,255,255,0.012)',
+  border:        'rgba(255,255,255,0.04)',
+  borderFaint:   'rgba(255,255,255,0.028)',
+  panelBg:       'rgba(255,255,255,0.014)',
+  panelBgFaint:  'rgba(255,255,255,0.009)',
+  hoverBg:       'rgba(255,255,255,0.024)',
+  hoverBgFaint:  'rgba(255,255,255,0.016)',
   label:         'rgba(255,255,255,0.2)',
-  divider:       'rgba(255,255,255,0.055)',
+  rowDivider:    'rgba(255,255,255,0.032)',
 } as const;
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ interface Props {
 function SectionLabel({ children }: { children: string }) {
   return (
     <p style={{
-      margin: '0 0 10px',
+      margin: '0 0 12px',
       fontSize: 9,
       fontWeight: 750,
       letterSpacing: '0.14em',
@@ -58,20 +60,29 @@ function SectionLabel({ children }: { children: string }) {
 
 function NextSection({ item, accent, onOpen }: { item: NextItem; accent: string; onOpen: () => void }) {
   return (
-    <div style={{ marginBottom: 28 }}>
+    <div style={{ marginBottom: 36 }}>
       <SectionLabel>Next</SectionLabel>
-      <div style={{ borderTop: `1px solid ${C.divider}`, borderBottom: `1px solid ${C.divider}` }}>
+      {/* Card — accent left bar + background wash */}
+      <div style={{
+        borderRadius: 10,
+        borderTop:    '1px solid rgba(255,255,255,0.06)',
+        borderRight:  '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderLeft:   `2px solid ${accent}88`,
+        background:   'rgba(255,255,255,0.022)',
+        overflow:     'hidden',
+      }}>
         <button
           type="button"
           onClick={onOpen}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: 14,
-            padding: '14px 0', background: 'none', border: 'none',
+            padding: '14px 16px', background: 'none', border: 'none',
             cursor: 'pointer', textAlign: 'left',
-            transition: 'opacity 0.15s ease',
+            transition: 'background-color 0.15s ease',
           }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.76'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = C.hoverBg; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; }}
         >
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{
@@ -91,10 +102,7 @@ function NextSection({ item, accent, onOpen }: { item: NextItem; accent: string;
               {item.label}
             </p>
             {item.sublabel && (
-              <p style={{
-                margin: '3px 0 0',
-                fontSize: 11, color: C.textHint, lineHeight: 1.3,
-              }}>
+              <p style={{ margin: '3px 0 0', fontSize: 11, color: C.textHint, lineHeight: 1.3 }}>
                 {item.sublabel}
               </p>
             )}
@@ -113,8 +121,8 @@ function ActiveRow({ item, onOpen }: { item: ActiveItem; onOpen: () => void }) {
       onClick={onOpen}
       style={{
         width: '100%', display: 'flex', alignItems: 'flex-start', gap: 12,
-        padding: '10px 0', background: 'none', border: 'none',
-        borderBottom: `1px solid ${C.border}`,
+        padding: '10px 14px', background: 'none', border: 'none',
+        borderBottom: `1px solid ${C.rowDivider}`,
         cursor: 'pointer', textAlign: 'left',
         transition: 'background-color 0.12s ease',
       }}
@@ -136,10 +144,7 @@ function ActiveRow({ item, onOpen }: { item: ActiveItem; onOpen: () => void }) {
           </p>
         )}
       </div>
-      <span style={{
-        flexShrink: 0, fontSize: 11, color: C.textGhost,
-        paddingTop: 2, whiteSpace: 'nowrap',
-      }}>
+      <span style={{ flexShrink: 0, fontSize: 11, color: C.textGhost, paddingTop: 2, whiteSpace: 'nowrap' }}>
         {item.recency}
       </span>
       <ChevronRight style={{ width: 12, height: 12, color: C.textNearBlack, flexShrink: 0, marginTop: 3 }} />
@@ -154,7 +159,7 @@ function FadingRow({ item, onOpen }: { item: FadingItem; onOpen: () => void }) {
       onClick={onOpen}
       style={{
         width: '100%', display: 'flex', alignItems: 'flex-start', gap: 12,
-        padding: '11px 0', background: 'none', border: 'none',
+        padding: '10px 14px', background: 'none', border: 'none',
         borderBottom: `1px solid ${C.borderFaint}`,
         cursor: 'pointer', textAlign: 'left',
         transition: 'background-color 0.12s ease',
@@ -165,26 +170,20 @@ function FadingRow({ item, onOpen }: { item: FadingItem; onOpen: () => void }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
           margin: 0,
-          fontSize: 13, color: C.textMuted,
+          fontSize: 12, color: C.textMuted,
           lineHeight: 1.4,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {item.concept}
         </p>
         {item.signal && (
-          <p style={{
-            margin: '2px 0 0',
-            fontSize: 11, color: C.textHint, fontStyle: 'italic', lineHeight: 1.3,
-          }}>
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: C.textHint, lineHeight: 1.3 }}>
             {item.signal}
           </p>
         )}
       </div>
       {item.recencyHint && (
-        <span style={{
-          flexShrink: 0, fontSize: 11, color: C.textNearBlack,
-          paddingTop: 2, whiteSpace: 'nowrap',
-        }}>
+        <span style={{ flexShrink: 0, fontSize: 11, color: C.textNearBlack, paddingTop: 2, whiteSpace: 'nowrap' }}>
           {item.recencyHint}
         </span>
       )}
@@ -227,7 +226,13 @@ export function MissionControlView({ objects, accent, onOpenObject }: Props) {
       {active.length > 0 && (
         <div style={{ marginBottom: 28 }}>
           <SectionLabel>Active</SectionLabel>
-          <div>
+          {/* Grouped panel — rows live inside a contained surface */}
+          <div style={{
+            borderRadius: 8,
+            border: `1px solid ${C.border}`,
+            background: C.panelBg,
+            overflow: 'hidden',
+          }}>
             {active.map(item => (
               <ActiveRow
                 key={item.object.id}
@@ -242,7 +247,13 @@ export function MissionControlView({ objects, accent, onOpenObject }: Props) {
       {fading.length > 0 && (
         <div style={{ marginBottom: 28 }}>
           <SectionLabel>Fading</SectionLabel>
-          <div>
+          {/* Grouped panel — more subdued than Active */}
+          <div style={{
+            borderRadius: 8,
+            border: `1px solid ${C.borderFaint}`,
+            background: C.panelBgFaint,
+            overflow: 'hidden',
+          }}>
             {fading.map(item => (
               <FadingRow
                 key={item.object.id}
