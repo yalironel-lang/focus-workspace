@@ -2481,6 +2481,7 @@ export function SectionPage() {
         color: '#f8fafc',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
         backgroundColor: tokens.pageBg,
         backgroundImage: `
           radial-gradient(circle at 24% 16%, ${tokens.ambientGlow1} 0%, transparent 34%),

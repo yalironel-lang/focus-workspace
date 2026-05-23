@@ -95,8 +95,9 @@ export function FloatingWorkspaceShell({
           pointerEvents: 'none',
         }}
       >
-        {/* Primary — orientation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px' }}>
+        {/* Primary — orientation. pointerEvents: auto here so the cluster is
+            interactive without relying on a child overriding two ancestor 'none' levels. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px', pointerEvents: 'auto' }}>
           <button
             type="button"
             onClick={onBack}

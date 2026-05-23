@@ -717,7 +717,7 @@ function WorkspaceLibraryView() {
           <div
             className="library-page-pad"
             style={{
-            flex: 1, overflowY: 'auto', paddingTop: 18, paddingBottom: 80, position: 'relative',
+            flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 18, paddingBottom: 80, position: 'relative',
             maskImage: 'linear-gradient(180deg, black 0%, black 90%, transparent 100%)',
           }}>
             {hasWorkspaces && (
