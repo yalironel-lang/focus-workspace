@@ -757,6 +757,13 @@ export function SectionPage() {
   const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
   const firstArrivalHandledRef = useRef(false);
   const studyOsDemoHandledRef = useRef(false);
+  // Refs for reading navState / location inside effects without making them deps.
+  // Both update every render so the effect body always sees the freshest values
+  // without re-triggering the effect on every router state flush.
+  const navStateRef = useRef(navState);
+  navStateRef.current = navState;
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
   const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
@@ -1983,14 +1990,18 @@ export function SectionPage() {
     ],
   );
 
+  // centerView is a stable useCallback with [] deps inside useSectionCanvasMode.
+  // Destructuring it here prevents frameArrivalScene from changing on every
+  // render just because sectionCanvas (a plain object) gets a new reference.
+  const { centerView: sectionCenterView } = sectionCanvas;
   const frameArrivalScene = useCallback(() => {
     const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const vh =
       typeof window !== 'undefined'
         ? Math.max(480, window.innerHeight - WORKSPACE_SHELL_TOP_INSET)
         : 720;
-    sectionCanvas.centerView(EXPLORE_FOCUS_SCENE_CENTER.x, EXPLORE_FOCUS_SCENE_CENTER.y, vw, vh);
-  }, [sectionCanvas]);
+    sectionCenterView(EXPLORE_FOCUS_SCENE_CENTER.x, EXPLORE_FOCUS_SCENE_CENTER.y, vw, vh);
+  }, [sectionCenterView]);
 
   useEffect(() => {
     firstArrivalHandledRef.current = false;
@@ -2000,7 +2011,9 @@ export function SectionPage() {
   }, [sectionId]);
 
   useEffect(() => {
-    if (!navState?.firstArrival || !section || !sectionId || firstArrivalHandledRef.current) return;
+    // Read via refs so the navigate call below doesn't trigger a re-run.
+    const ns = navStateRef.current;
+    if (!ns?.firstArrival || !section || !sectionId || firstArrivalHandledRef.current) return;
     if (loading) return;
     firstArrivalHandledRef.current = true;
 
@@ -2016,9 +2029,9 @@ export function SectionPage() {
 
     markFirstWorkspaceEntryDone();
     unlockAdvancedLibraryNav();
-    navigate(location.pathname, {
+    navigate(locationRef.current.pathname, {
       replace: true,
-      state: { ...navState, firstArrival: false },
+      state: { ...ns, firstArrival: false },
     });
 
     const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
@@ -2027,17 +2040,22 @@ export function SectionPage() {
     applyExploreFocus,
     frameArrivalScene,
     loading,
-    location.pathname,
+    // navState?.firstArrival — primitive trigger only; full navState object
+    // is read via navStateRef so navigate() doesn't cause re-runs.
+    // location.pathname — read via locationRef; excluded so navigating *away*
+    // doesn't fire this effect a final time.
+    navState?.firstArrival,
     navigate,
-    navState,
     section,
     sectionId,
     sectionObjects.objects.length,
   ]);
 
   useEffect(() => {
+    // Read via refs so the navigate call below doesn't trigger a re-run.
+    const ns = navStateRef.current;
     if (
-      (!navState?.exploreFocus && !navState?.studyOsDemo) ||
+      (!ns?.exploreFocus && !ns?.studyOsDemo) ||
       !sectionId ||
       loading ||
       studyOsDemoHandledRef.current
@@ -2052,17 +2070,20 @@ export function SectionPage() {
     void applyExploreFocus({ silent: true, skipToast: true }).then(() => {
       requestAnimationFrame(() => frameArrivalScene());
     });
-    navigate(location.pathname, {
+    navigate(locationRef.current.pathname, {
       replace: true,
-      state: { ...navState, exploreFocus: false, studyOsDemo: false },
+      state: { ...ns, exploreFocus: false, studyOsDemo: false },
     });
   }, [
     applyExploreFocus,
     frameArrivalScene,
     loading,
-    location.pathname,
+    // Primitive triggers only; full navState object read via navStateRef.
+    // location.pathname excluded — read via locationRef so navigating away
+    // doesn't fire a final spurious run of this effect.
+    navState?.exploreFocus,
+    navState?.studyOsDemo,
     navigate,
-    navState,
     sectionId,
     sectionObjects.objects.length,
   ]);
