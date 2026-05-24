@@ -696,6 +696,8 @@ export function SectionPage() {
   const prefersReducedMotion = usePrefersReducedMotion();
   const sectionBoards = useSectionFreeSpaceBoards(sectionId);
   const sectionCanvas = useSectionCanvasMode(sectionId, sectionBoards.activeBoardId);
+  const sectionCanvasRef = useRef(sectionCanvas);
+  sectionCanvasRef.current = sectionCanvas;
   const sectionPositions = useSectionBlockPositions(sectionId, sectionBoards.activeBoardId);
   const sectionObjects = useSectionFreeSpaceObjects(sectionId, sectionBoards.activeBoardId);
   const sectionObjectsRef = useRef(sectionObjects);
@@ -1052,36 +1054,37 @@ export function SectionPage() {
           clearConnectionsForObject,
           removeObject: removeSpaceObject } = sectionObjects;
   const { initPos, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
+  const spacePositionsRef = useRef(spacePositions);
+  spacePositionsRef.current = spacePositions;
 
   const focusNotebookOnCanvas = useCallback(
     (objectId: string) => {
       setSectionViewMode('free-space');
       seedMissingPositions([objectId]);
-      let pos = spacePositions[objectId];
+      const positions = spacePositionsRef.current;
+      const canvas = sectionCanvasRef.current;
+      let pos = positions[objectId];
       if (!pos) {
         initPos(objectId, { x: 120, y: 120, w: 520, h: 460 });
-        pos = spacePositions[objectId] ?? { x: 120, y: 120, w: 520, h: 460 };
+        pos = positions[objectId] ?? { x: 120, y: 120, w: 520, h: 460 };
       }
       const vpW = window.innerWidth;
       const vpH = Math.max(360, window.innerHeight - 112);
-      const view = panViewportToBlock(pos, vpW, vpH, sectionCanvas.zoom);
-      sectionCanvas.setViewport(view.zoom, view.panX, view.panY);
+      const view = panViewportToBlock(pos, vpW, vpH, canvas.zoom);
+      canvas.setViewport(view.zoom, view.panX, view.panY);
       setSpaceSelectedId(objectId);
       setNotebookSearchPulseId(objectId);
     },
-    [
-      setSectionViewMode,
-      seedMissingPositions,
-      spacePositions,
-      initPos,
-      sectionCanvas,
-    ],
+    [setSectionViewMode, seedMissingPositions, initPos],
   );
 
   const applyStudyLinksForObject = useCallback(
     (newObjectId: string, type: ProjectObjectType) => {
       const anchorId = spaceSelectedIdRef.current;
-      const { connectTo, sourceObjectId } = pickStudyLinkTargets(anchorId, sectionObjects.objects);
+      const { connectTo, sourceObjectId } = pickStudyLinkTargets(
+        anchorId,
+        sectionObjectsRef.current.objects,
+      );
       for (const tid of connectTo) {
         if (tid !== newObjectId) addSpaceConnection(newObjectId, tid);
       }
@@ -1095,7 +1098,7 @@ export function SectionPage() {
         }
       }
     },
-    [sectionObjects.objects, addSpaceConnection, getSpaceObject, updateSpaceObjectContent],
+    [addSpaceConnection, getSpaceObject, updateSpaceObjectContent],
   );
 
   const handleAddToSpace = useCallback((type: ProjectObjectType) => {
@@ -1267,7 +1270,7 @@ export function SectionPage() {
         return;
       }
       const obj = addRecallItem(prompt);
-      const anchor = spacePositions[notebookId];
+      const anchor = spacePositionsRef.current[notebookId];
       const fallback = viewportCenterWorld(120, 32);
       const x = anchor ? anchor.x + Math.max(48, Math.min(anchor.w + 28, 420)) : fallback.x;
       const y = anchor ? anchor.y + 24 : fallback.y;
@@ -1276,7 +1279,7 @@ export function SectionPage() {
       setSpaceSelectedId(obj.id);
       toast.success('Recall item created');
     },
-    [addRecallItem, spacePositions, initPos, addSpaceConnection, viewportCenterWorld],
+    [addRecallItem, initPos, addSpaceConnection, viewportCenterWorld],
   );
 
   const handlePdfDroppedOnCanvas = useCallback(
@@ -1616,12 +1619,12 @@ export function SectionPage() {
       if (sectionViewMode !== 'free-space') {
         setSectionViewMode('free-space');
       }
-      const q = buildMistakeReviewQueueFiltered(sectionObjects.objects, mode);
+      const q = buildMistakeReviewQueueFiltered(sectionObjectsRef.current.objects, mode);
       setMistakeReviewQueue(q);
       setMistakeReviewIndex(0);
       setMistakeReviewOpen(true);
     },
-    [sectionViewMode, sectionObjects.objects],
+    [sectionViewMode],
   );
 
   const convertSelectedNoteToMistake = useCallback(() => {

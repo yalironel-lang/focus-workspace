@@ -920,7 +920,10 @@ function EditableLine({
         onInput={(ev) => {
           const raw = ev.currentTarget.textContent ?? '';
           onUpdate(id, raw);
-          requestAnimationFrame(() => onAfterInput?.(ev.currentTarget));
+          // Capture the element now — React nullifies ev.currentTarget after the
+          // handler returns (async/rAF closures over ev.currentTarget always get null).
+          const target = ev.currentTarget;
+          requestAnimationFrame(() => onAfterInput?.(target));
         }}
         onFocus={() => {
           onFocusIndex(id);
@@ -1457,6 +1460,9 @@ export function ProjectNotebookBlock({
 
   const onEditableAfterInput = useCallback(
     (blockId: string, el: HTMLDivElement) => {
+      // Guard: el can be null/stale when the element unmounted before the rAF fired
+      // (e.g. a block morph unmounts the old EditableLine between the input event and the rAF).
+      if (!el) return;
       syncSlashFromParagraph(blockId, el);
       ensureNotebookBodyCaretVisible(el);
     },
