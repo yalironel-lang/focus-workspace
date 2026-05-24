@@ -18,6 +18,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
+import { StepBlockRenderer } from '../notebook/StepBlockRenderer';
 import { MathInputToolbar } from '../notebook/MathInputToolbar';
 import { MathRichText } from '../notebook/MathRichText';
 import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
@@ -56,6 +57,7 @@ type NotebookLine =
   | { kind: 'ordered'; number: number; text: string }
   | { kind: 'task'; checked: boolean; text: string }
   | { kind: 'quote'; text: string }
+  | { kind: 'step'; text: string }
   | { kind: 'callout'; tone: CalloutTone; text: string }
   | { kind: 'math'; text: string }
   | { kind: 'image-ref'; key: string; alt: string }
@@ -122,6 +124,9 @@ function parseNotebookLine(raw: string): NotebookLine {
   const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
   if (imgMatch) return { kind: 'image-ref', key: imgMatch[1]!, alt: imgMatch[2] ?? '' };
 
+  const stepMatch = trimmed.match(/^=>\s*(.*)$/);
+  if (stepMatch) return { kind: 'step', text: (stepMatch[1] ?? '').trimEnd() };
+
   /** Pilcrow prefixes — editorial tone scale (not shown in contenteditable; storage + paste only). */
   if (trimmed.startsWith('\u00b6\u00b6')) {
     const rest = trimmed.slice(2).trimStart();
@@ -142,6 +147,7 @@ type Block =
   | { id: string; kind: 'ordered'; number: number; text: string }
   | { id: string; kind: 'task'; text: string; checked: boolean }
   | { id: string; kind: 'quote'; text: string }
+  | { id: string; kind: 'step'; text: string }
   | { id: string; kind: 'callout'; tone: CalloutTone; text: string }
   | { id: string; kind: 'math'; text: string }
   | { id: string; kind: 'image-ref'; key: string; alt: string }
@@ -257,6 +263,8 @@ function lineToBlock(line: string): Block {
       return { id, kind: 'task', text: parsed.text, checked: parsed.checked };
     case 'quote':
       return { id, kind: 'quote', text: parsed.text };
+    case 'step':
+      return { id, kind: 'step', text: parsed.text };
     case 'callout':
       return { id, kind: 'callout', tone: parsed.tone, text: parsed.text };
     case 'math':
@@ -336,6 +344,8 @@ function blockToLine(b: Block): string {
       return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
     case 'quote':
       return `> ${b.text}`;
+    case 'step':
+      return `=> ${b.text}`;
     case 'callout':
       return `!${b.tone} ${b.text}`;
     case 'math':
@@ -395,6 +405,7 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
     if (parsed.kind === 'task')
       return { id: blockId, kind: 'task', text: parsed.text, checked: parsed.checked };
     if (parsed.kind === 'quote') return { id: blockId, kind: 'quote', text: parsed.text };
+    if (parsed.kind === 'step') return { id: blockId, kind: 'step', text: parsed.text };
     if (parsed.kind === 'callout') return { id: blockId, kind: 'callout', tone: parsed.tone, text: parsed.text };
     if (parsed.kind === 'math') return { id: blockId, kind: 'math', text: parsed.text };
     if (parsed.kind === 'image-ref') return { id: blockId, kind: 'image-ref', key: parsed.key, alt: parsed.alt };
@@ -430,6 +441,10 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
   }
   if (block.kind === 'quote') {
     const m = trimmed.match(/^>\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+  }
+  if (block.kind === 'step') {
+    const m = trimmed.match(/^=>\s*(.*)$/);
     return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
   }
   if (block.kind === 'callout') {
@@ -592,6 +607,8 @@ function mergeBlocks(prev: Block, next: Block): Block {
       return { id: prev.id, kind: 'bullet', depth: prev.depth, text: mergedText };
     case 'quote':
       return { id: prev.id, kind: 'quote', text: mergedText };
+    case 'step':
+      return { id: prev.id, kind: 'step', text: mergedText };
     case 'callout':
       return { id: prev.id, kind: 'callout', tone: prev.tone, text: mergedText };
     case 'math':
@@ -1529,6 +1546,9 @@ export function ProjectNotebookBlock({
           case 'fine':
             next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'fine' }, ...prev.slice(i + 1)];
             break;
+          case 'step':
+            next = [...prev.slice(0, i), { id, kind: 'step', text: rest }, ...prev.slice(i + 1)];
+            break;
           case 'divider': {
             const pid = newBlockId();
             next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
@@ -1734,6 +1754,9 @@ export function ProjectNotebookBlock({
             if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref') {
               scheduleCaret(last, caretBefore);
             }
+            // Multi-block paste morph: pulse the first non-divider block
+            const firstMorphed = transformed.find(b => b.kind !== 'divider' && b.kind !== 'paragraph');
+            if (firstMorphed) setMorphPulseId(firstMorphed.id);
             return next;
           }
           const variantMatch =
@@ -1753,6 +1776,8 @@ export function ProjectNotebookBlock({
           if (caretBefore !== null && transformed.kind !== 'divider' && transformed.kind !== 'image-ref') {
             scheduleCaret(transformed, caretBefore);
           }
+          // Single-block morph: pulse when block kind changes (e.g. paragraph → step/quote/title)
+          if (transformed.kind !== 'paragraph') setMorphPulseId(transformed.id);
           return next;
         }
 
@@ -1909,7 +1934,7 @@ export function ProjectNotebookBlock({
           if (editable) {
             const blockId = editable.dataset.editableId!;
             const blk = blocks.find(b => b.id === blockId);
-            if (blk?.kind === 'paragraph') {
+            if (blk?.kind === 'paragraph' || blk?.kind === 'step') {
               const offset = getCaretOffsetIn(editable);
               const expanded = tryMathTabExpansion(blk.text, offset);
               if (expanded) {
@@ -2140,11 +2165,13 @@ export function ProjectNotebookBlock({
                     ? { id: block.id, kind: 'ordered', number: block.number, text: nextText }
                   : block.kind === 'quote'
                     ? { id: block.id, kind: 'quote', text: nextText }
-                    : block.kind === 'task'
-                      ? { id: block.id, kind: 'task', text: nextText, checked: block.checked }
-                      : block.kind === 'callout'
-                        ? { id: block.id, kind: 'callout', tone: block.tone, text: nextText }
-                        : { id: block.id, kind: 'math', text: nextText };
+                    : block.kind === 'step'
+                      ? { id: block.id, kind: 'step', text: nextText }
+                      : block.kind === 'task'
+                        ? { id: block.id, kind: 'task', text: nextText, checked: block.checked }
+                        : block.kind === 'callout'
+                          ? { id: block.id, kind: 'callout', tone: block.tone, text: nextText }
+                          : { id: block.id, kind: 'math', text: nextText };
         const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
         persist(next);
         pendingCaretRef.current = { id: block.id, offset: offset + 1 };
@@ -2161,6 +2188,7 @@ export function ProjectNotebookBlock({
             block.kind === 'bullet' ||
             block.kind === 'ordered' ||
             block.kind === 'quote' ||
+            block.kind === 'step' ||
             block.kind === 'task' ||
             block.kind === 'callout' ||
             block.kind === 'math') &&
@@ -2190,6 +2218,7 @@ export function ProjectNotebookBlock({
           block.kind === 'bullet' ||
           block.kind === 'ordered' ||
           block.kind === 'quote' ||
+          block.kind === 'step' ||
           block.kind === 'task' ||
           block.kind === 'callout' ||
           block.kind === 'math'
@@ -2202,6 +2231,8 @@ export function ProjectNotebookBlock({
               ? { id: newBlockId(), kind: 'bullet', depth: block.depth, text: after }
               : block.kind === 'ordered' && before.trim() !== ''
               ? { id: newBlockId(), kind: 'ordered', number: block.number + 1, text: after }
+              : block.kind === 'step' && before.trim() !== ''
+              ? { id: newBlockId(), kind: 'step', text: after }
               : block.kind === 'task' && before.trim() !== ''
               ? { id: newBlockId(), kind: 'task', checked: false, text: after }
               : { id: newBlockId(), kind: 'paragraph', text: after };
@@ -2306,6 +2337,7 @@ export function ProjectNotebookBlock({
             block.kind === 'section' ||
             block.kind === 'ordered' ||
             block.kind === 'quote' ||
+            block.kind === 'step' ||
             block.kind === 'task' ||
             block.kind === 'callout' ||
             block.kind === 'math') &&
@@ -3508,6 +3540,31 @@ export function ProjectNotebookBlock({
               );
             }
 
+            if (block.kind === 'step') {
+              let stepIndex = 1;
+              for (let si = index - 1; si >= 0; si--) {
+                if (blocks[si]!.kind !== 'step') break;
+                stepIndex++;
+              }
+              return (
+                <StepBlockRenderer
+                  key={block.id}
+                  block={block}
+                  stepIndex={stepIndex}
+                  isFocused={surfaceFocusBlockId === block.id}
+                  tokens={tokens}
+                  ink={ink}
+                  typeScale={typeScale}
+                  morphPulse={morphPulseId === block.id}
+                  blockSurfaceChrome={blockSurfaceChrome(block.id)}
+                  EditableLine={EditableLine}
+                  onUpdate={updateBlockText}
+                  onFocusIndex={setFocusIndexById}
+                  onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+                />
+              );
+            }
+
             if (block.kind === 'callout') {
               const ct = calloutToneTokens(block.tone);
               return (
@@ -3984,6 +4041,51 @@ export function ProjectNotebookBlock({
                 >
                   {line.text}
                 </blockquote>
+              );
+            }
+            if (line.kind === 'step') {
+              let stepIndex = 1;
+              for (let si = index - 1; si >= 0; si--) {
+                if (previewLines[si]!.kind !== 'step') break;
+                stepIndex++;
+              }
+              return (
+                <div
+                  key={lineKey}
+                  style={{
+                    margin: `${typeScale.s2 + 8}px 0`,
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: '14px',
+                    paddingLeft: '18px',
+                    paddingTop: '6px',
+                    paddingBottom: '6px',
+                    borderLeft: `2px solid ${tokens.accent}38`,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: `${typeScale.l5 - 1}px`,
+                      fontWeight: 400,
+                      color: tokens.accent,
+                      opacity: 0.35,
+                      minWidth: '14px',
+                      userSelect: 'none',
+                      letterSpacing: '0.04em',
+                      fontVariantNumeric: 'tabular-nums',
+                      flexShrink: 0,
+                    }}
+                    aria-hidden
+                  >
+                    {stepIndex}
+                  </span>
+                  <MathRichText
+                    text={line.text}
+                    autoPlainMath
+                    textColor={ink.primary}
+                    mutedColor={tokens.textMuted}
+                  />
+                </div>
               );
             }
             if (line.kind === 'callout') {

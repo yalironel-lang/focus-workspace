@@ -60,19 +60,30 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>(() => initialEditMode(text, isMathNotebook));
-  const [simpleDraft, setSimpleDraft] = useState(() => latexToSimple(text));
+  // editingDraft: updates immediately on every keystroke (drives the input's value)
+  // previewDraft: debounced 100ms — KatexPreview only re-renders when this changes
+  const [editingDraft, setEditingDraft] = useState(() => latexToSimple(text));
+  const [previewDraft, setPreviewDraft] = useState(() => latexToSimple(text));
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (editMode === 'simple') {
-      setSimpleDraft(latexToSimple(text));
+      const v = latexToSimple(text);
+      setEditingDraft(v);
+      setPreviewDraft(v);
     }
   }, [text, editMode]);
 
+  // Debounce KaTeX re-render by 100ms so the preview doesn't repaint on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setPreviewDraft(editingDraft), 100);
+    return () => clearTimeout(t);
+  }, [editingDraft]);
+
   const previewLatex = useMemo(() => {
-    if (editMode === 'simple') return plainMathToLatex(simpleDraft);
+    if (editMode === 'simple') return plainMathToLatex(previewDraft);
     return text;
-  }, [editMode, simpleDraft, text]);
+  }, [editMode, previewDraft, text]);
 
   const schedulePersist = useCallback(
     (latex: string) => {
@@ -93,14 +104,14 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
 
   const handleSimpleChange = useCallback(
     (value: string) => {
-      setSimpleDraft(value);
+      setEditingDraft(value);
       schedulePersist(plainMathToLatex(value));
     },
     [schedulePersist],
   );
 
   const handleCopy = useCallback(async () => {
-    const payload = (editMode === 'simple' ? plainMathToLatex(simpleDraft) : text).trim();
+    const payload = (editMode === 'simple' ? plainMathToLatex(editingDraft) : text).trim();
     try {
       await navigator.clipboard.writeText(payload);
       setCopied(true);
@@ -108,20 +119,22 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
     } catch {
       /* ignore */
     }
-  }, [editMode, simpleDraft, text]);
+  }, [editMode, editingDraft, text]);
 
   const switchMode = useCallback(
     (mode: EditMode) => {
       if (mode === editMode) return;
       if (mode === 'simple') {
-        setSimpleDraft(latexToSimple(text));
+        const v = latexToSimple(text);
+        setEditingDraft(v);
+        setPreviewDraft(v);
       } else {
-        const latex = plainMathToLatex(simpleDraft);
+        const latex = plainMathToLatex(editingDraft);
         onUpdate(blockId, latex);
       }
       setEditMode(mode);
     },
-    [blockId, editMode, onUpdate, simpleDraft, text],
+    [blockId, editMode, onUpdate, editingDraft, text],
   );
 
   const showEditor = isFocused || !text.trim();
@@ -261,7 +274,7 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
             <input
               data-equation-simple={blockId}
               type="text"
-              value={simpleDraft}
+              value={editingDraft}
               onChange={e => handleSimpleChange(e.target.value)}
               onFocus={() => onFocusIndex(blockId)}
               onBlur={e => {
@@ -271,7 +284,7 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
                   clearTimeout(persistTimer.current);
                   persistTimer.current = null;
                 }
-                const latex = plainMathToLatex(simpleDraft);
+                const latex = plainMathToLatex(editingDraft);
                 if (latex !== text) onUpdate(blockId, latex);
               }}
               placeholder="y=x^2"

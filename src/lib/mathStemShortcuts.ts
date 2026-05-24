@@ -9,7 +9,8 @@ export type MathSlashId =
   | 'vector'
   | 'limit'
   | 'sum'
-  | 'graph';
+  | 'graph'
+  | 'step';
 
 export const MATH_SLASH_COMMANDS: Array<{ id: MathSlashId; label: string; hint: string }> = [
   { id: 'eq', label: 'Equation', hint: 'y = x²' },
@@ -21,6 +22,7 @@ export const MATH_SLASH_COMMANDS: Array<{ id: MathSlashId; label: string; hint: 
   { id: 'cases', label: 'Cases', hint: 'piecewise' },
   { id: 'vector', label: 'Vector', hint: 'components' },
   { id: 'graph', label: 'Graph', hint: 'y = f(x)' },
+  { id: 'step', label: 'Step', hint: 'Derivation step ⇒' },
 ];
 
 export const MATH_SLASH_TEMPLATES: Record<MathSlashId, string> = {
@@ -33,6 +35,7 @@ export const MATH_SLASH_TEMPLATES: Record<MathSlashId, string> = {
   cases: 'f(x) = 1 if x>0 else 0',
   vector: 'v = (1, 2, 3)',
   graph: 'y=x^2',
+  step: '',
 };
 
 const TAB_TRIGGERS: Array<{ trigger: string; template: string }> = [

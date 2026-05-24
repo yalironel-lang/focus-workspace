@@ -16,6 +16,8 @@ function plainTextFromLine(raw: string): string {
   const bullet = normalized.match(/^\s*- (?!\[)\s*(.*)$/);
   if (bullet) return (bullet[1] ?? '').trimEnd();
   if (trimmed.startsWith('> ')) return trimmed.slice(2).trimEnd();
+  const stepLine = trimmed.match(/^=>\s*(.*)$/);
+  if (stepLine) return (stepLine[1] ?? '').trimEnd();
   const callout = trimmed.match(/^!(summary|concept|review|definition|theorem|example|mistake)\s*(.*)$/i);
   if (callout) return (callout[2] ?? '').trimEnd();
   if (trimmed.startsWith('$$')) return trimmed.replace(/^\$\$\s*/, '').trimEnd();
