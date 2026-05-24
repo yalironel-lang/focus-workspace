@@ -28,6 +28,8 @@ interface Props {
   surfaceChrome: CSSProperties;
   isFocused: boolean;
   isMathNotebook: boolean;
+  /** When true, forces simple mode and hides the Simple/LaTeX toggle — math-workspace only */
+  isMathWorkspace?: boolean;
   EditableLine: React.ComponentType<EditableLineProps>;
   onUpdate: (id: string, text: string) => void;
   onFocusIndex: (id: string) => void;
@@ -51,6 +53,7 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
   surfaceChrome,
   isFocused,
   isMathNotebook,
+  isMathWorkspace = false,
   EditableLine,
   onUpdate,
   onFocusIndex,
@@ -59,7 +62,8 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
   morphPulse,
 }: Props) {
   const [copied, setCopied] = useState(false);
-  const [editMode, setEditMode] = useState<EditMode>(() => initialEditMode(text, isMathNotebook));
+  // math-workspace always uses simple mode — the Simple↔LaTeX distinction is an impl detail
+  const [editMode, setEditMode] = useState<EditMode>(() => isMathWorkspace ? 'simple' : initialEditMode(text, isMathNotebook));
   // editingDraft: updates immediately on every keystroke (drives the input's value)
   // previewDraft: debounced 100ms — KatexPreview only re-renders when this changes
   const [editingDraft, setEditingDraft] = useState(() => latexToSimple(text));
@@ -182,7 +186,8 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
           <span style={{ flex: 1 }} />
         )}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          {isMathNotebook ? (
+          {/* Simple/LaTeX toggle: shown in math mode, hidden in math-workspace (simple mode is implicit) */}
+          {isMathNotebook && !isMathWorkspace ? (
             <div style={{ display: 'flex', gap: 2, marginRight: 4 }}>
               {(['simple', 'latex'] as const).map(mode => (
                 <button

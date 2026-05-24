@@ -12,7 +12,8 @@ declare global {
 const counts = new Map<string, number>();
 
 function enabled(): boolean {
-  return import.meta.env.DEV && (window.__fwFlickerDebug !== false);
+  // Opt-in only: set window.__fwFlickerDebug = true in DevTools console to enable.
+  return import.meta.env.DEV && window.__fwFlickerDebug === true;
 }
 
 export function flickerDebugCount(label: string): void {

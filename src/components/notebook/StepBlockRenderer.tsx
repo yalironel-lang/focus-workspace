@@ -63,7 +63,7 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
         paddingLeft: '18px',
         paddingTop: '6px',
         paddingBottom: '6px',
-        borderLeft: `2px solid ${tokens.accent}38`,
+        borderLeft: `1px solid ${tokens.accent}22`,
       }}
     >
       {/* Editorial margin marker — quiet, paper-like, not a primary label */}
@@ -72,7 +72,7 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
           fontSize: `${typeScale.l5 - 1}px`,
           fontWeight: 400,
           color: tokens.accent,
-          opacity: 0.35,
+          opacity: 0.20,
           minWidth: '14px',
           userSelect: 'none',
           letterSpacing: '0.04em',

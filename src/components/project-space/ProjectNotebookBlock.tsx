@@ -1007,6 +1007,7 @@ export function ProjectNotebookBlock({
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
+  const [mathToolbarHovered, setMathToolbarHovered] = useState(false);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -1020,6 +1021,9 @@ export function ProjectNotebookBlock({
   const pendingCaretRef = useRef<{ id: string; offset: number } | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Stable ref so onEditingChange reference churn never fires the editing effect
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
   const notebookPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
 
@@ -1173,24 +1177,23 @@ export function ProjectNotebookBlock({
   const applyBlockLevel = useCallback(
     (blockId: string, level: 1 | 2 | 3 | 4 | 5) => {
       const caretBefore = captureCaretForBlock(blockId);
+      const prev = blocksRef.current;
+      const i = prev.findIndex((b) => b.id === blockId);
+      if (i === -1) return;
+      const cur = prev[i]!;
+      if (cur.kind === 'divider' || cur.kind === 'image-ref') return;
+      const text = cur.text;
+      let nb: Block;
+      if (level === 1) nb = { id: blockId, kind: 'title', text };
+      else if (level === 2) nb = { id: blockId, kind: 'section', text };
+      else if (level === 3) nb = { id: blockId, kind: 'paragraph', text };
+      else if (level === 4) nb = { id: blockId, kind: 'paragraph', text, variant: 'muted' };
+      else nb = { id: blockId, kind: 'paragraph', text, variant: 'fine' };
+      const next = [...prev.slice(0, i), nb, ...prev.slice(i + 1)];
       setMorphPulseId(blockId);
-      setBlocks((prev) => {
-        const i = prev.findIndex((b) => b.id === blockId);
-        if (i === -1) return prev;
-        const cur = prev[i]!;
-        if (cur.kind === 'divider' || cur.kind === 'image-ref') return prev;
-        const text = cur.text;
-        let nb: Block;
-        if (level === 1) nb = { id: blockId, kind: 'title', text };
-        else if (level === 2) nb = { id: blockId, kind: 'section', text };
-        else if (level === 3) nb = { id: blockId, kind: 'paragraph', text };
-        else if (level === 4) nb = { id: blockId, kind: 'paragraph', text, variant: 'muted' };
-        else nb = { id: blockId, kind: 'paragraph', text, variant: 'fine' };
-        const next = [...prev.slice(0, i), nb, ...prev.slice(i + 1)];
-        pushContent({ ...content, body: serializeBlocks(next) });
-        if (caretBefore !== null) scheduleCaret(nb, caretBefore);
-        return next;
-      });
+      setBlocks(next);
+      pushContent({ ...content, body: serializeBlocks(next) });
+      if (caretBefore !== null) scheduleCaret(nb, caretBefore);
     },
     [content, pushContent, captureCaretForBlock, scheduleCaret],
   );
@@ -1493,89 +1496,89 @@ export function ProjectNotebookBlock({
 
   const applySlashCommand = useCallback(
     (blockId: string, cmd: SlashCommandId) => {
+      const prev = blocksRef.current;
+      const i = prev.findIndex((b) => b.id === blockId);
+      if (i === -1) return;
+      const cur = prev[i]!;
+      if (cur.kind !== 'paragraph') return;
+      const rest = paragraphTextAfterSlashApply(cur.text, cmd);
+      const id = cur.id;
+      let next: Block[];
+      switch (cmd) {
+        case 'title':
+          next = [...prev.slice(0, i), { id, kind: 'title', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'section':
+          next = [...prev.slice(0, i), { id, kind: 'section', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'task':
+          next = [...prev.slice(0, i), { id, kind: 'task', text: rest, checked: false }, ...prev.slice(i + 1)];
+          break;
+        case 'quote':
+          next = [...prev.slice(0, i), { id, kind: 'quote', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'summary':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'summary', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'concept':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'concept', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'review':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'review', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'formula':
+          next = [...prev.slice(0, i), { id, kind: 'math', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'bullet':
+          next = [...prev.slice(0, i), { id, kind: 'bullet', depth: 0, text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'ordered':
+          next = [...prev.slice(0, i), { id, kind: 'ordered', number: 1, text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'definition':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'definition', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'theorem':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'theorem', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'example':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'example', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'mistake':
+          next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'mistake', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'muted':
+          next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'muted' }, ...prev.slice(i + 1)];
+          break;
+        case 'fine':
+          next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'fine' }, ...prev.slice(i + 1)];
+          break;
+        case 'step':
+          next = [...prev.slice(0, i), { id, kind: 'step', text: rest }, ...prev.slice(i + 1)];
+          break;
+        case 'divider': {
+          const pid = newBlockId();
+          next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
+          setSlashMenu(null);
+          setMorphPulseId(blockId);
+          setBlocks(next);
+          pushContent({ ...content, body: serializeBlocks(next) });
+          pendingCaretRef.current = { id: pid, offset: rest.length };
+          return;
+        }
+        default: {
+          if (!(cmd in MATH_SLASH_TEMPLATES)) return;
+          const mathRest = paragraphTextAfterSlashApply(cur.text, cmd);
+          next = [...prev.slice(0, i), { id, kind: 'paragraph', text: mathRest }, ...prev.slice(i + 1)];
+          break;
+        }
+      }
+      const nb = next[i]!;
       setSlashMenu(null);
       setMorphPulseId(blockId);
-      setBlocks((prev) => {
-        const i = prev.findIndex((b) => b.id === blockId);
-        if (i === -1) return prev;
-        const cur = prev[i]!;
-        if (cur.kind !== 'paragraph') return prev;
-        const rest = paragraphTextAfterSlashApply(cur.text, cmd);
-        const id = cur.id;
-        let next: Block[];
-        switch (cmd) {
-          case 'title':
-            next = [...prev.slice(0, i), { id, kind: 'title', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'section':
-            next = [...prev.slice(0, i), { id, kind: 'section', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'task':
-            next = [...prev.slice(0, i), { id, kind: 'task', text: rest, checked: false }, ...prev.slice(i + 1)];
-            break;
-          case 'quote':
-            next = [...prev.slice(0, i), { id, kind: 'quote', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'summary':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'summary', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'concept':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'concept', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'review':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'review', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'formula':
-            next = [...prev.slice(0, i), { id, kind: 'math', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'bullet':
-            next = [...prev.slice(0, i), { id, kind: 'bullet', depth: 0, text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'ordered':
-            next = [...prev.slice(0, i), { id, kind: 'ordered', number: 1, text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'definition':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'definition', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'theorem':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'theorem', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'example':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'example', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'mistake':
-            next = [...prev.slice(0, i), { id, kind: 'callout', tone: 'mistake', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'muted':
-            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'muted' }, ...prev.slice(i + 1)];
-            break;
-          case 'fine':
-            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: rest, variant: 'fine' }, ...prev.slice(i + 1)];
-            break;
-          case 'step':
-            next = [...prev.slice(0, i), { id, kind: 'step', text: rest }, ...prev.slice(i + 1)];
-            break;
-          case 'divider': {
-            const pid = newBlockId();
-            next = [...prev.slice(0, i), { id, kind: 'divider' }, { id: pid, kind: 'paragraph', text: rest }, ...prev.slice(i + 1)];
-            const serialized = serializeBlocks(next);
-            pushContent({ ...content, body: serialized });
-            pendingCaretRef.current = { id: pid, offset: rest.length };
-            return next;
-          }
-          default: {
-            if (!(cmd in MATH_SLASH_TEMPLATES)) return prev;
-            const mathRest = paragraphTextAfterSlashApply(cur.text, cmd);
-            next = [...prev.slice(0, i), { id, kind: 'paragraph', text: mathRest }, ...prev.slice(i + 1)];
-            break;
-          }
-        }
-        const serialized = serializeBlocks(next);
-        pushContent({ ...content, body: serialized });
-        const nb = next[i]!;
-        pendingCaretRef.current = { id: nb.id, offset: rest.length };
-        return next;
-      });
+      setBlocks(next);
+      pushContent({ ...content, body: serializeBlocks(next) });
+      pendingCaretRef.current = { id: nb.id, offset: rest.length };
     },
     [content, pushContent],
   );
@@ -1680,7 +1683,11 @@ export function ProjectNotebookBlock({
         letterSpacing: '0.01em',
         fontFamily: fontStack,
         fontFeatureSettings: '"kern" 1, "liga" 1',
-        border: '1px solid rgba(28,25,23,0.08)',
+        // Use explicit longhand border properties to avoid shorthand/longhand conflict warning
+        borderTop: '1px solid rgba(28,25,23,0.08)',
+        borderRight: '1px solid rgba(28,25,23,0.08)',
+        borderBottom: '1px solid rgba(28,25,23,0.08)',
+        borderLeft: isMathNotebook ? '2px solid rgba(120,113,108,0.35)' : '1px solid rgba(28,25,23,0.08)',
         borderRadius: context === 'free-space' ? 12 : 16,
         boxShadow:
           '0 1px 2px rgba(28,25,23,0.04), 0 8px 28px rgba(28,25,23,0.08), inset 0 1px 0 rgba(255,255,255,0.65)',
@@ -1691,7 +1698,6 @@ export function ProjectNotebookBlock({
         MozOsxFontSmoothing: 'grayscale',
         textRendering: 'optimizeLegibility',
         transition: 'color 0.22s ease, background-image 0.28s ease, border-color 0.24s ease, box-shadow 0.24s ease',
-        ...(isMathNotebook ? { borderLeft: '2px solid rgba(120,113,108,0.35)' } : {}),
       };
     }
     return {
@@ -1708,7 +1714,11 @@ export function ProjectNotebookBlock({
       letterSpacing: '0.005em',
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
-      border: '1px solid rgba(255,255,255,0.055)',
+      // Use explicit longhand border properties to avoid shorthand/longhand conflict warning
+      borderTop: '1px solid rgba(255,255,255,0.055)',
+      borderRight: '1px solid rgba(255,255,255,0.055)',
+      borderBottom: '1px solid rgba(255,255,255,0.055)',
+      borderLeft: isMathNotebook ? '2px solid rgba(129,140,248,0.20)' : '1px solid rgba(255,255,255,0.055)',
       borderRadius: 22,
       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
       paddingTop: '24px',
@@ -1718,7 +1728,6 @@ export function ProjectNotebookBlock({
       MozOsxFontSmoothing: 'grayscale',
       textRendering: 'optimizeLegibility',
       transition: 'color 0.22s ease, background-image 0.28s ease, border-color 0.24s ease, box-shadow 0.24s ease',
-      ...(isMathNotebook ? { borderLeft: '2px solid rgba(129,140,248,0.20)' } : {}),
     };
   }, [
     context,
@@ -1743,107 +1752,100 @@ export function ProjectNotebookBlock({
   const updateBlockText = useCallback(
     (id: string, rawText: string) => {
       const caretBefore = captureCaretForBlock(id);
-      setBlocks((prev) => {
-        const i = prev.findIndex((b) => b.id === id);
-        if (i === -1) return prev;
-        const block = prev[i]!;
-        if (block.kind === 'divider') return prev;
+      const prev = blocksRef.current;
+      const i = prev.findIndex((b) => b.id === id);
+      if (i === -1) return;
+      const block = prev[i]!;
+      if (block.kind === 'divider') return;
 
-        const text = rawText.replace(/\r\n/g, '\n');
+      const text = rawText.replace(/\r\n/g, '\n');
 
-        if (block.kind === 'paragraph') {
-          const transformed = morphParagraphLine(text, block.id);
-          if (Array.isArray(transformed)) {
-            const next = [...prev.slice(0, i), ...transformed, ...prev.slice(i + 1)];
-            pushContent({ ...content, body: serializeBlocks(next) });
-            const last = transformed[transformed.length - 1]!;
-            if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref') {
-              scheduleCaret(last, caretBefore);
-            }
-            // Multi-block paste morph: pulse the first non-divider block
-            const firstMorphed = transformed.find(b => b.kind !== 'divider' && b.kind !== 'paragraph');
-            if (firstMorphed) setMorphPulseId(firstMorphed.id);
-            return next;
-          }
-          const variantMatch =
-            transformed.kind !== 'paragraph' || block.kind !== 'paragraph'
-              ? true
-              : (transformed.variant ?? undefined) === (block.variant ?? undefined);
-          const transformedText = (transformed as { text?: string }).text ?? '';
-          const blockText = (block as { text?: string }).text ?? '';
-          const sameShape =
-            transformed.kind === block.kind &&
-            transformedText === blockText &&
-            transformed.id === block.id &&
-            variantMatch;
-          if (sameShape && text === blockText) return prev;
-          const next = [...prev.slice(0, i), transformed, ...prev.slice(i + 1)];
+      if (block.kind === 'paragraph') {
+        const transformed = morphParagraphLine(text, block.id);
+        if (Array.isArray(transformed)) {
+          const next = [...prev.slice(0, i), ...transformed, ...prev.slice(i + 1)];
+          setBlocks(next);
           pushContent({ ...content, body: serializeBlocks(next) });
-          if (caretBefore !== null && transformed.kind !== 'divider' && transformed.kind !== 'image-ref') {
-            scheduleCaret(transformed, caretBefore);
+          const last = transformed[transformed.length - 1]!;
+          if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref') {
+            scheduleCaret(last, caretBefore);
           }
-          // Single-block morph: pulse when block kind changes (e.g. paragraph → step/quote/title)
-          if (transformed.kind !== 'paragraph') setMorphPulseId(transformed.id);
-          return next;
+          // Multi-block paste morph: pulse the first non-divider block
+          const firstMorphed = transformed.find(b => b.kind !== 'divider' && b.kind !== 'paragraph');
+          if (firstMorphed) setMorphPulseId(firstMorphed.id);
+          return;
         }
-
-        const singleLine = text.includes('\n') ? (text.split('\n')[0] ?? '') : text;
-        const edited: Block = applyVisualEditToStructuredBlock(block, singleLine);
-        const editedText = (edited as { text?: string }).text ?? '';
-        const blockText2 = (block as { text?: string }).text ?? '';
-        const same =
-          edited.kind === block.kind &&
-          editedText === blockText2 &&
-          (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked)) &&
-          (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
-        if (same && text === blockText2) return prev;
-        const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
+        const variantMatch =
+          transformed.kind !== 'paragraph' || block.kind !== 'paragraph'
+            ? true
+            : (transformed.variant ?? undefined) === (block.variant ?? undefined);
+        const transformedText = (transformed as { text?: string }).text ?? '';
+        const blockText = (block as { text?: string }).text ?? '';
+        const sameShape =
+          transformed.kind === block.kind &&
+          transformedText === blockText &&
+          transformed.id === block.id &&
+          variantMatch;
+        if (sameShape && text === blockText) return;
+        const next = [...prev.slice(0, i), transformed, ...prev.slice(i + 1)];
+        setBlocks(next);
         pushContent({ ...content, body: serializeBlocks(next) });
-        if (caretBefore !== null) scheduleCaret(edited, caretBefore);
-        return next;
-      });
+        if (caretBefore !== null && transformed.kind !== 'divider' && transformed.kind !== 'image-ref') {
+          scheduleCaret(transformed, caretBefore);
+        }
+        // Single-block morph: pulse when block kind changes (e.g. paragraph → step/quote/title)
+        if (transformed.kind !== 'paragraph') setMorphPulseId(transformed.id);
+        return;
+      }
+
+      const singleLine = text.includes('\n') ? (text.split('\n')[0] ?? '') : text;
+      const edited: Block = applyVisualEditToStructuredBlock(block, singleLine);
+      const editedText = (edited as { text?: string }).text ?? '';
+      const blockText2 = (block as { text?: string }).text ?? '';
+      const same =
+        edited.kind === block.kind &&
+        editedText === blockText2 &&
+        (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked)) &&
+        (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
+      if (same && text === blockText2) return;
+      const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
+      setBlocks(next);
+      pushContent({ ...content, body: serializeBlocks(next) });
+      if (caretBefore !== null) scheduleCaret(edited, caretBefore);
     },
     [content, pushContent, captureCaretForBlock, scheduleCaret],
   );
 
   const toggleTask = useCallback(
     (id: string) => {
-      setBlocks((prev) => {
-        const i = prev.findIndex((b) => b.id === id);
-        if (i === -1) return prev;
-        const block = prev[i]!;
-        if (block.kind !== 'task') return prev;
-        const next = [...prev.slice(0, i), { ...block, checked: !block.checked }, ...prev.slice(i + 1)];
-        pushContent({ ...content, body: serializeBlocks(next) });
-        return next;
-      });
+      const prev = blocksRef.current;
+      const i = prev.findIndex((b) => b.id === id);
+      if (i === -1) return;
+      const block = prev[i]!;
+      if (block.kind !== 'task') return;
+      const next = [...prev.slice(0, i), { ...block, checked: !block.checked }, ...prev.slice(i + 1)];
+      setBlocks(next);
+      pushContent({ ...content, body: serializeBlocks(next) });
     },
     [content, pushContent],
   );
 
   const removeBlockAt = useCallback(
     (index: number) => {
-      setBlocks((prev) => {
-        if (index < 0 || index >= prev.length) return prev;
-        const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
-        const filled = next.length === 0 ? parseBodyToBlocks('') : next;
-        pushContent({ ...content, body: serializeBlocks(filled) });
-        const focusIdx = Math.max(0, index - 1);
-        const focusBlock = filled[focusIdx];
-        if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref') {
-          pendingCaretRef.current = {
-            id: focusBlock.id,
-            offset:
-              focusBlock.kind === 'title' ||
-              focusBlock.kind === 'section' ||
-              focusBlock.kind === 'quote' ||
-              focusBlock.kind === 'task'
-                ? focusBlock.text.length
-                : focusBlock.text.length,
-          };
-        }
-        return filled;
-      });
+      const prev = blocksRef.current;
+      if (index < 0 || index >= prev.length) return;
+      const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
+      const filled = next.length === 0 ? parseBodyToBlocks('') : next;
+      setBlocks(filled);
+      pushContent({ ...content, body: serializeBlocks(filled) });
+      const focusIdx = Math.max(0, index - 1);
+      const focusBlock = filled[focusIdx];
+      if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref') {
+        pendingCaretRef.current = {
+          id: focusBlock.id,
+          offset: focusBlock.text.length,
+        };
+      }
     },
     [content, pushContent],
   );
@@ -1972,15 +1974,15 @@ export function ProjectNotebookBlock({
               const newDepth = e.shiftKey ? Math.max(0, tabBlk.depth - 1) : Math.min(2, tabBlk.depth + 1);
               if (newDepth !== tabBlk.depth) {
                 const caretBefore = getCaretOffsetIn(editableB);
-                setBlocks(prev => {
-                  const bi = prev.findIndex(b => b.id === tabBlockId);
-                  if (bi === -1) return prev;
+                const prevBlocks = blocksRef.current;
+                const bi = prevBlocks.findIndex(b => b.id === tabBlockId);
+                if (bi !== -1) {
                   const nb = { ...tabBlk, depth: newDepth };
-                  const next = [...prev.slice(0, bi), nb, ...prev.slice(bi + 1)];
+                  const next = [...prevBlocks.slice(0, bi), nb, ...prevBlocks.slice(bi + 1)];
+                  setBlocks(next);
                   pushContent({ ...content, body: serializeBlocks(next) });
                   scheduleCaret(nb, caretBefore);
-                  return next;
-                });
+                }
               }
               return;
             }
@@ -1995,18 +1997,22 @@ export function ProjectNotebookBlock({
           e.preventDefault();
           const { blockId } = sm;
           setSlashMenu(null);
-          setBlocks((prev) => {
-            const i = prev.findIndex((b) => b.id === blockId);
-            if (i === -1) return prev;
-            const b = prev[i]!;
-            if (b.kind !== 'paragraph') return prev;
-            const nt = stripSlashInvocationForEscape(b.text);
-            if (nt === b.text) return prev;
-            const next = [...prev.slice(0, i), { ...b, text: nt }, ...prev.slice(i + 1)];
-            pushContent({ ...content, body: serializeBlocks(next) });
-            pendingCaretRef.current = { id: blockId, offset: 0 };
-            return next;
-          });
+          {
+            const prevBlocks = blocksRef.current;
+            const i = prevBlocks.findIndex((b) => b.id === blockId);
+            if (i !== -1) {
+              const b = prevBlocks[i]!;
+              if (b.kind === 'paragraph') {
+                const nt = stripSlashInvocationForEscape(b.text);
+                if (nt !== b.text) {
+                  const next = [...prevBlocks.slice(0, i), { ...b, text: nt }, ...prevBlocks.slice(i + 1)];
+                  setBlocks(next);
+                  pushContent({ ...content, body: serializeBlocks(next) });
+                  pendingCaretRef.current = { id: blockId, offset: 0 };
+                }
+              }
+            }
+          }
           return;
         }
         if (e.key === 'ArrowDown' && filtered.length > 0) {
@@ -2427,10 +2433,11 @@ export function ProjectNotebookBlock({
 `;
 
   // Host notification: when running inside Free Space, surface edit vs preview to the canvas host.
+  // Use ref to avoid re-firing when the callback reference changes (inline arrow in parent render).
   useEffect(() => {
-    if (context !== 'free-space' || !onEditingChange) return;
-    onEditingChange(editorMode === 'edit');
-  }, [context, editorMode, onEditingChange]);
+    if (context !== 'free-space' || !onEditingChangeRef.current) return;
+    onEditingChangeRef.current(editorMode === 'edit');
+  }, [context, editorMode]);
 
   function renderFocusModeBlocks() {
     return blocks.map((block) => {
@@ -2595,15 +2602,22 @@ export function ProjectNotebookBlock({
           padding: '4px 6px 14px',
           marginBottom: '8px',
           borderBottom: `1px solid ${
-            isMathNotebook
-              ? isPaperSurface
-                ? 'rgba(120,113,108,0.28)'
-                : 'rgba(129,140,248,0.18)'
-              : isPaperSurface
-                ? 'rgba(28,25,23,0.08)'
-                : 'rgba(255,255,255,0.055)'
+            notebookMode === 'math-workspace'
+              ? 'rgba(129,140,248,0.03)'   // near-invisible — no hard chrome/content boundary
+              : isMathNotebook
+                ? isPaperSurface
+                  ? 'rgba(120,113,108,0.28)'
+                  : 'rgba(129,140,248,0.18)'
+                : isPaperSurface
+                  ? 'rgba(28,25,23,0.08)'
+                  : 'rgba(255,255,255,0.055)'
           }`,
           ...(context === 'free-space' ? { flexShrink: 0 } : {}),
+          // Scratch mode: header recedes to margin-paper weight at rest, surfaces on hover
+          ...(notebookMode === 'scratch' ? {
+            opacity: headerHovered ? 0.85 : 0.28,
+            transition: 'opacity 0.3s ease',
+          } : {}),
         }}
       >
         <div style={{ minWidth: 0, flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2715,7 +2729,7 @@ export function ProjectNotebookBlock({
               </svg>
             </button>
           </span>
-          <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? 1 : 0.32, transition: 'opacity 0.4s ease' }}>
+          <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? (notebookMode === 'math-workspace' ? 0.75 : 1) : (notebookMode === 'math-workspace' ? 0.08 : 0.32), transition: 'opacity 0.4s ease' }}>
           {context === 'free-space' ? (
             <button
               type="button"
@@ -2797,26 +2811,28 @@ export function ProjectNotebookBlock({
               fontSize: 10, fontWeight: 500, letterSpacing: '0.04em', transition: 'color 0.15s',
             }}
           >Plain</button>
-          <button
-            type="button"
-            onClick={() => setEditorMode(editorMode === 'edit' ? 'preview' : 'edit')}
-            title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
-              borderRadius: 4, color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
-              fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
-            }}
-          >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
+          {notebookMode !== 'math-workspace' && (
+            <button
+              type="button"
+              onClick={() => setEditorMode(editorMode === 'edit' ? 'preview' : 'edit')}
+              title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
+                borderRadius: 4, color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+                fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
+              }}
+            >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
+          )}
           {notebookMode === 'math-workspace' ? (
-            /* Math Zone identity badge — replaces the √ toggle; mode is intentional */
+            /* Math Zone ambient trace — deliberately faint; mode is evident from behavior */
             <span
               title="Math Zone — solving mode"
               style={{
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
-                color: '#818cf8', opacity: 0.82, padding: '3px 5px',
+                fontSize: 10, fontWeight: 400, letterSpacing: '0.10em',
+                color: '#818cf8', opacity: 0.22, padding: '3px 5px',
                 userSelect: 'none',
               }}
-            >∑ Zone</span>
+            >∑ zone</span>
           ) : (
             <button
               type="button"
@@ -2848,34 +2864,36 @@ export function ProjectNotebookBlock({
               }}
             >√</button>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
-              onChange({ ...content, notebookSurface: next });
-            }}
-            title={notebookSurface === 'paper' ? 'Switch to spatial notebook' : 'Switch to paper page'}
-            style={{
-              background: notebookSurface === 'paper'
-                ? 'rgba(28,25,23,0.06)'
-                : isPaperSurface
-                  ? 'transparent'
-                  : 'rgba(255,255,255,0.04)',
-              border: notebookSurface === 'paper'
-                ? '1px solid rgba(28,25,23,0.1)'
-                : isPaperSurface
-                  ? 'none'
-                  : '1px solid rgba(255,255,255,0.06)',
-              cursor: 'pointer',
-              padding: '3px 8px',
-              borderRadius: 4,
-              color: notebookSurface === 'paper' ? ink.secondary : isPaperSurface ? ink.ghost : 'rgba(255,248,235,0.42)',
-              fontSize: 10,
-              fontWeight: notebookSurface === 'paper' ? 600 : 500,
-              letterSpacing: '0.04em',
-              transition: 'color 0.15s, background 0.15s',
-            }}
-          >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
+          {notebookMode !== 'math-workspace' && (
+            <button
+              type="button"
+              onClick={() => {
+                const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
+                onChange({ ...content, notebookSurface: next });
+              }}
+              title={notebookSurface === 'paper' ? 'Switch to spatial notebook' : 'Switch to paper page'}
+              style={{
+                background: notebookSurface === 'paper'
+                  ? 'rgba(28,25,23,0.06)'
+                  : isPaperSurface
+                    ? 'transparent'
+                    : 'rgba(255,255,255,0.04)',
+                border: notebookSurface === 'paper'
+                  ? '1px solid rgba(28,25,23,0.1)'
+                  : isPaperSurface
+                    ? 'none'
+                    : '1px solid rgba(255,255,255,0.06)',
+                cursor: 'pointer',
+                padding: '3px 8px',
+                borderRadius: 4,
+                color: notebookSurface === 'paper' ? ink.secondary : isPaperSurface ? ink.ghost : 'rgba(255,248,235,0.42)',
+                fontSize: 10,
+                fontWeight: notebookSurface === 'paper' ? 600 : 500,
+                letterSpacing: '0.04em',
+                transition: 'color 0.15s, background 0.15s',
+              }}
+            >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
+          )}
           <div style={{ position: 'relative' }}>
             <button
               type="button"
@@ -3103,9 +3121,11 @@ export function ProjectNotebookBlock({
           )
         : null}
 
-      {/* Math Zone command reference strip — visible only for math-workspace notebooks */}
+      {/* Math Zone command reference strip — ghosted at rest, fully visible on hover */}
       {notebookMode === 'math-workspace' && (
         <div
+          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.opacity = '0.12'; }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -3114,6 +3134,8 @@ export function ProjectNotebookBlock({
             flexWrap: 'wrap',
             borderBottom: '1px solid rgba(129,140,248,0.09)',
             flexShrink: 0,
+            opacity: 0.12,
+            transition: 'opacity 0.25s ease',
           }}
         >
           <span style={{
@@ -3174,12 +3196,24 @@ export function ProjectNotebookBlock({
           {isMathNotebook ? (
             <>
               <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
-              <MathInputToolbar
-                tokens={tokens}
-                textColor={ink.headline}
-                onInsertSymbol={insertMathSnippet}
-                onApplyTemplate={applyMathTemplate}
-              />
+              {/* Ghost the symbol row on math-workspace so math content has visual priority */}
+              <div
+                style={{
+                  opacity: notebookMode === 'math-workspace'
+                    ? (mathToolbarHovered ? 1 : 0.15)
+                    : 1,
+                  transition: 'opacity 0.22s ease',
+                }}
+                onMouseEnter={() => setMathToolbarHovered(true)}
+                onMouseLeave={() => setMathToolbarHovered(false)}
+              >
+                <MathInputToolbar
+                  tokens={tokens}
+                  textColor={ink.headline}
+                  onInsertSymbol={insertMathSnippet}
+                  onApplyTemplate={applyMathTemplate}
+                />
+              </div>
             </>
           ) : null}
           {blocks.map((block, index) => {
@@ -3707,6 +3741,7 @@ export function ProjectNotebookBlock({
                   surfaceChrome={blockSurfaceChrome(block.id)}
                   isFocused={surfaceFocusBlockId === block.id}
                   isMathNotebook={isMathNotebook}
+                  isMathWorkspace={notebookMode === 'math-workspace'}
                   EditableLine={EditableLine}
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
@@ -4288,7 +4323,9 @@ export function ProjectNotebookBlock({
               const paraTop =
                 index === 0 ? 0 : prevKind === 'title' ? typeScale.s5 : prevKind === 'section' ? typeScale.s5 : typeScale.s5;
               return (
-                <p
+                // Use div, not p: MathRichText may render block-level display math inside,
+                // and <div> inside <p> is invalid HTML (triggers React warning).
+                <div
                   key={lineKey}
                   style={{
                     margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
@@ -4313,7 +4350,7 @@ export function ProjectNotebookBlock({
                   ) : (
                     line.text
                   )}
-                </p>
+                </div>
               );
             }
             return null;

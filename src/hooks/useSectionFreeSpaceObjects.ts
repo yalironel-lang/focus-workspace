@@ -34,7 +34,7 @@ export type CalculatorHistoryEntry = { expr: string; result: string };
 export type NotebookPaperStyle = 'blank' | 'ruled' | 'grid';
 /** Document page vs dark spatial writing surface. */
 export type NotebookSurface = 'spatial' | 'paper';
-export type NotebookMode = 'normal' | 'math' | 'math-workspace';
+export type NotebookMode = 'normal' | 'math' | 'math-workspace' | 'scratch';
 
 export type ProjectObjectContent =
   | {
@@ -288,7 +288,10 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ps === 'blank' || ps === 'ruled' || ps === 'grid' ? ps : 'ruled';
       const nm = r.notebookMode;
       const notebookMode: NotebookMode =
-        nm === 'math' ? 'math' : nm === 'math-workspace' ? 'math-workspace' : 'normal';
+        nm === 'math' ? 'math'
+        : nm === 'math-workspace' ? 'math-workspace'
+        : nm === 'scratch' ? 'scratch'
+        : 'normal';
       const ns = r.notebookSurface;
       const notebookSurface: NotebookSurface = ns === 'paper' ? 'paper' : 'spatial';
       const icon = typeof r.icon === 'string' && r.icon ? r.icon : undefined;

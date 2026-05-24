@@ -1178,7 +1178,6 @@ export function SectionPage() {
       paperStyle: 'grid',
       notebookSurface: 'spatial',
       notebookMode: 'math-workspace',
-      subtitle: 'Derivation · steps ready',
       icon: '∑',
     });
 
@@ -1195,7 +1194,7 @@ export function SectionPage() {
       body: '',
       paperStyle: 'blank',
       notebookSurface: 'spatial',
-      notebookMode: 'normal',
+      notebookMode: 'scratch',
     });
 
     setSpaceSelectedId(solution.id); // focus the derivation zone, not the problem card
