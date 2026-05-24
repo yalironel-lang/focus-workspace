@@ -121,6 +121,7 @@ import {
   Link2,
   Image,
 } from 'lucide-react';
+import { MATH_ZONE_SEED_BODY, MATH_ZONE_SOLUTION_SEED } from '../lib/mathNotebookSeed';
 import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
 import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
@@ -208,7 +209,8 @@ type FreeSpacePaletteItemId =
   | ProjectObjectType
   | 'recall'
   | 'tutor'
-  | 'quick-review';
+  | 'quick-review'
+  | 'math-zone';
 
 type FreeSpacePaletteGroup = {
   label: string;
@@ -236,6 +238,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
         { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
+        { id: 'math-zone', title: 'Math Zone', description: 'Solve problems with steps, formulas, and scratch-friendly structure.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
         { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
         { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
       ],
@@ -1125,6 +1128,79 @@ export function SectionPage() {
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
   }, [addSpaceObject, initPos, viewportCenterWorld, applyStudyLinksForObject]);
+
+  /**
+   * Create a Math Zone: three spatial zones forming a mathematical thinking surface.
+   *
+   * Layout (top → bottom on left column, scratch spans right):
+   *
+   *   ┌──────────────────────────────────────┐  ┌─────────────────────────┐
+   *   │  # Problem  (compact, blank paper)   │  │                         │
+   *   │  Write the question here.            │  │  scratch  (blank, right)│
+   *   └──────────────────────────────────────┘  │                         │
+   *                                              │  margin paper — for     │
+   *   ┌──────────────────────────────────────┐  │  exploration, attempts, │
+   *   │  ∑ Zone  (math-workspace, grid)      │  │  side calculations      │
+   *   │  ① step  ② step  ③ step  ...        │  │                         │
+   *   │                                      │  │                         │
+   *   └──────────────────────────────────────┘  └─────────────────────────┘
+   *
+   * Zone roles:
+   *   problem  — anchors the question; compact, read-only feel
+   *   solution — primary derivation surface; step blocks, KaTeX, ∑ badge
+   *   scratch  — exploration zone; blank, no chrome, no structure expected
+   */
+  const handleCreateMathZone = useCallback(() => {
+    const base = viewportCenterWorld(0, 0);
+
+    // Zone 1 — Problem anchor card
+    // Small, compact, blank paper. Defines what is being solved.
+    // Positioned at the top of the left column.
+    const problem = addSpaceObject('notebook');
+    initPos(problem.id, { x: base.x, y: base.y, w: 680, h: 180 });
+    updateSpaceObjectContent(problem.id, {
+      type: 'notebook',
+      body: MATH_ZONE_SEED_BODY,
+      paperStyle: 'blank',
+      notebookSurface: 'spatial',
+      notebookMode: 'normal',
+    });
+
+    // Zone 2 — Solution / derivation space
+    // Primary working surface. Step blocks, KaTeX, ∑ Zone badge.
+    // Positioned below the problem card with a 36px gap (180 + 36 = 216).
+    // 36px reads as deliberate separation — two cognitive layers, not document sections.
+    const solution = addSpaceObject('notebook');
+    initPos(solution.id, { x: base.x, y: base.y + 216, w: 680, h: 520 });
+    updateSpaceObjectContent(solution.id, {
+      type: 'notebook',
+      body: MATH_ZONE_SOLUTION_SEED,
+      paperStyle: 'grid',
+      notebookSurface: 'spatial',
+      notebookMode: 'math-workspace',
+      subtitle: 'Derivation · steps ready',
+      icon: '∑',
+    });
+
+    // Zone 3 — Scratch surface
+    // Exploration zone: margin paper for attempts, side calculations, dead ends.
+    // Starts at y+240: 24px below the derivation zone top (y+216).
+    // Scratch belongs to the solving phase, not the problem-definition phase —
+    // it must not span the problem card's vertical territory.
+    // Height 480px < derivation 520px: subordinate in both width AND height.
+    const scratch = addSpaceObject('notebook');
+    initPos(scratch.id, { x: base.x + 720, y: base.y + 240, w: 360, h: 480 });
+    updateSpaceObjectContent(scratch.id, {
+      type: 'notebook',
+      body: '',
+      paperStyle: 'blank',
+      notebookSurface: 'spatial',
+      notebookMode: 'normal',
+    });
+
+    setSpaceSelectedId(solution.id); // focus the derivation zone, not the problem card
+    setShowSpaceAdd(false);
+  }, [addSpaceObject, initPos, viewportCenterWorld, updateSpaceObjectContent]);
 
   const handleAddRecallToSpace = useCallback(() => {
     const obj = addRecallItem('Recall prompt');
@@ -2737,6 +2813,10 @@ export function SectionPage() {
               tokens={freeSpaceTokens}
               onClose={() => setShowSpaceAdd(false)}
               onPick={itemId => {
+                if (itemId === 'math-zone') {
+                  handleCreateMathZone();
+                  return;
+                }
                 if (itemId === 'tutor') {
                   requestCompanionComposer();
                   return;
