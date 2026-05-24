@@ -1278,8 +1278,8 @@ export function ProjectNotebookBlock({
     if (paperStyle === 'grid') {
       return {
         image: `
-          linear-gradient(rgba(255,255,255,0.006) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.006) 1px, transparent 1px),
+          linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px),
           ${edge}
         `,
         size: '36px 36px, 36px 36px, 100% 100%',
@@ -1291,8 +1291,8 @@ export function ProjectNotebookBlock({
           180deg,
           transparent,
           transparent 37px,
-          rgba(255,255,255,0.01) 37px,
-          rgba(255,255,255,0.01) 38px
+          rgba(255,255,255,0.022) 37px,
+          rgba(255,255,255,0.022) 38px
         ),
         ${edge}
       `,
@@ -1656,15 +1656,17 @@ export function ProjectNotebookBlock({
     };
   }, []);
 
+  const isMathWorkspaceMode = notebookMode === 'math-workspace';
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
       maxWidth: isMathNotebook ? 'min(760px, 100%)' : isPaperSurface ? 'min(640px, 100%)' : 'min(700px, 100%)',
       margin: '0 auto',
       width: '100%',
-      paddingLeft: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : 'clamp(20px, 4vw, 44px)',
-      paddingRight: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : 'clamp(20px, 4vw, 44px)',
+      // math-workspace: tighter horizontal padding to maximize the 680px derivation column
+      paddingLeft: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : isMathWorkspaceMode ? 'clamp(8px, 1.5vw, 16px)' : 'clamp(20px, 4vw, 44px)',
+      paddingRight: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : isMathWorkspaceMode ? 'clamp(8px, 1.5vw, 16px)' : 'clamp(20px, 4vw, 44px)',
     }),
-    [isMathNotebook, isPaperSurface],
+    [isMathNotebook, isPaperSurface, isMathWorkspaceMode],
   );
 
   const editorSurfaceStyle = useMemo((): CSSProperties => {
@@ -1705,7 +1707,7 @@ export function ProjectNotebookBlock({
       width: '100%',
       ...(context === 'free-space' ? {} : { minHeight: '420px' }),
       boxSizing: 'border-box',
-      backgroundColor: 'rgba(255,255,255,0.018)',
+      backgroundColor: isMathWorkspaceMode ? 'rgba(129,140,248,0.008)' : 'rgba(255,255,255,0.018)',
       backgroundImage: writingSurfaceBackground.image,
       backgroundSize: writingSurfaceBackground.size,
       color: ink.primary,
@@ -1718,7 +1720,7 @@ export function ProjectNotebookBlock({
       borderTop: '1px solid rgba(255,255,255,0.055)',
       borderRight: '1px solid rgba(255,255,255,0.055)',
       borderBottom: '1px solid rgba(255,255,255,0.055)',
-      borderLeft: isMathNotebook ? '2px solid rgba(129,140,248,0.20)' : '1px solid rgba(255,255,255,0.055)',
+      borderLeft: isMathWorkspaceMode ? '2px solid rgba(129,140,248,0.38)' : (isMathNotebook ? '2px solid rgba(129,140,248,0.20)' : '1px solid rgba(255,255,255,0.055)'),
       borderRadius: 22,
       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
       paddingTop: '24px',
@@ -1736,6 +1738,7 @@ export function ProjectNotebookBlock({
     ink.primary,
     typeScale.l3,
     isMathNotebook,
+    isMathWorkspaceMode,
     isPaperSurface,
   ]);
 
@@ -2635,7 +2638,9 @@ export function ProjectNotebookBlock({
         ref={shellRef}
         onPaste={handleNotebookPaste}
         style={{
-          padding: context === 'free-space' ? '18px 18px 18px' : '18px 24px 28px',
+          padding: context === 'free-space'
+            ? (isMathWorkspaceMode ? '12px 10px 10px' : '18px 18px 18px')
+            : '18px 24px 28px',
           ...(context === 'free-space'
             ? {
                 display: 'flex',
@@ -2901,15 +2906,16 @@ export function ProjectNotebookBlock({
             >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
           )}
           {notebookMode === 'math-workspace' ? (
-            /* Math Zone ambient trace — deliberately faint; mode is evident from behavior */
+            /* Math Zone identity label — readable but ambient, not a control */
             <span
               title="Math Zone — solving mode"
               style={{
-                fontSize: 10, fontWeight: 400, letterSpacing: '0.10em',
-                color: '#818cf8', opacity: 0.22, padding: '3px 5px',
+                fontSize: 10, fontWeight: 600, letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: '#818cf8', opacity: 0.42, padding: '3px 5px',
                 userSelect: 'none',
               }}
-            >∑ zone</span>
+            >∑ Zone</span>
           ) : (
             <button
               type="button"
@@ -4521,9 +4527,9 @@ export function ProjectNotebookBlock({
                     border: '1px solid rgba(28,25,23,0.06)',
                   }
                 : {
-                    maxWidth: 680,
+                    maxWidth: notebookMode === 'math-workspace' ? 820 : 680,
                     margin: '0 auto',
-                    padding: '80px 48px 140px',
+                    padding: notebookMode === 'math-workspace' ? '80px 32px 160px' : '80px 48px 140px',
                     minHeight: '100%',
                     // Carry the canvas grid texture into fullscreen so the surface feels continuous
                     ...(notebookMode === 'math-workspace' ? {
@@ -4595,8 +4601,9 @@ export function ProjectNotebookBlock({
                   normal         → √ toggle to enable math */}
               {notebookMode === 'math-workspace' ? (
                 <span style={{
-                  fontSize: 11, fontWeight: 400, letterSpacing: '0.10em',
-                  color: '#818cf8', opacity: 0.45, padding: '4px 8px',
+                  fontSize: 10, fontWeight: 600, letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: '#818cf8', opacity: 0.50, padding: '4px 8px',
                   userSelect: 'none',
                 }}>∑ Zone</span>
               ) : (

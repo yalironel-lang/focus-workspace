@@ -153,12 +153,18 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
         ...surfaceChrome,
         ...marginStyle,
         padding: isMathNotebook ? '14px 16px 12px' : '15px 18px',
-        borderRadius: '16px',
-        border: `1px solid ${isFocused ? `${tokens.accent}44` : tokens.cardBorder}`,
-        background: `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
-        boxShadow: isFocused
-          ? `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px ${tokens.accent}22`
-          : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        borderRadius: isMathWorkspace ? '10px' : '16px',
+        border: isMathWorkspace
+          ? `1px solid ${isFocused ? `${tokens.accent}44` : `${tokens.accent}1a`}`
+          : `1px solid ${isFocused ? `${tokens.accent}44` : tokens.cardBorder}`,
+        background: isMathWorkspace
+          ? `linear-gradient(180deg, ${tokens.wellBg}55 0%, ${tokens.cardBg}33 100%)`
+          : `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
+        boxShadow: isMathWorkspace
+          ? (isFocused ? `0 0 0 1px ${tokens.accent}28` : 'none')
+          : (isFocused
+              ? `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px ${tokens.accent}22`
+              : 'inset 0 1px 0 rgba(255,255,255,0.04)'),
       }}
     >
       <div
