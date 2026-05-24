@@ -83,7 +83,7 @@ export const MathRichText = memo(function MathRichText({
         }
         if (seg.type === 'inline') {
           return (
-            <span key={i} style={{ display: 'inline-block', verticalAlign: 'middle', margin: '0 2px' }}>
+            <span key={i} style={{ display: 'inline-block', verticalAlign: 'middle', margin: '0 1px' }}>
               <KatexPreview latex={seg.latex} displayMode={false} textColor={textColor} mutedColor={mutedColor} />
             </span>
           );

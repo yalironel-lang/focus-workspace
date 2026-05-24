@@ -96,6 +96,7 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
           margin: blockMargin,
           cursor: 'text',
           outline: 'none',
+          transition: 'opacity 0.1s ease',
         }}
       >
         <MathRichText text={text} autoPlainMath textColor={textColor} mutedColor={mutedColor} />

@@ -2440,7 +2440,7 @@ export function ProjectNotebookBlock({
   }, [context, editorMode]);
 
   function renderFocusModeBlocks() {
-    return blocks.map((block) => {
+    return blocks.map((block, index) => {
       if (block.kind === 'divider') {
         return (
           <div key={block.id} style={{ display: 'flex', alignItems: 'center', margin: '28px 0' }}>
@@ -2529,7 +2529,84 @@ export function ProjectNotebookBlock({
           </div>
         ) : null;
       }
-      // Default: paragraph (and other block kinds)
+      // Step block — render with counter + border-left + math-aware text input
+      if (block.kind === 'step') {
+        let stepIndex = 1;
+        for (let si = index - 1; si >= 0; si--) {
+          if (blocks[si]!.kind !== 'step') break;
+          stepIndex++;
+        }
+        return (
+          <StepBlockRenderer
+            key={block.id}
+            block={block}
+            stepIndex={stepIndex}
+            isFocused={surfaceFocusBlockId === block.id}
+            tokens={tokens}
+            ink={ink}
+            typeScale={typeScale}
+            blockSurfaceChrome={{}}
+            EditableLine={EditableLine}
+            onUpdate={updateBlockText}
+            onFocusIndex={setFocusIndexById}
+            onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+          />
+        );
+      }
+
+      // Math/equation block — render with KaTeX preview and simple input
+      if (block.kind === 'math') {
+        return (
+          <EquationBlockEditor
+            key={block.id}
+            blockId={block.id}
+            text={block.text}
+            tokens={tokens}
+            notebookInk={notebookInk}
+            typeScale={typeScale}
+            marginStyle={{ margin: '12px 0' }}
+            surfaceChrome={{}}
+            isFocused={surfaceFocusBlockId === block.id}
+            isMathNotebook={isMathNotebook}
+            isMathWorkspace={notebookMode === 'math-workspace'}
+            EditableLine={EditableLine}
+            onUpdate={updateBlockText}
+            onFocusIndex={setFocusIndexById}
+            onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+            onDelete={() => removeBlockAt(index)}
+          />
+        );
+      }
+
+      // Paragraph in a math notebook — use MathEditableParagraph so inline/display
+      // math renders correctly (MathRichText on blur, EditableLine while editing).
+      // Without this, y=x^2 or lim x->0 stays as raw text in fullscreen.
+      if (block.kind === 'paragraph' && isMathNotebook) {
+        return (
+          <MathEditableParagraph
+            key={block.id}
+            id={block.id}
+            text={block.text}
+            tokens={tokens}
+            placeholder="Write…"
+            textColor={ink.primary}
+            mutedColor={tokens.textMuted}
+            onUpdate={updateBlockText}
+            onFocusIndex={setFocusIndexById}
+            onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+            EditableLine={EditableLine}
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: ink.primary, fontSize: `${typeScale.l3}px`, fontWeight: 400,
+              lineHeight: 1.84, marginBottom: '10px',
+              caretColor: isPaperSurface ? '#b45309' : tokens.accent,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}
+          />
+        );
+      }
+
+      // Default: paragraph (non-math) and other block kinds (quote, bullet, etc.)
       return (
         <EditableLine
           key={block.id}
@@ -2542,8 +2619,8 @@ export function ProjectNotebookBlock({
           onAfterInput={(el) => onEditableAfterInput(block.id, el)}
           style={{
             width: '100%', border: 'none', outline: 'none', background: 'transparent',
-            color: ink.primary, fontSize: '17px', fontWeight: 400,
-            lineHeight: 1.96, marginBottom: '10px', caretColor: isPaperSurface ? '#b45309' : tokens.accent,
+            color: ink.primary, fontSize: `${typeScale.l3}px`, fontWeight: 400,
+            lineHeight: 1.84, marginBottom: '10px', caretColor: isPaperSurface ? '#b45309' : tokens.accent,
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}
         />
@@ -3811,13 +3888,15 @@ export function ProjectNotebookBlock({
               !paraFine &&
               !paraMuted &&
               ((isStarterNotebook && index === 1) || (isLegacySingleEmptyParagraph && index === 0));
-            const paragraphPlaceholder = useStartWritingPlaceholder
-              ? 'Start writing...'
-              : paraFine
-                ? 'Fine print…'
-                : paraMuted
-                  ? 'Softer emphasis…'
-                  : 'Write…';
+            const paragraphPlaceholder = notebookMode === 'scratch'
+              ? '…'  // blank/disposable margin paper — no instructional placeholder
+              : useStartWritingPlaceholder
+                ? 'Start writing...'
+                : paraFine
+                  ? 'Fine print…'
+                  : paraMuted
+                    ? 'Softer emphasis…'
+                    : 'Write…';
             return (
               <div
                 key={block.id}
@@ -3869,10 +3948,10 @@ export function ProjectNotebookBlock({
                       border: 'none',
                       outline: 'none',
                       background: 'transparent',
-                      color: paraFine ? ink.muted : paraMuted ? ink.secondary : ink.primary,
+                      color: paraFine ? ink.muted : paraMuted ? ink.secondary : notebookMode === 'scratch' ? ink.secondary : ink.primary,
                       fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
                       fontWeight: paraMuted ? 500 : 400,
-                      lineHeight: paraFine ? 1.7 : 1.96,
+                      lineHeight: paraFine ? 1.7 : notebookMode === 'scratch' ? 1.76 : 1.96,
                       letterSpacing: paraFine ? '0.024em' : '0.004em',
                       margin: `${paraTop}px 0 10px`,
                       opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
@@ -4441,7 +4520,17 @@ export function ProjectNotebookBlock({
                     boxShadow: '0 2px 8px rgba(28,25,23,0.06), 0 16px 48px rgba(28,25,23,0.12)',
                     border: '1px solid rgba(28,25,23,0.06)',
                   }
-                : { maxWidth: 680, margin: '0 auto', padding: '80px 48px 140px', minHeight: '100%' }
+                : {
+                    maxWidth: 680,
+                    margin: '0 auto',
+                    padding: '80px 48px 140px',
+                    minHeight: '100%',
+                    // Carry the canvas grid texture into fullscreen so the surface feels continuous
+                    ...(notebookMode === 'math-workspace' ? {
+                      backgroundImage: writingSurfaceBackground.image,
+                      backgroundSize: writingSurfaceBackground.size,
+                    } : {}),
+                  }
             }
           >
             <div
@@ -4484,40 +4573,54 @@ export function ProjectNotebookBlock({
                   color: isPaperSurface ? ink.secondary : 'rgba(255,248,235,0.65)', fontSize: 11, fontWeight: 500,
                 }}
               >Copy Plain</button>
-              <button
-                type="button"
-                title={notebookSurface === 'paper' ? 'Spatial notebook' : 'Paper page'}
-                onClick={() => {
-                  const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
-                  onChange({ ...content, notebookSurface: next });
-                }}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-                  color: isPaperSurface ? ink.secondary : 'rgba(255,248,235,0.80)',
-                  fontSize: 11, letterSpacing: '0.06em',
-                }}
-              >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
-              {/* Math mode toggle */}
-              <button
-                type="button"
-                title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
-                onClick={() => {
-                  if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
-                    onChange({ ...content, notebookMode: 'math', paperStyle: 'grid', body: MATH_CALCULUS_NOTEBOOK_SEED });
-                    return;
-                  }
-                  const nextMode = notebookMode === 'math' ? 'normal' : 'math';
-                  onChange({
-                    ...content, notebookMode: nextMode,
-                    ...(nextMode === 'math' && paperStyle === 'ruled' ? { paperStyle: 'grid' as const } : {}),
-                  });
-                }}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-                  color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.80)',
-                  fontSize: 14, fontWeight: notebookMode === 'math' ? 600 : 400,
-                }}
-              >√</button>
+              {/* Paper/Spatial toggle — hidden for math-workspace (derivation zone is always spatial) */}
+              {notebookMode !== 'math-workspace' && (
+                <button
+                  type="button"
+                  title={notebookSurface === 'paper' ? 'Spatial notebook' : 'Paper page'}
+                  onClick={() => {
+                    const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
+                    onChange({ ...content, notebookSurface: next });
+                  }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                    color: isPaperSurface ? ink.secondary : 'rgba(255,248,235,0.80)',
+                    fontSize: 11, letterSpacing: '0.06em',
+                  }}
+                >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
+              )}
+              {/* Math mode indicator:
+                  math-workspace → ambient ∑ label (not a button — mode must not be changed here)
+                  math           → √ toggle to switch back to normal
+                  normal         → √ toggle to enable math */}
+              {notebookMode === 'math-workspace' ? (
+                <span style={{
+                  fontSize: 11, fontWeight: 400, letterSpacing: '0.10em',
+                  color: '#818cf8', opacity: 0.45, padding: '4px 8px',
+                  userSelect: 'none',
+                }}>∑ Zone</span>
+              ) : (
+                <button
+                  type="button"
+                  title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
+                  onClick={() => {
+                    if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
+                      onChange({ ...content, notebookMode: 'math', paperStyle: 'grid', body: MATH_CALCULUS_NOTEBOOK_SEED });
+                      return;
+                    }
+                    const nextMode = notebookMode === 'math' ? 'normal' : 'math';
+                    onChange({
+                      ...content, notebookMode: nextMode,
+                      ...(nextMode === 'math' && paperStyle === 'ruled' ? { paperStyle: 'grid' as const } : {}),
+                    });
+                  }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                    color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.80)',
+                    fontSize: 14, fontWeight: notebookMode === 'math' ? 600 : 400,
+                  }}
+                >√</button>
+              )}
 
               {/* Paper style cycle */}
               <button
@@ -4545,7 +4648,8 @@ export function ProjectNotebookBlock({
                 }}
               >×</button>
             </div>
-            {!isPaperSurface ? (
+            {/* Title: shown in spatial fullscreen except math-workspace (its ∑ Zone label suffices) */}
+            {!isPaperSurface && notebookMode !== 'math-workspace' ? (
               <h1 style={{
                 fontFamily: 'Georgia, serif', fontSize: 32, fontWeight: 400,
                 color: ink.headline, marginBottom: 40, lineHeight: 1.3,

@@ -172,8 +172,12 @@ export type PlainSegment = { type: 'text'; value: string } | { type: 'math'; val
 export function splitPlainMathSpans(text: string): PlainSegment[] {
   if (!text) return [{ type: 'text', value: '' }];
 
+  // Pattern notes:
+  //   (?<![a-zA-Z])[a-z]\([a-zA-Z0-9]\)=...  — lowercase single-letter functions: f(x)=x^2
+  //   (?<![a-zA-Z])[a-zA-Z]\s*->\s*\S+        — variable arrows: x->0, n -> infty
+  //   Both use negative lookbehind so they don't match mid-word (e.g. "matrix->")
   const pattern =
-    /(\bd\s*\/\s*d[a-zA-Z]\s+[^\n,;]+|\bpartial\s+[a-zA-Z]+\s*\/\s*partial\s+[a-zA-Z]+|\bint\s+\S+\s+to\s+\S+\s+.+?\s+d[a-zA-Z]\b|\blim\s+[a-zA-Z]+\s*-?>\s*\S+|\bsqrt\s*\([^)]+\)|\bsum\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|\bsigma\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|[A-Z]\([A-Za-z]+\)=[^\s,;.]+|[A-Z]{1,3}=[^\s,;.]+|[a-zA-Z]\s*\^[^\s,;.+]+|[a-zA-Z]_\d+|\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b(?:\s*[+\-]\s*\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b)*|[a-zA-Z0-9]+\s*\/\s*[a-zA-Z0-9]+|[a-zA-Z]=[^\s,;.]+)/gi;
+    /(\bd\s*\/\s*d[a-zA-Z]\s+[^\n,;]+|\bpartial\s+[a-zA-Z]+\s*\/\s*partial\s+[a-zA-Z]+|\bint\s+\S+\s+to\s+\S+\s+.+?\s+d[a-zA-Z]\b|\blim\s+[a-zA-Z]+\s*-?>\s*\S+|\bsqrt\s*\([^)]+\)|\bsum\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|\bsigma\s+[a-zA-Z]\s*=\s*\S+\s+to\s+\S+(?:\s+\S+)?|[A-Z]\([A-Za-z]+\)=[^\s,;.]+|(?<![a-zA-Z])[a-z]\([a-zA-Z0-9]\)\s*=\s*\S+|[A-Z]{1,3}=[^\s,;.]+|(?<![a-zA-Z])[a-zA-Z]\s*->\s*\S+|[a-zA-Z]\s*\^[^\s,;.+]+|[a-zA-Z]_\d+|\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b(?:\s*[+\-]\s*\b(?:alpha|beta|gamma|delta|theta|pi|sigma|omega|phi|infty|infinity)\b)*|[a-zA-Z0-9]+\s*\/\s*[a-zA-Z0-9]+|[a-zA-Z]=[^\s,;.]+)/gi;
 
   const segments: PlainSegment[] = [];
   let last = 0;
