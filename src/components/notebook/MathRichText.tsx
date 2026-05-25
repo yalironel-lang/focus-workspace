@@ -91,7 +91,7 @@ export const MathRichText = memo(function MathRichText({
         // Use span (not div) so MathRichText is safe inside <p> or inline <span> ancestors.
         // display:block gives identical layout; avoids the "div inside p/span" HTML violation.
         return (
-          <span key={i} style={{ display: 'block', margin: '10px 0', textAlign: 'center' }}>
+          <span key={i} style={{ display: 'block', margin: '20px 0', textAlign: 'center' }}>
             <KatexPreview latex={seg.latex} displayMode textColor={textColor} mutedColor={mutedColor} />
           </span>
         );

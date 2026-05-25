@@ -1,5 +1,6 @@
 import { memo, type CSSProperties } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import { MathEditableParagraph } from './MathEditableParagraph';
 
 interface EditableLineProps {
   id: string;
@@ -66,8 +67,6 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
         // Breathing room only at sequence boundaries — zero gap between consecutive steps
         marginTop: isFirst ? sequenceGap : '1px',
         marginBottom: isLast ? sequenceGap : '0',
-        display: 'flex',
-        alignItems: 'baseline',
         paddingLeft: '18px',
         paddingTop: isFirst ? '5px' : '2px',
         paddingBottom: isLast ? '5px' : '2px',
@@ -75,14 +74,11 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
         borderLeft: `2px solid ${tokens.accent}22`,
       }}
     >
-      <EditableLine
+      <MathEditableParagraph
         id={block.id}
         text={block.text}
         tokens={tokens}
         placeholder="…"
-        onUpdate={onUpdate}
-        onFocusIndex={onFocusIndex}
-        onAfterInput={onAfterInput}
         style={{
           flex: 1,
           border: 'none',
@@ -97,6 +93,12 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
+        textColor={ink.primary}
+        mutedColor={tokens.textMuted}
+        onUpdate={onUpdate}
+        onFocusIndex={onFocusIndex}
+        onAfterInput={onAfterInput}
+        EditableLine={EditableLine}
       />
     </div>
   );

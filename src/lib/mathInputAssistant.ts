@@ -138,6 +138,8 @@ export function plainMathToLatex(input: string): string {
   );
 
   s = s.replace(/\bsqrt\s*\(\s*([^)]+)\s*\)/gi, (_, x) => `\\sqrt{${plainMathToLatex(x)}}`);
+  // sqrt x without parens — catches `sqrt x`, `sqrt 2` etc. (runs after the paren form)
+  s = s.replace(/\bsqrt\s+([a-zA-Z0-9]+)/gi, (_, x) => `\\sqrt{${x}}`);
 
   s = convertGreekAndOps(s);
   s = convertFractions(s);
@@ -198,8 +200,17 @@ export function splitPlainMathSpans(text: string): PlainSegment[] {
   return segments.length > 0 ? segments : [{ type: 'text', value: text }];
 }
 
+/**
+ * LaTeX commands that indicate display mathematics (as opposed to prose formatting).
+ * Used to distinguish derivation steps like `\frac{d}{dx}x^n = nx^{n-1}` from
+ * text-formatting LaTeX like `\textbf{important}`.
+ */
+const DISPLAY_MATH_LATEX =
+  /\\(?:frac|dfrac|tfrac|cfrac|int|oint|iint|iiint|sum|prod|coprod|lim|limsup|liminf|max|min|inf|sup|sqrt|partial|nabla|binom|tbinom|dbinom|begin|end|underbrace|overbrace|hat|tilde|bar|vec|dot|ddot|widehat|overline|underline)/;
+
 export function textLikelyHasPlainMath(text: string): boolean {
   if (textHasMathDelimiters(text)) return true;
+  if (DISPLAY_MATH_LATEX.test(text)) return true;
   return splitPlainMathSpans(text).some(s => s.type === 'math');
 }
 
@@ -222,6 +233,7 @@ export function isLikelyMathLine(text: string): boolean {
 export function isWholeLineMath(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (DISPLAY_MATH_LATEX.test(t)) return true;
   const spans = splitPlainMathSpans(t);
   const significant = spans.filter(s => (s.type === 'math' ? true : s.value.trim().length > 0));
   if (significant.length === 0) return false;
@@ -233,6 +245,25 @@ export function isWholeLineMath(text: string): boolean {
 
 function textHasMathDelimiters(text: string): boolean {
   return /\$/.test(text);
+}
+
+/**
+ * True when text looks like a standalone mathematical expression that uses
+ * display-math LaTeX commands — NOT prose containing LaTeX formatting.
+ *
+ * Used during paste normalization to auto-promote undelimited lines like
+ * `\frac{d}{dx}x^n = nx^{n-1}` to explicit math blocks (`$$ ...`).
+ */
+export function looksLikeMathLatexExpression(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length < 3) return false;
+  // Must contain a recognized display-math command
+  if (!DISPLAY_MATH_LATEX.test(t)) return false;
+  // Skip prose-leading lines
+  if (PROSE_LEAD.test(t)) return false;
+  // Skip text/formatting LaTeX commands
+  if (/^\\(?:text|section|subsection|paragraph|chapter|label|ref|cite|textbf|textit|emph|underline|item\b|usepackage|newcommand|renewcommand|documentclass)/.test(t)) return false;
+  return true;
 }
 
 export type MathTemplateId = 'fraction' | 'exponent' | 'root' | 'integral' | 'limit' | 'sum';
