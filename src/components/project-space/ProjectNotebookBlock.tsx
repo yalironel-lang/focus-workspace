@@ -1657,6 +1657,7 @@ export function ProjectNotebookBlock({
   }, []);
 
   const isMathWorkspaceMode = notebookMode === 'math-workspace';
+  const isScratch = notebookMode === 'scratch';
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
       maxWidth: isMathNotebook ? 'min(760px, 100%)' : isPaperSurface ? 'min(640px, 100%)' : 'min(700px, 100%)',
@@ -1707,7 +1708,7 @@ export function ProjectNotebookBlock({
       width: '100%',
       ...(context === 'free-space' ? {} : { minHeight: '420px' }),
       boxSizing: 'border-box',
-      backgroundColor: isMathWorkspaceMode ? 'rgba(129,140,248,0.008)' : 'rgba(255,255,255,0.018)',
+      backgroundColor: isMathWorkspaceMode ? 'rgba(129,140,248,0.008)' : isScratch ? 'rgba(255,255,255,0.006)' : 'rgba(255,255,255,0.018)',
       backgroundImage: writingSurfaceBackground.image,
       backgroundSize: writingSurfaceBackground.size,
       color: ink.primary,
@@ -1717,12 +1718,15 @@ export function ProjectNotebookBlock({
       fontFamily: fontStack,
       fontFeatureSettings: '"kern" 1, "liga" 1',
       // Use explicit longhand border properties to avoid shorthand/longhand conflict warning
-      borderTop: '1px solid rgba(255,255,255,0.055)',
-      borderRight: '1px solid rgba(255,255,255,0.055)',
-      borderBottom: '1px solid rgba(255,255,255,0.055)',
-      borderLeft: isMathWorkspaceMode ? '2px solid rgba(129,140,248,0.38)' : (isMathNotebook ? '2px solid rgba(129,140,248,0.20)' : '1px solid rgba(255,255,255,0.055)'),
+      // scratch: very faint, no accent — margin paper feeling
+      borderTop: isScratch ? '1px solid rgba(255,255,255,0.022)' : '1px solid rgba(255,255,255,0.055)',
+      borderRight: isScratch ? '1px solid rgba(255,255,255,0.022)' : '1px solid rgba(255,255,255,0.055)',
+      borderBottom: isScratch ? '1px solid rgba(255,255,255,0.022)' : '1px solid rgba(255,255,255,0.055)',
+      borderLeft: isMathWorkspaceMode ? '2px solid rgba(129,140,248,0.38)' : isScratch ? '1px solid rgba(255,255,255,0.022)' : (isMathNotebook ? '2px solid rgba(129,140,248,0.20)' : '1px solid rgba(255,255,255,0.055)'),
       borderRadius: 22,
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
+      boxShadow: isScratch
+        ? 'inset 0 1px 0 rgba(255,255,255,0.02), 0 12px 32px rgba(0,0,0,0.10)'
+        : 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
       paddingTop: '24px',
       paddingBottom: '88px',
       outline: 'none',
@@ -1739,6 +1743,7 @@ export function ProjectNotebookBlock({
     typeScale.l3,
     isMathNotebook,
     isMathWorkspaceMode,
+    isScratch,
     isPaperSurface,
   ]);
 
@@ -2532,18 +2537,22 @@ export function ProjectNotebookBlock({
           </div>
         ) : null;
       }
-      // Step block — render with counter + border-left + math-aware text input
+      // Step block — continuous derivation flow (no card, no counter, faint left rail)
       if (block.kind === 'step') {
         let stepIndex = 1;
         for (let si = index - 1; si >= 0; si--) {
           if (blocks[si]!.kind !== 'step') break;
           stepIndex++;
         }
+        const isFirstStep = stepIndex === 1;
+        const isLastStep = index >= blocks.length - 1 || blocks[index + 1]?.kind !== 'step';
         return (
           <StepBlockRenderer
             key={block.id}
             block={block}
             stepIndex={stepIndex}
+            isFirst={isFirstStep}
+            isLast={isLastStep}
             isFocused={surfaceFocusBlockId === block.id}
             tokens={tokens}
             ink={ink}
@@ -3720,11 +3729,15 @@ export function ProjectNotebookBlock({
                 if (blocks[si]!.kind !== 'step') break;
                 stepIndex++;
               }
+              const isFirstStep = stepIndex === 1;
+              const isLastStep = index >= blocks.length - 1 || blocks[index + 1]?.kind !== 'step';
               return (
                 <StepBlockRenderer
                   key={block.id}
                   block={block}
                   stepIndex={stepIndex}
+                  isFirst={isFirstStep}
+                  isLast={isLastStep}
                   isFocused={surfaceFocusBlockId === block.id}
                   tokens={tokens}
                   ink={ink}

@@ -22,7 +22,11 @@ interface Props {
   block: StepBlock;
   /** 1-based position among consecutive step blocks (resets after any non-step block) */
   stepIndex: number;
-  /** Wired now for future focus-mode fading; intentionally unused in v1 */
+  /** True if this is the first step in a consecutive sequence (preceded by non-step or start) */
+  isFirst?: boolean;
+  /** True if this is the last step in a consecutive sequence (followed by non-step or end) */
+  isLast?: boolean;
+  /** Wired for future focus-mode fading; intentionally unused in v1 */
   isFocused: boolean;
   tokens: AtmosphereTokens;
   ink: { primary: string };
@@ -37,8 +41,10 @@ interface Props {
 
 export const StepBlockRenderer = memo(function StepBlockRenderer({
   block,
-  stepIndex,
+  // stepIndex kept in interface for future use; not rendered (no numbered cards)
   // isFocused intentionally unused — available for future focus-mode fading
+  isFirst = true,
+  isLast = true,
   tokens,
   ink,
   typeScale,
@@ -49,6 +55,7 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
   onFocusIndex,
   onAfterInput,
 }: Props) {
+  const sequenceGap = `${typeScale.s2 + 8}px`;
   return (
     <div
       data-nb-surface-block
@@ -56,38 +63,23 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
       data-nb-pulse={morphPulse ? '1' : undefined}
       style={{
         ...blockSurfaceChrome,
-        margin: `${typeScale.s2 + 8}px 0`,
+        // Breathing room only at sequence boundaries — zero gap between consecutive steps
+        marginTop: isFirst ? sequenceGap : '1px',
+        marginBottom: isLast ? sequenceGap : '0',
         display: 'flex',
         alignItems: 'baseline',
-        gap: '10px',
-        paddingLeft: '14px',
-        paddingTop: '6px',
-        paddingBottom: '6px',
-        borderLeft: `2px solid ${tokens.accent}50`,
+        paddingLeft: '18px',
+        paddingTop: isFirst ? '5px' : '2px',
+        paddingBottom: isLast ? '5px' : '2px',
+        // Whisper rail: marks the derivation column without creating a bordered section
+        borderLeft: `2px solid ${tokens.accent}22`,
       }}
     >
-      {/* Editorial margin marker — quiet, paper-like, not a primary label */}
-      <span
-        style={{
-          fontSize: `${typeScale.l5 - 1}px`,
-          fontWeight: 400,
-          color: tokens.accent,
-          opacity: 0.42,
-          minWidth: '14px',
-          userSelect: 'none',
-          letterSpacing: '0.04em',
-          fontVariantNumeric: 'tabular-nums',
-          flexShrink: 0,
-        }}
-        aria-hidden
-      >
-        {stepIndex}
-      </span>
       <EditableLine
         id={block.id}
         text={block.text}
         tokens={tokens}
-        placeholder="Derivation step…"
+        placeholder="…"
         onUpdate={onUpdate}
         onFocusIndex={onFocusIndex}
         onAfterInput={onAfterInput}
