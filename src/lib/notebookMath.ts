@@ -15,9 +15,9 @@ export interface KatexRenderResult {
   error: string | null;
 }
 
-/** True if string contains $ or LaTeX delimiters worth parsing. */
+/** True if string contains $ delimiters worth parsing. */
 export function textHasMathDelimiters(text: string): boolean {
-  return /\$|\\[\[(]/.test(text);
+  return /\$/.test(text);
 }
 
 /**
@@ -32,26 +32,6 @@ export function parseMathSegments(input: string): MathSegment[] {
   let i = 0;
 
   while (i < input.length) {
-    // \[...\] → display segment
-    if (input[i] === '\\' && input[i + 1] === '[') {
-      const close = input.indexOf('\\]', i + 2);
-      if (close !== -1) {
-        const latex = input.slice(i + 2, close).trim();
-        if (latex) segments.push({ type: 'display', latex });
-        i = close + 2;
-        continue;
-      }
-    }
-    // \(...\) → inline segment
-    if (input[i] === '\\' && input[i + 1] === '(') {
-      const close = input.indexOf('\\)', i + 2);
-      if (close !== -1) {
-        const latex = input.slice(i + 2, close).trim();
-        if (latex) segments.push({ type: 'inline', latex });
-        i = close + 2;
-        continue;
-      }
-    }
     if (input.startsWith('$$', i)) {
       const close = input.indexOf('$$', i + 2);
       if (close !== -1) {
@@ -73,7 +53,7 @@ export function parseMathSegments(input: string): MathSegment[] {
 
     let next = input.length;
     for (let j = i + 1; j < input.length; j += 1) {
-      if (input[j] === '$' || (input[j] === '\\' && (input[j + 1] === '[' || input[j + 1] === '('))) {
+      if (input[j] === '$') {
         next = j;
         break;
       }
@@ -81,7 +61,7 @@ export function parseMathSegments(input: string): MathSegment[] {
     const chunk = input.slice(i, next);
     if (chunk) segments.push({ type: 'text', value: chunk });
     i = next === input.length ? input.length : next;
-    if (i < input.length && (input[i] === '$' || input[i] === '\\')) continue;
+    if (i < input.length && input[i] === '$') continue;
   }
 
   return segments.length > 0 ? segments : [{ type: 'text', value: input }];

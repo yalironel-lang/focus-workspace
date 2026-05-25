@@ -44,9 +44,6 @@ const TAB_TRIGGERS: Array<{ trigger: string; template: string }> = [
   { trigger: 'sqrt', template: 'sqrt(x)' },
   { trigger: 'sum', template: 'sum i=1 to n i' },
   { trigger: 'd/dx', template: 'd/dx x^2' },
-  { trigger: 'matrix', template: '\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}' },
-  { trigger: 'cases',  template: '\\begin{cases} f(x) & x > 0 \\\\ 0 & x \\leq 0 \\end{cases}' },
-  { trigger: 'frac',   template: 'a/b' },
 ];
 
 export interface TabExpansionResult {

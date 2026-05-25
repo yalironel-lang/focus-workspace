@@ -19,18 +19,16 @@ import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSe
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { StepBlockRenderer } from '../notebook/StepBlockRenderer';
-import { MathBar } from '../notebook/MathBar';
-import type { MathBarBlockIntent } from '../notebook/MathBar';
 import { MathInputToolbar } from '../notebook/MathInputToolbar';
 import { MathRichText } from '../notebook/MathRichText';
 import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
+import { MathStudyInsight } from '../notebook/MathStudyInsight';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
 import { nbImageGet, nbImageSet } from '../../lib/notebookImageStore';
 import {
   getMathTemplate,
   isLikelyMathLine,
-  looksLikeMathLatexExpression,
   plainMathToLatex,
   textLikelyHasPlainMath,
   type MathTemplateId,
@@ -68,56 +66,6 @@ type NotebookLine =
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
 function normalizeNotebookSpaces(s: string): string {
   return s.replace(/\u00a0/g, ' ');
-}
-
-/**
- * Normalize LaTeX delimiter variants to the internal `$$ ...` / `$...$` storage format.
- * Called in morphParagraphLine before line-splitting so multi-line blocks collapse correctly.
- *
- * Handles pasted content from Claude, ChatGPT, and standard LaTeX documents:
- *   \[...\]           \u2192 $$ content   (display math block)
- *   \(...\)           \u2192 $content$    (inline math)
- *   \begin{align}...\end{align} etc  \u2192 $$ content (single-line)
- *   $$\n...\n$$       \u2192 $$ content   (multi-line display collapsed)
- *   $$expr$$          \u2192 $$ expr      (fix: strip trailing delimiter)
- */
-function normalizePastedMathDelimiters(text: string): string {
-  let s = text;
-  // 1. \begin{equation|align|aligned|gather|eqnarray}...\end{...} \u2192 $$ content (single line)
-  s = s.replace(
-    /\\begin\{(?:equation|align|aligned|gather|eqnarray)\*?\}\s*([\s\S]*?)\s*\\end\{(?:equation|align|aligned|gather|eqnarray)\*?\}/g,
-    (_, inner: string) => '\n$$ ' + inner.trim().replace(/\s*\n\s*/g, ' ') + '\n',
-  );
-  // 2. Multi-line \[...\] \u2192 $$ content (single line)
-  s = s.replace(
-    /\\\[\s*\n([\s\S]*?)\n\s*\\\]/g,
-    (_, inner: string) => '\n$$ ' + inner.trim().replace(/\s*\n\s*/g, ' ') + '\n',
-  );
-  // 3. Single-line \[...\] \u2192 $$ content
-  s = s.replace(/\\\[([^\n]*?)\\\]/g, (_, inner: string) => '$$ ' + inner.trim());
-  // 4. \(...\) \u2192 $...$
-  s = s.replace(/\\\(([^\n]*?)\\\)/g, (_, inner: string) => '$' + inner.trim() + '$');
-  // 5. Multi-line $$\n...\n$$ \u2192 $$ content (single line)
-  s = s.replace(
-    /\$\$\s*\n([\s\S]*?)\n\s*\$\$/g,
-    (_, inner: string) => '\n$$ ' + inner.trim().replace(/\s*\n\s*/g, ' ') + '\n',
-  );
-  // 6. Single-line $$expr$$ \u2192 $$ expr  (strip closing $$)
-  s = s.replace(/^\$\$\s*(.*?)\s*\$\$\s*$/gm, (_, inner: string) => '$$ ' + inner.trim());
-  // 7. Auto-promote undelimited LaTeX math expressions to display blocks.
-  // Catches derivation steps pasted from LaTeX sources, e.g.:
-  //   \frac{d}{dx}x^n = nx^{n-1}  \u2192  $$ \frac{d}{dx}x^n = nx^{n-1}
-  s = s.replace(/^([^\n]+)$/gm, (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return line;
-    // Skip lines already prefixed as a block type
-    if (/^(\$\$|\$|#|>|!|-|\d+\.|=>|::)/.test(trimmed) || trimmed.startsWith('\\[') || trimmed.startsWith('\\(')) return line;
-    if (looksLikeMathLatexExpression(trimmed)) {
-      return '$$ ' + trimmed;
-    }
-    return line;
-  });
-  return s;
 }
 
 /**
@@ -170,13 +118,8 @@ function parseNotebookLine(raw: string): NotebookLine {
     };
   }
 
-  // Strip trailing $$ if present (e.g. pasted $$expr$$)
-  const mathMatch = trimmed.match(/^\$\$\s*(.*?)(?:\s*\$\$)?$/);
+  const mathMatch = trimmed.match(/^\$\$\s*(.*)$/);
   if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
-
-  // \[...\] single-line fallback — for content that bypasses the paste normalizer
-  const latexBlockMatch = trimmed.match(/^\\\[\s*(.*?)\s*\\\]$/);
-  if (latexBlockMatch) return { kind: 'math', text: (latexBlockMatch[1] ?? '').trim() };
 
   const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
   if (imgMatch) return { kind: 'image-ref', key: imgMatch[1]!, alt: imgMatch[2] ?? '' };
@@ -443,8 +386,7 @@ function serializeBlocks(blocks: Block[]): string {
 }
 
 function morphParagraphLine(text: string, blockId: string): Block | Block[] {
-  let normalized = normalizeNotebookSpaces(text).replace(/\r\n/g, '\n');
-  normalized = normalizePastedMathDelimiters(normalized);
+  const normalized = normalizeNotebookSpaces(text).replace(/\r\n/g, '\n');
   if (!normalized.includes('\n')) {
     const parsed = parseNotebookLine(normalized);
     if (parsed.kind === 'blank') return { id: blockId, kind: 'paragraph', text: '' };
@@ -1065,7 +1007,7 @@ export function ProjectNotebookBlock({
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
-  // mathToolbarHovered removed — Math Bar handles its own hover state
+  const [mathToolbarHovered, setMathToolbarHovered] = useState(false);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -1936,35 +1878,6 @@ export function ProjectNotebookBlock({
       pendingCaretRef.current = { id: blockId, offset: offset + insert.length };
     },
     [surfaceFocusBlockId, updateBlockText, getEditorRoot],
-  );
-
-  /** Math Bar: insert a semantic block after the currently focused block (or at end). */
-  const handleAddMathBlock = useCallback(
-    (kind: MathBarBlockIntent) => {
-      const newId = newBlockId();
-      let newBlock: Block;
-      if (kind === 'step') {
-        newBlock = { id: newId, kind: 'step', text: '' };
-      } else if (kind === 'math') {
-        newBlock = { id: newId, kind: 'math', text: '' };
-      } else if (kind === 'theorem') {
-        newBlock = { id: newId, kind: 'callout', tone: 'theorem', text: '' };
-      } else if (kind === 'definition') {
-        newBlock = { id: newId, kind: 'callout', tone: 'definition', text: '' };
-      } else {
-        newBlock = { id: newId, kind: 'callout', tone: 'concept', text: '' };
-      }
-      const prev = blocksRef.current;
-      const focused = surfaceFocusBlockId;
-      const idx = focused ? prev.findIndex(b => b.id === focused) : prev.length - 1;
-      const insertAt = idx >= 0 ? idx + 1 : prev.length;
-      const next = [...prev.slice(0, insertAt), newBlock, ...prev.slice(insertAt)];
-      setMorphPulseId(newId);
-      setBlocks(next);
-      pushContent({ ...content, body: serializeBlocks(next) });
-      pendingCaretRef.current = { id: newId, offset: 0 };
-    },
-    [surfaceFocusBlockId, content, pushContent],
   );
 
   const applyMathTemplate = useCallback(
@@ -3300,7 +3213,48 @@ export function ProjectNotebookBlock({
           )
         : null}
 
-      {/* Command reference strip removed — replaced by the bottom MathBar (intent-based, not syntax-based) */}
+      {/* Math Zone command reference strip — ghosted at rest, fully visible on hover */}
+      {notebookMode === 'math-workspace' && (
+        <div
+          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.opacity = '0.12'; }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            padding: '5px 18px 6px',
+            flexWrap: 'wrap',
+            borderBottom: '1px solid rgba(129,140,248,0.09)',
+            flexShrink: 0,
+            opacity: 0.12,
+            transition: 'opacity 0.25s ease',
+          }}
+        >
+          <span style={{
+            fontSize: 9.5, color: 'rgba(129,140,248,0.38)',
+            letterSpacing: '0.13em', textTransform: 'uppercase',
+            flexShrink: 0, userSelect: 'none',
+          }}>Quick ref</span>
+          {([
+            { key: '=>', label: 'step' },
+            { key: '/', label: 'commands' },
+            { key: 'int·Tab', label: 'integral' },
+            { key: 'lim·Tab', label: 'limit' },
+            { key: '/math', label: 'formula' },
+          ] as const).map(({ key, label }) => (
+            <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+              <kbd style={{
+                background: 'rgba(129,140,248,0.07)',
+                border: '1px solid rgba(129,140,248,0.16)',
+                borderRadius: 4, padding: '1px 5px',
+                fontSize: 10, fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                color: 'rgba(129,140,248,0.70)', fontWeight: 500, letterSpacing: 0,
+              }}>{key}</kbd>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{label}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
       <div
@@ -3331,15 +3285,28 @@ export function ProjectNotebookBlock({
           style={editorSurfaceStyle}
         >
           <div style={writingColumnStyle}>
-          {/* Regular math notebook: keep compact symbol toolbar at top.
-              Math-workspace: toolbar replaced by bottom MathBar + inline symbols in EquationBlockEditor. */}
-          {isMathNotebook && !isMathWorkspaceMode ? (
-            <MathInputToolbar
-              tokens={tokens}
-              textColor={ink.headline}
-              onInsertSymbol={insertMathSnippet}
-              onApplyTemplate={applyMathTemplate}
-            />
+          {isMathNotebook ? (
+            <>
+              <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
+              {/* Ghost the symbol row on math-workspace so math content has visual priority */}
+              <div
+                style={{
+                  opacity: notebookMode === 'math-workspace'
+                    ? (mathToolbarHovered ? 1 : 0.15)
+                    : 1,
+                  transition: 'opacity 0.22s ease',
+                }}
+                onMouseEnter={() => setMathToolbarHovered(true)}
+                onMouseLeave={() => setMathToolbarHovered(false)}
+              >
+                <MathInputToolbar
+                  tokens={tokens}
+                  textColor={ink.headline}
+                  onInsertSymbol={insertMathSnippet}
+                  onApplyTemplate={applyMathTemplate}
+                />
+              </div>
+            </>
           ) : null}
           {blocks.map((block, index) => {
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
@@ -4016,16 +3983,6 @@ export function ProjectNotebookBlock({
               </div>
             );
           })}
-          {/* Math Bar — intent-based block insertion for math-workspace.
-              Positioned at the bottom of the content flow, after all blocks.
-              Replaces static toolbar + command reference strip. */}
-          {isMathWorkspaceMode && (
-            <MathBar
-              tokens={tokens}
-              onAddBlock={handleAddMathBlock}
-              onInsertSymbol={insertMathSnippet}
-            />
-          )}
           </div>
         </div>
       ) : (
@@ -4368,14 +4325,10 @@ export function ProjectNotebookBlock({
                       fontSize: `${typeScale.l3}px`,
                       fontWeight: 400,
                       lineHeight: 1.82,
+                      whiteSpace: 'pre-wrap',
                     }}
                   >
-                    <MathRichText
-                      text={line.text}
-                      autoPlainMath={isMathNotebook}
-                      textColor={ink.primary}
-                      mutedColor={tokens.textMuted}
-                    />
+                    {line.text}
                   </div>
                 </div>
               );
@@ -4386,12 +4339,10 @@ export function ProjectNotebookBlock({
                   key={lineKey}
                   style={{
                     margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
-                    // Math mode: clean display equation — no card, no border, no background.
-                    // Non-math mode: keep the bordered widget for clarity.
-                    padding: isMathNotebook ? '8px 0' : '15px 18px',
-                    borderRadius: isMathNotebook ? 0 : '16px',
-                    border: isMathNotebook ? 'none' : `1px solid ${tokens.cardBorder}`,
-                    backgroundColor: isMathNotebook ? 'transparent' : `${tokens.wellBg}44`,
+                    padding: '15px 18px',
+                    borderRadius: '16px',
+                    border: `1px solid ${tokens.cardBorder}`,
+                    backgroundColor: `${tokens.wellBg}44`,
                   }}
                 >
                   {!isMathNotebook ? (
@@ -4408,10 +4359,7 @@ export function ProjectNotebookBlock({
                       Equation
                     </div>
                   ) : null}
-                  <div
-                    className={isMathNotebook ? 'math-nb-hero' : undefined}
-                    style={isMathNotebook ? { textAlign: 'center' } : undefined}
-                  >
+                  <div className={isMathNotebook ? 'math-nb-hero' : undefined}>
                     <KatexPreview
                       latex={plainMathToLatex(line.text)}
                       displayMode

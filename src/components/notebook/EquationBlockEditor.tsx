@@ -4,7 +4,6 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { CSSProperties } from 'react';
 import { KatexPreview } from './KatexPreview';
 import { latexToSimple, looksLikeLatex, plainMathToLatex } from '../../lib/mathInputAssistant';
-import { tryMathTabExpansion } from '../../lib/mathStemShortcuts';
 
 interface EditableLineProps {
   id: string;
@@ -18,31 +17,6 @@ interface EditableLineProps {
 }
 
 type EditMode = 'simple' | 'latex';
-
-/** Greek word → unicode symbol conversions triggered by a trailing space in simple mode. */
-const GREEK_DISPLAY: Array<[string, string]> = [
-  ['alpha', 'α'], ['beta', 'β'], ['gamma', 'γ'], ['delta', 'δ'],
-  ['epsilon', 'ε'], ['theta', 'θ'], ['lambda', 'λ'], ['mu', 'μ'],
-  ['pi', 'π'], ['sigma', 'σ'], ['omega', 'ω'], ['phi', 'φ'],
-  ['tau', 'τ'], ['rho', 'ρ'], ['infty', '∞'], ['inf', '∞'],
-];
-
-/** Symbols available in the inline strip when an equation block is focused (simple mode). */
-const EQUATION_SYMBOLS: Array<{ label: string; insert: string }> = [
-  { label: 'α', insert: 'alpha' },
-  { label: 'β', insert: 'beta' },
-  { label: 'γ', insert: 'gamma' },
-  { label: 'θ', insert: 'theta' },
-  { label: 'π', insert: 'pi' },
-  { label: '∞', insert: 'infinity' },
-  { label: '∂', insert: '\\partial' },
-  { label: '→', insert: '->' },
-  { label: '±', insert: '\\pm' },
-  { label: '≤', insert: '<=' },
-  { label: '≥', insert: '>=' },
-  { label: '≠', insert: '!=' },
-  { label: '×', insert: '\\times' },
-];
 
 interface Props {
   blockId: string;
@@ -88,7 +62,6 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
   morphPulse,
 }: Props) {
   const [copied, setCopied] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
   // math-workspace always uses simple mode — the Simple↔LaTeX distinction is an impl detail
   const [editMode, setEditMode] = useState<EditMode>(() => isMathWorkspace ? 'simple' : initialEditMode(text, isMathNotebook));
   // editingDraft: updates immediately on every keystroke (drives the input's value)
@@ -135,48 +108,10 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
 
   const handleSimpleChange = useCallback(
     (value: string) => {
-      let processed = value;
-      // Space-triggered Greek word → unicode symbol (e.g. "alpha " → "α ")
-      if (value.endsWith(' ')) {
-        const withoutSpace = value.slice(0, -1);
-        for (const [word, sym] of GREEK_DISPLAY) {
-          if (withoutSpace.endsWith(word)) {
-            const charBefore = withoutSpace[withoutSpace.length - word.length - 1];
-            if (!charBefore || !/[a-zA-Z]/.test(charBefore)) {
-              processed = withoutSpace.slice(0, withoutSpace.length - word.length) + sym + ' ';
-              break;
-            }
-          }
-        }
-      }
-      setEditingDraft(processed);
-      schedulePersist(plainMathToLatex(processed));
+      setEditingDraft(value);
+      schedulePersist(plainMathToLatex(value));
     },
     [schedulePersist],
-  );
-
-  const handleSymbolInsert = useCallback(
-    (symbolInsert: string) => {
-      const input = document.querySelector<HTMLInputElement>(`[data-equation-simple="${blockId}"]`);
-      if (!input) {
-        // No input visible — just append to draft
-        const next = editingDraft + symbolInsert;
-        handleSimpleChange(next);
-        return;
-      }
-      const start = input.selectionStart ?? input.value.length;
-      const end = input.selectionEnd ?? start;
-      const before = input.value.slice(0, start);
-      const after = input.value.slice(end);
-      const next = before + symbolInsert + after;
-      handleSimpleChange(next);
-      requestAnimationFrame(() => {
-        input.focus();
-        const pos = start + symbolInsert.length;
-        input.setSelectionRange(pos, pos);
-      });
-    },
-    [blockId, editingDraft, handleSimpleChange],
   );
 
   const handleCopy = useCallback(async () => {
@@ -209,33 +144,21 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
   const showEditor = isFocused || !text.trim();
   const useSimple = isMathNotebook && editMode === 'simple';
 
-  // In math-workspace, the block reveals its chrome only on hover/focus.
-  // Resting state: pure equation display — no border, no background, no chrome.
-  const wsChrome = isFocused || isHovered;
-
   return (
     <div
       data-nb-surface-block
       data-block-id={blockId}
       data-nb-pulse={morphPulse ? '1' : undefined}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       style={{
         ...surfaceChrome,
         ...marginStyle,
-        padding: isMathWorkspace
-          ? (wsChrome ? '14px 16px 12px' : '6px 0')
-          : (isMathNotebook ? '14px 16px 12px' : '15px 18px'),
+        padding: isMathNotebook ? '14px 16px 12px' : '15px 18px',
         borderRadius: isMathWorkspace ? '10px' : '16px',
         border: isMathWorkspace
-          ? (isFocused
-              ? `1px solid ${tokens.accent}44`
-              : isHovered
-                ? `1px solid ${tokens.accent}22`
-                : 'none')
+          ? `1px solid ${isFocused ? `${tokens.accent}44` : `${tokens.accent}1a`}`
           : `1px solid ${isFocused ? `${tokens.accent}44` : tokens.cardBorder}`,
         background: isMathWorkspace
-          ? (wsChrome ? `linear-gradient(180deg, ${tokens.wellBg}55 0%, ${tokens.cardBg}33 100%)` : 'transparent')
+          ? `linear-gradient(180deg, ${tokens.wellBg}55 0%, ${tokens.cardBg}33 100%)`
           : `linear-gradient(180deg, ${tokens.wellBg}ee 0%, ${tokens.cardBg}c8 100%)`,
         boxShadow: isMathWorkspace
           ? (isFocused ? `0 0 0 1px ${tokens.accent}28` : 'none')
@@ -244,16 +167,13 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
               : 'inset 0 1px 0 rgba(255,255,255,0.04)'),
       }}
     >
-      {/* Header chrome: always visible outside math-workspace; on hover/focus only inside it */}
-      {(!isMathWorkspace || wsChrome) && <div
+      <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 8,
           marginBottom: `${typeScale.s5}px`,
-          opacity: isMathWorkspace && !isFocused ? 0.65 : 1,
-          transition: 'opacity 0.15s ease',
         }}
       >
         {!isMathNotebook ? (
@@ -340,17 +260,14 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
             <Trash2 className="w-3 h-3" />
           </button>
         </div>
-      </div>}
+      </div>
 
       <div
-        className={isMathNotebook && (!isMathWorkspace || wsChrome) ? 'math-nb-hero' : undefined}
+        className={isMathNotebook ? 'math-nb-hero' : undefined}
         style={{
           marginBottom: showEditor ? 6 : 0,
-          padding: isMathWorkspace && !wsChrome
-            ? '4px 0'
-            : (isMathNotebook ? '14px 10px 10px' : '4px 0'),
+          padding: isMathNotebook ? '14px 10px 10px' : '4px 0',
           minHeight: isMathNotebook ? 48 : undefined,
-          textAlign: isMathWorkspace && !wsChrome ? 'center' : undefined,
         }}
       >
         <KatexPreview
@@ -363,49 +280,6 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
         />
       </div>
 
-      {/* Inline symbol strip — appears between preview and input when focused in simple mode.
-          Keeps math tools spatially collocated with where the student is typing.
-          data-math-input-toolbar prevents the input from blurring on symbol click. */}
-      {showEditor && useSimple && isFocused && (
-        <div
-          data-math-input-toolbar="1"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            gap: 2,
-            padding: '5px 4px 3px',
-          }}
-        >
-          {EQUATION_SYMBOLS.map(sym => (
-            <button
-              key={sym.insert}
-              type="button"
-              title={sym.label}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => handleSymbolInsert(sym.insert)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: `1px solid ${tokens.cardBorder}`,
-                background: 'transparent',
-                color: tokens.textMuted,
-                borderRadius: 5,
-                width: 22,
-                height: 20,
-                fontSize: 12,
-                cursor: 'pointer',
-                lineHeight: 1,
-                opacity: 0.72,
-              }}
-            >
-              {sym.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       {showEditor ? (
         useSimple ? (
             <input
@@ -414,22 +288,6 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
               value={editingDraft}
               onChange={e => handleSimpleChange(e.target.value)}
               onFocus={() => onFocusIndex(blockId)}
-              onKeyDown={e => {
-                if (e.key === 'Tab') {
-                  const pos = e.currentTarget.selectionStart ?? editingDraft.length;
-                  const expanded = tryMathTabExpansion(editingDraft, pos);
-                  if (expanded) {
-                    e.preventDefault();
-                    handleSimpleChange(expanded.text);
-                    requestAnimationFrame(() => {
-                      const inp = document.querySelector<HTMLInputElement>(
-                        `[data-equation-simple="${blockId}"]`,
-                      );
-                      if (inp) inp.setSelectionRange(expanded.caret, expanded.caret);
-                    });
-                  }
-                }
-              }}
               onBlur={e => {
                 const next = e.relatedTarget as HTMLElement | null;
                 if (next?.closest('[data-math-input-toolbar]')) return;
