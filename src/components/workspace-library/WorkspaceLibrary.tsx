@@ -243,6 +243,39 @@ function WorkspaceLibraryView() {
     return sections.find(s => s.id === recentIdsOrdered[0]) ?? null;
   }, [recentIdsOrdered, sections]);
 
+  // Spatial scene ordering — recency first, then alphabetical
+  const spatialOrder = useMemo(() => {
+    const byRecency = recentIdsOrdered
+      .map(id => sections.find(s => s.id === id))
+      .filter((s): s is SectionWithProgress => s !== undefined);
+    const rest = sections
+      .filter(s => !recentIdsOrdered.includes(s.id))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    return [...byRecency, ...rest];
+  }, [sections, recentIdsOrdered]);
+
+  // Show 3-screen spatial stage when unfiltered and not searching
+  const showSpatialScene = hasWorkspaces && filterFolder === 'all' && !search && !loading;
+
+  // ── Spatial navigation — which workspace occupies the primary slot ───────────
+  const [primaryIdx, setPrimaryIdx] = useState(0);
+
+  // Keep index valid when workspace list changes
+  useEffect(() => {
+    if (spatialOrder.length === 0) return;
+    setPrimaryIdx(prev => Math.min(prev, spatialOrder.length - 1));
+  }, [spatialOrder.length]);
+
+  const spatialSlots = useMemo(() => {
+    const len = spatialOrder.length;
+    if (len === 0) return { s0: null, s1: null, s2: null, rail: [] as SectionWithProgress[] };
+    const s0 = spatialOrder[primaryIdx] ?? null;
+    const s1 = len > 1 ? spatialOrder[(primaryIdx - 1 + len) % len] : null;
+    const s2 = len > 2 ? spatialOrder[(primaryIdx + 1) % len] : null;
+    const staged = new Set([s0?.id, s1?.id, s2?.id].filter((id): id is string => Boolean(id)));
+    return { s0, s1, s2, rail: spatialOrder.filter(s => !staged.has(s.id)) };
+  }, [spatialOrder, primaryIdx]);
+
   const filterChips = useMemo(() => [
     { id: 'all' as const, label: 'All' },
     { id: 'unfiled' as const, label: 'Unfiled' },
@@ -353,9 +386,10 @@ function WorkspaceLibraryView() {
     );
   };
 
-  // ─── Environment accent — follows most-recently-opened workspace ─────────────
-  const sA = continueWorkspace
-    ? (getWorkspaceCustomization(continueWorkspace.id).accent || accentForTitle(continueWorkspace.title))
+  // ─── Environment accent — follows active primary workspace ──────────────────
+  const activePrimary = showSpatialScene && spatialSlots.s0 ? spatialSlots.s0 : continueWorkspace;
+  const sA = activePrimary
+    ? (getWorkspaceCustomization(activePrimary.id).accent || accentForTitle(activePrimary.title))
     : tokens.accent;
   const sidebarParallax = spatialParallaxOffset(spatial, 0.12);
 
@@ -713,68 +747,203 @@ function WorkspaceLibraryView() {
             </div>
           )}
 
-          {/* WORKSPACE GRID — spatial object field */}
-          <div
-            className="library-page-pad"
-            style={{
-            flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 18, paddingBottom: 80, position: 'relative',
-            maskImage: 'linear-gradient(180deg, black 0%, black 90%, transparent 100%)',
-          }}>
-            {hasWorkspaces && (
-              <div style={{
-                position: 'absolute', left: 0, right: 0, top: -24, height: 200,
-                pointerEvents: 'none', zIndex: 0,
-                background: `linear-gradient(180deg, ${sA}14 0%, ${sA}06 42%, transparent 100%)`,
-                opacity: 0.85,
-              }} />
-            )}
-            <div data-guide-home="workspace-grid" style={{ position: 'relative', zIndex: 1 }}>
-            {loading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 64 }}>
-                <Loader2 style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.16)', animation: 'spin 1s linear infinite' }} />
-              </div>
-            ) : (
-              <>
-                {hasWorkspaces && (
-                  <>
-                    <div style={{ marginBottom: 14 }}>
-                      <h2 style={{ fontSize: 9, fontWeight: 920, letterSpacing: '0.26em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)', margin: 0 }}>
-                        {filterFolder === 'all' ? 'Your workspaces' : filterFolder === 'unfiled' ? 'Unfiled' : (folders.find(f => f.id === filterFolder)?.name ?? 'Workspaces')}
-                      </h2>
-                    </div>
+          {/* ═══════════════════════════════════════════════════════════════
+              SPATIAL SCENE — 3-screen perspective stage
+          ═══════════════════════════════════════════════════════════════ */}
+          {showSpatialScene && (() => {
+            const { s0, s1, s2, rail } = spatialSlots;
+            const spatialLen = spatialOrder.length;
+            return (
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  maskImage: 'linear-gradient(180deg, black 0%, black 88%, transparent 100%)',
+                }}
+              >
+                {/* 3-screen perspective stage */}
+                <div
+                  className="library-spatial-scene library-page-pad"
+                  style={{ animation: 'libFadeIn 0.5s 0.15s ease both' }}
+                >
+                  {/* Ghost camera-shift nav — left */}
+                  {spatialLen > 1 && (
+                    <button
+                      type="button"
+                      className="library-spatial-nav-btn library-spatial-nav-btn--left"
+                      onClick={() => setPrimaryIdx(i => (i - 1 + spatialLen) % spatialLen)}
+                      aria-label="Previous workspace"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M9 2.5L4.5 7L9 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                  )}
 
-                    {filterFolder === 'all' && grouped ? (
-                      <>
-                        {folders.map(folder => {
-                          const list = grouped.byFolder.get(folder.id) ?? [];
-                          if (!list.length) return null;
-                          return (
-                            <div key={folder.id} style={{ marginBottom: 34 }}>
-                              <h3 style={{ fontSize: 10, fontWeight: 680, color: 'rgba(255,255,255,0.24)', marginBottom: 13, marginTop: 0, letterSpacing: '0.04em' }}>{folder.name}</h3>
-                              {renderGrid(list)}
-                            </div>
-                          );
-                        })}
-                        {grouped.unfiled.length > 0 && (
-                          <div style={{ marginBottom: 34 }}>
-                            {folders.length > 0 && <h3 style={{ fontSize: 10, fontWeight: 680, color: 'rgba(255,255,255,0.24)', marginBottom: 13, marginTop: 0, letterSpacing: '0.04em' }}>Unfiled</h3>}
-                            {renderGrid(grouped.unfiled)}
-                          </div>
-                        )}
-                      </>
+                  {/* Secondary left */}
+                  <div key={s1?.id ?? 'left'} className="library-screen-secondary-left" style={{ animation: 'libFadeIn 0.28s ease both' }}>
+                    {s1 ? (
+                      <SpatialLibraryCard
+                        section={s1}
+                        deadlines={deadlinesFor(s1.id)}
+                        tokens={tokens}
+                        folders={folders}
+                        folderId={getFolderForSection(s1.id)}
+                        onFolderChange={setSectionFolder}
+                        onDelete={setDeleteTarget}
+                        openedAt={openedAt(s1.id) ?? undefined}
+                        spatialVariant="secondary"
+                      />
                     ) : (
-                      renderGrid(filteredSections)
+                      <button
+                        type="button"
+                        className="library-screen-slot-empty"
+                        onClick={() => setShowNew(true)}
+                        aria-label="Add workspace"
+                      >
+                        <Plus style={{ width: 20, height: 20, color: 'rgba(255,255,255,0.18)' }} strokeWidth={1.5} />
+                      </button>
                     )}
+                  </div>
 
-                    {!loading && !filteredSections.length && sections.length > 0 && (
-                      <p style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.20)', marginTop: 20 }}>No workspaces match this filter.</p>
+                  {/* Primary — centre */}
+                  <div key={s0?.id ?? 'primary'} className="library-screen-primary" style={{ animation: 'libFadeIn 0.28s ease both' }}>
+                    {s0 ? (
+                      <SpatialLibraryCard
+                        section={s0}
+                        deadlines={deadlinesFor(s0.id)}
+                        tokens={tokens}
+                        folders={folders}
+                        folderId={getFolderForSection(s0.id)}
+                        onFolderChange={setSectionFolder}
+                        onDelete={setDeleteTarget}
+                        openedAt={openedAt(s0.id) ?? undefined}
+                        spatialVariant="primary"
+                      />
+                    ) : null}
+                  </div>
+
+                  {/* Secondary right */}
+                  <div key={s2?.id ?? 'right'} className="library-screen-secondary-right" style={{ animation: 'libFadeIn 0.28s ease both' }}>
+                    {s2 ? (
+                      <SpatialLibraryCard
+                        section={s2}
+                        deadlines={deadlinesFor(s2.id)}
+                        tokens={tokens}
+                        folders={folders}
+                        folderId={getFolderForSection(s2.id)}
+                        onFolderChange={setSectionFolder}
+                        onDelete={setDeleteTarget}
+                        openedAt={openedAt(s2.id) ?? undefined}
+                        spatialVariant="secondary"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="library-screen-slot-empty"
+                        onClick={() => setShowNew(true)}
+                        aria-label="Add workspace"
+                      >
+                        <Plus style={{ width: 20, height: 20, color: 'rgba(255,255,255,0.18)' }} strokeWidth={1.5} />
+                      </button>
                     )}
-                  </>
+                  </div>
+
+                  {/* Ghost camera-shift nav — right */}
+                  {spatialLen > 1 && (
+                    <button
+                      type="button"
+                      className="library-spatial-nav-btn library-spatial-nav-btn--right"
+                      onClick={() => setPrimaryIdx(i => (i + 1) % spatialLen)}
+                      aria-label="Next workspace"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Workspace rail — sections beyond the 3-screen stage */}
+                {rail.length > 0 && (
+                  <div className="library-workspace-rail library-page-pad" style={{ paddingTop: 18, paddingBottom: 80 }}>
+                    <div className="library-workspace-rail-divider">
+                      <span style={{ fontSize: 8.5, fontWeight: 900, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.18)', whiteSpace: 'nowrap' }}>
+                        More workspaces
+                      </span>
+                    </div>
+                    {renderGrid(rail)}
+                  </div>
                 )}
-              </>
-            )}
+              </div>
+            );
+          })()}
+
+          {/* WORKSPACE GRID — filtered / search / loading fallback */}
+          {!showSpatialScene && (
+            <div
+              className="library-page-pad"
+              style={{
+              flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 18, paddingBottom: 80, position: 'relative',
+              maskImage: 'linear-gradient(180deg, black 0%, black 90%, transparent 100%)',
+            }}>
+              {hasWorkspaces && (
+                <div style={{
+                  position: 'absolute', left: 0, right: 0, top: -24, height: 200,
+                  pointerEvents: 'none', zIndex: 0,
+                  background: `linear-gradient(180deg, ${sA}14 0%, ${sA}06 42%, transparent 100%)`,
+                  opacity: 0.85,
+                }} />
+              )}
+              <div data-guide-home="workspace-grid" style={{ position: 'relative', zIndex: 1 }}>
+              {loading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 64 }}>
+                  <Loader2 style={{ width: 18, height: 18, color: 'rgba(255,255,255,0.16)', animation: 'spin 1s linear infinite' }} />
+                </div>
+              ) : (
+                <>
+                  {hasWorkspaces && (
+                    <>
+                      <div style={{ marginBottom: 14 }}>
+                        <h2 style={{ fontSize: 9, fontWeight: 920, letterSpacing: '0.26em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)', margin: 0 }}>
+                          {filterFolder === 'all' ? 'Your workspaces' : filterFolder === 'unfiled' ? 'Unfiled' : (folders.find(f => f.id === filterFolder)?.name ?? 'Workspaces')}
+                        </h2>
+                      </div>
+
+                      {filterFolder === 'all' && grouped ? (
+                        <>
+                          {folders.map(folder => {
+                            const list = grouped.byFolder.get(folder.id) ?? [];
+                            if (!list.length) return null;
+                            return (
+                              <div key={folder.id} style={{ marginBottom: 34 }}>
+                                <h3 style={{ fontSize: 10, fontWeight: 680, color: 'rgba(255,255,255,0.24)', marginBottom: 13, marginTop: 0, letterSpacing: '0.04em' }}>{folder.name}</h3>
+                                {renderGrid(list)}
+                              </div>
+                            );
+                          })}
+                          {grouped.unfiled.length > 0 && (
+                            <div style={{ marginBottom: 34 }}>
+                              {folders.length > 0 && <h3 style={{ fontSize: 10, fontWeight: 680, color: 'rgba(255,255,255,0.24)', marginBottom: 13, marginTop: 0, letterSpacing: '0.04em' }}>Unfiled</h3>}
+                              {renderGrid(grouped.unfiled)}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        renderGrid(filteredSections)
+                      )}
+
+                      {!loading && !filteredSections.length && sections.length > 0 && (
+                        <p style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.20)', marginTop: 20 }}>No workspaces match this filter.</p>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+              </div>
             </div>
-          </div>
+          )}
         </main>
 
         {hasWorkspaces && (

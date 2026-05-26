@@ -217,6 +217,205 @@
   }
 }
 
+/* ─── Spatial scene — cinematic 3-screen composition ──────────────────────── */
+
+.library-spatial-scene {
+  position: relative;
+  width: 100%;
+  height: min(88vh, 780px);
+  perspective: 1100px;
+  perspective-origin: 50% 44%;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* Primary screen — forward, centred */
+.library-screen-primary {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) translateZ(0px);
+  width: clamp(340px, 36vw, 520px);
+  height: min(68%, 420px);
+  z-index: 3;
+}
+
+/* Secondary screens — genuinely recessed, atmospheric depth */
+.library-screen-secondary-left {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -44%) rotateY(22deg) translateX(-440px) translateZ(-480px);
+  width: clamp(220px, 24vw, 310px);
+  height: min(60%, 360px);
+  opacity: 0.55;
+  filter: blur(1.4px);
+  z-index: 2;
+}
+
+.library-screen-secondary-right {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -44%) rotateY(-22deg) translateX(440px) translateZ(-480px);
+  width: clamp(220px, 24vw, 310px);
+  height: min(60%, 360px);
+  opacity: 0.55;
+  filter: blur(1.4px);
+  z-index: 2;
+}
+
+/* ── Ghost spatial navigation buttons ───────────────────────────────────── */
+.library-spatial-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(6, 12, 24, 0.58);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  color: rgba(255, 255, 255, 0.38);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition:
+    opacity 220ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    background 180ms ease,
+    box-shadow 220ms ease,
+    transform 120ms ease;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.library-spatial-scene:hover .library-spatial-nav-btn {
+  opacity: 1;
+}
+
+.library-spatial-nav-btn:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(10, 18, 36, 0.78);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.library-spatial-nav-btn:active {
+  transform: translateY(-50%) scale(0.92);
+}
+
+.library-spatial-nav-btn--left {
+  left: 6px;
+}
+
+.library-spatial-nav-btn--right {
+  right: 6px;
+}
+
+@media (max-width: 767px) {
+  .library-spatial-nav-btn {
+    opacity: 1;
+  }
+}
+
+/* Empty secondary slot — invite placeholder */
+.library-screen-slot-empty {
+  width: 100%;
+  height: 100%;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease;
+}
+
+.library-screen-slot-empty:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Stage floor glow — warm accent pool grounding the primary card */
+.library-stage-floor {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  height: 22%;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+/* Scene forefront — dark framing mass at the bottom, threshold feeling */
+.library-scene-forefront {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 14%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(2, 4, 10, 0.72) 0%, transparent 100%);
+}
+
+/* Workspace rail — remaining workspaces below scene */
+.library-workspace-rail {
+  flex-shrink: 0;
+}
+
+.library-workspace-rail-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.library-workspace-rail-divider::before,
+.library-workspace-rail-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+@media (max-width: 767px) {
+  .library-spatial-scene {
+    height: auto;
+    perspective: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .library-screen-primary,
+  .library-screen-secondary-left,
+  .library-screen-secondary-right {
+    position: static;
+    transform: none;
+    width: 100%;
+    height: auto;
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* ─── End spatial scene ──────────────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
   .library-sidebar-slot,
   .library-main,

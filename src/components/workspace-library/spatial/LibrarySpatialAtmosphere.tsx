@@ -33,6 +33,240 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
 
   return (
     <>
+      {/* ── Architectural skeleton — neutral dark masses the gradient layers tint ── */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 0,
+          pointerEvents: 'none',
+          // Pass accent as custom property for the SVG ceiling light panel
+          ['--lib-arch-accent' as string]: accent,
+        }}
+      >
+        <svg
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="xMidYMid slice"
+          style={{ width: '100%', height: '100%', display: 'block' }}
+          aria-hidden="true"
+        >
+          <defs>
+            {/* Ceiling light panel warm glow — stronger */}
+            <radialGradient id="libArchCeilLight" cx="50%" cy="0%" r="55%" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor={accent} stopOpacity="0.50" />
+              <stop offset="40%" stopColor={accent} stopOpacity="0.18" />
+              <stop offset="100%" stopColor={accent} stopOpacity="0" />
+            </radialGradient>
+            {/* Central warm light shaft — inner beam */}
+            <linearGradient id="libArchShaftWarm" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.26" />
+              <stop offset="100%" stopColor="#ffd580" stopOpacity="0" />
+            </linearGradient>
+            {/* Wide stage cone — theatrical spotlight, warm amber */}
+            <linearGradient id="libStageLight" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.28" />
+              <stop offset="60%" stopColor="#ffd580" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#ffd580" stopOpacity="0" />
+            </linearGradient>
+            {/* Side cool shaft — teal flanks */}
+            <linearGradient id="libArchShaftCool" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.14" />
+              <stop offset="100%" stopColor="#60a5fa" stopOpacity="0" />
+            </linearGradient>
+            {/* Column inner-face edge — left-facing highlight */}
+            <linearGradient id="libColFaceL" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="rgba(80,140,240,0.52)" />
+              <stop offset="100%" stopColor="rgba(80,140,240,0)" />
+            </linearGradient>
+            {/* Column inner-face edge — right-facing highlight */}
+            <linearGradient id="libColFaceR" x1="1" y1="0" x2="0" y2="0">
+              <stop offset="0%" stopColor="rgba(80,140,240,0.52)" />
+              <stop offset="100%" stopColor="rgba(80,140,240,0)" />
+            </linearGradient>
+            {/* Vault underside highlight — stronger */}
+            <linearGradient id="libVaultUnder" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(50,110,220,0.44)" />
+              <stop offset="100%" stopColor="rgba(50,110,220,0)" />
+            </linearGradient>
+            {/* Floor fade */}
+            <linearGradient id="libFloorFade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#040c1a" stopOpacity="0" />
+              <stop offset="100%" stopColor="#030810" stopOpacity="1" />
+            </linearGradient>
+          </defs>
+
+          {/* 1. Base void — deep graphite-blue, not pure black */}
+          <rect width="1440" height="900" fill="#030710" />
+
+          {/* 2. Back wall interior surface — visibly lighter than walls */}
+          <rect x="160" y="80" width="1120" height="560" fill="#0c1830" />
+
+          {/* 3. Ceiling light panel — warm glow strip */}
+          <rect x="460" y="80" width="520" height="120" fill={`url(#libArchCeilLight)`} />
+          {/* Gold slit at base of panel — clearly visible */}
+          <rect x="510" y="196" width="420" height="2" fill="#ffd580" fillOpacity="0.72" rx="1" />
+
+          {/* 4. Left near-wall mass */}
+          <polygon points="0,0 200,0 160,900 0,900" fill="#020610" />
+          {/* 5. Right near-wall mass */}
+          <polygon points="1440,0 1240,0 1280,900 1440,900" fill="#020610" />
+
+          {/* 6. Near columns — LEFT */}
+          <rect x="148" y="80" width="42" height="700" fill="#121e32" />
+          {/* Inner face highlight — lit edge facing centre */}
+          <rect x="188" y="80" width="4" height="700" fill="url(#libColFaceL)" />
+
+          {/* 7. Near columns — RIGHT */}
+          <rect x="1250" y="80" width="42" height="700" fill="#121e32" />
+          <rect x="1248" y="80" width="4" height="700" fill="url(#libColFaceR)" />
+
+          {/* 8. Mid-distance columns — left */}
+          <rect x="270" y="100" width="28" height="620" fill="#0c1828" />
+          <rect x="296" y="100" width="3" height="620" fill="rgba(80,140,240,0.32)" />
+          {/* Mid-distance columns — right */}
+          <rect x="1142" y="100" width="28" height="620" fill="#0c1828" />
+          <rect x="1141" y="100" width="3" height="620" fill="rgba(80,140,240,0.32)" />
+
+          {/* 9. Far columns — left */}
+          <rect x="380" y="118" width="16" height="540" fill="#090f1e" />
+          <rect x="395" y="118" width="2" height="540" fill="rgba(80,140,240,0.20)" />
+          {/* Far columns — right */}
+          <rect x="1044" y="118" width="16" height="540" fill="#090f1e" />
+          <rect x="1043" y="118" width="2" height="540" fill="rgba(80,140,240,0.20)" />
+
+          {/* 10. Ceiling vault arch */}
+          <path
+            d="M0,0 L1440,0 L1440,110 Q1280,82 720,78 Q160,82 0,110 Z"
+            fill="#040c18"
+          />
+          {/* Vault underside highlight line — clearly visible */}
+          <path
+            d="M148,110 Q720,90 1292,110"
+            fill="none"
+            stroke="url(#libVaultUnder)"
+            strokeWidth="2.5"
+          />
+
+          {/* 11. Perspective floor polygon — clearly visible graphite-blue */}
+          <polygon
+            points="0,720 1440,720 1280,900 160,900"
+            fill="#081628"
+          />
+          {/* Floor horizon seam — strong separation line */}
+          <line x1="0" y1="720" x2="1440" y2="720" stroke={accent} strokeOpacity="0.28" strokeWidth="1.5" />
+          {/* Floor depth lines — perspective */}
+          <line x1="720" y1="720" x2="720" y2="900" stroke="rgba(80,140,240,0.12)" strokeWidth="1" />
+          <line x1="560" y1="720" x2="160" y2="900" stroke="rgba(80,140,240,0.08)" strokeWidth="1" />
+          <line x1="880" y1="720" x2="1280" y2="900" stroke="rgba(80,140,240,0.08)" strokeWidth="1" />
+
+          {/* Floor specular — warm reflection pool under the stage cone */}
+          <ellipse cx="720" cy="740" rx="180" ry="28" fill="#ffd580" fillOpacity="0.10" />
+          <ellipse cx="720" cy="740" rx="90" ry="14" fill="#ffd580" fillOpacity="0.14" />
+
+          {/* 12. Light shafts — wide stage cone + tight inner beam */}
+          {/* Wide cone: theatrical spotlight illuminating the main stage */}
+          <polygon
+            points="540,80 900,80 960,900 480,900"
+            fill="url(#libStageLight)"
+          />
+          {/* Tight warm shaft — inner beam, higher intensity */}
+          <polygon
+            points="630,80 810,80 790,720 650,720"
+            fill="url(#libArchShaftWarm)"
+          />
+          {/* Cool flanking shaft — left */}
+          <polygon
+            points="190,80 280,80 270,500 190,500"
+            fill="url(#libArchShaftCool)"
+          />
+          {/* Cool flanking shaft — right */}
+          <polygon
+            points="1160,80 1250,80 1250,500 1170,500"
+            fill="url(#libArchShaftCool)"
+          />
+
+          {/* 13. Back wall back-panel — deep interior hint */}
+          <rect x="460" y="200" width="520" height="360" fill="#040c1c" fillOpacity="0.65" />
+          {/* Back panel edge light */}
+          <rect x="460" y="200" width="520" height="1" fill="rgba(80,140,240,0.18)" />
+
+          {/* 14. Foreground base strip */}
+          <rect x="0" y="820" width="1440" height="80" fill="#020508" fillOpacity="0.80" />
+
+          {/* 15. Corner depth vignettes */}
+          <rect x="0" y="0" width="200" height="900" fill="url(#libFloorFade)" fillOpacity="0.32" />
+          <rect x="1240" y="0" width="200" height="900" fill="url(#libFloorFade)" fillOpacity="0.32" />
+
+          {/* 16. Near-foreground threshold — dark corner masses framing the view */}
+          {/* Creates the feeling of looking through an architectural entrance */}
+          <polygon points="0,900 220,900 0,580" fill="#010308" fillOpacity="0.88" />
+          <polygon points="1440,900 1220,900 1440,580" fill="#010308" fillOpacity="0.88" />
+          <rect x="0" y="860" width="1440" height="40" fill="#010308" fillOpacity="0.72" />
+        </svg>
+
+        {/* Ceiling darkness — seals enclosure, lighter than before */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '18%',
+            background: 'linear-gradient(180deg, rgba(1,3,8,0.68) 0%, transparent 100%)',
+            pointerEvents: 'none',
+          }}
+        />
+        {/* Left wall vignette — lighter, lets columns breathe */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '14%',
+            height: '100%',
+            background: 'linear-gradient(90deg, rgba(1,3,8,0.48) 0%, transparent 100%)',
+            pointerEvents: 'none',
+          }}
+        />
+        {/* Right wall vignette */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '14%',
+            height: '100%',
+            background: 'linear-gradient(270deg, rgba(1,3,8,0.48) 0%, transparent 100%)',
+            pointerEvents: 'none',
+          }}
+        />
+        {/* Warm amber overhead bloom — heat source above */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '40%',
+            background: 'radial-gradient(ellipse 48% 28% at 50% 0%, rgba(255,210,120,0.10), transparent 80%)',
+            pointerEvents: 'none',
+          }}
+        />
+        {/* Floor teal ambient — cool shadow pooling at base */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '30%',
+            background: 'radial-gradient(ellipse 80% 30% at 50% 100%, rgba(30,100,180,0.09), transparent 70%)',
+            pointerEvents: 'none',
+          }}
+        />
+      </div>
+
+      {/* ── Original gradient overlays tint the architecture with theme accent ── */}
       <div
         style={{
           position: 'fixed',
@@ -45,7 +279,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
             radial-gradient(ellipse 64% 50% at 72% 42%, rgba(139,92,246,0.06), transparent 58%),
             radial-gradient(ellipse 70% 55% at 22% 18%, ${envGlow1}, transparent 58%),
             radial-gradient(ellipse 55% 48% at 82% 28%, ${envGlow2}, transparent 62%),
-            linear-gradient(168deg, #040810 0%, #020407 46%, #050912 100%)
+            linear-gradient(168deg, #060e1c 0%, #030810 46%, #060d18 100%)
           `,
           opacity: accentStrength * (0.92 + env * 0.08),
           transition: bgEase,
@@ -107,6 +341,24 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
         }}
       />
 
+      {/* Primary stage atmospheric cone — accent-tinted light from above the main stage */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: '28%',
+          right: '28%',
+          height: '80%',
+          zIndex: 0,
+          pointerEvents: 'none',
+          background: `linear-gradient(180deg, ${accent}1e 0%, ${accent}08 45%, transparent 78%)`,
+          opacity: featured ? 0.90 : 0.55,
+          transition: bgEase,
+          maskImage: 'linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
+        }}
+      />
+
       {/* Center-right anchor */}
       <div
         style={{
@@ -134,7 +386,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
           inset: 0,
           zIndex: 0,
           pointerEvents: 'none',
-          opacity: featured ? focusOpacity * 1.15 : focusOpacity * 0.85,
+          opacity: featured ? focusOpacity * 1.55 : focusOpacity * 0.85,
           background: `
             radial-gradient(ellipse min(62vw, 780px) min(48vh, 520px) at ${heroSpotX} ${heroSpotY}, ${accent}22, transparent 68%),
             radial-gradient(ellipse min(36vw, 420px) min(28vh, 280px) at ${heroSpotX} ${heroSpotY}, rgba(255,255,255,0.04), transparent 72%)
@@ -262,7 +514,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
           height: '44vh',
           zIndex: 0,
           pointerEvents: 'none',
-          background: 'linear-gradient(0deg, rgba(0,0,0,0.68) 0%, transparent 100%)',
+          background: 'linear-gradient(0deg, rgba(0,0,0,0.38) 0%, transparent 100%)',
         }}
       />
 
@@ -273,7 +525,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
           zIndex: 0,
           pointerEvents: 'none',
           background:
-            'radial-gradient(ellipse 82% 74% at 44% 38%, transparent 32%, rgba(2,4,10,0.48) 100%)',
+            'radial-gradient(ellipse 82% 74% at 44% 38%, transparent 32%, rgba(2,4,10,0.28) 100%)',
         }}
       />
     </>

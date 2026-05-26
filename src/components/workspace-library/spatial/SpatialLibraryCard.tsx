@@ -1,4 +1,4 @@
-import { motion, useMotionTemplate, useMotionValue, useSpring, useTransform } from 'framer-motion';
+import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { getWorkspaceCustomization } from '../../../hooks/useWorkspaceCustomization';
@@ -46,14 +46,20 @@ interface SceneCapProps {
   completed: number;
   hovered: boolean;
   wide?: boolean;
+  /** Override cap height explicitly (spatialVariant-driven) */
+  capHeight?: number;
   liftY: number;
   presence: 'present' | 'warm' | 'fading';
 }
 
-function SceneCap({ accent, custom, section, total, completed, hovered, wide, liftY, presence }: SceneCapProps) {
-  const h = wide ? 88 : 70;
-  const glowOuter = presence === 'present' ? '2e' : presence === 'warm' ? '1e' : '0e';
-  const glowInner = presence === 'present' ? '10' : presence === 'warm' ? '0a' : '06';
+function SceneCap({ accent, custom, section, total, completed, hovered, wide, capHeight, liftY, presence }: SceneCapProps) {
+  const h = capHeight ?? (wide ? 88 : 70);
+  const glowOuter = h >= 120
+    ? (presence === 'present' ? '42' : presence === 'warm' ? '30' : '20')
+    : (presence === 'present' ? '2e' : presence === 'warm' ? '1e' : '0e');
+  const glowInner = h >= 120
+    ? (presence === 'present' ? '1c' : presence === 'warm' ? '14' : '0e')
+    : (presence === 'present' ? '10' : presence === 'warm' ? '0a' : '06');
   const dotAlpha  = presence === 'present' ? '45' : presence === 'warm' ? '30' : '1e';
   const dotGlow   = presence === 'present' ? '88' : presence === 'warm' ? '55' : '33';
   const taskDots = useMemo(() => {
@@ -126,9 +132,9 @@ function SceneCap({ accent, custom, section, total, completed, hovered, wide, li
           position: 'absolute',
           right: 12,
           bottom: 8,
-          width: wide ? 42 : 34,
-          height: wide ? 42 : 34,
-          borderRadius: wide ? 13 : 11,
+          width: h >= 120 ? 56 : (wide ? 42 : 34),
+          height: h >= 120 ? 56 : (wide ? 42 : 34),
+          borderRadius: h >= 120 ? 17 : (wide ? 13 : 11),
           background: `radial-gradient(circle at 34% 24%, rgba(255,255,255,0.18), transparent 38%),
                      linear-gradient(135deg, ${accent}50, ${accent}16)`,
           border: `1px solid ${accent}38`,
@@ -141,11 +147,11 @@ function SceneCap({ accent, custom, section, total, completed, hovered, wide, li
         }}
       >
         {custom.icon ? (
-          <span style={{ fontSize: wide ? 17 : 13, lineHeight: 1 }} role="img" aria-hidden>
+          <span style={{ fontSize: h >= 120 ? 22 : (wide ? 17 : 13), lineHeight: 1 }} role="img" aria-hidden>
             {custom.icon}
           </span>
         ) : (
-          <span style={{ fontSize: wide ? 12 : 9.5, fontWeight: 880, color: accent }}>
+          <span style={{ fontSize: h >= 120 ? 15 : (wide ? 12 : 9.5), fontWeight: 880, color: accent }}>
             {initials(section.title)}
           </span>
         )}
@@ -164,6 +170,8 @@ export interface SpatialLibraryCardProps {
   onDelete: (section: SectionWithProgress) => void;
   wide?: boolean;
   openedAt?: string;
+  /** Spatial scene variant — 'primary' enlarges cap + text; 'secondary' compacts */
+  spatialVariant?: 'primary' | 'secondary';
 }
 
 export function SpatialLibraryCard({
@@ -176,6 +184,7 @@ export function SpatialLibraryCard({
   onDelete,
   wide,
   openedAt,
+  spatialVariant,
 }: SpatialLibraryCardProps) {
   const reducedMotion = usePrefersReducedMotion();
   const { setFocusRegion } = useLibrarySpatial();
@@ -186,6 +195,14 @@ export function SpatialLibraryCard({
   const custom = getWorkspaceCustomization(section.id);
   const accent = custom.accent || accentForTitle(section.title);
   const kind = workspaceKind(section);
+
+  // spatialVariant drives SceneCap height and text sizing
+  const isPrimary   = spatialVariant === 'primary';
+  const isSecondary = spatialVariant === 'secondary';
+  const capWide     = wide || isPrimary;
+  const capHeight   = isPrimary ? 160 : isSecondary ? 65 : undefined; // undefined → SceneCap uses its own default
+  const titleSize   = isPrimary ? 16 : isSecondary ? 12 : wide ? 15 : 13.5;
+  const btnHeight   = isPrimary ? 38 : isSecondary ? 28 : 32;
   const total = section.total_items ?? 0;
   const completed = section.completed_items ?? 0;
   const nearest = deadlines
@@ -206,10 +223,37 @@ export function SpatialLibraryCard({
     return 'fading';
   }, [openedAt]);
 
+  // ── Premium material by spatialVariant (depends on presence) ─────────────────
+  const cardBg = isPrimary
+    ? 'linear-gradient(152deg, rgba(16,26,48,0.97) 0%, rgba(8,14,28,0.98) 55%, rgba(4,8,18,0.99) 100%)'
+    : 'linear-gradient(152deg, rgba(14,20,34,0.94) 0%, rgba(5,7,14,0.97) 100%)';
+
+  const cardOpacity = isPrimary ? 1 : (presence === 'fading' ? 0.78 : presence === 'warm' ? 0.92 : 1);
+
+  const borderRest = isPrimary
+    ? `${accent}${presence === 'present' ? '30' : '1e'}`
+    : `${accent}${presence === 'present' ? '1c' : presence === 'warm' ? '14' : '0a'}`;
+
+  const borderHover = isPrimary
+    ? `${accent}${presence === 'present' ? '58' : '44'}`
+    : `${accent}${presence === 'present' ? '44' : presence === 'warm' ? '34' : '22'}`;
+
+  const cardShadowRest = isPrimary
+    ? `0 18px 64px rgba(0,0,0,0.52), 0 6px 32px ${accent}14, inset 0 1px 0 rgba(255,255,255,0.10)`
+    : `0 10px 32px rgba(0,0,0,0.30), 0 4px 24px ${accent}0a, inset 0 1px 0 rgba(255,255,255,0.05)`;
+
+  const cardShadowHover = isPrimary
+    ? `0 32px 90px rgba(0,0,0,0.62), 0 10px 48px ${accent}1e, inset 0 1px 0 rgba(255,255,255,0.14)`
+    : `0 22px 56px rgba(0,0,0,0.50), 0 6px 28px ${accent}16, inset 0 1px 0 rgba(255,255,255,0.08)`;
+
+  const titleColor = isPrimary ? 'rgba(248,244,236,0.96)' : tokens.textPrimary;
+
+  const btnRestBg     = isPrimary ? 'rgba(255,255,255,0.068)' : 'rgba(255,255,255,0.036)';
+  const btnRestBorder = isPrimary ? 'rgba(255,255,255,0.15)'  : 'rgba(255,255,255,0.060)';
+  const btnRestColor  = isPrimary ? 'rgba(248,244,236,0.72)'  : 'rgba(255,255,255,0.38)';
+
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
-  const spotX = useMotionValue(50);
-  const spotY = useMotionValue(35);
 
   const rotateX = useSpring(useTransform(my, [-0.5, 0.5], [2, -2]), {
     stiffness: 180,
@@ -221,8 +265,6 @@ export function SpatialLibraryCard({
   });
   const liftY = useSpring(hovered ? -5 : 0, { stiffness: 220, damping: 30 });
 
-  const spotlight = useMotionTemplate`radial-gradient(200px circle at ${spotX}% ${spotY}%, rgba(99,102,241,0.09), transparent 70%)`;
-
   const onPointerMove = (e: React.PointerEvent) => {
     if (reducedMotion || !cardRef.current) return;
     const rect = cardRef.current.getBoundingClientRect();
@@ -230,15 +272,11 @@ export function SpatialLibraryCard({
     const y = (e.clientY - rect.top) / rect.height - 0.5;
     mx.set(x);
     my.set(y);
-    spotX.set(((e.clientX - rect.left) / rect.width) * 100);
-    spotY.set(((e.clientY - rect.top) / rect.height) * 100);
   };
 
   const onPointerLeave = () => {
     mx.set(0);
     my.set(0);
-    spotX.set(50);
-    spotY.set(35);
     setHovered(false);
     setMenuOpen(false);
     setFocusRegion(null);
@@ -252,16 +290,12 @@ export function SpatialLibraryCard({
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 20,
-        border: `1px solid ${hovered
-          ? `${accent}${presence === 'present' ? '44' : presence === 'warm' ? '34' : '22'}`
-          : `${accent}${presence === 'present' ? '1c' : presence === 'warm' ? '14' : '0a'}`}`,
-        opacity: presence === 'fading' ? 0.78 : presence === 'warm' ? 0.92 : 1,
-        background: `linear-gradient(152deg, rgba(14,20,34,0.94) 0%, rgba(5,7,14,0.97) 100%)`,
-        backdropFilter: 'blur(18px) saturate(1.35)',
-        WebkitBackdropFilter: 'blur(18px) saturate(1.35)',
-        boxShadow: hovered
-          ? `0 22px 56px rgba(0,0,0,0.50), 0 6px 28px ${accent}16, inset 0 1px 0 rgba(255,255,255,0.08)`
-          : `0 10px 32px rgba(0,0,0,0.30), 0 4px 24px ${accent}0a, inset 0 1px 0 rgba(255,255,255,0.05)`,
+        border: `1px solid ${hovered ? borderHover : borderRest}`,
+        opacity: cardOpacity,
+        background: cardBg,
+        backdropFilter: isPrimary ? 'blur(4px) saturate(1.1)' : 'blur(18px) saturate(1.35)',
+        WebkitBackdropFilter: isPrimary ? 'blur(4px) saturate(1.1)' : 'blur(18px) saturate(1.35)',
+        boxShadow: hovered ? cardShadowHover : cardShadowRest,
         cursor: 'pointer',
         overflow: 'hidden',
         isolation: 'isolate',
@@ -280,19 +314,6 @@ export function SpatialLibraryCard({
       whileTap={reducedMotion ? undefined : { scale: 0.996 }}
       transition={{ type: 'spring', stiffness: 260, damping: 34 }}
     >
-      {/* Cursor-reactive interior light */}
-      <motion.div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 0,
-          background: spotlight,
-          opacity: hovered ? 0.85 : 0,
-        }}
-        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      />
-
       <div
         style={{
           position: 'absolute',
@@ -313,7 +334,7 @@ export function SpatialLibraryCard({
           left: 0,
           top: 0,
           bottom: 0,
-          width: 2,
+          width: isPrimary ? 3 : 2,
           zIndex: 1,
           background: `linear-gradient(180deg, ${accent}cc, ${accent}44, transparent)`,
           opacity: hovered ? 1 : 0.55,
@@ -328,7 +349,8 @@ export function SpatialLibraryCard({
         total={total}
         completed={completed}
         hovered={hovered}
-        wide={wide}
+        wide={capWide}
+        capHeight={capHeight}
         liftY={0}
         presence={presence}
       />
@@ -357,9 +379,9 @@ export function SpatialLibraryCard({
           <div style={{ minWidth: 0 }}>
             <p
               style={{
-                fontSize: wide ? 15 : 13.5,
+                fontSize: titleSize,
                 fontWeight: 800,
-                color: tokens.textPrimary,
+                color: titleColor,
                 letterSpacing: '-0.028em',
                 margin: 0,
                 overflow: 'hidden',
@@ -441,14 +463,14 @@ export function SpatialLibraryCard({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            height: 32,
+            height: btnHeight,
             padding: '0 12px',
             borderRadius: 10,
             background: hovered
               ? `linear-gradient(135deg, ${accent}ee, ${accent}aa)`
-              : 'rgba(255,255,255,0.036)',
-            border: `1px solid ${hovered ? `${accent}80` : 'rgba(255,255,255,0.060)'}`,
-            color: hovered ? '#020508' : 'rgba(255,255,255,0.38)',
+              : btnRestBg,
+            border: `1px solid ${hovered ? `${accent}80` : btnRestBorder}`,
+            color: hovered ? '#020508' : btnRestColor,
             fontSize: 11.5,
             fontWeight: 800,
             textDecoration: 'none',
@@ -460,6 +482,20 @@ export function SpatialLibraryCard({
           <ArrowRight style={{ width: 12, height: 12 }} strokeWidth={2.5} />
         </motion.a>
       </div>
+
+      {/* Physical base — accent grounding bar */}
+      {isPrimary && (
+        <div
+          style={{
+            height: 2,
+            margin: '0 16px 12px',
+            borderRadius: 1,
+            background: `linear-gradient(90deg, transparent, ${accent}55, ${accent}88, ${accent}55, transparent)`,
+            opacity: hovered ? 0.85 : 0.45,
+            transition: 'opacity 280ms ease',
+          }}
+        />
+      )}
 
       {menuOpen && (
         <div
