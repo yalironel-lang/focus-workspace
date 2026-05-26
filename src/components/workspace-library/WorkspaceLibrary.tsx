@@ -640,8 +640,10 @@ function WorkspaceLibraryView() {
                         style={{
                           height: 26, padding: '0 10px',
                           borderRadius: isFolder ? '7px 0 0 7px' : 7,
-                          border: `1px solid ${active ? `${sA}42` : 'rgba(255,255,255,0.065)'}`,
-                          borderRight: isFolder ? 'none' : undefined,
+                          borderTop: `1px solid ${active ? `${sA}42` : 'rgba(255,255,255,0.065)'}`,
+                          borderBottom: `1px solid ${active ? `${sA}42` : 'rgba(255,255,255,0.065)'}`,
+                          borderLeft: `1px solid ${active ? `${sA}42` : 'rgba(255,255,255,0.065)'}`,
+                          borderRight: isFolder ? 'none' : `1px solid ${active ? `${sA}42` : 'rgba(255,255,255,0.065)'}`,
                           background: active ? `${sA}16` : 'rgba(255,255,255,0.020)',
                           color: active ? sA : 'rgba(255,255,255,0.38)',
                           fontSize: 10.5, fontWeight: active ? 750 : 500,
@@ -808,20 +810,22 @@ function WorkspaceLibraryView() {
                   </div>
 
                   {/* Primary — centre */}
-                  <div key={s0?.id ?? 'primary'} className="library-screen-primary" style={{ animation: 'libFadeIn 0.28s ease both' }}>
-                    {s0 ? (
-                      <SpatialLibraryCard
-                        section={s0}
-                        deadlines={deadlinesFor(s0.id)}
-                        tokens={tokens}
-                        folders={folders}
-                        folderId={getFolderForSection(s0.id)}
-                        onFolderChange={setSectionFolder}
-                        onDelete={setDeleteTarget}
-                        openedAt={openedAt(s0.id) ?? undefined}
-                        spatialVariant="primary"
-                      />
-                    ) : null}
+                  <div key={s0?.id ?? 'primary'} className="library-screen-primary">
+                    <div style={{ width: '100%', height: '100%', animation: 'libFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both' }}>
+                      {s0 ? (
+                        <SpatialLibraryCard
+                          section={s0}
+                          deadlines={deadlinesFor(s0.id)}
+                          tokens={tokens}
+                          folders={folders}
+                          folderId={getFolderForSection(s0.id)}
+                          onFolderChange={setSectionFolder}
+                          onDelete={setDeleteTarget}
+                          openedAt={openedAt(s0.id) ?? undefined}
+                          spatialVariant="primary"
+                        />
+                      ) : null}
+                    </div>
                   </div>
 
                   {/* Secondary right */}

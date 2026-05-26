@@ -51,6 +51,11 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
           aria-hidden="true"
         >
           <defs>
+            {/* Floor atmospheric gradient — lighter at front, darker at horizon */}
+            <linearGradient id="libFloorGrad" x1="0" y1="900" x2="0" y2="720" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#0f1e36" />
+              <stop offset="100%" stopColor="#040c1c" />
+            </linearGradient>
             {/* Ceiling light panel warm glow — stronger */}
             <radialGradient id="libArchCeilLight" cx="50%" cy="0%" r="55%" gradientUnits="userSpaceOnUse">
               <stop offset="0%" stopColor={accent} stopOpacity="0.50" />
@@ -147,11 +152,13 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
             strokeWidth="2.5"
           />
 
-          {/* 11. Perspective floor polygon — clearly visible graphite-blue */}
+          {/* 11. Perspective floor polygon — atmospheric gradient, front lighter */}
           <polygon
             points="0,720 1440,720 1280,900 160,900"
-            fill="#081628"
+            fill="url(#libFloorGrad)"
           />
+          {/* Warm front-floor highlight — stage light reaching camera-near floor */}
+          <ellipse cx="720" cy="852" rx="310" ry="22" fill="#ffd580" fillOpacity="0.048" />
           {/* Floor horizon seam — strong separation line */}
           <line x1="0" y1="720" x2="1440" y2="720" stroke={accent} strokeOpacity="0.28" strokeWidth="1.5" />
           {/* Floor depth lines — perspective */}
@@ -189,6 +196,52 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
           <rect x="460" y="200" width="520" height="360" fill="#040c1c" fillOpacity="0.65" />
           {/* Back panel edge light */}
           <rect x="460" y="200" width="520" height="1" fill="rgba(80,140,240,0.18)" />
+
+          {/* ── Observatory ring portal — architectural depth centerpiece ─────────
+              Placement: cx=720 cy=365, r=260 → top=105, bottom=625, sides=460–980
+              Fits inside far columns, above floor horizon. Near-invisible by design.
+              User perceives it as architectural structure, not decorative element.
+          ─────────────────────────────────────────────────────────────────────── */}
+          {/* Outer structural ring — barely perceptible */}
+          <circle cx="720" cy="365" r="260" fill="none"
+            stroke="rgba(50,80,175,0.08)" strokeWidth="1.2" />
+          {/* Inner concentric ring — ghost trace */}
+          <circle cx="720" cy="365" r="241" fill="none"
+            stroke="rgba(50,80,175,0.04)" strokeWidth="0.6" />
+          {/* Accent top arc — warm illuminated upper edge, ~28% of ring */}
+          <circle cx="720" cy="365" r="260" fill="none"
+            stroke={accent} strokeOpacity="0.06" strokeWidth="1.2"
+            strokeDasharray={`${(Math.PI * 2 * 260 * 0.28).toFixed(1)} ${(Math.PI * 2 * 260 * 0.72).toFixed(1)}`}
+            transform="rotate(-90 720 365)"
+          />
+          {/* Structural crosshairs — barely visible architectural ribs */}
+          <line x1="462" y1="365" x2="978" y2="365" stroke="rgba(55,90,190,0.035)" strokeWidth="0.5" />
+          <line x1="720" y1="107" x2="720" y2="623" stroke="rgba(55,90,190,0.035)" strokeWidth="0.5" />
+
+          {/* ── Ambient atmospheric particles — dust motes in mid-space ─────── */}
+          {/* Rendered only when motion is allowed (SVG animate doesn't read CSS prefers-reduced-motion) */}
+          {!spatial.reducedMotion && (
+            <>
+              <circle cx="468" cy="278" r="1.5" fill="rgba(140,180,255,0.07)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;3,-8;-2,3;0,0" dur="19s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="628" cy="192" r="2" fill="rgba(140,180,255,0.055)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;-4,-6;2,4;0,0" dur="24s" begin="3s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="764" cy="240" r="1.5" fill="rgba(255,215,130,0.065)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;2,-7;-3,2;0,0" dur="22s" begin="8s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="908" cy="318" r="2" fill="rgba(140,180,255,0.05)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;-3,-9;1,5;0,0" dur="17s" begin="13s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="542" cy="386" r="1.5" fill="rgba(255,215,130,0.055)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;4,-5;-2,3;0,0" dur="28s" begin="5s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="845" cy="204" r="2" fill="rgba(140,180,255,0.06)">
+                <animateTransform attributeName="transform" type="translate" values="0,0;-2,-8;3,4;0,0" dur="21s" begin="10s" repeatCount="indefinite" />
+              </circle>
+            </>
+          )}
 
           {/* 14. Foreground base strip */}
           <rect x="0" y="820" width="1440" height="80" fill="#020508" fillOpacity="0.80" />
@@ -341,23 +394,6 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }:
         }}
       />
 
-      {/* Primary stage atmospheric cone — accent-tinted light from above the main stage */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: '28%',
-          right: '28%',
-          height: '80%',
-          zIndex: 0,
-          pointerEvents: 'none',
-          background: `linear-gradient(180deg, ${accent}1e 0%, ${accent}08 45%, transparent 78%)`,
-          opacity: featured ? 0.90 : 0.55,
-          transition: bgEase,
-          maskImage: 'linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)',
-        }}
-      />
 
       {/* Center-right anchor */}
       <div
