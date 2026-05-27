@@ -334,14 +334,6 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
     fontFamily: 'var(--fw-font-body)',
     marginBottom: 3,
   };
-  const exLabel: React.CSSProperties = {
-    fontSize:   10,
-    color:      tokens.textGhost,
-    opacity:    0.6,
-    fontFamily: 'var(--fw-font-body)',
-    marginBottom: 2,
-    marginTop:  10,
-  };
   const shortRow: React.CSSProperties = {
     display:       'flex',
     gap:           12,
@@ -383,9 +375,8 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
       </div>
 
       {/* Rules */}
-      <div style={rule}>Write text as you normally would.</div>
-      <div style={rule}>Put equations on their own line — they render automatically.</div>
-      <div style={rule}>Use <span style={mono}>$…$</span> for math inside a sentence.</div>
+      <div style={rule}>Write naturally.</div>
+      <div style={rule}>Equations on their own line render automatically.</div>
 
       {/* Divider */}
       <div style={{ borderTop: `1px solid ${tokens.divider}`, margin: '12px 0 0', opacity: 0.5 }} />
@@ -393,19 +384,14 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
       {/* Examples */}
       <div style={label}>Examples</div>
 
-      <div style={exLabel}>Write text:</div>
-      <div style={{ ...mono, background: `${tokens.wellBg}88`, borderRadius: 6, padding: '5px 8px' }}>
-        The derivative of x squared is 2x.
+      <div style={{ ...mono, background: `${tokens.wellBg}88`, borderRadius: 6, padding: '8px 10px', lineHeight: 1.9, whiteSpace: 'pre' }}>
+        {'y = x^2\nf(x) = 2x\nint 0 to 1 x^2 dx'}
       </div>
 
-      <div style={exLabel}>Equation on its own line:</div>
-      <div style={{ ...mono, background: `${tokens.wellBg}88`, borderRadius: 6, padding: '5px 8px' }}>
-        y = x^2
-      </div>
-
-      <div style={exLabel}>Math inside a sentence:</div>
-      <div style={{ ...mono, background: `${tokens.wellBg}88`, borderRadius: 6, padding: '5px 8px' }}>
-        The answer is $x = 5$.
+      {/* Optional inline note — de-emphasised */}
+      <div style={{ fontSize: 11, color: tokens.textGhost, opacity: 0.5,
+        fontFamily: 'var(--fw-font-body)', lineHeight: 1.6, marginTop: 10 }}>
+        You can also use inline math inside a sentence — wrap it in $…$
       </div>
 
       {/* Divider */}
