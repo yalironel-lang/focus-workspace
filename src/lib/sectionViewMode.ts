@@ -1,6 +1,6 @@
 const VIEW_MODE_KEY = 'fw_section_view_mode_v1';
 
-export type SectionViewMode = 'work-surface' | 'free-space';
+export type SectionViewMode = 'work-surface' | 'free-space' | 'math-zone';
 
 export function loadSectionViewMode(sectionId: string): SectionViewMode {
   if (!sectionId || typeof window === 'undefined') return 'free-space';
@@ -8,7 +8,10 @@ export function loadSectionViewMode(sectionId: string): SectionViewMode {
     const raw = sessionStorage.getItem(VIEW_MODE_KEY);
     if (!raw) return 'free-space';
     const map = JSON.parse(raw) as Record<string, string>;
-    return map[sectionId] === 'work-surface' ? 'work-surface' : 'free-space';
+    const m = map[sectionId];
+    if (m === 'work-surface') return 'work-surface';
+    if (m === 'math-zone') return 'math-zone';
+    return 'free-space';
   } catch {
     return 'free-space';
   }

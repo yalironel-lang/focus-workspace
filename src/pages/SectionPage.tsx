@@ -13,6 +13,7 @@ import {
   isExploreFocusWorkspace,
 } from '../lib/exploreFocus';
 import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWorkspaceShell';
+import { MathZone } from '../components/math-zone/MathZone';
 import { WORKSPACE_SHELL_TOP_INSET } from '../components/workspace-shell/shellGlass';
 import { ExploreFocusGuide } from '../components/explore-focus/ExploreFocusGuide';
 import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
@@ -728,12 +729,12 @@ export function SectionPage() {
   const [addingLane,      setAddingLane]       = useState(false);
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
-  const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space'>(() => {
+  const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space' | 'math-zone'>(() => {
     if (navState?.firstArrival) return 'free-space';
     return sectionId ? loadSectionViewMode(sectionId) : 'free-space';
   });
   const setSectionViewMode = useCallback(
-    (mode: 'work-surface' | 'free-space') => {
+    (mode: 'work-surface' | 'free-space' | 'math-zone') => {
       pulsePerformancePressure('view-switch');
       flickerDebugLog('view-mode', mode);
       setSectionViewModeState(mode);
@@ -834,9 +835,10 @@ export function SectionPage() {
   );
   const canvasBackgroundStyle = livingEnvironment.studio.canvasStyle;
   const freeSpaceClarity = livingEnvironment.clarity;
-  const freeSpaceSurfaceVisible = sectionViewMode === 'free-space';
-  const workSurfaceVisible = sectionViewMode !== 'free-space' && !designMode;
-  const designSurfaceVisible = sectionViewMode !== 'free-space' && designMode;
+  const freeSpaceSurfaceVisible  = sectionViewMode === 'free-space';
+  const mathZoneSurfaceVisible   = sectionViewMode === 'math-zone';
+  const workSurfaceVisible       = sectionViewMode === 'work-surface' && !designMode;
+  const designSurfaceVisible     = sectionViewMode === 'work-surface' && designMode;
 
 
   useEffect(() => {
@@ -3184,6 +3186,17 @@ export function SectionPage() {
           </main>
         </div>
       </div>
+
+      {/* ── MATH ZONE SURFACE ─────────────────────────────────────────────── */}
+      <div style={surfaceShellStyle(mathZoneSurfaceVisible)}>
+        <MathZone
+          tokens={tokens}
+          sectionId={sectionId}
+          sectionTitle={section.title}
+          paddingTop={WORKSPACE_SHELL_TOP_INSET}
+        />
+      </div>
+
       </div>
 
       {aiAssistResult && (

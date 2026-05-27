@@ -12,8 +12,9 @@ import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
 import { glassIsland, shellIconBtn } from './shellGlass';
 
 const VIEW_MODES = [
-  { id: 'free-space' as const, label: 'Workspace' },
+  { id: 'free-space' as const,  label: 'Workspace' },
   { id: 'work-surface' as const, label: 'Mission Control' },
+  { id: 'math-zone' as const,   label: 'Math Zone' },
 ];
 
 export const WORKSPACE_CHROME_Z = 600;
@@ -31,8 +32,8 @@ interface Props {
   onCustomize: () => void;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
-  sectionViewMode: 'work-surface' | 'free-space';
-  onViewModeChange: (mode: 'work-surface' | 'free-space') => void;
+  sectionViewMode: 'work-surface' | 'free-space' | 'math-zone';
+  onViewModeChange: (mode: 'work-surface' | 'free-space' | 'math-zone') => void;
   focusMode: FocusMode | null;
   boards?: FreeSpaceBoard[];
   activeBoardId?: string;
