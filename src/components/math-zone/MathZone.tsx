@@ -37,11 +37,51 @@ import { plainMathToLatex, isLikelyMathLine } from '../../lib/mathInputAssistant
 
 interface RefCard      { id: string; content: string }
 interface ScratchBlock { id: string; content: string }
+interface NotebookPageResume {
+  scrollTop: number;
+  lastEditing: boolean;
+}
+interface NotebookPage {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 interface MathZoneData {
+  schemaVersion: 2;
   content:   string;
+  pages:     NotebookPage[];
+  activePageId: string;
+  pageResume: Record<string, NotebookPageResume>;
   refs:      RefCard[];
   scratches: ScratchBlock[];
+}
+
+type PageBackground = 'dots' | 'grid' | 'ruled' | 'blank';
+type PageDensity = 'light' | 'medium' | 'dense';
+type NotebookWidth = 'narrow' | 'comfortable' | 'wide';
+type PageSpacing = 'compact' | 'balanced' | 'spacious';
+type EquationSize = 'small' | 'medium' | 'large';
+type EquationAlignment = 'center' | 'left';
+
+interface NotebookControlsState {
+  pageBackground: PageBackground;
+  pageDensity: PageDensity;
+  notebookWidth: NotebookWidth;
+  pageSpacing: PageSpacing;
+  fontSize: number;
+  lineHeight: number;
+  writingWidth: number;
+  keepListsVisibleWhileTyping: boolean;
+  rtlAssist: boolean;
+  equationSize: EquationSize;
+  equationAlignment: EquationAlignment;
+  hideReferences: boolean;
+  hideScratch: boolean;
+  dimEnvironment: boolean;
+  deepFocus: boolean;
 }
 
 interface Notebook {
@@ -61,6 +101,8 @@ export interface MathZoneProps {
   sectionId:    string;
   sectionTitle: string;
   paddingTop?:  number;
+  controlsOpen?: boolean;
+  onControlsOpenChange?: (open: boolean) => void;
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -68,9 +110,60 @@ export interface MathZoneProps {
 const legacyKey = (sid: string)            => `fw_math_v1_${sid}`;
 const indexKey  = (sid: string)            => `fw_math_index_${sid}`;
 const nbDataKey = (sid: string, id: string) => `fw_math_nb_${sid}_${id}`;
+const nbControlsKey = (sid: string, id: string) => `fw_math_controls_v1_${sid}_${id}`;
+
+function defaultControls(): NotebookControlsState {
+  return {
+    pageBackground: 'dots',
+    pageDensity: 'medium',
+    notebookWidth: 'comfortable',
+    pageSpacing: 'balanced',
+    fontSize: 15.5,
+    lineHeight: 1.85,
+    writingWidth: 640,
+    keepListsVisibleWhileTyping: true,
+    rtlAssist: false,
+    equationSize: 'medium',
+    equationAlignment: 'center',
+    hideReferences: false,
+    hideScratch: false,
+    dimEnvironment: false,
+    deepFocus: false,
+  };
+}
+
+function loadControls(sectionId: string, notebookId: string): NotebookControlsState {
+  try {
+    const raw = localStorage.getItem(nbControlsKey(sectionId, notebookId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<NotebookControlsState>;
+      return { ...defaultControls(), ...parsed };
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaultControls();
+}
+
+function saveControls(sectionId: string, notebookId: string, controls: NotebookControlsState) {
+  try {
+    localStorage.setItem(nbControlsKey(sectionId, notebookId), JSON.stringify(controls));
+  } catch {
+    /* quota */
+  }
+}
 
 function defaultData(): MathZoneData {
-  return { content: '', refs: [], scratches: [] };
+  const id = `page-${Date.now()}`;
+  return {
+    schemaVersion: 2,
+    content: '',
+    pages: [{ id, title: 'Page 1', content: '', createdAt: Date.now(), updatedAt: Date.now() }],
+    activePageId: id,
+    pageResume: {},
+    refs: [],
+    scratches: [],
+  };
 }
 
 function loadIndex(sectionId: string): NotebooksIndex {
@@ -101,7 +194,16 @@ function loadIndex(sectionId: string): NotebooksIndex {
           .map(s => s.text ?? '').filter(Boolean).join('\n\n');
       }
       data = {
+        ...defaultData(),
         content,
+        pages: [{
+          id: `page-${now}`,
+          title: 'Page 1',
+          content,
+          createdAt: now,
+          updatedAt: now,
+        }],
+        activePageId: `page-${now}`,
         refs:      Array.isArray(p.refs)      ? (p.refs as RefCard[])           : [],
         scratches: Array.isArray(p.scratches) ? (p.scratches as ScratchBlock[]) : [],
       };
@@ -122,7 +224,41 @@ function loadIndex(sectionId: string): NotebooksIndex {
 function loadNbData(sectionId: string, nbId: string): MathZoneData {
   try {
     const raw = localStorage.getItem(nbDataKey(sectionId, nbId));
-    if (raw) return JSON.parse(raw) as MathZoneData;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<MathZoneData>;
+      const now = Date.now();
+      if (Array.isArray(parsed.pages) && parsed.pages.length > 0) {
+        const pages = parsed.pages.map((p, idx) => ({
+          id: typeof p.id === 'string' ? p.id : `page-${now}-${idx}`,
+          title: typeof p.title === 'string' && p.title.trim() ? p.title : `Page ${idx + 1}`,
+          content: typeof p.content === 'string' ? p.content : '',
+          createdAt: typeof p.createdAt === 'number' ? p.createdAt : now,
+          updatedAt: typeof p.updatedAt === 'number' ? p.updatedAt : now,
+        }));
+        const activePageId = pages.some(p => p.id === parsed.activePageId) ? parsed.activePageId! : pages[0]!.id;
+        return {
+          schemaVersion: 2,
+          content: typeof parsed.content === 'string' ? parsed.content : pages.find(p => p.id === activePageId)?.content ?? '',
+          pages,
+          activePageId,
+          pageResume: parsed.pageResume && typeof parsed.pageResume === 'object' ? parsed.pageResume : {},
+          refs: Array.isArray(parsed.refs) ? parsed.refs as RefCard[] : [],
+          scratches: Array.isArray(parsed.scratches) ? parsed.scratches as ScratchBlock[] : [],
+        };
+      }
+      // Legacy single-document compatibility adapter -> Page 1.
+      const legacyContent = typeof parsed.content === 'string' ? parsed.content : '';
+      const pageId = `page-${now}`;
+      return {
+        schemaVersion: 2,
+        content: legacyContent,
+        pages: [{ id: pageId, title: 'Page 1', content: legacyContent, createdAt: now, updatedAt: now }],
+        activePageId: pageId,
+        pageResume: {},
+        refs: Array.isArray(parsed.refs) ? parsed.refs as RefCard[] : [],
+        scratches: Array.isArray(parsed.scratches) ? parsed.scratches as ScratchBlock[] : [],
+      };
+    }
   } catch { /* ignore */ }
   return defaultData();
 }
@@ -152,9 +288,16 @@ function useNotebooks(sectionId: string) {
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
       saveNbData(sectionId, index.activeId, data);
+      const now = Date.now();
+      const updatedIndex: NotebooksIndex = {
+        ...index,
+        notebooks: index.notebooks.map(nb => nb.id === index.activeId ? { ...nb, updatedAt: now } : nb),
+      };
+      saveIndex(sectionId, updatedIndex);
+      setIndex(updatedIndex);
     }, 300);
     return () => { if (persistTimer.current) clearTimeout(persistTimer.current); };
-  }, [data, sectionId, index.activeId]);
+  }, [data, sectionId, index.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createNotebook = () => {
     const id  = `nb-${Date.now()}`;
@@ -204,7 +347,44 @@ function useNotebooks(sectionId: string) {
   const activeNotebook = index.notebooks.find(nb => nb.id === index.activeId)
     ?? index.notebooks[0]!;
 
-  return { index, data, activeNotebook, setData, createNotebook, switchNotebook, renameNotebook, deleteNotebook };
+  const duplicateNotebook = (id: string) => {
+    const source = index.notebooks.find(nb => nb.id === id);
+    if (!source) return null;
+    const sourceData = loadNbData(sectionId, id);
+    const newId = `nb-${Date.now()}`;
+    const now = Date.now();
+    const duplicate: Notebook = {
+      id: newId,
+      title: `${source.title || 'Untitled'} copy`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    saveNbData(sectionId, newId, sourceData);
+    const newIndex: NotebooksIndex = { notebooks: [...index.notebooks, duplicate], activeId: newId };
+    saveIndex(sectionId, newIndex);
+    setIndex(newIndex);
+    setData(sourceData);
+    return newId;
+  };
+
+  const updateNotebookData = (
+    updater: (current: MathZoneData) => MathZoneData,
+  ) => {
+    setData(current => updater(current));
+  };
+
+  return {
+    index,
+    data,
+    activeNotebook,
+    setData,
+    updateNotebookData,
+    createNotebook,
+    switchNotebook,
+    renameNotebook,
+    deleteNotebook,
+    duplicateNotebook,
+  };
 }
 
 // ── Plain text ↔ Tiptap JSON converters ──────────────────────────────────────
@@ -437,19 +617,35 @@ function InlineMath({ text, tokens }: { text: string; tokens: AtmosphereTokens }
 
 // ── LineEquation ──────────────────────────────────────────────────────────────
 
-function LineEquation({ text, tokens }: { text: string; tokens: AtmosphereTokens }) {
+function LineEquation({
+  text,
+  tokens,
+  equationSize,
+  equationAlignment,
+}: {
+  text: string;
+  tokens: AtmosphereTokens;
+  equationSize: EquationSize;
+  equationAlignment: EquationAlignment;
+}) {
   const latex           = useMemo(() => plainMathToLatex(text), [text]);
   const { html, error } = useMemo(() => renderKatexHtml(latex, true), [latex]);
+  const scale = equationSize === 'small' ? 0.92 : equationSize === 'large' ? 1.12 : 1;
+  const justifyContent = equationAlignment === 'left' ? 'flex-start' : 'center';
+  const textAlign = equationAlignment === 'left' ? 'left' : 'center';
 
   return (
     <div style={{
-      textAlign: 'center', padding: '14px 0',
+      textAlign, padding: '14px 0',
       overflowX: 'auto', overflowY: 'hidden',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      display: 'flex', alignItems: 'center', justifyContent,
     }}>
       {error
         ? <code style={{ fontSize: 13, color: '#f87171', fontFamily: 'monospace', opacity: 0.8 }}>{text}</code>
-        : <div dangerouslySetInnerHTML={{ __html: html }} style={{ color: tokens.textPrimary }} />
+        : <div
+            dangerouslySetInnerHTML={{ __html: html }}
+            style={{ color: tokens.textPrimary, transform: `scale(${scale})`, transformOrigin: equationAlignment === 'left' ? 'left center' : 'center center' }}
+          />
       }
     </div>
   );
@@ -462,18 +658,22 @@ const proseStyle = {
   fontFamily: 'var(--fw-font-body)', minHeight: '1.2em',
 } as const;
 
-function RenderedDocument({ content, tokens, onClick }: {
+function RenderedDocument({ content, tokens, onClick, proseStyleOverride, equationSize, equationAlignment }: {
   content: string;
   tokens:  AtmosphereTokens;
   onClick: () => void;
+  proseStyleOverride?: React.CSSProperties;
+  equationSize?: EquationSize;
+  equationAlignment?: EquationAlignment;
 }) {
   const lines = useMemo(() => content.split('\n'), [content]);
+  const prose = proseStyleOverride ? { ...proseStyle, ...proseStyleOverride } : proseStyle;
 
   if (!content.trim()) {
     return (
       <div onClick={onClick} style={{
         cursor: 'text', color: tokens.textGhost, opacity: 0.3,
-        ...proseStyle, fontStyle: 'italic', userSelect: 'none',
+        ...prose, fontStyle: 'italic', userSelect: 'none',
       }}>
         Write your solution here.
       </div>
@@ -495,7 +695,7 @@ function RenderedDocument({ content, tokens, onClick }: {
           const content = bulletM[3];
           return (
             <div key={i} dir="auto" style={{
-              ...proseStyle, color: tokens.textPrimary,
+              ...prose, color: tokens.textPrimary,
               paddingLeft: 18 + indent, position: 'relative',
             }}>
               <span aria-hidden style={{ position: 'absolute', left: indent, opacity: 0.45 }}>•</span>
@@ -512,7 +712,7 @@ function RenderedDocument({ content, tokens, onClick }: {
           const content = numberedM[3];
           return (
             <div key={i} dir="auto" style={{
-              ...proseStyle, color: tokens.textPrimary,
+              ...prose, color: tokens.textPrimary,
               paddingLeft: 26 + indent, position: 'relative',
             }}>
               <span aria-hidden style={{
@@ -525,11 +725,21 @@ function RenderedDocument({ content, tokens, onClick }: {
         }
 
         // Math line
-        if (isLikelyMathLine(t)) return <LineEquation key={i} text={t} tokens={tokens} />;
+        if (isLikelyMathLine(t)) {
+          return (
+            <LineEquation
+              key={i}
+              text={t}
+              tokens={tokens}
+              equationSize={equationSize ?? 'medium'}
+              equationAlignment={equationAlignment ?? 'center'}
+            />
+          );
+        }
 
         // Prose line
         return (
-          <div key={i} dir="auto" style={{ ...proseStyle, color: tokens.textPrimary }}>
+          <div key={i} dir="auto" style={{ ...prose, color: tokens.textPrimary }}>
             <InlineMath text={line} tokens={tokens} />
           </div>
         );
@@ -563,6 +773,23 @@ const EDITOR_STYLES = `
   [data-math-editor] .ProseMirror ul,
   [data-math-editor] .ProseMirror ol { margin: 0; padding-left: 20px; }
   [data-math-editor] .ProseMirror li > p { margin: 0; }
+  [data-math-editor][data-list-visible="on"] .ProseMirror ul,
+  [data-math-editor][data-list-visible="on"] .ProseMirror ol {
+    list-style-position: outside;
+    padding-left: 24px;
+  }
+  [data-math-editor][data-list-visible="on"] .ProseMirror li::marker {
+    color: rgba(255,255,255,0.62);
+    font-size: 0.9em;
+  }
+  [data-math-editor][data-list-visible="off"] .ProseMirror ul,
+  [data-math-editor][data-list-visible="off"] .ProseMirror ol {
+    list-style: none;
+    padding-left: 0;
+  }
+  [data-math-editor][data-list-visible="off"] .ProseMirror li > p {
+    margin-left: 0;
+  }
   [data-math-editor] .ProseMirror [data-placeholder]::before {
     content: attr(data-placeholder);
     float: left;
@@ -573,11 +800,12 @@ const EDITOR_STYLES = `
   }
 `;
 
-function TiptapWritingArea({ content, tokens, onChange, onBlur }: {
-  content:  string;
-  tokens:   AtmosphereTokens;
-  onChange: (s: string) => void;
-  onBlur:   () => void;
+function TiptapWritingArea({ content, tokens, onChange, controls, flushRef }: {
+  content:   string;
+  tokens:    AtmosphereTokens;
+  onChange:  (s: string) => void;
+  controls:  NotebookControlsState;
+  flushRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   // Inject editor styles once — scoped, idempotent, never removed
   useEffect(() => {
@@ -621,20 +849,21 @@ function TiptapWritingArea({ content, tokens, onChange, onBlur }: {
       }, 16);
     },
     onBlur: ({ editor }) => {
-      // Always flush immediately on blur — guarantees no data loss.
+      // Flush on blur — exit edit mode is handled by the writing-surface wrapper.
       if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
       onChange(tiptapDocToPlainText(editor.getJSON()));
-      onBlur();
     },
     editorProps: {
       attributes: {
         style: [
-          'font-size: 15.5px',
-          'line-height: 1.85',
+          `font-size: ${controls.fontSize}px`,
+          `line-height: ${controls.lineHeight}`,
           'letter-spacing: 0.01em',
           `color: ${tokens.textPrimary}`,
           'font-family: var(--fw-font-body)',
           `caret-color: ${tokens.accent}`,
+          `direction: ${controls.rtlAssist ? 'rtl' : 'ltr'}`,
+          `text-align: ${controls.rtlAssist ? 'right' : 'left'}`,
         ].join('; '),
       },
       transformPastedText(text: string): string {
@@ -648,8 +877,18 @@ function TiptapWritingArea({ content, tokens, onChange, onBlur }: {
     },
   });
 
+  useEffect(() => {
+    if (!flushRef) return;
+    flushRef.current = () => {
+      if (!editor) return;
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
+      onChange(tiptapDocToPlainText(editor.getJSON()));
+    };
+    return () => { flushRef.current = null; };
+  }, [editor, onChange, flushRef]);
+
   return (
-    <div data-math-editor="">
+    <div data-math-editor="" data-list-visible={controls.keepListsVisibleWhileTyping ? 'on' : 'off'}>
       <EditorContent editor={editor} />
     </div>
   );
@@ -794,6 +1033,81 @@ function PageTitle({ notebook, allNotebooks, tokens, onRename, onSwitch, onCreat
 
 // ── HelpPanel ─────────────────────────────────────────────────────────────────
 
+function NotebookShelf({
+  tokens,
+  notebooks,
+  activeNotebookId,
+  onClose,
+  onSwitch,
+  onCreate,
+  onRename,
+}: {
+  tokens: AtmosphereTokens;
+  notebooks: Notebook[];
+  activeNotebookId: string;
+  onClose: () => void;
+  onSwitch: (id: string) => void;
+  onCreate: () => void;
+  onRename: (id: string, title: string) => void;
+}) {
+  const ordered = [...notebooks].sort((a, b) => b.updatedAt - a.updatedAt);
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 70 }} />
+      <div
+        style={{
+          position: 'absolute',
+          top: 52,
+          left: 24,
+          right: 24,
+          zIndex: 81,
+          borderRadius: 14,
+          border: `1px solid ${tokens.cardBorder}`,
+          background: `${tokens.cardBg}f3`,
+          backdropFilter: 'blur(10px)',
+          boxShadow: '0 18px 44px rgba(0,0,0,0.52)',
+          padding: 14,
+        }}
+        onPointerDown={e => e.stopPropagation()}
+        onMouseDown={e => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: tokens.textGhost, fontFamily: 'var(--fw-font-label)' }}>
+            Notebooks
+          </span>
+          <button type="button" onClick={onCreate} style={{ background: 'none', border: `1px solid ${tokens.cardBorder}`, color: tokens.textMuted, borderRadius: 999, fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}>
+            + New Notebook
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+          {ordered.map(nb => (
+            <button key={nb.id} type="button"
+              onClick={() => { onSwitch(nb.id); onClose(); }}
+              onDoubleClick={() => {
+                const next = window.prompt('Rename notebook', nb.title || 'Untitled');
+                if (next != null) onRename(nb.id, next.trim() || 'Untitled');
+              }}
+              style={{
+                textAlign: 'left',
+                borderRadius: 12,
+                border: `1px solid ${nb.id === activeNotebookId ? `${tokens.accent}66` : tokens.cardBorder}`,
+                background: nb.id === activeNotebookId ? `${tokens.accent}1f` : `${tokens.wellBg}80`,
+                color: nb.id === activeNotebookId ? tokens.textPrimary : tokens.textMuted,
+                padding: '10px 12px',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.25 }}>{nb.title || 'Untitled'}</div>
+              <div style={{ marginTop: 6, fontSize: 10, opacity: 0.6 }}>Open Notebook</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () => void }) {
   const mono: React.CSSProperties = {
     fontFamily: "ui-monospace, 'JetBrains Mono', 'Courier New', monospace",
@@ -863,6 +1177,152 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
             fontFamily: 'var(--fw-font-body)' }}>{to}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function NotebookControlsPanel({
+  tokens,
+  controls,
+  onChange,
+  onClose,
+  onRename,
+  onDuplicate,
+  onCopy,
+  onExport,
+}: {
+  tokens: AtmosphereTokens;
+  controls: NotebookControlsState;
+  onChange: (next: NotebookControlsState) => void;
+  onClose: () => void;
+  onRename: () => void;
+  onDuplicate: () => void;
+  onCopy: () => void;
+  onExport: () => void;
+}) {
+  const sectionStyle: React.CSSProperties = {
+    borderTop: `1px solid ${tokens.divider}`,
+    paddingTop: 10,
+    marginTop: 10,
+  };
+  const labelStyle: React.CSSProperties = {
+    fontSize: 10,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: tokens.textGhost,
+    fontFamily: 'var(--fw-font-label)',
+    marginBottom: 8,
+  };
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+  };
+  const chip = (active: boolean): React.CSSProperties => ({
+    border: `1px solid ${active ? `${tokens.accent}66` : tokens.cardBorder}`,
+    background: active ? `${tokens.accent}1f` : `${tokens.wellBg}66`,
+    color: active ? tokens.accent : tokens.textMuted,
+    borderRadius: 999,
+    padding: '5px 9px',
+    fontSize: 11,
+    cursor: 'pointer',
+    fontFamily: 'var(--fw-font-body)',
+  });
+  const toggle = (
+    k: 'keepListsVisibleWhileTyping' | 'rtlAssist' | 'hideReferences' | 'hideScratch' | 'dimEnvironment' | 'deepFocus',
+  ) =>
+    onChange({ ...controls, [k]: !controls[k] });
+
+  return (
+    <div style={{
+      position: 'absolute', top: 52, right: 16, width: 360, zIndex: 80,
+      background: `${tokens.cardBg}f2`,
+      border: `1px solid ${tokens.cardBorder}`,
+      borderRadius: 14,
+      padding: '12px 14px 14px',
+      boxShadow: '0 18px 44px rgba(0,0,0,0.55)',
+      backdropFilter: 'blur(10px)',
+      pointerEvents: 'auto',
+      overflowY: 'auto',
+      maxHeight: 'calc(100vh - 120px)',
+    }}
+      onPointerDown={e => e.stopPropagation()}
+      onMouseDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 650, color: tokens.textMuted, fontFamily: 'var(--fw-font-body)' }}>
+          Notebook Controls
+        </span>
+        <button type="button" onClick={onClose} style={{ border: 'none', background: 'none', color: tokens.textGhost, cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>Page</div>
+        <div style={rowStyle}>
+          {(['dots', 'grid', 'ruled', 'blank'] as PageBackground[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, pageBackground: v })} style={chip(controls.pageBackground === v)}>{v}</button>
+          ))}
+        </div>
+        <div style={rowStyle}>
+          {(['light', 'medium', 'dense'] as PageDensity[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, pageDensity: v })} style={chip(controls.pageDensity === v)}>{v}</button>
+          ))}
+        </div>
+        <div style={rowStyle}>
+          {(['narrow', 'comfortable', 'wide'] as NotebookWidth[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, notebookWidth: v })} style={chip(controls.notebookWidth === v)}>{v}</button>
+          ))}
+        </div>
+        <div style={rowStyle}>
+          {(['compact', 'balanced', 'spacious'] as PageSpacing[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, pageSpacing: v })} style={chip(controls.pageSpacing === v)}>{v}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>Writing</div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Font size</span><input type="range" min={13} max={20} step={0.5} value={controls.fontSize} onChange={e => onChange({ ...controls, fontSize: Number(e.target.value) })} /></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Line height</span><input type="range" min={1.4} max={2.3} step={0.05} value={controls.lineHeight} onChange={e => onChange({ ...controls, lineHeight: Number(e.target.value) })} /></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Writing width</span><input type="range" min={520} max={920} step={10} value={controls.writingWidth} onChange={e => onChange({ ...controls, writingWidth: Number(e.target.value) })} /></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Keep lists visible while typing</span><button type="button" onClick={() => toggle('keepListsVisibleWhileTyping')} style={chip(controls.keepListsVisibleWhileTyping)}>{controls.keepListsVisibleWhileTyping ? 'On' : 'Off'}</button></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>RTL/Hebrew assist</span><button type="button" onClick={() => toggle('rtlAssist')} style={chip(controls.rtlAssist)}>{controls.rtlAssist ? 'On' : 'Off'}</button></div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>Equations</div>
+        <div style={rowStyle}>
+          {(['small', 'medium', 'large'] as EquationSize[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, equationSize: v })} style={chip(controls.equationSize === v)}>{v}</button>
+          ))}
+        </div>
+        <div style={rowStyle}>
+          {(['center', 'left'] as EquationAlignment[]).map(v => (
+            <button key={v} type="button" onClick={() => onChange({ ...controls, equationAlignment: v })} style={chip(controls.equationAlignment === v)}>{v === 'center' ? 'Centered' : 'Left'}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>Focus</div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Hide References</span><button type="button" onClick={() => toggle('hideReferences')} style={chip(controls.hideReferences)}>{controls.hideReferences ? 'On' : 'Off'}</button></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Hide Scratch</span><button type="button" onClick={() => toggle('hideScratch')} style={chip(controls.hideScratch)}>{controls.hideScratch ? 'On' : 'Off'}</button></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Dim environment</span><button type="button" onClick={() => toggle('dimEnvironment')} style={chip(controls.dimEnvironment)}>{controls.dimEnvironment ? 'On' : 'Off'}</button></div>
+        <div style={rowStyle}><span style={{ fontSize: 12, color: tokens.textMuted }}>Deep Focus mode</span><button type="button" onClick={() => toggle('deepFocus')} style={chip(controls.deepFocus)}>{controls.deepFocus ? 'On' : 'Off'}</button></div>
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>Notebook Actions</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <button type="button" onClick={onRename} style={chip(false)}>Rename</button>
+          <button type="button" onClick={onDuplicate} style={chip(false)}>Duplicate</button>
+          <button type="button" onClick={onCopy} style={chip(false)}>Copy</button>
+          <button type="button" onClick={onExport} style={chip(false)}>Export .txt</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1035,43 +1495,155 @@ function EdgeTab({ side, label, open, tokens, onClick }: {
 // ── MathZone ──────────────────────────────────────────────────────────────────
 
 export function MathZone({
-  tokens, sectionId, sectionTitle: _st, paddingTop = 52,
+  tokens, sectionId, sectionTitle: _st, paddingTop = 52, controlsOpen = false, onControlsOpenChange,
 }: MathZoneProps) {
   const {
     index, data, activeNotebook,
-    setData, createNotebook, switchNotebook, renameNotebook,
+    updateNotebookData, createNotebook, switchNotebook, renameNotebook, duplicateNotebook,
   } = useNotebooks(sectionId);
+  const [showShelf, setShowShelf] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const writingSurfaceRef = useRef<HTMLDivElement>(null);
+  const flushEditorRef = useRef<(() => void) | null>(null);
 
-  const [editing,   setEditing]   = useState(() => data.content.trim() === '');
+  const activePage = useMemo(() => {
+    return data.pages.find(p => p.id === data.activePageId) ?? data.pages[0];
+  }, [data.pages, data.activePageId]);
+  const activePageId = activePage?.id ?? '';
+  const activePageContent = activePage?.content ?? '';
+
+  const [editing,   setEditing]   = useState(false);
   const [leftOpen,  setLeftOpen]  = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const [showHelp,  setShowHelp]  = useState(false);
+  const [controls, setControls] = useState<NotebookControlsState>(() => loadControls(sectionId, activeNotebook.id));
 
   useEffect(() => {
-    setEditing(data.content.trim() === '');
-  }, [activeNotebook.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    setControls(loadControls(sectionId, activeNotebook.id));
+  }, [sectionId, activeNotebook.id]);
 
-  const handleBlur = () => {
-    if (data.content.trim()) setEditing(false);
+  useEffect(() => {
+    saveControls(sectionId, activeNotebook.id, controls);
+  }, [sectionId, activeNotebook.id, controls]);
+
+  const persistPageResume = (pageId: string, patch: Partial<NotebookPageResume>) => {
+    updateNotebookData(current => ({
+      ...current,
+      pageResume: {
+        ...current.pageResume,
+        [pageId]: {
+          scrollTop: current.pageResume[pageId]?.scrollTop ?? 0,
+          lastEditing: current.pageResume[pageId]?.lastEditing ?? false,
+          ...patch,
+        },
+      },
+    }));
   };
 
-  // Atomically exit editing mode when switching notebooks — prevents a one-frame
-  // window where the editor is still visible but data has already changed.
-  const handleSwitchNotebook = (id: string) => {
+  // Restore edit mode only on notebook/page navigation — never from content changes.
+  useEffect(() => {
+    if (!activePageId) return;
+    setEditing(Boolean(data.pageResume[activePageId]?.lastEditing));
+  }, [activeNotebook.id, activePageId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !activePageId) return;
+    const nextTop = data.pageResume[activePageId]?.scrollTop ?? 0;
+    node.scrollTo({ top: nextTop, behavior: 'auto' });
+  }, [activePageId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const enterEdit = () => {
+    setEditing(true);
+    if (activePageId) persistPageResume(activePageId, { lastEditing: true });
+  };
+
+  const exitEdit = () => {
     setEditing(false);
+    if (activePageId) persistPageResume(activePageId, { lastEditing: false });
+  };
+
+  const handleWritingSurfaceBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && writingSurfaceRef.current?.contains(next)) return;
+    exitEdit();
+  };
+
+  const flushActiveEditor = () => {
+    flushEditorRef.current?.();
+  };
+
+  const handleSwitchNotebook = (id: string) => {
+    if (editing) flushActiveEditor();
+    const currentScroll = scrollRef.current?.scrollTop ?? 0;
+    if (activePageId) persistPageResume(activePageId, { scrollTop: currentScroll, lastEditing: false });
     switchNotebook(id);
+    setShowShelf(false);
+  };
+
+  const setActivePage = (pageId: string) => {
+    if (!pageId || pageId === activePageId) return;
+    if (editing) flushActiveEditor();
+    const currentScroll = scrollRef.current?.scrollTop ?? 0;
+    if (activePageId) persistPageResume(activePageId, { scrollTop: currentScroll, lastEditing: false });
+    updateNotebookData(current => ({
+      ...current,
+      activePageId: pageId,
+      content: current.pages.find(p => p.id === pageId)?.content ?? '',
+    }));
+  };
+
+  const createPage = () => {
+    const id = `page-${Date.now()}`;
+    const now = Date.now();
+    updateNotebookData(current => {
+      const activeIdx = current.pages.findIndex(p => p.id === current.activePageId);
+      const nextTitle = `Page ${current.pages.length + 1}`;
+      const nextPage: NotebookPage = { id, title: nextTitle, content: '', createdAt: now, updatedAt: now };
+      const pages = [...current.pages];
+      if (activeIdx >= 0) pages.splice(activeIdx + 1, 0, nextPage);
+      else pages.push(nextPage);
+      return {
+        ...current,
+        pages,
+        activePageId: id,
+        content: '',
+        pageResume: {
+          ...current.pageResume,
+          [id]: { scrollTop: 0, lastEditing: true },
+        },
+      };
+    });
+    setEditing(true);
+  };
+
+  const renamePage = (pageId: string, title: string) => {
+    updateNotebookData(current => ({
+      ...current,
+      pages: current.pages.map(p => p.id === pageId ? { ...p, title: title.trim() || 'Untitled page', updatedAt: Date.now() } : p),
+    }));
   };
 
   const toggleLeft  = () => setLeftOpen(v  => { const next = !v;  if (next) setRightOpen(false); return next; });
   const toggleRight = () => setRightOpen(v => { const next = !v; if (next) setLeftOpen(false);  return next; });
 
-  const addRef      = () => setData(d => ({ ...d, refs: [...d.refs, { id: `ref-${Date.now()}`, content: '' }] }));
-  const updateRef   = (id: string, c: string) => setData(d => ({ ...d, refs: d.refs.map(r => r.id === id ? { ...r, content: c } : r) }));
-  const removeRef   = (id: string) => setData(d => ({ ...d, refs: d.refs.filter(r => r.id !== id) }));
+  const shouldHideRefs = controls.hideReferences || controls.deepFocus;
+  const shouldHideScratch = controls.hideScratch || controls.deepFocus;
+  const effectiveLeftOpen = shouldHideRefs ? false : leftOpen;
+  const effectiveRightOpen = shouldHideScratch ? false : rightOpen;
 
-  const addScratch    = () => setData(d => ({ ...d, scratches: [...d.scratches, { id: `scratch-${Date.now()}`, content: '' }] }));
-  const updateScratch = (id: string, c: string) => setData(d => ({ ...d, scratches: d.scratches.map(s => s.id === id ? { ...s, content: c } : s) }));
-  const removeScratch = (id: string) => setData(d => ({ ...d, scratches: d.scratches.filter(s => s.id !== id) }));
+  useEffect(() => {
+    if (shouldHideRefs) setLeftOpen(false);
+    if (shouldHideScratch) setRightOpen(false);
+  }, [shouldHideRefs, shouldHideScratch]);
+
+  const addRef      = () => updateNotebookData(d => ({ ...d, refs: [...d.refs, { id: `ref-${Date.now()}`, content: '' }] }));
+  const updateRef   = (id: string, c: string) => updateNotebookData(d => ({ ...d, refs: d.refs.map(r => r.id === id ? { ...r, content: c } : r) }));
+  const removeRef   = (id: string) => updateNotebookData(d => ({ ...d, refs: d.refs.filter(r => r.id !== id) }));
+
+  const addScratch    = () => updateNotebookData(d => ({ ...d, scratches: [...d.scratches, { id: `scratch-${Date.now()}`, content: '' }] }));
+  const updateScratch = (id: string, c: string) => updateNotebookData(d => ({ ...d, scratches: d.scratches.map(s => s.id === id ? { ...s, content: c } : s) }));
+  const removeScratch = (id: string) => updateNotebookData(d => ({ ...d, scratches: d.scratches.filter(s => s.id !== id) }));
 
   const refsContent = (
     <>
@@ -1109,6 +1681,54 @@ export function MathZone({
     </>
   );
 
+  const densityOpacity = controls.pageDensity === 'light' ? 0.06 : controls.pageDensity === 'dense' ? 0.14 : 0.1;
+  const densityStep = controls.pageDensity === 'light' ? 24 : controls.pageDensity === 'dense' ? 14 : 18;
+  const pageBackgroundImage =
+    controls.pageBackground === 'blank'
+      ? undefined
+      : controls.pageBackground === 'grid'
+        ? `linear-gradient(rgba(255,255,255,${densityOpacity}) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,${densityOpacity}) 1px, transparent 1px)`
+        : controls.pageBackground === 'ruled'
+          ? `linear-gradient(rgba(255,255,255,${densityOpacity}) 1px, transparent 1px)`
+          : `radial-gradient(circle, rgba(255,255,255,${densityOpacity}) 1px, transparent 1px)`;
+  const pageBackgroundSize =
+    controls.pageBackground === 'grid'
+      ? `${densityStep}px ${densityStep}px`
+      : controls.pageBackground === 'ruled'
+        ? `100% ${Math.max(18, densityStep)}px`
+        : `${densityStep}px ${densityStep}px`;
+  const notebookMaxWidth = controls.notebookWidth === 'narrow' ? 560 : controls.notebookWidth === 'wide' ? 860 : 700;
+  const pagePaddingY = controls.pageSpacing === 'compact' ? '26px 40px 30px' : controls.pageSpacing === 'spacious' ? '78px 64px 112px' : '44px 52px 64px';
+  const notebookOpacity = controls.deepFocus ? 1 : controls.dimEnvironment ? 0.98 : 1;
+  const notebookScale = controls.deepFocus ? 1.01 : 1;
+  const helpButtonOpacity = controls.deepFocus ? 0.08 : undefined;
+  const pageTitleOpacity = controls.deepFocus ? 0.82 : 1;
+  const pageTitleFilter = controls.deepFocus ? 'drop-shadow(0 0 20px rgba(0,0,0,0.45))' : undefined;
+  const proseStyleOverride: React.CSSProperties = {
+    fontSize: controls.fontSize,
+    lineHeight: controls.lineHeight,
+  };
+  const handleRenameNotebook = () => {
+    const next = window.prompt('Rename notebook', activeNotebook.title || 'Untitled');
+    if (next == null) return;
+    renameNotebook(activeNotebook.id, next.trim() || 'Untitled');
+  };
+  const handleDuplicateNotebook = () => {
+    duplicateNotebook(activeNotebook.id);
+  };
+  const handleCopyNotebook = async () => {
+    try { await navigator.clipboard.writeText(activePageContent); } catch { /* ignore */ }
+  };
+  const handleExportNotebook = () => {
+    const flattened = data.pages.map(p => `# ${p.title}\n\n${p.content}`).join('\n\n');
+    const blob = new Blob([flattened], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(activeNotebook.title || 'notebook').replace(/[^a-z0-9-_]/gi, '_')}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
@@ -1116,20 +1736,26 @@ export function MathZone({
     }}>
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
 
-        <EdgeTab side="left"  label="REFS"    open={leftOpen}  tokens={tokens} onClick={toggleLeft}  />
-        <EdgeTab side="right" label="SCRATCH" open={rightOpen} tokens={tokens} onClick={toggleRight} />
+        {!shouldHideRefs && <EdgeTab side="left"  label="REFS"    open={effectiveLeftOpen}  tokens={tokens} onClick={toggleLeft}  />}
+        {!shouldHideScratch && <EdgeTab side="right" label="SCRATCH" open={effectiveRightOpen} tokens={tokens} onClick={toggleRight} />}
 
         {/* Notebook page — anchored, never reflowed */}
         <div style={{
           position: 'absolute', inset: '0 16px',
           display: 'flex', flexDirection: 'column',
           backgroundColor: tokens.pageBg,
+          backgroundImage: pageBackgroundImage,
+          backgroundSize: pageBackgroundImage ? pageBackgroundSize : undefined,
+          opacity: notebookOpacity,
+          transform: `scale(${notebookScale})`,
+          transformOrigin: '50% 52%',
+          transition: 'opacity 0.2s ease, transform 0.2s ease',
           overflow: 'hidden', zIndex: 1,
         }}>
           {/* "?" help button */}
           <button type="button"
             onClick={() => setShowHelp(v => !v)}
-            title="Math writing guide"
+            title="Notebook writing guide"
             onMouseEnter={e => { if (!showHelp) (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
             onMouseLeave={e => { if (!showHelp) (e.currentTarget as HTMLButtonElement).style.opacity = '0.35'; }}
             style={{
@@ -1144,12 +1770,54 @@ export function MathZone({
               fontSize: 13, fontWeight: 700, lineHeight: 1, padding: 0,
               transition: 'opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s',
               fontFamily: 'var(--fw-font-label)', backdropFilter: 'blur(4px)',
+              ...(helpButtonOpacity != null ? { opacity: helpButtonOpacity } : {}),
             }}>?</button>
 
           {showHelp && <HelpPanel tokens={tokens} onClose={() => setShowHelp(false)} />}
-
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <div style={{ maxWidth: 640, margin: '0 auto', padding: '44px 52px 64px' }}>
+          <div
+            ref={scrollRef}
+            style={{ flex: 1, overflowY: 'auto' }}
+            onScroll={() => {
+              if (!activePageId) return;
+              const top = scrollRef.current?.scrollTop ?? 0;
+              persistPageResume(activePageId, { scrollTop: top });
+            }}
+          >
+            <div style={{ maxWidth: notebookMaxWidth, margin: '0 auto', padding: pagePaddingY, width: '100%', opacity: pageTitleOpacity, filter: pageTitleFilter }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowShelf(v => !v)}
+                  style={{
+                    border: `1px solid ${tokens.cardBorder}`,
+                    borderRadius: 999,
+                    background: `${tokens.wellBg}88`,
+                    color: tokens.textMuted,
+                    fontSize: 11,
+                    padding: '5px 10px',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--fw-font-body)',
+                  }}
+                >
+                  Open Notebook
+                </button>
+                <button
+                  type="button"
+                  onClick={createPage}
+                  style={{
+                    border: `1px solid ${tokens.cardBorder}`,
+                    borderRadius: 999,
+                    background: `${tokens.wellBg}88`,
+                    color: tokens.textMuted,
+                    fontSize: 11,
+                    padding: '5px 10px',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--fw-font-body)',
+                  }}
+                >
+                  + Page
+                </button>
+              </div>
 
               <PageTitle
                 notebook={activeNotebook}
@@ -1159,20 +1827,63 @@ export function MathZone({
                 onSwitch={handleSwitchNotebook}
                 onCreate={createNotebook}
               />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: -18, marginBottom: 28 }}>
+                {data.pages.map(page => (
+                  <button
+                    key={page.id}
+                    type="button"
+                    onClick={() => setActivePage(page.id)}
+                    onDoubleClick={() => {
+                      const next = window.prompt('Rename page', page.title);
+                      if (next != null) renamePage(page.id, next);
+                    }}
+                    style={{
+                      borderRadius: 999,
+                      border: `1px solid ${page.id === activePageId ? `${tokens.accent}66` : tokens.cardBorder}`,
+                      background: page.id === activePageId ? `${tokens.accent}1c` : `${tokens.wellBg}70`,
+                      color: page.id === activePageId ? tokens.accent : tokens.textMuted,
+                      fontSize: 11,
+                      padding: '5px 10px',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--fw-font-body)',
+                    }}
+                    title="Double-click to rename page"
+                  >
+                    {page.title}
+                  </button>
+                ))}
+              </div>
 
               {editing ? (
-                <TiptapWritingArea
-                  content={data.content}
-                  tokens={tokens}
-                  onChange={c => setData(d => ({ ...d, content: c }))}
-                  onBlur={handleBlur}
-                />
+                <div
+                  ref={writingSurfaceRef}
+                  onBlur={handleWritingSurfaceBlur}
+                  style={{ maxWidth: controls.writingWidth, margin: '0 auto' }}
+                >
+                  <TiptapWritingArea
+                    key={activePageId}
+                    content={activePageContent}
+                    tokens={tokens}
+                    flushRef={flushEditorRef}
+                    onChange={c => updateNotebookData(d => ({
+                      ...d,
+                      content: c,
+                      pages: d.pages.map(p => p.id === activePageId ? { ...p, content: c, updatedAt: Date.now() } : p),
+                    }))}
+                    controls={controls}
+                  />
+                </div>
               ) : (
-                <RenderedDocument
-                  content={data.content}
-                  tokens={tokens}
-                  onClick={() => setEditing(true)}
-                />
+                <div style={{ maxWidth: controls.writingWidth, margin: '0 auto', direction: controls.rtlAssist ? 'rtl' : 'ltr' }}>
+                  <RenderedDocument
+                    content={activePageContent}
+                    tokens={tokens}
+                    onClick={enterEdit}
+                    proseStyleOverride={proseStyleOverride}
+                    equationSize={controls.equationSize}
+                    equationAlignment={controls.equationAlignment}
+                  />
+                </div>
               )}
             </div>
           </div>
@@ -1182,37 +1893,65 @@ export function MathZone({
         <div
           style={{
             position: 'absolute', inset: 0, zIndex: 35,
-            opacity: (leftOpen || rightOpen) ? 1 : 0,
-            pointerEvents: (leftOpen || rightOpen) ? 'auto' : 'none',
-            background: 'rgba(0,0,0,0.22)',
+            opacity: (effectiveLeftOpen || effectiveRightOpen || controlsOpen || controls.dimEnvironment || controls.deepFocus) ? 1 : 0,
+            pointerEvents: (effectiveLeftOpen || effectiveRightOpen || controlsOpen) ? 'auto' : 'none',
+            background: controls.deepFocus ? 'rgba(2,4,9,0.64)' : controls.dimEnvironment ? 'rgba(2,4,9,0.38)' : 'rgba(0,0,0,0.22)',
             transition: 'opacity 0.22s',
           }}
-          onClick={() => { setLeftOpen(false); setRightOpen(false); }}
+          onClick={() => {
+            setLeftOpen(false);
+            setRightOpen(false);
+            if (controlsOpen) onControlsOpenChange?.(false);
+          }}
         />
 
+        {controlsOpen && (
+          <NotebookControlsPanel
+            tokens={tokens}
+            controls={controls}
+            onChange={setControls}
+            onClose={() => onControlsOpenChange?.(false)}
+            onRename={handleRenameNotebook}
+            onDuplicate={handleDuplicateNotebook}
+            onCopy={handleCopyNotebook}
+            onExport={handleExportNotebook}
+          />
+        )}
+        {showShelf && (
+          <NotebookShelf
+            tokens={tokens}
+            notebooks={index.notebooks}
+            activeNotebookId={activeNotebook.id}
+            onClose={() => setShowShelf(false)}
+            onSwitch={handleSwitchNotebook}
+            onCreate={createNotebook}
+            onRename={renameNotebook}
+          />
+        )}
+
         {/* Left drawer */}
-        <div style={{
+        {!shouldHideRefs && <div style={{
           position: 'absolute', left: 16, top: 0, bottom: 0, width: 280, zIndex: 40,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           background: tokens.cardBg, borderRight: `1px solid ${tokens.cardBorder}`,
-          transform: leftOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transform: effectiveLeftOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         }}>
           <ZoneHeader label="References" description="Theorem · Formula · Hint" tokens={tokens} />
           {refsContent}
-        </div>
+        </div>}
 
         {/* Right drawer */}
-        <div style={{
+        {!shouldHideScratch && <div style={{
           position: 'absolute', right: 16, top: 0, bottom: 0, width: 260, zIndex: 40,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           background: tokens.cardBg, borderLeft: `1px solid ${tokens.cardBorder}`,
-          transform: rightOpen ? 'translateX(0)' : 'translateX(100%)',
+          transform: effectiveRightOpen ? 'translateX(0)' : 'translateX(100%)',
           transition: 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         }}>
           <ZoneHeader label="Scratch" description="Explore freely." tokens={tokens} />
           {scratchContent}
-        </div>
+        </div>}
 
       </div>
     </div>

@@ -239,7 +239,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
         { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
-        { id: 'math-zone', title: 'Math Zone', description: 'Solve problems with steps, formulas, and scratch-friendly structure.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
+        { id: 'math-zone', title: 'Notebook', description: 'Study pages with notes, equations, and calm writing flow.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
         { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
         { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
       ],
@@ -783,7 +783,12 @@ export function SectionPage() {
 
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
+  const [notebookControlsOpen, setNotebookControlsOpen] = useState(false);
   const designSnapshot = useRef<WorkspaceCustomization | null>(null);
+
+  useEffect(() => {
+    if (sectionViewMode !== 'math-zone') setNotebookControlsOpen(false);
+  }, [sectionViewMode]);
 
   const performanceCalm = usePerformanceCalm();
   const environmentFocusGlow = useMemo(() => {
@@ -898,6 +903,7 @@ export function SectionPage() {
     setResumeVisible(false);
     setStudyLoopDismissed(false);
     setDesignMode(false);
+    setNotebookControlsOpen(false);
     setDragId(null);
     setDragOverId(null);
   }, [id]);
@@ -2420,6 +2426,8 @@ export function SectionPage() {
           onOpenSearch={openPalette}
           onOpenAppearance={() => setAppearanceOpen(true)}
           onCustomize={() => {}}
+          onOpenNotebookControls={() => {}}
+          notebookControlsOpen={false}
           onExitCustomize={() => {}}
           onResetCustomize={() => {}}
           sectionViewMode="free-space"
@@ -2603,6 +2611,8 @@ export function SectionPage() {
         onOpenSearch={openPalette}
         onOpenAppearance={() => setAppearanceOpen(true)}
         onCustomize={enterDesignMode}
+        onOpenNotebookControls={() => setNotebookControlsOpen(v => !v)}
+        notebookControlsOpen={notebookControlsOpen}
         onExitCustomize={exitDesignMode}
         onResetCustomize={resetDesign}
         sectionViewMode={sectionViewMode}
@@ -3194,6 +3204,8 @@ export function SectionPage() {
           sectionId={sectionId}
           sectionTitle={section.title}
           paddingTop={WORKSPACE_SHELL_TOP_INSET}
+          controlsOpen={notebookControlsOpen}
+          onControlsOpenChange={setNotebookControlsOpen}
         />
       </div>
 

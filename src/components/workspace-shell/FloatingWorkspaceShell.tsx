@@ -14,7 +14,7 @@ import { glassIsland, shellIconBtn } from './shellGlass';
 const VIEW_MODES = [
   { id: 'free-space' as const,  label: 'Workspace' },
   { id: 'work-surface' as const, label: 'Mission Control' },
-  { id: 'math-zone' as const,   label: 'Math Zone' },
+  { id: 'math-zone' as const,   label: 'Notebook' },
 ];
 
 export const WORKSPACE_CHROME_Z = 600;
@@ -30,6 +30,8 @@ interface Props {
   onOpenSearch: () => void;
   onOpenAppearance: () => void;
   onCustomize: () => void;
+  onOpenNotebookControls?: () => void;
+  notebookControlsOpen?: boolean;
   onExitCustomize: () => void;
   onResetCustomize: () => void;
   sectionViewMode: 'work-surface' | 'free-space' | 'math-zone';
@@ -52,6 +54,8 @@ export function FloatingWorkspaceShell({
   onOpenSearch,
   onOpenAppearance,
   onCustomize,
+  onOpenNotebookControls,
+  notebookControlsOpen = false,
   onExitCustomize,
   onResetCustomize,
   sectionViewMode,
@@ -317,14 +321,20 @@ export function FloatingWorkspaceShell({
                 </button>
                 <button
                   type="button"
-                  aria-label="Settings"
-                  title="Customize"
-                  onClick={onCustomize}
+                  aria-label={sectionViewMode === 'math-zone' ? 'Notebook controls' : 'Settings'}
+                  title={sectionViewMode === 'math-zone' ? 'Notebook Controls' : 'Customize'}
+                  onClick={sectionViewMode === 'math-zone' ? (onOpenNotebookControls ?? onCustomize) : onCustomize}
                   style={shellIconBtn(tokens, settingsHover ? 'hover' : 'idle')}
                   onMouseEnter={() => setSettingsHover(true)}
                   onMouseLeave={() => setSettingsHover(false)}
                 >
-                  <Sliders size={17} strokeWidth={2} />
+                  <Sliders
+                    size={17}
+                    strokeWidth={2}
+                    style={{
+                      color: sectionViewMode === 'math-zone' && notebookControlsOpen ? accent : undefined,
+                    }}
+                  />
                 </button>
               </div>
             </>

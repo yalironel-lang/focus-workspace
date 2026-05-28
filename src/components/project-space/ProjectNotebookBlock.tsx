@@ -2915,9 +2915,9 @@ export function ProjectNotebookBlock({
             >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
           )}
           {notebookMode === 'math-workspace' ? (
-            /* Math Zone identity label — readable but ambient, not a control */
+            /* Notebook identity label — readable but ambient, not a control */
             <span
-              title="Math Zone — solving mode"
+              title="Notebook — solving mode"
               style={{
                 fontSize: 10, fontWeight: 600, letterSpacing: '0.12em',
                 textTransform: 'uppercase',
@@ -2947,7 +2947,7 @@ export function ProjectNotebookBlock({
                     : {}),
                 });
               }}
-              title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
+              title={notebookMode === 'math' ? 'Notebook mode' : 'Equation mode'}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
                 borderRadius: 4, color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.28)',
@@ -4691,7 +4691,7 @@ export function ProjectNotebookBlock({
                 fontSize: 10, color: 'rgba(129,140,248,0.55)',
                 letterSpacing: '0.12em', textTransform: 'uppercase',
                 marginBottom: 20,
-              }}>{notebookMode === 'math-workspace' ? '∑ Math Zone' : '∑ Math mode'}</p>
+              }}>{notebookMode === 'math-workspace' ? '∑ Notebook' : '∑ Equation mode'}</p>
             )}
             {renderFocusModeBlocks()}
             <div style={{
