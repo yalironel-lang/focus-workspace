@@ -5,10 +5,14 @@
  *   Content split line-by-line. Each line independently classified:
  *     isLikelyMathLine → centered KaTeX (display mode)
  *     else             → readable prose, with $…$ inline KaTeX
+ *     list prefix      → rendered as bullet/numbered item
  *   Empty lines → breathing space only.
  *
  * WRITING (click anywhere, or when empty):
- *   One transparent auto-resizing textarea. Blur → reading.
+ *   Tiptap editor (ProseMirror-based). Blur → reading mode.
+ *   Serializes to/from plain text for storage.
+ *   Supports: bullet lists, numbered lists, Tab/Shift-Tab indent, undo/redo.
+ *   Zero toolbar chrome. Invisible editor feel.
  *
  * LAYOUT:
  *   Notebook page always occupies full width (minus 16px ghost edge tabs).
@@ -21,6 +25,10 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import type { JSONContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { renderKatexHtml } from '../../lib/notebookMath';
 import { plainMathToLatex, isLikelyMathLine } from '../../lib/mathInputAssistant';
@@ -74,7 +82,6 @@ function loadIndex(sectionId: string): NotebooksIndex {
     }
   } catch { /* ignore */ }
 
-  // First-ever load — migrate legacy key (do NOT delete it)
   const id  = 'nb-legacy';
   const now = Date.now();
   let data  = defaultData();
@@ -200,6 +207,184 @@ function useNotebooks(sectionId: string) {
   return { index, data, activeNotebook, setData, createNotebook, switchNotebook, renameNotebook, deleteNotebook };
 }
 
+// ── Plain text ↔ Tiptap JSON converters ──────────────────────────────────────
+//
+// Content is stored as plain text (same format as before).
+// These functions translate between that format and Tiptap's JSON document.
+//
+// Plain text format:
+//   - Empty lines    → blank paragraph (spacing in render)
+//   - "- text"       → top-level bullet item
+//   - "  - text"     → nested bullet item (2-space indent)
+//   - "1. text"      → numbered item
+//   - other          → prose paragraph
+
+function plainTextToTiptapDoc(text: string): JSONContent {
+  if (!text) return { type: 'doc', content: [{ type: 'paragraph' }] };
+
+  const lines = text.split('\n');
+  const nodes: JSONContent[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Empty line → blank paragraph
+    if (!line) {
+      nodes.push({ type: 'paragraph', content: [] });
+      i++;
+      continue;
+    }
+
+    // Top-level bullet list item (no leading spaces)
+    const topBullet = /^([-*]) (.*)$/.exec(line);
+    if (topBullet) {
+      const listItems: JSONContent[] = [];
+      while (i < lines.length) {
+        const tbm = /^([-*]) (.*)$/.exec(lines[i]);
+        if (!tbm) break;
+        const itemText = tbm[2];
+        i++;
+        const itemContent: JSONContent[] = [
+          { type: 'paragraph', content: itemText ? [{ type: 'text', text: itemText }] : [] },
+        ];
+        // Consume nested items (exactly 2-space indent)
+        const nestedItems = consumeNestedList(lines, i);
+        if (nestedItems !== null) {
+          itemContent.push(nestedItems.node);
+          i = nestedItems.nextIdx;
+        }
+        listItems.push({ type: 'listItem', content: itemContent });
+      }
+      if (listItems.length > 0) nodes.push({ type: 'bulletList', content: listItems });
+      continue;
+    }
+
+    // Top-level ordered list item (no leading spaces)
+    const topNumbered = /^(\d+)\. (.*)$/.exec(line);
+    if (topNumbered) {
+      const startNum = parseInt(topNumbered[1], 10);
+      const listItems: JSONContent[] = [];
+      while (i < lines.length) {
+        const tnm = /^(\d+)\. (.*)$/.exec(lines[i]);
+        if (!tnm) break;
+        const itemText = tnm[2];
+        i++;
+        const itemContent: JSONContent[] = [
+          { type: 'paragraph', content: itemText ? [{ type: 'text', text: itemText }] : [] },
+        ];
+        const nestedItems = consumeNestedList(lines, i);
+        if (nestedItems !== null) {
+          itemContent.push(nestedItems.node);
+          i = nestedItems.nextIdx;
+        }
+        listItems.push({ type: 'listItem', content: itemContent });
+      }
+      if (listItems.length > 0) nodes.push({ type: 'orderedList', attrs: { start: startNum }, content: listItems });
+      continue;
+    }
+
+    // Normal prose paragraph
+    nodes.push({ type: 'paragraph', content: [{ type: 'text', text: line }] });
+    i++;
+  }
+
+  return { type: 'doc', content: nodes.length > 0 ? nodes : [{ type: 'paragraph' }] };
+}
+
+/** Consume consecutive 2-space-indented list items as a nested list node. */
+function consumeNestedList(
+  lines: string[], startIdx: number
+): { node: JSONContent; nextIdx: number } | null {
+  if (startIdx >= lines.length) return null;
+  const firstLine = lines[startIdx];
+  const nestedBullet   = /^ {2}([-*]) (.*)$/.exec(firstLine);
+  const nestedNumbered = /^ {2}(\d+)\. (.*)$/.exec(firstLine);
+  if (!nestedBullet && !nestedNumbered) return null;
+
+  const isBullet = !!nestedBullet;
+  const startNum = nestedNumbered ? parseInt(nestedNumbered[1], 10) : 1;
+  const items: JSONContent[] = [];
+  let i = startIdx;
+
+  while (i < lines.length) {
+    const nbm = /^ {2}([-*]) (.*)$/.exec(lines[i]);
+    const nnm = /^ {2}(\d+)\. (.*)$/.exec(lines[i]);
+    if (!nbm && !nnm) break;
+    const childText = nbm ? nbm[2] : nnm![2];
+    items.push({
+      type: 'listItem',
+      content: [{ type: 'paragraph', content: childText ? [{ type: 'text', text: childText }] : [] }],
+    });
+    i++;
+  }
+
+  if (items.length === 0) return null;
+  return {
+    node: {
+      type: isBullet ? 'bulletList' : 'orderedList',
+      ...(isBullet ? {} : { attrs: { start: startNum } }),
+      content: items,
+    },
+    nextIdx: i,
+  };
+}
+
+function tiptapDocToPlainText(json: JSONContent): string {
+  function serialize(node: JSONContent, listIndent = 0): string {
+    switch (node.type) {
+      case 'doc':
+        return (node.content ?? []).map(n => serialize(n, 0)).join('\n');
+
+      case 'paragraph':
+        return (node.content ?? []).map(n => serialize(n, listIndent)).join('');
+
+      case 'text':
+        return node.text ?? '';
+
+      case 'hardBreak':
+        return '\n';
+
+      case 'bulletList': {
+        return (node.content ?? []).map(item => {
+          const firstPara  = item.content?.[0];
+          const text       = (firstPara?.content ?? []).map(n => serialize(n)).join('');
+          const prefix     = '  '.repeat(listIndent) + '- ';
+          const parts: string[] = [prefix + text];
+          // Nested lists (content[1], content[2], …)
+          for (let j = 1; j < (item.content ?? []).length; j++) {
+            parts.push(serialize(item.content![j], listIndent + 1));
+          }
+          return parts.join('\n');
+        }).join('\n');
+      }
+
+      case 'orderedList': {
+        const start = (node.attrs?.start ?? 1) as number;
+        return (node.content ?? []).map((item, idx) => {
+          const firstPara  = item.content?.[0];
+          const text       = (firstPara?.content ?? []).map(n => serialize(n)).join('');
+          const prefix     = '  '.repeat(listIndent) + `${start + idx}. `;
+          const parts: string[] = [prefix + text];
+          for (let j = 1; j < (item.content ?? []).length; j++) {
+            parts.push(serialize(item.content![j], listIndent + 1));
+          }
+          return parts.join('\n');
+        }).join('\n');
+      }
+
+      case 'listItem':
+        // Called for free-standing listItem — fall through to content
+        return (node.content ?? []).map(n => serialize(n, listIndent)).join('\n');
+
+      default:
+        if (node.text) return node.text;
+        return (node.content ?? []).map(n => serialize(n, listIndent)).join('');
+    }
+  }
+  return serialize(json);
+}
+
 // ── Dollar-marker parser ──────────────────────────────────────────────────────
 
 type DollarSeg = { type: 'text' | 'math'; value: string };
@@ -272,6 +457,11 @@ function LineEquation({ text, tokens }: { text: string; tokens: AtmosphereTokens
 
 // ── RenderedDocument ──────────────────────────────────────────────────────────
 
+const proseStyle = {
+  fontSize: 15.5, lineHeight: 1.85, letterSpacing: '0.01em',
+  fontFamily: 'var(--fw-font-body)', minHeight: '1.2em',
+} as const;
+
 function RenderedDocument({ content, tokens, onClick }: {
   content: string;
   tokens:  AtmosphereTokens;
@@ -283,8 +473,7 @@ function RenderedDocument({ content, tokens, onClick }: {
     return (
       <div onClick={onClick} style={{
         cursor: 'text', color: tokens.textGhost, opacity: 0.3,
-        fontSize: 15.5, lineHeight: 1.85, fontStyle: 'italic',
-        fontFamily: 'var(--fw-font-body)', userSelect: 'none',
+        ...proseStyle, fontStyle: 'italic', userSelect: 'none',
       }}>
         Write your solution here.
       </div>
@@ -295,14 +484,52 @@ function RenderedDocument({ content, tokens, onClick }: {
     <div onClick={onClick} style={{ cursor: 'text' }}>
       {lines.map((line, i) => {
         const t = line.trim();
+
+        // Empty line → spacing
         if (!t) return <div key={i} style={{ height: '1.2em' }} />;
+
+        // Bullet list item (check BEFORE isLikelyMathLine — "- f(x) = sin(x)" must not become KaTeX)
+        const bulletM = /^( *)([-*]) (.*)$/.exec(t);
+        if (bulletM) {
+          const indent  = (line.length - line.trimStart().length) * 6;
+          const content = bulletM[3];
+          return (
+            <div key={i} dir="auto" style={{
+              ...proseStyle, color: tokens.textPrimary,
+              paddingLeft: 18 + indent, position: 'relative',
+            }}>
+              <span aria-hidden style={{ position: 'absolute', left: indent, opacity: 0.45 }}>•</span>
+              <InlineMath text={content} tokens={tokens} />
+            </div>
+          );
+        }
+
+        // Numbered list item
+        const numberedM = /^( *)(\d+)\. (.*)$/.exec(t);
+        if (numberedM) {
+          const indent  = (line.length - line.trimStart().length) * 6;
+          const num     = numberedM[2];
+          const content = numberedM[3];
+          return (
+            <div key={i} dir="auto" style={{
+              ...proseStyle, color: tokens.textPrimary,
+              paddingLeft: 26 + indent, position: 'relative',
+            }}>
+              <span aria-hidden style={{
+                position: 'absolute', left: indent, opacity: 0.4,
+                fontSize: 13, fontVariantNumeric: 'tabular-nums',
+              }}>{num}.</span>
+              <InlineMath text={content} tokens={tokens} />
+            </div>
+          );
+        }
+
+        // Math line
         if (isLikelyMathLine(t)) return <LineEquation key={i} text={t} tokens={tokens} />;
+
+        // Prose line
         return (
-          <div key={i} dir="auto" style={{
-            fontSize: 15.5, lineHeight: 1.85, color: tokens.textPrimary,
-            letterSpacing: '0.01em',
-            fontFamily: 'var(--fw-font-body)', minHeight: '1.2em',
-          }}>
+          <div key={i} dir="auto" style={{ ...proseStyle, color: tokens.textPrimary }}>
             <InlineMath text={line} tokens={tokens} />
           </div>
         );
@@ -311,53 +538,120 @@ function RenderedDocument({ content, tokens, onClick }: {
   );
 }
 
-// ── WritingArea ───────────────────────────────────────────────────────────────
+// ── TiptapWritingArea ─────────────────────────────────────────────────────────
+// Replaces the plain <textarea> with a Tiptap/ProseMirror editor.
+// Zero visible chrome: no toolbar, no bubble menu, no formatting controls.
+// Keyboard behaviors handled natively by ProseMirror extensions:
+//   - "- " + space  → bullet list
+//   - "1. " + space → numbered list
+//   - Enter          → continue list / new paragraph
+//   - Enter on empty list item → exits list
+//   - Tab            → indent list item
+//   - Shift+Tab      → dedent list item
+//   - Backspace at list start → exits list (to paragraph)
+//   - Cmd/Ctrl+Z     → undo (native ProseMirror stack)
 
 const PLACEHOLDER = 'Write normally. Put equations on their own line.';
 
-function WritingArea({ content, tokens, onChange, onBlur }: {
+// CSS injected once into <head>, scoped to [data-math-editor]
+const EDITOR_STYLES = `
+  [data-math-editor] .ProseMirror { outline: none; }
+  [data-math-editor] .ProseMirror:focus { outline: none; }
+  [data-math-editor] [contenteditable] { outline: none; -webkit-tap-highlight-color: transparent; }
+  [data-math-editor] .ProseMirror > p { margin: 0; }
+  [data-math-editor] .ProseMirror > p + p { margin-top: 0; }
+  [data-math-editor] .ProseMirror ul,
+  [data-math-editor] .ProseMirror ol { margin: 0; padding-left: 20px; }
+  [data-math-editor] .ProseMirror li > p { margin: 0; }
+  [data-math-editor] .ProseMirror [data-placeholder]::before {
+    content: attr(data-placeholder);
+    float: left;
+    pointer-events: none;
+    height: 0;
+    opacity: 0.3;
+    font-style: italic;
+  }
+`;
+
+function TiptapWritingArea({ content, tokens, onChange, onBlur }: {
   content:  string;
   tokens:   AtmosphereTokens;
   onChange: (s: string) => void;
   onBlur:   () => void;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const [visible, setVisible] = useState(false);
-
+  // Inject editor styles once — scoped, idempotent, never removed
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  });
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-    requestAnimationFrame(() => setVisible(true));
+    const id = 'fw-math-editor-styles';
+    if (document.getElementById(id)) return;
+    const el = document.createElement('style');
+    el.id = id;
+    el.textContent = EDITOR_STYLES;
+    document.head.appendChild(el);
   }, []);
 
+  // Debounce timer stored in a ref — timer ops never trigger re-renders
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        bold:           false,
+        italic:         false,
+        strike:         false,
+        code:           false,
+        codeBlock:      false,
+        blockquote:     false,
+        heading:        false,
+        horizontalRule: false,
+        dropcursor:     false,
+        gapcursor:      false,
+        link:           false,
+      }),
+      Placeholder.configure({ placeholder: PLACEHOLDER }),
+    ],
+    content: plainTextToTiptapDoc(content),
+    autofocus: 'end',
+    textDirection: 'auto',
+    onUpdate: ({ editor }) => {
+      // 16ms debounce — one animation frame; never blocks input,
+      // yet flushes well before the user can click the notebook switcher.
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      flushTimer.current = setTimeout(() => {
+        onChange(tiptapDocToPlainText(editor.getJSON()));
+      }, 16);
+    },
+    onBlur: ({ editor }) => {
+      // Always flush immediately on blur — guarantees no data loss.
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
+      onChange(tiptapDocToPlainText(editor.getJSON()));
+      onBlur();
+    },
+    editorProps: {
+      attributes: {
+        style: [
+          'font-size: 15.5px',
+          'line-height: 1.85',
+          'letter-spacing: 0.01em',
+          `color: ${tokens.textPrimary}`,
+          'font-family: var(--fw-font-body)',
+          `caret-color: ${tokens.accent}`,
+        ].join('; '),
+      },
+      transformPastedText(text: string): string {
+        // Normalize non-breaking spaces and Windows/Mac line endings
+        // from Word, PDF, and web-copy pastes.
+        return text
+          .replace(/ /g, ' ')
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n');
+      },
+    },
+  });
+
   return (
-    <textarea
-      ref={ref}
-      dir="auto"
-      value={content}
-      onChange={e => onChange(e.target.value)}
-      onBlur={onBlur}
-      placeholder={PLACEHOLDER}
-      style={{
-        display: 'block', width: '100%', resize: 'none',
-        border: 'none', outline: 'none', overflow: 'hidden',
-        background: 'transparent', fontSize: 15.5, lineHeight: 1.85,
-        letterSpacing: '0.01em',
-        color: tokens.textPrimary, fontFamily: 'var(--fw-font-body)',
-        boxSizing: 'border-box', caretColor: tokens.accent, minHeight: 220,
-        opacity: visible ? 1 : 0,
-        transition: 'opacity 0.15s ease',
-      }}
-    />
+    <div data-math-editor="">
+      <EditorContent editor={editor} />
+    </div>
   );
 }
 
@@ -405,7 +699,6 @@ function PageTitle({ notebook, allNotebooks, tokens, onRename, onSwitch, onCreat
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
     >
-      {/* Editorial title — feels like a notebook page heading, not a toolbar */}
       {editingTitle ? (
         <input
           autoFocus
@@ -438,7 +731,6 @@ function PageTitle({ notebook, allNotebooks, tokens, onRename, onSwitch, onCreat
         </div>
       )}
 
-      {/* Management row — dim text links only, appears on hover */}
       <div style={{
         height: 18, marginTop: 6,
         display: 'flex', alignItems: 'center', gap: 10,
@@ -459,7 +751,6 @@ function PageTitle({ notebook, allNotebooks, tokens, onRename, onSwitch, onCreat
         }}>· new</span>
       </div>
 
-      {/* Notebook list dropdown — fixed-positioned to escape overflow clipping */}
       {showList && (
         <>
           <div onClick={() => setShowList(false)}
@@ -541,6 +832,7 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
 
       <div style={rule}>Write naturally.</div>
       <div style={rule}>Equations on their own line render automatically.</div>
+      <div style={rule}>Lists: start a line with <span style={mono}>- </span> or <span style={mono}>1. </span></div>
 
       <div style={{ borderTop: `1px solid ${tokens.divider}`, margin: '12px 0 0', opacity: 0.5 }} />
       <div style={sectionLabel}>Examples</div>
@@ -561,6 +853,8 @@ function HelpPanel({ tokens, onClose }: { tokens: AtmosphereTokens; onClose: () 
         ['x^2',                'power'],
         ['int 0 to 1 x^2 dx', 'integral'],
         ['lim x->0',           'limit'],
+        ['Tab',                'indent list'],
+        ['Shift+Tab',          'dedent list'],
       ] as [string, string][]).map(([from, to]) => (
         <div key={from} style={shortRow}>
           <span style={{ ...mono, flex: 1 }}>{from}</span>
@@ -698,8 +992,6 @@ function ScratchBlockView({ block, tokens, onChange, onRemove }: {
 }
 
 // ── EdgeTab ───────────────────────────────────────────────────────────────────
-// Near-invisible ghost tab at each edge. No border, no background, no chrome.
-// Only the hover label reveals it. Click to toggle the drawer.
 
 function EdgeTab({ side, label, open, tokens, onClick }: {
   side:    'left' | 'right';
@@ -722,7 +1014,6 @@ function EdgeTab({ side, label, open, tokens, onClick }: {
         top: 0, bottom: 0, width: 16,
         cursor: 'pointer', zIndex: 50,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        // No background, no border, no box-shadow — pure ghost
       }}
     >
       <span style={{
@@ -756,7 +1047,6 @@ export function MathZone({
   const [rightOpen, setRightOpen] = useState(false);
   const [showHelp,  setShowHelp]  = useState(false);
 
-  // Reset editing state when switching notebooks
   useEffect(() => {
     setEditing(data.content.trim() === '');
   }, [activeNotebook.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -765,7 +1055,13 @@ export function MathZone({
     if (data.content.trim()) setEditing(false);
   };
 
-  // Opening one panel closes the other
+  // Atomically exit editing mode when switching notebooks — prevents a one-frame
+  // window where the editor is still visible but data has already changed.
+  const handleSwitchNotebook = (id: string) => {
+    setEditing(false);
+    switchNotebook(id);
+  };
+
   const toggleLeft  = () => setLeftOpen(v  => { const next = !v;  if (next) setRightOpen(false); return next; });
   const toggleRight = () => setRightOpen(v => { const next = !v; if (next) setLeftOpen(false);  return next; });
 
@@ -818,24 +1114,19 @@ export function MathZone({
       display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
       backgroundColor: tokens.pageBg, paddingTop, overflow: 'hidden',
     }}>
-
-      {/* ── All children absolutely positioned — no flex layout to reflow ──── */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* Ghost edge tabs — invisible at rest, whisper label on hover */}
         <EdgeTab side="left"  label="REFS"    open={leftOpen}  tokens={tokens} onClick={toggleLeft}  />
         <EdgeTab side="right" label="SCRATCH" open={rightOpen} tokens={tokens} onClick={toggleRight} />
 
-        {/* ── Notebook page — never moves, never reflowes ───────────────────── */}
+        {/* Notebook page — anchored, never reflowed */}
         <div style={{
           position: 'absolute', inset: '0 16px',
           display: 'flex', flexDirection: 'column',
           backgroundColor: tokens.pageBg,
-          overflow: 'hidden',
-          zIndex: 1,
+          overflow: 'hidden', zIndex: 1,
         }}>
-
-          {/* "?" help button — reduced opacity, no hover state in React */}
+          {/* "?" help button */}
           <button type="button"
             onClick={() => setShowHelp(v => !v)}
             title="Math writing guide"
@@ -855,10 +1146,8 @@ export function MathZone({
               fontFamily: 'var(--fw-font-label)', backdropFilter: 'blur(4px)',
             }}>?</button>
 
-          {/* Help panel */}
           {showHelp && <HelpPanel tokens={tokens} onClose={() => setShowHelp(false)} />}
 
-          {/* Scrollable notebook document */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <div style={{ maxWidth: 640, margin: '0 auto', padding: '44px 52px 64px' }}>
 
@@ -867,12 +1156,12 @@ export function MathZone({
                 allNotebooks={index.notebooks}
                 tokens={tokens}
                 onRename={renameNotebook}
-                onSwitch={switchNotebook}
+                onSwitch={handleSwitchNotebook}
                 onCreate={createNotebook}
               />
 
               {editing ? (
-                <WritingArea
+                <TiptapWritingArea
                   content={data.content}
                   tokens={tokens}
                   onChange={c => setData(d => ({ ...d, content: c }))}
@@ -889,7 +1178,7 @@ export function MathZone({
           </div>
         </div>
 
-        {/* ── Scrim — always mounted, fades in when a drawer is open ─────────── */}
+        {/* Scrim */}
         <div
           style={{
             position: 'absolute', inset: 0, zIndex: 35,
@@ -901,12 +1190,11 @@ export function MathZone({
           onClick={() => { setLeftOpen(false); setRightOpen(false); }}
         />
 
-        {/* ── Left drawer — slides over notebook, never displaces it ─────────── */}
+        {/* Left drawer */}
         <div style={{
           position: 'absolute', left: 16, top: 0, bottom: 0, width: 280, zIndex: 40,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          background: tokens.cardBg,
-          borderRight: `1px solid ${tokens.cardBorder}`,
+          background: tokens.cardBg, borderRight: `1px solid ${tokens.cardBorder}`,
           transform: leftOpen ? 'translateX(0)' : 'translateX(-100%)',
           transition: 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         }}>
@@ -914,12 +1202,11 @@ export function MathZone({
           {refsContent}
         </div>
 
-        {/* ── Right drawer ────────────────────────────────────────────────────── */}
+        {/* Right drawer */}
         <div style={{
           position: 'absolute', right: 16, top: 0, bottom: 0, width: 260, zIndex: 40,
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          background: tokens.cardBg,
-          borderLeft: `1px solid ${tokens.cardBorder}`,
+          background: tokens.cardBg, borderLeft: `1px solid ${tokens.cardBorder}`,
           transform: rightOpen ? 'translateX(0)' : 'translateX(100%)',
           transition: 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
         }}>

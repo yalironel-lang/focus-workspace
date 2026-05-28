@@ -22,6 +22,12 @@ export default defineConfig({
         // SW minification path used by Workbox's production mode.
         mode: 'development',
 
+        // Raise the precache limit from the 2 MiB default.
+        // The main JS bundle (Tiptap + ProseMirror + KaTeX + pdf.js) exceeds 2 MiB
+        // uncompressed. Workbox still serves it over the network correctly;
+        // this limit only controls which assets are precached in the SW manifest.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
+
         // ── Precache ──────────────────────────────────────────────────────────
         // All app-shell assets are content-hashed, so Workbox can track
         // revisions and update them atomically across deploys.
