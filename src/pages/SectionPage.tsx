@@ -29,7 +29,14 @@ import { pickStudyLinkTargets } from '../lib/studyConnections';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
-import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
+import { saveSectionViewMode } from '../lib/sectionViewMode';
+import { resolveSectionViewModeOnOpen } from '../lib/mathSurfaceRouter';
+import {
+  loadWorkspaceContinuityMemory,
+  type WorkspaceContinuitySuggestion,
+} from '../lib/workspaceContinuity';
+import { shouldRestoreFocusLens } from '../lib/reEntryPolicy';
+import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
 import { surfaceShellStyle } from '../lib/surfaceShellStyle';
 import { flickerDebugCount, flickerDebugLog } from '../lib/flickerDebug';
 import {
@@ -236,7 +243,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
         { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
-        { id: 'math-zone', title: 'Notebook', description: 'Study pages with notes, equations, and calm writing flow.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
+        { id: 'math-zone', title: '∑ Math studio', description: 'Dedicated derivation studio with pages, refs, and scratch.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
         { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
         { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
       ],
@@ -728,8 +735,10 @@ export function SectionPage() {
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space' | 'math-zone'>(() => {
     if (navState?.firstArrival) return 'free-space';
-    return sectionId ? loadSectionViewMode(sectionId) : 'free-space';
+    return sectionId ? resolveSectionViewModeOnOpen(sectionId) : 'free-space';
   });
+  const [resumeDismissed, setResumeDismissed] = useState(false);
+  const reEntryRestoreAppliedRef = useRef<string | null>(null);
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
       pulsePerformancePressure('view-switch');
@@ -845,7 +854,17 @@ export function SectionPage() {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
 
-  useWorkspaceContinuity({
+  const {
+    continuity,
+    reEntryPolicy,
+    resumeCopy,
+    suggestions: continuitySuggestions,
+    continuityObjectIds,
+    continuityClusterIds,
+    continuityEdgeKeys,
+    restoreSelectionId,
+    restoreViewport,
+  } = useWorkspaceContinuity({
     sectionId,
     objects: sectionObjects.objects,
     positions: sectionPositions.positions,
@@ -856,6 +875,18 @@ export function SectionPage() {
     panX: sectionCanvas.panX,
     panY: sectionCanvas.panY,
   });
+
+  useEffect(() => {
+    reEntryRestoreAppliedRef.current = null;
+    setResumeDismissed(false);
+    if (!sectionId || navStateRef.current?.firstArrival) return;
+    const memory = loadWorkspaceContinuityMemory(sectionId);
+    if (!shouldRestoreFocusLens(memory, focusMode)) {
+      setFocusMode(null);
+    } else if (memory?.activeFocusMode) {
+      setFocusMode(memory.activeFocusMode);
+    }
+  }, [sectionId, setFocusMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     aiRunRef.current?.abort();
@@ -872,7 +903,9 @@ export function SectionPage() {
     setAddingLane(false);
     setEditingExamDate(false);
     setShowCustomize(false);
-    setSectionViewModeState(sectionId ? loadSectionViewMode(sectionId) : 'work-surface');
+    setSectionViewModeState(
+      sectionId ? resolveSectionViewModeOnOpen(sectionId) : 'work-surface',
+    );
     setShowSpaceAdd(false);
     setCompanionComposerOpen(false);
     setSpaceSelectedId(null);
@@ -891,6 +924,41 @@ export function SectionPage() {
     setDragId(null);
     setDragOverId(null);
   }, [id]);
+
+  useEffect(() => {
+    if (!sectionId || !sectionObjects.objects.length) return;
+    if (navStateRef.current?.firstArrival) return;
+    if (reEntryRestoreAppliedRef.current === sectionId) return;
+    reEntryRestoreAppliedRef.current = sectionId;
+
+    const anchorId = restoreSelectionId;
+    if (!anchorId) return;
+
+    if (reEntryPolicy.restoreSelection) {
+      setSpaceSelectedId(anchorId);
+    }
+
+    const canvas = sectionCanvasRef.current;
+    const pos = sectionPositions.positions[anchorId];
+    const vpW = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vpH = typeof window !== 'undefined' ? Math.max(360, window.innerHeight - 112) : 720;
+
+    if (reEntryPolicy.softViewport && pos) {
+      const view = panViewportToBlock(pos, vpW, vpH, canvas.zoom);
+      canvas.setViewport(view.zoom, view.panX, view.panY);
+    } else if (reEntryPolicy.restoreViewport && restoreViewport) {
+      canvas.setViewport(restoreViewport.zoom, restoreViewport.panX, restoreViewport.panY);
+    }
+  }, [
+    sectionId,
+    sectionObjects.objects.length,
+    restoreSelectionId,
+    restoreViewport,
+    reEntryPolicy.restoreSelection,
+    reEntryPolicy.restoreViewport,
+    reEntryPolicy.softViewport,
+    sectionPositions.positions,
+  ]);
 
   const enterDesignMode = () => {
     designSnapshot.current = { ...customization };
@@ -1165,6 +1233,21 @@ export function SectionPage() {
       setNotebookSearchPulseId(objectId);
     },
     [setSectionViewMode, seedMissingPositions, initPos],
+  );
+
+  const handleResumeSuggestion = useCallback(
+    (suggestion: WorkspaceContinuitySuggestion) => {
+      setResumeDismissed(true);
+      if (suggestion.focusMode) setFocusMode(suggestion.focusMode);
+      if (suggestion.objectId) {
+        focusNotebookOnCanvas(suggestion.objectId);
+        return;
+      }
+      if (suggestion.focusMode && !suggestion.objectId) {
+        setSectionViewMode('free-space');
+      }
+    },
+    [focusNotebookOnCanvas, setFocusMode, setSectionViewMode],
   );
 
   const applyStudyLinksForObject = useCallback(
@@ -2678,11 +2761,27 @@ export function SectionPage() {
               calmEffects={performanceCalm}
               workspaceClarity={freeSpaceClarity}
               focusStrength={global.focusStrength ?? 'soft'}
-              continuityObjectIds={[]}
-              continuityClusterIds={[]}
-              continuityEdgeKeys={[]}
+              continuityObjectIds={continuityObjectIds}
+              continuityClusterIds={continuityClusterIds}
+              continuityEdgeKeys={continuityEdgeKeys}
             />
           </FreeSpaceCanvasErrorBoundary>
+
+          {freeSpaceSurfaceVisible &&
+            continuity &&
+            resumeCopy &&
+            !resumeDismissed &&
+            !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') && (
+            <WorkspaceResumeLayer
+              tokens={freeSpaceTokens}
+              inShell
+              continuity={continuity}
+              resumeCopy={resumeCopy}
+              suggestions={continuitySuggestions}
+              onDismiss={() => setResumeDismissed(true)}
+              onSuggestionClick={handleResumeSuggestion}
+            />
+          )}
 
           {freeSpaceSurfaceVisible && sectionObjects.objects.length === 0 && !showWorkspaceStarter && !showStarterDock && !spaceEditingId && (
             <FreeSpaceEmptyGuidance

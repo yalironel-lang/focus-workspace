@@ -42,6 +42,7 @@ import {
 } from '../../lib/mathZoneInlineFormat';
 import { TiptapFormatBubbleMenu, tiptapToolbarBusyRef } from './TiptapFormatBubbleMenu';
 import '../notebook/notebookToolbar.css';
+import { touchMathZoneActivity } from '../../lib/mathZoneActivity';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -278,6 +279,7 @@ function saveIndex(sectionId: string, idx: NotebooksIndex) {
 }
 
 function saveNbData(sectionId: string, nbId: string, data: MathZoneData) {
+  touchMathZoneActivity(sectionId);
   try { localStorage.setItem(nbDataKey(sectionId, nbId), JSON.stringify(data)); } catch { /* quota */ }
 }
 

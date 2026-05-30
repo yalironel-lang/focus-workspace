@@ -10,7 +10,7 @@ export const STABILITY_BASELINE = {
   /** No living-environment time interval / timePhase updates. */
   disableLivingEnvironmentMotion: true,
   /** Hide workspace resume overlay. */
-  disableWorkspaceResumeLayer: true,
+  disableWorkspaceResumeLayer: false,
   /** Hide starter dock + full starter overlay. */
   disableWorkspaceStarterChrome: true,
   /** Do not mount Free Space minimap. */

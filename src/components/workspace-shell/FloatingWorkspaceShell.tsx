@@ -14,7 +14,7 @@ import { glassIsland, shellIconBtn } from './shellGlass';
 const VIEW_MODES = [
   { id: 'free-space' as const,  label: 'Workspace' },
   { id: 'work-surface' as const, label: 'Mission Control' },
-  { id: 'math-zone' as const,   label: 'Notebook' },
+  { id: 'math-zone' as const,   label: '∑ Studio' },
 ];
 
 export const WORKSPACE_CHROME_Z = 600;

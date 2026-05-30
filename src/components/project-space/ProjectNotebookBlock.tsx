@@ -42,6 +42,7 @@ import {
   type MathSlashId,
 } from '../../lib/mathStemShortcuts';
 import { notebookBodyToMarkdown, notebookBodyToPlainText } from '../../lib/notebookExport';
+import { loadNotebookPose, saveNotebookPose } from '../../lib/notebookPose';
 import toast from 'react-hot-toast';
 import type { InlineMark } from '../../lib/notebookInlineMarks';
 import {
@@ -916,6 +917,8 @@ export function ProjectNotebookBlock({
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
   const notebookPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const posePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const poseRestoredRef = useRef(false);
   const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
   const notebookEditCountRef = useRef(0);
   const selectionSnapshotRef = useRef<StoredNotebookSelection | null>(null);
@@ -1039,6 +1042,46 @@ export function ProjectNotebookBlock({
     pendingNotebookContentRef.current = null;
     onChangeRef.current(pending);
   }, []);
+
+  const schedulePosePersist = useCallback(
+    (scrollTop: number, blockId: string | null) => {
+      if (context !== 'free-space' || !freeSpaceSectionId || !objectId) return;
+      if (posePersistTimerRef.current) clearTimeout(posePersistTimerRef.current);
+      posePersistTimerRef.current = setTimeout(() => {
+        saveNotebookPose(freeSpaceSectionId, freeSpaceBoardId, objectId, { scrollTop, blockId });
+      }, 400);
+    },
+    [context, freeSpaceSectionId, freeSpaceBoardId, objectId],
+  );
+
+  useEffect(() => {
+    poseRestoredRef.current = false;
+  }, [freeSpaceSectionId, freeSpaceBoardId, objectId]);
+
+  useEffect(() => {
+    if (context !== 'free-space' || !freeSpaceSectionId || !objectId || poseRestoredRef.current) return;
+    const pose = loadNotebookPose(freeSpaceSectionId, freeSpaceBoardId, objectId);
+    if (!pose) return;
+    poseRestoredRef.current = true;
+    const sc = notebookBodyScrollRef.current;
+    if (sc && pose.scrollTop > 0) {
+      requestAnimationFrame(() => {
+        sc.scrollTop = pose.scrollTop;
+      });
+    }
+    if (pose.blockId && blocks.some(b => b.id === pose.blockId)) {
+      setSurfaceFocusBlockId(pose.blockId);
+    }
+  }, [context, freeSpaceSectionId, freeSpaceBoardId, objectId, blocks]);
+
+  useEffect(() => {
+    if (context !== 'free-space') return;
+    const sc = notebookBodyScrollRef.current;
+    if (!sc) return;
+    const onScroll = () => schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    return () => sc.removeEventListener('scroll', onScroll);
+  }, [context, schedulePosePersist, surfaceFocusBlockId]);
 
   const pushContent = useCallback(
     (next: NotebookContent) => {
@@ -1475,8 +1518,9 @@ export function ProjectNotebookBlock({
       } else if (r.top < sr.top + pad) {
         sc.scrollTop -= Math.max(1, sr.top + pad - r.top);
       }
+      schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
     },
-    [context],
+    [context, schedulePosePersist, surfaceFocusBlockId],
   );
 
   const onEditableAfterInput = useCallback(

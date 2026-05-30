@@ -11,6 +11,7 @@ import {
   saveWorkspaceContinuityMemory,
   type WorkspaceContinuityMemory,
 } from '../lib/workspaceContinuity';
+import { policyForContinuity, type ReEntryTierPolicy } from '../lib/reEntryPolicy';
 
 interface Args {
   sectionId: string;
@@ -37,6 +38,7 @@ export function useWorkspaceContinuity({
 }: Args): {
   continuity: WorkspaceContinuityMemory | null;
   continuityRecent: boolean;
+  reEntryPolicy: ReEntryTierPolicy;
   resumeCopy: ReturnType<typeof buildWorkspaceResumeCopy>;
   suggestions: ReturnType<typeof buildWorkspaceContinuitySuggestions>;
   continuityObjectIds: string[];
@@ -111,39 +113,51 @@ export function useWorkspaceContinuity({
     () => (continuityRecent ? continuity?.recentConnectionKeys ?? [] : []),
     [continuity, continuityRecent],
   );
-  const restoreSelectionId =
+  const rawRestoreSelectionId =
     continuityRecent && continuity?.lastSelectedObjectId && validIds.has(continuity.lastSelectedObjectId)
       ? continuity.lastSelectedObjectId
       : null;
-  const restoreViewport = continuityRecent ? continuity?.viewport ?? null : null;
+  const rawRestoreViewport = continuityRecent ? continuity?.viewport ?? null : null;
 
-  const resumeCopy = useMemo(
-    () => buildWorkspaceResumeCopy(continuity, objects),
-    [continuity, objects],
-  );
-  const suggestions = useMemo(
-    () => buildWorkspaceContinuitySuggestions(continuity, objects),
-    [continuity, objects],
-  );
+  const reEntryPolicy = useMemo(() => policyForContinuity(continuity), [continuity]);
+
+  const restoreSelectionId = reEntryPolicy.restoreSelection ? rawRestoreSelectionId : null;
+  const restoreViewport = reEntryPolicy.restoreViewport ? rawRestoreViewport : null;
+
+  const effectiveContinuityObjectIds = reEntryPolicy.emphasizeCluster ? continuityObjectIds : [];
+  const effectiveContinuityClusterIds = reEntryPolicy.emphasizeCluster ? continuityClusterIds : [];
+  const effectiveContinuityEdgeKeys = reEntryPolicy.emphasizeCluster ? continuityEdgeKeys : [];
+
+  const resumeCopy = useMemo(() => {
+    if (!reEntryPolicy.showResumeLayer) return null;
+    return buildWorkspaceResumeCopy(continuity, objects);
+  }, [continuity, objects, reEntryPolicy.showResumeLayer]);
+
+  const suggestions = useMemo(() => {
+    if (!reEntryPolicy.showResumeLayer) return [];
+    return buildWorkspaceContinuitySuggestions(continuity, objects);
+  }, [continuity, objects, reEntryPolicy.showResumeLayer]);
 
   return useMemo(() => ({
     continuity,
     continuityRecent,
+    reEntryPolicy,
     resumeCopy,
     suggestions,
-    continuityObjectIds,
-    continuityClusterIds,
-    continuityEdgeKeys,
+    continuityObjectIds: effectiveContinuityObjectIds,
+    continuityClusterIds: effectiveContinuityClusterIds,
+    continuityEdgeKeys: effectiveContinuityEdgeKeys,
     restoreSelectionId,
     restoreViewport,
   }), [
     continuity,
     continuityRecent,
+    reEntryPolicy,
     resumeCopy,
     suggestions,
-    continuityObjectIds,
-    continuityClusterIds,
-    continuityEdgeKeys,
+    effectiveContinuityObjectIds,
+    effectiveContinuityClusterIds,
+    effectiveContinuityEdgeKeys,
     restoreSelectionId,
     restoreViewport,
   ]);
