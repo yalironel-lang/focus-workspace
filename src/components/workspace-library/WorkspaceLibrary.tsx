@@ -259,9 +259,10 @@ function WorkspaceLibraryView() {
     return [...byRecency, ...rest];
   }, [sections, recentIdsOrdered]);
 
-  // Cinematic entry stage — replaces 3-screen carousel for first impression
-  const showMcStage = hasWorkspaces && filterFolder === 'all' && !search && !loading;
-  const showSpatialScene = false;
+  // Mission Control entry stage — disabled until layout is stable in production.
+  const showMcStage = false;
+  // Restore 3-screen spatial carousel (regression fix: d4cfc20 disabled this).
+  const showSpatialScene = hasWorkspaces && filterFolder === 'all' && !search && !loading;
 
   // ── Spatial navigation — which workspace occupies the primary slot ───────────
   const [primaryIdx, setPrimaryIdx] = useState(0);

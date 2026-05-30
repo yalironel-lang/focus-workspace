@@ -7,7 +7,6 @@ import { logAppBuildInfo } from './lib/appBuildInfo'
 import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
-import './lib/notebookDebugIngest'
 
 logAppBuildInfo()
 initPerformanceSafeModeListeners()
