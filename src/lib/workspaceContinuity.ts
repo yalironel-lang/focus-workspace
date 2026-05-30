@@ -6,6 +6,7 @@ import {
 } from '../hooks/useSectionFreeSpaceObjects';
 import type { FocusMode } from '../focusMode/focusModeTypes';
 import { getCompanionKind } from './companionPanels';
+import { choosePrimaryLearningLoopTarget } from './learningLoop';
 import { countNeedsReviewMistakes } from './mistakeIntelligence';
 import { findLinkedNotebook, findLinkedSource } from './studyConnections';
 
@@ -43,6 +44,8 @@ export interface WorkspaceContinuitySuggestion {
   objectId?: string;
   focusMode?: FocusMode | null;
   openCompanion?: boolean;
+  /** Opens closed-book learning attempt overlay instead of canvas focus only. */
+  learningAttempt?: boolean;
 }
 
 export interface WorkspaceResumeCopy {
@@ -389,6 +392,16 @@ export function buildWorkspaceResumeCopy(
   objects: ProjectSpaceObject[],
 ): WorkspaceResumeCopy | null {
   if (!memory || !isRecentWorkspaceContinuity(memory)) return null;
+
+  const learningPrimary = choosePrimaryLearningLoopTarget(objects);
+  if (learningPrimary) {
+    return {
+      headline: 'Learning loop',
+      subtitle: learningPrimary.subtitle,
+      details: [],
+    };
+  }
+
   const anchor = objectById(objects, memory.lastSelectedObjectId);
   const companions = memory.openCompanionIds
     .map(id => objectById(objects, id))
@@ -426,38 +439,24 @@ export function buildWorkspaceResumeCopy(
   };
 }
 
-function choosePrimaryCompanion(memory: WorkspaceContinuityMemory, objects: ProjectSpaceObject[]) {
-  return memory.openCompanionIds
-    .map(id => objectById(objects, id))
-    .find((object): object is ProjectSpaceObject => !!object && object.type === 'companion');
-}
-
-function chooseReadingTarget(memory: WorkspaceContinuityMemory, objects: ProjectSpaceObject[]) {
-  return memory.activeClusterObjectIds
-    .map(id => objectById(objects, id))
-    .find((object): object is ProjectSpaceObject => !!object && object.type === 'pdf');
-}
-
-function chooseReviewTarget(memory: WorkspaceContinuityMemory, objects: ProjectSpaceObject[]) {
-  return memory.activeClusterObjectIds
-    .map(id => objectById(objects, id))
-    .find((object): object is ProjectSpaceObject => !!object && object.type === 'mistake');
-}
-
-function chooseSolvingTarget(memory: WorkspaceContinuityMemory, objects: ProjectSpaceObject[]) {
-  return memory.activeClusterObjectIds
-    .map(id => objectById(objects, id))
-    .find((object): object is ProjectSpaceObject =>
-      !!object &&
-      (object.type === 'graph' || object.type === 'calculator' || object.type === 'companion'),
-    );
-}
-
 export function buildWorkspaceContinuitySuggestions(
   memory: WorkspaceContinuityMemory | null,
   objects: ProjectSpaceObject[],
 ): WorkspaceContinuitySuggestion[] {
   if (!memory || !isRecentWorkspaceContinuity(memory)) return [];
+
+  const learningPrimary = choosePrimaryLearningLoopTarget(objects);
+  if (learningPrimary) {
+    return [{
+      id: 'learning-loop-primary',
+      label: learningPrimary.label,
+      subtitle: learningPrimary.subtitle,
+      objectId: learningPrimary.target.objectId,
+      focusMode: 'review',
+      learningAttempt: true,
+    }];
+  }
+
   const suggestions: WorkspaceContinuitySuggestion[] = [];
   const push = (item: WorkspaceContinuitySuggestion) => {
     if (suggestions.some(existing => existing.id === item.id)) return;
@@ -475,62 +474,7 @@ export function buildWorkspaceContinuitySuggestions(
     });
   }
 
-  const readingTarget = chooseReadingTarget(memory, objects);
-  if (readingTarget) {
-    push({
-      id: 'resume-reading',
-      label: `Resume reading ${titleForResume(readingTarget)}`,
-      subtitle: 'Bring the previous reading surface back into view.',
-      objectId: readingTarget.id,
-      focusMode: 'reading',
-    });
-  }
-
-  const reviewTarget = chooseReviewTarget(memory, objects);
-  if (reviewTarget) {
-    push({
-      id: 'resume-review',
-      label: 'Continue reviewing mistakes',
-      subtitle: 'Return to the mistake cluster you were using.',
-      objectId: reviewTarget.id,
-      focusMode: 'review',
-    });
-  }
-
-  const dueCount = countNeedsReviewMistakes(objects);
-  if (dueCount > 0) {
-    push({
-      id: 'resume-mistake-loop',
-      label: dueCount === 1 ? 'Revisit 1 mistake' : `Revisit ${dueCount} mistakes`,
-      subtitle: 'Pick up slips that still need attention.',
-      focusMode: 'review',
-    });
-  }
-
-  const solvingTarget = chooseSolvingTarget(memory, objects);
-  if (solvingTarget && (memory.intent === 'solving' || memory.activeFocusMode === 'solving')) {
-    push({
-      id: 'resume-solving',
-      label: 'Continue solving cluster',
-      subtitle: 'Restore the graph, calculator, and nearby notes.',
-      objectId: solvingTarget.id,
-      focusMode: 'solving',
-    });
-  }
-
-  const companion = choosePrimaryCompanion(memory, objects);
-  if (companion) {
-    push({
-      id: 'resume-companion',
-      label: `Reopen ${titleForResume(companion)}`,
-      subtitle: 'Bring the companion back into the flow.',
-      objectId: companion.id,
-      openCompanion: true,
-      focusMode: memory.activeFocusMode,
-    });
-  }
-
-  return suggestions.slice(0, 3);
+  return suggestions.slice(0, 1);
 }
 
 export function formatTimeAgo(ts: number): string {

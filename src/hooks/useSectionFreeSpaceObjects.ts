@@ -60,6 +60,16 @@ export type ProjectObjectContent =
       lastReviewedAt: number | null;
       /** Optional lineage — primary PDF/source this mistake came from. */
       sourceObjectId?: string | null;
+      /** V1 learning loop — notebook/note anchor for repair linkage. */
+      anchorObjectId?: string | null;
+      /** What the user believed on a failed attempt (confusion capture). */
+      confusionBelief?: string;
+      loopOpen?: boolean;
+      pendingReAttempt?: boolean;
+      repairedAt?: number | null;
+      lastAttemptOutcome?: 'pass' | 'fail' | null;
+      lastAttemptAt?: number | null;
+      attemptHistory?: Array<{ at: number; outcome: 'pass' | 'fail'; belief?: string }>;
     }
   | { type: 'link'; title: string; url: string; description?: string }
   | { type: 'checklist'; items: ChecklistItem[] }
@@ -183,6 +193,14 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
           timesReviewed: 0,
           lastReviewedAt: null,
           sourceObjectId: null,
+          anchorObjectId: null,
+          confusionBelief: '',
+          loopOpen: true,
+          pendingReAttempt: false,
+          repairedAt: null,
+          lastAttemptOutcome: null,
+          lastAttemptAt: null,
+          attemptHistory: [],
         },
       };
     case 'link': return { title: 'Reference Link', content: { type: 'link', title: 'Untitled link', url: '' } };
@@ -321,6 +339,31 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const sourceRaw = r.sourceObjectId;
       const sourceObjectId =
         typeof sourceRaw === 'string' && sourceRaw.trim() ? sourceRaw.trim() : null;
+      const anchorRaw = r.anchorObjectId;
+      const anchorObjectId =
+        typeof anchorRaw === 'string' && anchorRaw.trim() ? anchorRaw.trim() : null;
+      const repairedRaw = r.repairedAt;
+      const repairedAt =
+        typeof repairedRaw === 'number' && Number.isFinite(repairedRaw) ? repairedRaw : null;
+      const lastAttemptRaw = r.lastAttemptAt;
+      const lastAttemptAt =
+        typeof lastAttemptRaw === 'number' && Number.isFinite(lastAttemptRaw) ? lastAttemptRaw : null;
+      const lastOutcome = r.lastAttemptOutcome;
+      const lastAttemptOutcome =
+        lastOutcome === 'pass' || lastOutcome === 'fail' ? lastOutcome : null;
+      const histRaw = Array.isArray(r.attemptHistory) ? r.attemptHistory : [];
+      const attemptHistory = histRaw
+        .map((entry: unknown) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const e = entry as Record<string, unknown>;
+          const at = typeof e.at === 'number' && Number.isFinite(e.at) ? e.at : null;
+          const outcome = e.outcome === 'pass' || e.outcome === 'fail' ? e.outcome : null;
+          if (at == null || !outcome) return null;
+          const belief = typeof e.belief === 'string' ? e.belief : undefined;
+          return { at, outcome, ...(belief ? { belief } : {}) };
+        })
+        .filter((x): x is { at: number; outcome: 'pass' | 'fail'; belief?: string } => x !== null)
+        .slice(-24);
       return {
         type: 'mistake',
         variant,
@@ -332,6 +375,14 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         timesReviewed: Math.max(0, Math.floor(numOr(r.timesReviewed, 0))),
         lastReviewedAt,
         sourceObjectId,
+        anchorObjectId,
+        confusionBelief: typeof r.confusionBelief === 'string' ? r.confusionBelief : '',
+        loopOpen: r.loopOpen === false ? false : true,
+        pendingReAttempt: r.pendingReAttempt === true,
+        repairedAt,
+        lastAttemptOutcome,
+        lastAttemptAt,
+        attemptHistory,
       };
     }
     case 'link': {
@@ -808,6 +859,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
         confidence: 'medium',
         timesReviewed: 0,
         lastReviewedAt: null,
+        sourceObjectId: null,
+        anchorObjectId: null,
+        confusionBelief: '',
+        loopOpen: true,
+        pendingReAttempt: false,
+        repairedAt: null,
+        lastAttemptOutcome: null,
+        lastAttemptAt: null,
+        attemptHistory: [],
       },
       createdAt: now,
       updatedAt: now,

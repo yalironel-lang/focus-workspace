@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, Clock3, X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -6,7 +6,6 @@ import type {
   WorkspaceContinuityMemory,
   WorkspaceContinuitySuggestion,
 } from '../../lib/workspaceContinuity';
-import { WorkspaceMicroScene } from './WorkspaceMicroScene';
 
 interface Props {
   tokens: AtmosphereTokens;
@@ -25,26 +24,10 @@ interface Props {
 
 const AUTO_HIDE_MS = 9000;
 
-function variantForIntent(intent: WorkspaceContinuityMemory['intent']) {
-  switch (intent) {
-    case 'reading':
-      return 'reading-focus';
-    case 'solving':
-      return 'problem-tools';
-    case 'reviewing':
-      return 'cluster-return';
-    case 'thinking':
-      return 'thinking-map';
-    default:
-      return 'course-desk';
-  }
-}
-
 export function WorkspaceResumeLayer({
   tokens,
   topOffset = 0,
   inShell = false,
-  continuity,
   resumeCopy,
   suggestions,
   onDismiss,
@@ -72,12 +55,11 @@ export function WorkspaceResumeLayer({
     return () => window.clearTimeout(timer);
   }, [hovered, prefersReducedMotion]);
 
-  const variant = useMemo(() => variantForIntent(continuity.intent), [continuity.intent]);
   const primary = suggestions[0];
 
   if (!resumeCopy) return null;
 
-  const showCard = expanded || hovered;
+  const showDock = expanded || hovered;
 
   return (
     <div
@@ -88,10 +70,11 @@ export function WorkspaceResumeLayer({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: inShell ? 'absolute' : 'fixed',
-        top: inShell ? 10 : topOffset + 10,
+        top: inShell ? 8 : topOffset + 8,
+        left: 16,
         right: 16,
         zIndex: 48,
-        maxWidth: 'min(340px, calc(100vw - 48px))',
+        maxWidth: inShell ? undefined : 'min(640px, calc(100vw - 32px))',
         pointerEvents: 'none',
         opacity: entered ? 1 : 0,
         transform: entered ? 'translateY(0)' : 'translateY(-4px)',
@@ -100,7 +83,7 @@ export function WorkspaceResumeLayer({
           : 'opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1), transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
-      {!showCard ? (
+      {!showDock ? (
         <button
           type="button"
           aria-label="Show resume hint"
@@ -127,70 +110,55 @@ export function WorkspaceResumeLayer({
         <div
           style={{
             pointerEvents: 'auto',
-            borderRadius: 14,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            borderRadius: 12,
             border: `1px solid ${tokens.cardBorder}`,
             background: tokens.cardBg,
-            boxShadow: '0 10px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05)',
-            padding: '10px 10px 10px 8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.05)',
+            padding: '8px 10px',
+            minHeight: 40,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <WorkspaceMicroScene tokens={tokens} variant={variant} size="compact" />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: tokens.accent,
-                }}
-              >
-                {resumeCopy.headline}
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  lineHeight: 1.35,
-                  color: tokens.textPrimary,
-                }}
-              >
-                {resumeCopy.subtitle}
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-label="Dismiss resume for this workspace"
-              onClick={onDismiss}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span
               style={{
-                width: 24,
-                height: 24,
-                border: 'none',
-                borderRadius: 8,
-                background: 'transparent',
-                color: tokens.textGhost,
-                cursor: 'pointer',
+                fontSize: 10,
+                fontWeight: 650,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: tokens.accent,
                 flexShrink: 0,
               }}
             >
-              <X className="w-3.5 h-3.5" />
-            </button>
+              {resumeCopy.headline}
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: tokens.textPrimary,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0,
+              }}
+            >
+              {resumeCopy.subtitle}
+            </span>
           </div>
-          {primary && (
+          {primary ? (
             <button
               type="button"
               onClick={() => onSuggestionClick(primary)}
               style={{
-                marginTop: 8,
-                width: '100%',
-                display: 'flex',
+                flexShrink: 0,
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                padding: '8px 10px',
-                borderRadius: 10,
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 8,
                 border: `1px solid ${tokens.accent}33`,
                 background: `${tokens.accent}12`,
                 color: tokens.accent,
@@ -199,10 +167,27 @@ export function WorkspaceResumeLayer({
                 cursor: 'pointer',
               }}
             >
-              <span style={{ textAlign: 'left' }}>{primary.label}</span>
+              <span>{primary.label}</span>
               <ArrowRight className="w-3.5 h-3.5 shrink-0" />
             </button>
-          )}
+          ) : null}
+          <button
+            type="button"
+            aria-label="Dismiss resume for this workspace"
+            onClick={onDismiss}
+            style={{
+              width: 28,
+              height: 28,
+              border: 'none',
+              borderRadius: 8,
+              background: 'transparent',
+              color: tokens.textGhost,
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

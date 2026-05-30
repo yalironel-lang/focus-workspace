@@ -21,6 +21,7 @@ import {
   findLinkedSource,
 } from '../../lib/studyConnections';
 import { mistakeContent, mistakeNeedsReview, mistakeReviewLabel } from '../../lib/mistakeIntelligence';
+import { isLearningLoopOpen, learningLoopFields } from '../../lib/learningLoop';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
@@ -44,6 +45,8 @@ interface Props {
   onRequestSelectObject?: (id: string) => void;
   /** Optional: create a connected recall item from notebook content. */
   onCreateNotebookRecall?: (sourceObjectId: string, prompt: string) => void;
+  /** Start closed-book learning attempt for this object. */
+  onStartLearningAttempt?: (objectId: string) => void;
 }
 
 function copyText(text: string): Promise<void> {
@@ -122,6 +125,7 @@ function ProjectSpaceObjectRendererInner({
   onTitleChange,
   onRequestSelectObject,
   onCreateNotebookRecall,
+  onStartLearningAttempt,
 }: Props) {
   useEffect(() => {
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
@@ -142,6 +146,26 @@ function ProjectSpaceObjectRendererInner({
       window.setTimeout(() => setCopied(false), 1000);
     } catch {}
   }, [copyPayload]);
+
+  const attemptBtn =
+    onStartLearningAttempt &&
+    (object.type === 'mistake' || object.type === 'note' || object.type === 'notebook' || object.type === 'pdf' || object.type === 'studyfile') ? (
+      <button
+        type="button"
+        onClick={e => {
+          e.stopPropagation();
+          onStartLearningAttempt(object.id);
+        }}
+        className="absolute top-2 right-2 z-[2] px-2 py-1 rounded-lg text-[10px] font-semibold"
+        style={{
+          backgroundColor: `${tokens.accent}22`,
+          color: tokens.accent,
+          border: `1px solid ${tokens.accent}44`,
+        }}
+      >
+        Attempt
+      </button>
+    ) : null;
 
   const wrapWithCopy = useCallback((node: ReactNode) => {
     if (!copyPayload) return node;
@@ -221,41 +245,47 @@ function ProjectSpaceObjectRendererInner({
     case 'notebook':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Notebook">
-          <ProjectNotebookBlock
-            content={content}
-            tokens={tokens}
-            onChange={onChange}
-            context="free-space"
-            objectId={object.id}
-            objectTitle={object.title}
-            objectUpdatedAt={object.updatedAt}
-            allObjects={allObjects}
-            freeSpaceSectionId={freeSpaceSectionId}
-            freeSpaceBoardId={freeSpaceBoardId}
-            onRequestSelectObject={onRequestSelectObject}
-            onCreateRecallItem={
-              onCreateNotebookRecall
-                ? (prompt) => onCreateNotebookRecall(object.id, prompt)
-                : undefined
-            }
-            onEditingChange={
-              onNotebookEditingChange
-                ? (editing) => onNotebookEditingChange(object.id, editing)
-                : undefined
-            }
-          />
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            {attemptBtn}
+            <ProjectNotebookBlock
+              content={content}
+              tokens={tokens}
+              onChange={onChange}
+              context="free-space"
+              objectId={object.id}
+              objectTitle={object.title}
+              objectUpdatedAt={object.updatedAt}
+              allObjects={allObjects}
+              freeSpaceSectionId={freeSpaceSectionId}
+              freeSpaceBoardId={freeSpaceBoardId}
+              onRequestSelectObject={onRequestSelectObject}
+              onCreateRecallItem={
+                onCreateNotebookRecall
+                  ? (prompt) => onCreateNotebookRecall(object.id, prompt)
+                  : undefined
+              }
+              onEditingChange={
+                onNotebookEditingChange
+                  ? (editing) => onNotebookEditingChange(object.id, editing)
+                  : undefined
+              }
+            />
+          </div>
         </WorkspaceSurfaceErrorBoundary>
       );
     case 'note':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Note">
-          {wrapWithCopy(
-            <NoteBlock
-              content={{ type: 'note', body: content.body }}
-              tokens={tokens}
-              onChange={c => onChange({ type: 'note', body: c.body })}
-            />,
-          )}
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            {attemptBtn}
+            {wrapWithCopy(
+              <NoteBlock
+                content={{ type: 'note', body: content.body }}
+                tokens={tokens}
+                onChange={c => onChange({ type: 'note', body: c.body })}
+              />,
+            )}
+          </div>
         </WorkspaceSurfaceErrorBoundary>
       );
     case 'mistake': {
@@ -264,6 +294,7 @@ function ProjectSpaceObjectRendererInner({
       const mc = mistakeContent(object);
       const needsReview = mc ? mistakeNeedsReview(mc) : false;
       const reviewLabel = mc ? mistakeReviewLabel(mc) : undefined;
+      const loop = content.type === 'mistake' ? learningLoopFields(content) : null;
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Mistake card">
           {wrapWithCopy(
@@ -277,8 +308,13 @@ function ProjectSpaceObjectRendererInner({
               }
               needsReview={needsReview}
               reviewLabel={reviewLabel}
+              loopOpen={loop ? isLearningLoopOpen(content) : true}
+              pendingReAttempt={loop?.pendingReAttempt ?? false}
               onChange={c => onChange(c)}
               onTitleChange={onTitleChange}
+              onStartAttempt={
+                onStartLearningAttempt ? () => onStartLearningAttempt(object.id) : undefined
+              }
             />,
           )}
         </WorkspaceSurfaceErrorBoundary>
@@ -364,17 +400,20 @@ function ProjectSpaceObjectRendererInner({
       }
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="PDF">
-          <FreeSpacePdfCard
-            objectId={object.id}
-            content={content}
-            tokens={tokens}
-            sectionId={freeSpaceSectionId}
-            onChange={c => onChange(c)}
-            onTitleChange={onTitleChange}
+          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            {attemptBtn}
+            <FreeSpacePdfCard
+              objectId={object.id}
+              content={content}
+              tokens={tokens}
+              sectionId={freeSpaceSectionId}
+              onChange={c => onChange(c)}
+              onTitleChange={onTitleChange}
             suspendViewer={renderPolicy.suspendHeavyContent}
             linkedNotebookTitle={notebook?.title ?? null}
             relatedMistakeCount={mistakeCount}
           />
+          </div>
         </WorkspaceSurfaceErrorBoundary>
       );
     }

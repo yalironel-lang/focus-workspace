@@ -1,23 +1,58 @@
 /**
- * Floating spatial OS controls — no full-width nav slab.
+ * Floating spatial OS controls — single primary bar, minimal permanent chrome.
  */
 
-import { useState } from 'react';
-import { ArrowLeft, Palette, Search, Sliders } from 'lucide-react';
+import { useState, useRef, useEffect, type CSSProperties, type RefObject } from 'react';
+import { ArrowLeft, ChevronDown, MoreHorizontal, Palette, Search, Sliders } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { FocusMode } from '../../focusMode/focusModeTypes';
-import { FOCUS_MODE_BADGE } from '../../focusMode/focusModeTypes';
 import type { FreeSpaceBoard } from '../../hooks/useSectionFreeSpaceBoards';
+import type { FreeSpaceTemplateId } from '../../lib/sectionFreeSpaceLayoutTemplates';
+import type { ArrangeGoalId } from '../../lib/freeSpaceAutoArrange';
 import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
 import { glassIsland, shellIconBtn } from './shellGlass';
+import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 
 const VIEW_MODES = [
-  { id: 'free-space' as const,  label: 'Workspace' },
+  { id: 'free-space' as const, label: 'Workspace' },
   { id: 'work-surface' as const, label: 'Mission Control' },
-  { id: 'math-zone' as const,   label: '∑ Studio' },
-];
+  { id: 'math-zone' as const, label: '∑ Studio' },
+] as const;
 
 export const WORKSPACE_CHROME_Z = 600;
+
+const MENU_PANEL_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: 'calc(100% + 6px)',
+  right: 0,
+  minWidth: 220,
+  maxWidth: 360,
+  padding: 6,
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.06)',
+  boxShadow: '0 16px 44px rgba(0,0,0,0.4)',
+  zIndex: 2,
+};
+
+function useDismissOnOutside(open: boolean, onClose: () => void, rootRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open, onClose, rootRef]);
+}
+
+interface OrganizeProps {
+  objectCount: number;
+  selectedCount: number;
+  onApplyTemplate: (id: FreeSpaceTemplateId) => void;
+  onAutoArrange: () => void;
+  onArrangeSelected: () => void;
+  onArrangeByGoal: (goal: ArrangeGoalId) => void;
+}
 
 interface Props {
   title: string;
@@ -41,6 +76,7 @@ interface Props {
   activeBoardId?: string;
   onSelectBoard?: (id: string) => void;
   onCreateBoard?: (name: string) => void;
+  organize?: OrganizeProps;
 }
 
 export function FloatingWorkspaceShell({
@@ -65,13 +101,32 @@ export function FloatingWorkspaceShell({
   activeBoardId,
   onSelectBoard,
   onCreateBoard,
+  organize,
 }: Props) {
   const [searchHover, setSearchHover] = useState(false);
-  const [sceneHover, setSceneHover] = useState(false);
-  const [settingsHover, setSettingsHover] = useState(false);
+  const [overflowHover, setOverflowHover] = useState(false);
+  const [spaceOpen, setSpaceOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [overflowView, setOverflowView] = useState<'root' | 'organize'>('root');
+
+  const spaceRef = useRef<HTMLDivElement>(null);
+  const overflowRef = useRef<HTMLDivElement>(null);
+
+  const closeSpace = () => setSpaceOpen(false);
+  const closeOverflow = () => {
+    setOverflowOpen(false);
+    setOverflowView('root');
+  };
+
+  useDismissOnOutside(spaceOpen, closeSpace, spaceRef);
+  useDismissOnOutside(overflowOpen, closeOverflow, overflowRef);
 
   const displayTitle = isExploreFocus ? EXPLORE_FOCUS_SECTION_TITLE : title;
-  const osLabel = isExploreFocus ? 'Guided environment' : 'Workspace';
+  const activeBoard = boards?.find(b => b.id === activeBoardId);
+  const showSpace = sectionViewMode === 'free-space' && boards && activeBoardId != null && onSelectBoard;
+  const showOrganize = sectionViewMode === 'free-space' && organize;
+
+  const menuPanelBg = tokens.cardBg;
 
   return (
     <div
@@ -84,280 +139,422 @@ export function FloatingWorkspaceShell({
         right: 0,
         zIndex: WORKSPACE_CHROME_Z,
         pointerEvents: 'none',
-        padding: 'max(10px, env(safe-area-inset-top)) 16px 0',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
+        padding: 'max(8px, env(safe-area-inset-top)) 16px 0',
       }}
     >
       <div
         style={{
+          ...glassIsland(tokens, 'primary', 'idle'),
+          pointerEvents: 'auto',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-          pointerEvents: 'none',
+          gap: 10,
+          flexWrap: 'nowrap',
+          minHeight: 52,
+          padding: '6px 10px 6px 8px',
+          borderRadius: 16,
+          maxWidth: '100%',
         }}
       >
-        {/* Primary — orientation. pointerEvents: auto here so the cluster is
-            interactive without relying on a child overriding two ancestor 'none' levels. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 280px', pointerEvents: 'auto' }}>
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label={`Back to ${backLabel}`}
-            style={{ ...glassIsland(tokens, 'primary', 'idle'), pointerEvents: 'auto' }}
-          >
-            <ArrowLeft size={16} strokeWidth={2.25} style={{ color: tokens.textPrimary, flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: 650, color: tokens.textPrimary, letterSpacing: '-0.02em' }}>
-              {backLabel}
-            </span>
-          </button>
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label={`Back to ${backLabel}`}
+          style={{
+            ...shellIconBtn(tokens, 'idle'),
+            flexShrink: 0,
+            width: 36,
+            minWidth: 36,
+          }}
+        >
+          <ArrowLeft size={18} strokeWidth={2.25} style={{ color: tokens.textPrimary }} />
+        </button>
 
-          <div
+        <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h1
             style={{
-              ...glassIsland(tokens, 'primary', 'idle'),
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              gap: 2,
-              padding: '7px 14px 8px',
-              borderRadius: 14,
-              maxWidth: 280,
-              pointerEvents: 'none',
+              flex: '1 1 auto',
+              minWidth: 0,
+              margin: 0,
+              padding: '0 4px',
+              fontSize: 15,
+              fontWeight: 650,
+              letterSpacing: '-0.025em',
+              color: tokens.textPrimary,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              lineHeight: 1.25,
             }}
+            title={displayTitle}
           >
+            {displayTitle}
+          </h1>
+          {isExploreFocus ? (
             <span
               style={{
+                flexShrink: 0,
                 fontSize: 9,
                 fontWeight: 750,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                color: tokens.textGhost,
-              }}
-            >
-              {osLabel}
-            </span>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: tokens.textSecondary,
-                letterSpacing: '-0.02em',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                maxWidth: 240,
-              }}
-            >
-              {displayTitle}
-            </span>
-          </div>
-
-          {isExploreFocus && (
-            <span
-              style={{
-                ...glassIsland(tokens, 'primary', 'active'),
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '0.12em',
+                letterSpacing: '0.1em',
                 textTransform: 'uppercase',
                 color: accent,
-                pointerEvents: 'none',
+                padding: '3px 7px',
+                borderRadius: 6,
+                border: `1px solid ${accent}44`,
+                background: `${accent}14`,
               }}
             >
-              Explore Focus
+              Explore
             </span>
-          )}
+          ) : null}
         </div>
 
-        {/* Spaces — free-space only */}
-        {sectionViewMode === 'free-space' && boards && activeBoardId != null && onSelectBoard && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              flexWrap: 'wrap',
-              flex: '0 1 auto',
-              pointerEvents: 'none',
-            }}
-          >
-            <span
+        {isCustomizing ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button type="button" onClick={onResetCustomize} style={shellIconBtn(tokens)}>
+              <span style={{ fontSize: 11, color: tokens.textMuted, padding: '0 6px' }}>Reset</span>
+            </button>
+            <button
+              type="button"
+              onClick={onExitCustomize}
               style={{
-                fontSize: 9,
-                fontWeight: 750,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                color: tokens.textGhost,
-                marginRight: 2,
-                pointerEvents: 'none',
+                ...shellIconBtn(tokens, 'hover'),
+                backgroundColor: accent,
+                color: '#0a0805',
+                borderRadius: 10,
+                padding: '0 12px',
+                minWidth: 56,
               }}
             >
-              Spaces
-            </span>
-            {boards.map(board => {
-              const active = board.id === activeBoardId;
-              return (
+              <span style={{ fontSize: 11, fontWeight: 700 }}>Done</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                flexShrink: 0,
+                padding: 3,
+                borderRadius: 12,
+                background: `${tokens.wellBg}66`,
+              }}
+            >
+              {VIEW_MODES.map(opt => {
+                const active = sectionViewMode === opt.id;
+                const lensActive = active && focusMode != null;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onViewModeChange(opt.id)}
+                    style={{
+                      position: 'relative',
+                      border: 'none',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      minHeight: 32,
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      fontWeight: active ? 700 : 550,
+                      letterSpacing: '-0.01em',
+                      backgroundColor: active
+                        ? opt.id === 'free-space'
+                          ? `${accent}cc`
+                          : `${tokens.wellBg}ee`
+                        : 'transparent',
+                      color: active
+                        ? opt.id === 'free-space'
+                          ? '#0a0805'
+                          : tokens.textPrimary
+                        : tokens.textMuted,
+                      transition: 'background 0.15s ease, color 0.15s ease',
+                    }}
+                  >
+                    {opt.label}
+                    {lensActive ? (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          width: 4,
+                          height: 4,
+                          borderRadius: '50%',
+                          background: accent,
+                          boxShadow: `0 0 6px ${accent}`,
+                        }}
+                      />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            {showSpace ? (
+              <div ref={spaceRef} style={{ position: 'relative', flexShrink: 0 }}>
                 <button
-                  key={board.id}
                   type="button"
-                  onClick={() => onSelectBoard(board.id)}
+                  onClick={() => setSpaceOpen(o => !o)}
+                  aria-expanded={spaceOpen}
+                  aria-haspopup="listbox"
                   style={{
-                    ...glassIsland(tokens, active ? 'primary' : 'secondary', active ? 'active' : 'idle'),
+                    ...glassIsland(tokens, 'secondary', spaceOpen ? 'active' : 'idle'),
                     fontSize: 11,
-                    fontWeight: active ? 700 : 550,
-                    color: active ? tokens.textPrimary : tokens.textMuted,
-                    padding: '6px 12px',
+                    fontWeight: 600,
+                    color: tokens.textSecondary,
+                    padding: '6px 10px',
+                    gap: 4,
                   }}
                 >
-                  {board.name}
-                </button>
-              );
-            })}
-            {onCreateBoard && (
-              <button
-                type="button"
-                onClick={() => {
-                  const name = window.prompt('New space name', 'Space');
-                  if (name?.trim()) onCreateBoard(name.trim());
-                }}
-                style={{
-                  ...glassIsland(tokens, 'secondary', 'idle'),
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: tokens.textGhost,
-                  padding: '6px 10px',
-                }}
-              >
-                +
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* View mode + secondary tools */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, pointerEvents: 'none' }}>
-          {isCustomizing ? (
-            <div style={{ ...glassIsland(tokens, 'primary', 'idle'), gap: 6 }}>
-              <button type="button" onClick={onResetCustomize} style={shellIconBtn(tokens)}>
-                <span style={{ fontSize: 11, color: tokens.textMuted }}>Reset</span>
-              </button>
-              <button
-                type="button"
-                onClick={onExitCustomize}
-                style={{
-                  ...shellIconBtn(tokens, 'hover'),
-                  backgroundColor: accent,
-                  color: '#0a0805',
-                  borderRadius: 10,
-                  padding: '0 12px',
-                  minWidth: 56,
-                }}
-              >
-                <span style={{ fontSize: 11, fontWeight: 700 }}>Done</span>
-              </button>
-            </div>
-          ) : (
-            <>
-              <div style={{ ...glassIsland(tokens, 'primary', 'idle'), padding: 4, gap: 4 }}>
-                {VIEW_MODES.map(opt => {
-                  const active = sectionViewMode === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => onViewModeChange(opt.id)}
-                      style={{
-                        border: 'none',
-                        borderRadius: 999,
-                        padding: '6px 12px',
-                        minHeight: 34,
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        fontWeight: active ? 750 : 580,
-                        letterSpacing: '-0.01em',
-                        backgroundColor: active
-                          ? opt.id === 'free-space'
-                            ? `${accent}cc`
-                            : `${tokens.wellBg}ee`
-                          : 'transparent',
-                        color: active
-                          ? opt.id === 'free-space'
-                            ? '#0a0805'
-                            : tokens.textPrimary
-                          : tokens.textMuted,
-                        transition: 'background 0.15s ease, color 0.15s ease',
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div style={{ ...glassIsland(tokens, 'secondary', 'idle'), padding: 4, gap: 2 }}>
-                <button
-                  type="button"
-                  aria-label="Search notebooks"
-                  title="Search (⌘K)"
-                  onClick={onOpenSearch}
-                  style={shellIconBtn(tokens, searchHover ? 'hover' : 'idle')}
-                  onMouseEnter={() => setSearchHover(true)}
-                  onMouseLeave={() => setSearchHover(false)}
-                >
-                  <Search size={17} strokeWidth={2} />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Scene"
-                  title="Appearance"
-                  onClick={onOpenAppearance}
-                  style={shellIconBtn(tokens, sceneHover ? 'hover' : 'idle')}
-                  onMouseEnter={() => setSceneHover(true)}
-                  onMouseLeave={() => setSceneHover(false)}
-                >
-                  <Palette size={17} strokeWidth={2} style={{ color: accent }} />
-                </button>
-                <button
-                  type="button"
-                  aria-label={sectionViewMode === 'math-zone' ? 'Notebook controls' : 'Settings'}
-                  title={sectionViewMode === 'math-zone' ? 'Notebook Controls' : 'Customize'}
-                  onClick={sectionViewMode === 'math-zone' ? (onOpenNotebookControls ?? onCustomize) : onCustomize}
-                  style={shellIconBtn(tokens, settingsHover ? 'hover' : 'idle')}
-                  onMouseEnter={() => setSettingsHover(true)}
-                  onMouseLeave={() => setSettingsHover(false)}
-                >
-                  <Sliders
-                    size={17}
-                    strokeWidth={2}
+                  <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeBoard?.name ?? 'Space'}
+                  </span>
+                  <ChevronDown
+                    size={14}
                     style={{
-                      color: sectionViewMode === 'math-zone' && notebookControlsOpen ? accent : undefined,
+                      opacity: 0.7,
+                      transform: spaceOpen ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.2s ease',
                     }}
                   />
                 </button>
+                {spaceOpen ? (
+                  <div
+                    role="listbox"
+                    aria-label="Spaces"
+                    style={{
+                      ...MENU_PANEL_STYLE,
+                      right: 0,
+                      minWidth: 180,
+                      backgroundColor: menuPanelBg,
+                    }}
+                  >
+                    {boards!.map(board => {
+                      const active = board.id === activeBoardId;
+                      return (
+                        <button
+                          key={board.id}
+                          type="button"
+                          role="option"
+                          aria-selected={active}
+                          onClick={() => {
+                            onSelectBoard!(board.id);
+                            closeSpace();
+                          }}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '9px 10px',
+                            border: 'none',
+                            borderRadius: 8,
+                            background: active ? `${tokens.accent}18` : 'transparent',
+                            color: active ? tokens.textPrimary : tokens.textSecondary,
+                            fontSize: 12,
+                            fontWeight: active ? 650 : 500,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {board.name}
+                        </button>
+                      );
+                    })}
+                    {onCreateBoard ? (
+                      <>
+                        <div style={{ height: 1, margin: '4px 6px', background: 'rgba(255,255,255,0.06)' }} />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const name = window.prompt('New space name', 'Space');
+                            if (name?.trim()) {
+                              onCreateBoard(name.trim());
+                              closeSpace();
+                            }
+                          }}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '9px 10px',
+                            border: 'none',
+                            borderRadius: 8,
+                            background: 'transparent',
+                            color: tokens.textMuted,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          New space…
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-            </>
-          )}
-        </div>
-      </div>
+            ) : null}
 
-      {focusMode && (
-        <div
-          style={{
-            alignSelf: 'center',
-            ...glassIsland(tokens, 'secondary', 'idle'),
-            fontSize: 10,
-            fontWeight: 650,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: tokens.textSecondary,
-            pointerEvents: 'none',
-          }}
-        >
-          Focus · {FOCUS_MODE_BADGE[focusMode as keyof typeof FOCUS_MODE_BADGE] ?? focusMode}
-        </div>
-      )}
+            <button
+              type="button"
+              aria-label="Search"
+              title="Search (⌘K)"
+              onClick={onOpenSearch}
+              style={{
+                ...shellIconBtn(tokens, searchHover ? 'hover' : 'idle'),
+                flexShrink: 0,
+                width: 36,
+                minWidth: 36,
+              }}
+              onMouseEnter={() => setSearchHover(true)}
+              onMouseLeave={() => setSearchHover(false)}
+            >
+              <Search size={18} strokeWidth={2} />
+            </button>
+
+            <div ref={overflowRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                type="button"
+                aria-label="More options"
+                aria-expanded={overflowOpen}
+                aria-haspopup="menu"
+                onClick={() => setOverflowOpen(o => !o)}
+                style={{
+                  ...shellIconBtn(tokens, overflowHover ? 'hover' : 'idle'),
+                  width: 36,
+                  minWidth: 36,
+                }}
+                onMouseEnter={() => setOverflowHover(true)}
+                onMouseLeave={() => setOverflowHover(false)}
+              >
+                <MoreHorizontal size={18} strokeWidth={2} />
+              </button>
+              {overflowOpen ? (
+                <div
+                  role="menu"
+                  style={{
+                    ...MENU_PANEL_STYLE,
+                    backgroundColor: menuPanelBg,
+                    maxHeight: 'min(70vh, 480px)',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {overflowView === 'organize' && organize ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setOverflowView('root')}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 10px',
+                          border: 'none',
+                          borderRadius: 8,
+                          background: 'transparent',
+                          color: tokens.textMuted,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          marginBottom: 4,
+                        }}
+                      >
+                        ← Back
+                      </button>
+                      <OrganizeWorkspaceMenuPanel
+                        tokens={tokens}
+                        objectCount={organize.objectCount}
+                        selectedCount={organize.selectedCount}
+                        onApplyTemplate={organize.onApplyTemplate}
+                        onAutoArrange={organize.onAutoArrange}
+                        onArrangeSelected={organize.onArrangeSelected}
+                        onArrangeByGoal={organize.onArrangeByGoal}
+                        onClose={closeOverflow}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          onOpenAppearance();
+                          closeOverflow();
+                        }}
+                        style={overflowMenuItemStyle(tokens)}
+                      >
+                        <Palette size={15} style={{ marginRight: 8, verticalAlign: -3, color: accent }} />
+                        Appearance
+                      </button>
+                      {sectionViewMode === 'math-zone' ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            (onOpenNotebookControls ?? onCustomize)();
+                            closeOverflow();
+                          }}
+                          style={{
+                            ...overflowMenuItemStyle(tokens),
+                            color: notebookControlsOpen ? tokens.accent : tokens.textSecondary,
+                          }}
+                        >
+                          <Sliders size={15} style={{ marginRight: 8, verticalAlign: -3 }} />
+                          Notebook controls
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            onCustomize();
+                            closeOverflow();
+                          }}
+                          style={overflowMenuItemStyle(tokens)}
+                        >
+                          <Sliders size={15} style={{ marginRight: 8, verticalAlign: -3 }} />
+                          Customize workspace
+                        </button>
+                      )}
+                      {showOrganize ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => setOverflowView('organize')}
+                          style={overflowMenuItemStyle(tokens)}
+                        >
+                          Organize workspace…
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
+}
+
+function overflowMenuItemStyle(tokens: AtmosphereTokens): CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    textAlign: 'left',
+    padding: '10px 10px',
+    border: 'none',
+    borderRadius: 8,
+    background: 'transparent',
+    color: tokens.textSecondary,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: 'pointer',
+  };
 }

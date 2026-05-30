@@ -63,6 +63,7 @@ import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
 import {
   useSectionFreeSpaceObjects,
   type ProjectObjectType,
+  type ProjectObjectContent,
   ensureProjectObjectContent,
 } from '../hooks/useSectionFreeSpaceObjects';
 import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
@@ -72,7 +73,6 @@ import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
 import { DesignModeBar } from '../components/DesignModeBar';
 import { FreeformCanvas } from '../components/canvas/FreeformCanvas';
-import { FreeSpaceArrangeControl } from '../components/canvas/FreeSpaceArrangeControl';
 import {
   computeFreeSpaceTemplateLayout,
   type FreeSpaceTemplateId,
@@ -91,8 +91,17 @@ import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanv
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import { CompanionComposerModal } from '../components/project-space/CompanionComposerModal';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
-import { MistakeReviewOverlay } from '../components/project-space/MistakeReviewOverlay';
-import { computeMistakeInsights, buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
+import { LearningAttemptOverlay } from '../components/project-space/LearningAttemptOverlay';
+import { buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
+import {
+  applyAttemptFail,
+  applyRepairSaved,
+  buildLearningLoopQueue,
+  learningTargetFromObject,
+  resolveAttemptPrompt,
+  type LearningAttemptTarget,
+  type MistakeLearningBody,
+} from '../lib/learningLoop';
 import { isAcceptablePdfFile, savePdfBlob } from '../lib/freeSpacePdfIdb';
 import {
   fitImageFrame,
@@ -761,8 +770,10 @@ export function SectionPage() {
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
   const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   const [quickCaptureVariant, setQuickCaptureVariant] = useState<'note' | 'mistake'>('note');
-  const [mistakeReviewOpen, setMistakeReviewOpen] = useState(false);
-  const [mistakeReviewQueue, setMistakeReviewQueue] = useState<string[]>([]);
+  const [learningAttemptOpen, setLearningAttemptOpen] = useState(false);
+  const [learningAttemptTarget, setLearningAttemptTarget] = useState<LearningAttemptTarget | null>(null);
+  const [learningAttemptQueue, setLearningAttemptQueue] = useState<string[]>([]);
+  const [learningAttemptIndex, setLearningAttemptIndex] = useState(0);
   const [starterDismissed, setStarterDismissed] = useState(false);
   const [starterExpanded, setStarterExpanded] = useState(false);
   const [starterDockVisible, setStarterDockVisible] = useState(false);
@@ -777,7 +788,6 @@ export function SectionPage() {
   const locationRef = useRef(location);
   locationRef.current = location;
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
-  const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
   // ── Design Mode state ─────────────────────────────────────────────────────
@@ -914,10 +924,11 @@ export function SectionPage() {
     setConnectHoverId(null);
     setQuickCaptureOpen(false);
     setQuickCaptureVariant('note');
-    setMistakeReviewOpen(false);
-    setMistakeReviewQueue([]);
+    setLearningAttemptOpen(false);
+    setLearningAttemptTarget(null);
+    setLearningAttemptQueue([]);
+    setLearningAttemptIndex(0);
     setStarterHints(null);
-    setMistakeReviewIndex(0);
     setAiAssistResult(null);
     setDesignMode(false);
     setNotebookControlsOpen(false);
@@ -1238,6 +1249,18 @@ export function SectionPage() {
   const handleResumeSuggestion = useCallback(
     (suggestion: WorkspaceContinuitySuggestion) => {
       setResumeDismissed(true);
+      if (suggestion.learningAttempt && suggestion.objectId) {
+        if (sectionViewMode !== 'free-space') setSectionViewMode('free-space');
+        const obj = sectionObjectsRef.current.getObject(suggestion.objectId);
+        const target = obj ? learningTargetFromObject(obj) : { kind: 'mistake' as const, objectId: suggestion.objectId };
+        if (target) {
+          setLearningAttemptTarget(target);
+          setLearningAttemptQueue([]);
+          setLearningAttemptIndex(0);
+          setLearningAttemptOpen(true);
+        }
+        return;
+      }
       if (suggestion.focusMode) setFocusMode(suggestion.focusMode);
       if (suggestion.objectId) {
         focusNotebookOnCanvas(suggestion.objectId);
@@ -1247,7 +1270,22 @@ export function SectionPage() {
         setSectionViewMode('free-space');
       }
     },
-    [focusNotebookOnCanvas, setFocusMode, setSectionViewMode],
+    [focusNotebookOnCanvas, setFocusMode, setSectionViewMode, sectionViewMode],
+  );
+
+  const openLearningAttemptForObject = useCallback(
+    (objectId: string) => {
+      const obj = sectionObjectsRef.current.getObject(objectId);
+      if (!obj) return;
+      const target = learningTargetFromObject(obj);
+      if (!target) return;
+      if (sectionViewMode !== 'free-space') setSectionViewMode('free-space');
+      setLearningAttemptTarget(target);
+      setLearningAttemptQueue([]);
+      setLearningAttemptIndex(0);
+      setLearningAttemptOpen(true);
+    },
+    [sectionViewMode, setSectionViewMode],
   );
 
   const applyStudyLinksForObject = useCallback(
@@ -1643,7 +1681,7 @@ export function SectionPage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
       if (quickCaptureOpen) return;
-      if (mistakeReviewOpen) return;
+      if (learningAttemptOpen) return;
       if (paletteOpen || sessionModalOpen) return;
       if (connectSourceId) return;
       if (isQuickCaptureBlockedTarget(e.target)) return;
@@ -1683,7 +1721,7 @@ export function SectionPage() {
     id,
     section,
     quickCaptureOpen,
-    mistakeReviewOpen,
+    learningAttemptOpen,
     paletteOpen,
     sessionModalOpen,
     connectSourceId,
@@ -1735,12 +1773,75 @@ export function SectionPage() {
       if (sectionViewMode !== 'free-space') {
         setSectionViewMode('free-space');
       }
-      const q = buildMistakeReviewQueueFiltered(sectionObjectsRef.current.objects, mode);
-      setMistakeReviewQueue(q);
-      setMistakeReviewIndex(0);
-      setMistakeReviewOpen(true);
+      const q =
+        mode === 'all'
+          ? buildLearningLoopQueue(sectionObjectsRef.current.objects)
+          : buildMistakeReviewQueueFiltered(sectionObjectsRef.current.objects, mode);
+      if (q.length === 0) {
+        toast('No learning loops need attention right now.');
+        return;
+      }
+      const first = sectionObjectsRef.current.getObject(q[0]);
+      const target = first ? learningTargetFromObject(first) : null;
+      if (!target) return;
+      setLearningAttemptQueue(q);
+      setLearningAttemptIndex(0);
+      setLearningAttemptTarget(target);
+      setLearningAttemptOpen(true);
     },
-    [sectionViewMode],
+    [sectionViewMode, setSectionViewMode],
+  );
+
+  const handleLearningAttemptUpdate = useCallback(
+    (mistakeId: string, content: Extract<ProjectObjectContent, { type: 'mistake' }>) => {
+      updateSpaceObjectContent(mistakeId, content);
+    },
+    [updateSpaceObjectContent],
+  );
+
+  const handlePersistSourceAttempt = useCallback(
+    (target: LearningAttemptTarget, patch: Partial<Extract<ProjectObjectContent, { type: 'mistake' }>>) => {
+      const objects = sectionObjectsRef.current.objects;
+      const src = sectionObjectsRef.current.getObject(target.objectId);
+      if (!src) return;
+      const prompt = resolveAttemptPrompt(target, objects);
+      const obj = addSpaceObject('mistake');
+      const base = viewportCenterWorld(0, 40);
+      initPos(obj.id, { x: base.x, y: base.y, w: 380, h: 320 });
+      addSpaceConnection(obj.id, target.objectId);
+      const c = ensureProjectObjectContent('mistake', obj.content);
+      if (c.type !== 'mistake') return;
+      const belief = patch.confusionBelief?.trim() || patch.whyConfused?.trim() || '';
+      let next: MistakeLearningBody = {
+        ...c,
+        variant: 'recall',
+        whatWrong: patch.whatWrong || prompt?.prompt || obj.title,
+        correction: patch.correction || prompt?.hiddenAnswer || '',
+        whyConfused: patch.whyConfused || belief,
+        confusionBelief: belief,
+        sourceObjectId: target.kind === 'notebook' ? null : target.objectId,
+        anchorObjectId: target.kind === 'notebook' ? target.objectId : null,
+        loopOpen: true,
+        pendingReAttempt: true,
+        repairedAt: Date.now(),
+        lastAttemptOutcome: 'fail',
+        lastAttemptAt: Date.now(),
+      };
+      if (belief) next = applyAttemptFail(next, belief);
+      next = applyRepairSaved(next);
+      updateSpaceObjectContent(obj.id, next);
+      applyStudyLinksForObject(obj.id, 'mistake');
+      setLearningAttemptTarget({ kind: 'mistake', objectId: obj.id });
+      toast.success('Saved recall card — re-attempt when ready');
+    },
+    [
+      addSpaceObject,
+      initPos,
+      viewportCenterWorld,
+      addSpaceConnection,
+      updateSpaceObjectContent,
+      applyStudyLinksForObject,
+    ],
   );
 
   const convertSelectedNoteToMistake = useCallback(() => {
@@ -1780,28 +1881,6 @@ export function SectionPage() {
       toast.error('Could not reach the model.', { duration: 4500 });
     }
   }, []);
-
-  const markMistakeReviewedInSession = useCallback(
-    (mistakeId: string) => {
-      const o = getSpaceObject(mistakeId);
-      if (!o || o.type !== 'mistake') return;
-      const c = ensureProjectObjectContent('mistake', o.content);
-      if (c.type !== 'mistake') return;
-      const nextConfidence =
-        c.confidence === 'low'
-          ? 'medium'
-          : c.confidence === 'medium'
-            ? 'high'
-            : c.confidence;
-      updateSpaceObjectContent(mistakeId, {
-        ...c,
-        timesReviewed: c.timesReviewed + 1,
-        lastReviewedAt: Date.now(),
-        confidence: c.confidence === 'mastered' ? 'mastered' : nextConfidence,
-      });
-    },
-    [getSpaceObject, updateSpaceObjectContent],
-  );
 
   useEffect(() => {
     if (!connectSourceId) return;
@@ -1928,20 +2007,23 @@ export function SectionPage() {
     sectionBoards.setActiveBoardId,
   ]);
 
-  const mistakeInsights = useMemo(
-    () => computeMistakeInsights(sectionObjects.objects),
-    [sectionObjects.objects],
-  );
-
   useEffect(() => {
-    if (mistakeReviewQueue.length === 0) {
-      if (mistakeReviewIndex !== 0) setMistakeReviewIndex(0);
+    if (learningAttemptQueue.length === 0) {
+      if (learningAttemptIndex !== 0) setLearningAttemptIndex(0);
       return;
     }
-    if (mistakeReviewIndex >= mistakeReviewQueue.length) {
-      setMistakeReviewIndex(0);
+    if (learningAttemptIndex >= learningAttemptQueue.length) {
+      setLearningAttemptIndex(0);
     }
-  }, [mistakeReviewQueue, mistakeReviewIndex]);
+  }, [learningAttemptQueue, learningAttemptIndex]);
+
+  useEffect(() => {
+    if (!learningAttemptOpen || learningAttemptQueue.length === 0) return;
+    const id = learningAttemptQueue[learningAttemptIndex];
+    const obj = sectionObjects.objects.find(o => o.id === id);
+    const target = obj ? learningTargetFromObject(obj) : null;
+    if (target) setLearningAttemptTarget(target);
+  }, [learningAttemptOpen, learningAttemptQueue, learningAttemptIndex, sectionObjects.objects]);
 
   useEffect(() => {
     installFwFreeSpaceDevTools();
@@ -2414,9 +2496,10 @@ export function SectionPage() {
         }}
         onRequestSelectObject={setSpaceSelectedId}
         onCreateNotebookRecall={createNotebookRecallItem}
+        onStartLearningAttempt={openLearningAttemptForObject}
       />
     );
-  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem]);
+  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem, openLearningAttemptForObject]);
 
   if (!section && loading) {
     return (
@@ -2635,6 +2718,18 @@ export function SectionPage() {
         activeBoardId={sectionBoards.activeBoardId}
         onSelectBoard={sectionBoards.setActiveBoardId}
         onCreateBoard={sectionBoards.createBoard}
+        organize={
+          sectionViewMode === 'free-space'
+            ? {
+                objectCount: sectionObjects.objects.length,
+                selectedCount: spaceSelectedIds.length,
+                onApplyTemplate: handleApplySpaceTemplate,
+                onAutoArrange: handleAutoArrange,
+                onArrangeSelected: handleArrangeSelected,
+                onArrangeByGoal: handleArrangeByGoal,
+              }
+            : undefined
+        }
       />
 
       {isExploreFocus && (
@@ -2652,16 +2747,21 @@ export function SectionPage() {
         onCommit={handleQuickCaptureCommit}
       />
 
-      <MistakeReviewOverlay
-        open={mistakeReviewOpen}
+      <LearningAttemptOverlay
+        open={learningAttemptOpen}
         tokens={tokens}
         objects={sectionObjects.objects}
-        queueIds={mistakeReviewQueue}
-        index={mistakeReviewIndex}
-        setIndex={setMistakeReviewIndex}
-        insights={mistakeInsights}
-        onClose={() => setMistakeReviewOpen(false)}
-        onMarkReviewed={markMistakeReviewedInSession}
+        target={learningAttemptTarget}
+        queueIds={learningAttemptQueue}
+        queueIndex={learningAttemptIndex}
+        onClose={() => {
+          setLearningAttemptOpen(false);
+          setLearningAttemptTarget(null);
+          setLearningAttemptQueue([]);
+          setLearningAttemptIndex(0);
+        }}
+        onUpdateMistake={handleLearningAttemptUpdate}
+        onPersistSourceAttempt={handlePersistSourceAttempt}
       />
 
       <CompanionComposerModal
@@ -2700,17 +2800,6 @@ export function SectionPage() {
             paddingTop: WORKSPACE_SHELL_TOP_INSET,
           }}
         >
-          <FreeSpaceArrangeControl
-            tokens={tokens}
-            inShell
-            objectCount={sectionObjects.objects.length}
-            selectedCount={spaceSelectedIds.length}
-            onApplyTemplate={handleApplySpaceTemplate}
-            onAutoArrange={handleAutoArrange}
-            onArrangeSelected={handleArrangeSelected}
-            onArrangeByGoal={handleArrangeByGoal}
-            chromeQuiet={!!spaceEditingId}
-          />
           <FreeSpaceCanvasErrorBoundary tokens={freeSpaceTokens} fillParent>
             <FreeformCanvas
               tokens={freeSpaceTokens}

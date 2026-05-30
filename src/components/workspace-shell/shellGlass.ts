@@ -1,7 +1,8 @@
 import type { CSSProperties } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 
-export const WORKSPACE_SHELL_TOP_INSET = 76;
+/** Clears fixed workspace chrome (bar + safe area). */
+export const WORKSPACE_SHELL_TOP_INSET = 54;
 
 type IslandTier = 'primary' | 'secondary';
 type IslandPhase = 'idle' | 'hover' | 'active';

@@ -14,6 +14,9 @@ interface Props {
   reviewLabel?: string;
   onChange: (c: MistakeBody) => void;
   onTitleChange?: (title: string) => void;
+  onStartAttempt?: () => void;
+  loopOpen?: boolean;
+  pendingReAttempt?: boolean;
 }
 
 const CONF: { id: MistakeConfidence; label: string }[] = [
@@ -41,6 +44,9 @@ export function FreeSpaceMistakeCard({
   reviewLabel,
   onChange,
   onTitleChange,
+  onStartAttempt,
+  loopOpen = true,
+  pendingReAttempt = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const variant = content.variant === 'recall' ? 'recall' : 'mistake';
@@ -113,7 +119,23 @@ export function FreeSpaceMistakeCard({
         >
           {isRecall ? 'Recall item' : 'Mistake'}
         </div>
-        {needsReview ? (
+        {pendingReAttempt ? (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 750,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: tokens.accent,
+              padding: '2px 7px',
+              borderRadius: 6,
+              border: `1px solid ${tokens.accent}44`,
+              background: `${tokens.accent}14`,
+            }}
+          >
+            Re-attempt due
+          </span>
+        ) : needsReview ? (
           <span
             style={{
               fontSize: 9,
@@ -169,6 +191,21 @@ export function FreeSpaceMistakeCard({
           }}
         />,
       )}
+
+      {onStartAttempt && loopOpen !== false ? (
+        <button
+          type="button"
+          onClick={onStartAttempt}
+          className="w-full mb-3 px-3 py-2 rounded-xl text-[11px] font-semibold"
+          style={{
+            backgroundColor: `${tokens.accent}20`,
+            color: tokens.accent,
+            border: `1px solid ${tokens.accent}40`,
+          }}
+        >
+          Try closed-book
+        </button>
+      ) : null}
 
       <button
         type="button"
