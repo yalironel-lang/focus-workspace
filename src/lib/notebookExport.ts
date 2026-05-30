@@ -3,8 +3,10 @@
  * Storage format (`content.body`) is already markdown-lite; these produce clean clipboard text.
  */
 
+import { stripInlineMarks } from './notebookInlineMarks';
+
 function plainTextFromLine(raw: string): string {
-  const normalized = raw.replace(/\u00a0/g, ' ');
+  const normalized = stripInlineMarks(raw).replace(/\u00a0/g, ' ');
   const trimmed = normalized.trim();
   if (trimmed === '' || trimmed === '---') return '';
   if (trimmed.startsWith('## ')) return trimmed.slice(3).trimEnd();

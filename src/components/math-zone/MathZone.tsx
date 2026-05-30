@@ -29,9 +29,19 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import Underline from '@tiptap/extension-underline';
+import { TextStyle, Color, FontSize } from '@tiptap/extension-text-style';
+import Highlight from '@tiptap/extension-highlight';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { renderKatexHtml } from '../../lib/notebookMath';
 import { plainMathToLatex, isLikelyMathLine } from '../../lib/mathInputAssistant';
+import {
+  parseInlineForTiptap,
+  serializeTiptapInline,
+  renderInlineFormatted,
+} from '../../lib/mathZoneInlineFormat';
+import { TiptapFormatBubbleMenu, tiptapToolbarBusyRef } from './TiptapFormatBubbleMenu';
+import '../notebook/notebookToolbar.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -426,7 +436,7 @@ function plainTextToTiptapDoc(text: string): JSONContent {
         const itemText = tbm[2];
         i++;
         const itemContent: JSONContent[] = [
-          { type: 'paragraph', content: itemText ? [{ type: 'text', text: itemText }] : [] },
+          { type: 'paragraph', content: itemText ? parseInlineForTiptap(itemText) : [] },
         ];
         // Consume nested items (exactly 2-space indent)
         const nestedItems = consumeNestedList(lines, i);
@@ -451,7 +461,7 @@ function plainTextToTiptapDoc(text: string): JSONContent {
         const itemText = tnm[2];
         i++;
         const itemContent: JSONContent[] = [
-          { type: 'paragraph', content: itemText ? [{ type: 'text', text: itemText }] : [] },
+          { type: 'paragraph', content: itemText ? parseInlineForTiptap(itemText) : [] },
         ];
         const nestedItems = consumeNestedList(lines, i);
         if (nestedItems !== null) {
@@ -465,7 +475,7 @@ function plainTextToTiptapDoc(text: string): JSONContent {
     }
 
     // Normal prose paragraph
-    nodes.push({ type: 'paragraph', content: [{ type: 'text', text: line }] });
+    nodes.push({ type: 'paragraph', content: parseInlineForTiptap(line) });
     i++;
   }
 
@@ -494,7 +504,7 @@ function consumeNestedList(
     const childText = nbm ? nbm[2] : nnm![2];
     items.push({
       type: 'listItem',
-      content: [{ type: 'paragraph', content: childText ? [{ type: 'text', text: childText }] : [] }],
+      content: [{ type: 'paragraph', content: childText ? parseInlineForTiptap(childText) : [] }],
     });
     i++;
   }
@@ -517,7 +527,7 @@ function tiptapDocToPlainText(json: JSONContent): string {
         return (node.content ?? []).map(n => serialize(n, 0)).join('\n');
 
       case 'paragraph':
-        return (node.content ?? []).map(n => serialize(n, listIndent)).join('');
+        return serializeTiptapInline(node.content ?? []);
 
       case 'text':
         return node.text ?? '';
@@ -528,7 +538,7 @@ function tiptapDocToPlainText(json: JSONContent): string {
       case 'bulletList': {
         return (node.content ?? []).map(item => {
           const firstPara  = item.content?.[0];
-          const text       = (firstPara?.content ?? []).map(n => serialize(n)).join('');
+          const text       = serializeTiptapInline(firstPara?.content ?? []);
           const prefix     = '  '.repeat(listIndent) + '- ';
           const parts: string[] = [prefix + text];
           // Nested lists (content[1], content[2], …)
@@ -543,7 +553,7 @@ function tiptapDocToPlainText(json: JSONContent): string {
         const start = (node.attrs?.start ?? 1) as number;
         return (node.content ?? []).map((item, idx) => {
           const firstPara  = item.content?.[0];
-          const text       = (firstPara?.content ?? []).map(n => serialize(n)).join('');
+          const text       = serializeTiptapInline(firstPara?.content ?? []);
           const prefix     = '  '.repeat(listIndent) + `${start + idx}. `;
           const parts: string[] = [prefix + text];
           for (let j = 1; j < (item.content ?? []).length; j++) {
@@ -591,12 +601,12 @@ function InlineMath({ text, tokens }: { text: string; tokens: AtmosphereTokens }
     return parseDollarMath(text);
   }, [text]);
 
-  if (!parts) return <>{text}</>;
+  if (!parts) return <>{renderInlineFormatted(text)}</>;
 
   return (
     <>
       {parts.map((seg, i) => {
-        if (seg.type === 'text') return <span key={i}>{seg.value}</span>;
+        if (seg.type === 'text') return <span key={i}>{renderInlineFormatted(seg.value)}</span>;
         const latex = plainMathToLatex(seg.value);
         const { html, error } = renderKatexHtml(latex, false);
         if (error || !html) {
@@ -749,19 +759,19 @@ function RenderedDocument({ content, tokens, onClick, proseStyleOverride, equati
 }
 
 // ── TiptapWritingArea ─────────────────────────────────────────────────────────
-// Replaces the plain <textarea> with a Tiptap/ProseMirror editor.
-// Zero visible chrome: no toolbar, no bubble menu, no formatting controls.
-// Keyboard behaviors handled natively by ProseMirror extensions:
-//   - "- " + space  → bullet list
-//   - "1. " + space → numbered list
-//   - Enter          → continue list / new paragraph
-//   - Enter on empty list item → exits list
-//   - Tab            → indent list item
-//   - Shift+Tab      → dedent list item
-//   - Backspace at list start → exits list (to paragraph)
-//   - Cmd/Ctrl+Z     → undo (native ProseMirror stack)
+// Tiptap/ProseMirror editor with selection bubble formatting toolbar.
 
 const PLACEHOLDER = 'Write normally. Put equations on their own line.';
+
+function isTiptapFormatToolbarNode(node: EventTarget | null | undefined): boolean {
+  return (
+    node instanceof Element &&
+    Boolean(
+      node.closest('[data-nb-tiptap-bubble-menu="1"]') ||
+        node.closest('[data-nb-format-toolbar="1"]'),
+    )
+  );
+}
 
 // CSS injected once into <head>, scoped to [data-math-editor]
 const EDITOR_STYLES = `
@@ -798,6 +808,19 @@ const EDITOR_STYLES = `
     opacity: 0.3;
     font-style: italic;
   }
+  [data-math-editor] .ProseMirror strong { font-weight: 650; }
+  [data-math-editor] .ProseMirror em {
+    font-style: italic;
+    font-synthesis: style;
+  }
+  [data-math-editor] .ProseMirror u {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  [data-math-editor] .ProseMirror mark {
+    border-radius: 2px;
+    padding: 0 1px;
+  }
 `;
 
 function TiptapWritingArea({ content, tokens, onChange, controls, flushRef }: {
@@ -823,8 +846,6 @@ function TiptapWritingArea({ content, tokens, onChange, controls, flushRef }: {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        bold:           false,
-        italic:         false,
         strike:         false,
         code:           false,
         codeBlock:      false,
@@ -835,6 +856,11 @@ function TiptapWritingArea({ content, tokens, onChange, controls, flushRef }: {
         gapcursor:      false,
         link:           false,
       }),
+      Underline,
+      TextStyle,
+      Color,
+      FontSize,
+      Highlight.configure({ multicolor: true }),
       Placeholder.configure({ placeholder: PLACEHOLDER }),
     ],
     content: plainTextToTiptapDoc(content),
@@ -890,6 +916,7 @@ function TiptapWritingArea({ content, tokens, onChange, controls, flushRef }: {
   return (
     <div data-math-editor="" data-list-visible={controls.keepListsVisibleWhileTyping ? 'on' : 'off'}>
       <EditorContent editor={editor} />
+      {editor ? <TiptapFormatBubbleMenu editor={editor} tokens={tokens} /> : null}
     </div>
   );
 }
@@ -1564,9 +1591,20 @@ export function MathZone({
   };
 
   const handleWritingSurfaceBlur = (e: React.FocusEvent<HTMLDivElement>) => {
-    const next = e.relatedTarget as Node | null;
-    if (next && writingSurfaceRef.current?.contains(next)) return;
-    exitEdit();
+    const related = e.relatedTarget;
+    // Defer past toolbar mousedown/command so exitEdit does not unmount the editor mid-command.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (tiptapToolbarBusyRef.current) return;
+        const active = document.activeElement;
+        if (active && writingSurfaceRef.current?.contains(active)) return;
+        if (related instanceof Node && writingSurfaceRef.current?.contains(related)) return;
+        const prose = writingSurfaceRef.current?.querySelector('.ProseMirror');
+        if (prose && document.activeElement === prose) return;
+        if (isTiptapFormatToolbarNode(active) || isTiptapFormatToolbarNode(related)) return;
+        exitEdit();
+      });
+    });
   };
 
   const flushActiveEditor = () => {

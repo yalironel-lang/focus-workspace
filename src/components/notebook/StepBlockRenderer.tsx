@@ -1,21 +1,25 @@
 import { memo, type CSSProperties } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import type { InlineMark } from '../../lib/notebookInlineMarks';
 
 interface EditableLineProps {
   id: string;
   text: string;
+  marks?: InlineMark[];
   tokens: AtmosphereTokens;
   placeholder: string;
   style: CSSProperties;
-  onUpdate: (id: string, raw: string) => void;
+  onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
 }
 
 interface StepBlock {
   id: string;
   kind: 'step';
   text: string;
+  marks?: InlineMark[];
 }
 
 interface Props {
@@ -37,6 +41,7 @@ interface Props {
   onUpdate: (id: string, raw: string) => void;
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
 }
 
 export const StepBlockRenderer = memo(function StepBlockRenderer({
@@ -54,6 +59,7 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
   onUpdate,
   onFocusIndex,
   onAfterInput,
+  onSelectionChange,
 }: Props) {
   const sequenceGap = `${typeScale.s2 + 8}px`;
   return (
@@ -78,11 +84,13 @@ export const StepBlockRenderer = memo(function StepBlockRenderer({
       <EditableLine
         id={block.id}
         text={block.text}
+        marks={block.marks}
         tokens={tokens}
         placeholder="…"
         onUpdate={onUpdate}
         onFocusIndex={onFocusIndex}
         onAfterInput={onAfterInput}
+        onSelectionChange={onSelectionChange}
         style={{
           flex: 1,
           border: 'none',

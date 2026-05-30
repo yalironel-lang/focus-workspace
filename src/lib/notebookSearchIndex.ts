@@ -8,6 +8,7 @@ import {
   sectionBoardsListKey,
 } from './freeSpacePersistence';
 import { textMatchesQuery } from '../command/matchCommands';
+import { stripInlineMarks } from './notebookInlineMarks';
 import type { ProjectSpaceObject } from '../hooks/useSectionFreeSpaceObjects';
 
 export interface NotebookSearchHit {
@@ -71,6 +72,9 @@ function loadObjects(sectionId: string, boardId: string): ProjectSpaceObject[] {
 /** Strip markdown-lite / image refs for plain-text search. */
 export function notebookBodyPlain(body: string): string {
   return body
+    .split(/\r?\n/)
+    .map(line => stripInlineMarks(line))
+    .join('\n')
     .replace(/::img::[^:\n]+::/g, ' ')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/^>\s+/gm, '')

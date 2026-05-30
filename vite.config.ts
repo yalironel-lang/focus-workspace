@@ -1,8 +1,39 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const buildId = new Date().toISOString()
+
+function debugLogIngestPlugin(): Plugin {
+  const logPath = path.join(process.cwd(), '.cursor/debug-3f83e8.log')
+  return {
+    name: 'debug-log-ingest',
+    configureServer(server) {
+      server.middlewares.use('/__debug_ingest', (req, res, next) => {
+        if (req.method !== 'POST') {
+          next()
+          return
+        }
+        let body = ''
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString()
+        })
+        req.on('end', () => {
+          try {
+            fs.mkdirSync(path.dirname(logPath), { recursive: true })
+            fs.appendFileSync(logPath, `${body.trim()}\n`)
+          } catch {
+            /* ignore write failures */
+          }
+          res.statusCode = 204
+          res.end()
+        })
+      })
+    },
+  }
+}
 
 export default defineConfig({
   define: {
@@ -10,6 +41,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    debugLogIngestPlugin(),
     VitePWA({
       // autoUpdate: new SW installs + activates silently.
       // Combined with the controllerchange reload in main.tsx, the page

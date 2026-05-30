@@ -1,4 +1,4 @@
-import { BookOpenCheck, Calendar, LayoutDashboard, LogOut, Menu, Palette, Play, Search, Sparkles, X } from 'lucide-react';
+import { BookOpenCheck, Calendar, LayoutDashboard, LogOut, Menu, Palette, Play, RotateCcw, Search, Sparkles, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { LIBRARY_SIDEBAR_EXPANDED_PX } from '../../hooks/useLibraryBreakpoint';
@@ -16,6 +16,7 @@ interface Props {
   appearanceOpen: boolean;
   onOpenAppearance: () => void;
   onOpenNotebookSearch: () => void;
+  onOpenRecentlyDeleted: () => void;
   onSignOut: () => void;
   spatial: LibrarySpatialState;
   sidebarParallax: { x: number; y: number };
@@ -37,6 +38,7 @@ export function LibrarySidebar({
   appearanceOpen,
   onOpenAppearance,
   onOpenNotebookSearch,
+  onOpenRecentlyDeleted,
   onSignOut,
   spatial,
   sidebarParallax,
@@ -109,6 +111,55 @@ export function LibrarySidebar({
             onNavigate={isMobile ? onCloseMobile : undefined}
           />
         </>
+      )}
+      {hasWorkspaces && (
+        <button
+          type="button"
+          title={!showLabels ? 'Recently deleted' : undefined}
+          onClick={() => {
+            onOpenRecentlyDeleted();
+            if (isMobile) onCloseMobile();
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: showLabels ? 'flex-start' : 'center',
+            gap: showLabels ? 9 : 0,
+            padding: showLabels ? '9px 11px' : '10px 0',
+            borderRadius: 10,
+            border: '1px solid transparent',
+            background: 'transparent',
+            color: tokens.textMuted,
+            fontSize: 12.5,
+            fontWeight: 500,
+            cursor: 'pointer',
+            width: '100%',
+            minHeight: showLabels ? undefined : 40,
+            marginBottom: 2,
+            transition: 'background 0.22s ease, color 0.22s ease',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.040)';
+            e.currentTarget.style.color = tokens.textSecondary;
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = tokens.textMuted;
+          }}
+        >
+          <RotateCcw style={{ width: 13, height: 13, flexShrink: 0 }} strokeWidth={2} />
+          <span
+            className="library-nav-label"
+            style={{
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              maxWidth: showLabels ? 120 : 0,
+              opacity: showLabels ? 1 : 0,
+            }}
+          >
+            Recently deleted
+          </span>
+        </button>
       )}
       {hasWorkspaces && (
         <button

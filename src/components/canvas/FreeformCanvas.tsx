@@ -164,6 +164,7 @@ interface Props {
   };
   designMode:   boolean;
   selectedId:   string | null;
+  selectedIds?: string[];
   /** Id of a Free Space object whose inner editor is actively in edit mode (deep writing focus). */
   focusEditingId?: string | null;
   topOffset?:   number;
@@ -179,7 +180,7 @@ interface Props {
   /** Section Free Space: subtle spatial ambient behind the world (does not affect interactions). */
   spatialAmbient?: boolean;
   onSetPos:     (id: string, pos: Partial<BlockPos>) => void;
-  onSelect:     (id: string | null) => void;
+  onSelect:     (id: string | null, opts?: { toggle?: boolean }) => void;
   onRemoveModule:  (id: string) => void;
   onRemoveBlock:   (id: string) => void;
   onRemoveTool:    (id: string) => void;
@@ -378,6 +379,7 @@ export function FreeformCanvas({
   canvasState,
   designMode,
   selectedId,
+  selectedIds = [],
   activeSession = false,
   spatialAmbient = false,
   focusEditingId,
@@ -849,13 +851,18 @@ export function FreeformCanvas({
     return new Set<string>([a, b]);
   }, [hoveredConnectionEdgeKey]);
 
+  const selectedIdSet = useMemo(() => {
+    if (selectedIds.length > 0) return new Set(selectedIds);
+    return selectedId ? new Set([selectedId]) : new Set<string>();
+  }, [selectedIds, selectedId]);
+
   const handleBlockSelect = useCallback(
-    (blockId: string) => {
+    (blockId: string, opts?: { toggle?: boolean }) => {
       if (connectModeSourceId && connectModeSourceId !== blockId) {
         onConnectPairComplete?.(connectModeSourceId, blockId);
         return;
       }
-      onSelect(blockId);
+      onSelect(blockId, opts);
     },
     [connectModeSourceId, onConnectPairComplete, onSelect],
   );
@@ -902,7 +909,7 @@ export function FreeformCanvas({
         kind: item.kind,
         blockType: item.kind === 'block' ? blocksById.get(item.id)?.type : undefined,
         pos,
-        selected: selectedId === item.id,
+        selected: selectedIdSet.has(item.id),
         editing: focusEditingId === item.id,
         inActiveCluster,
         relatedToSelection: relatedToSelection?.has(item.id) ?? false,
@@ -2090,7 +2097,7 @@ export function FreeformCanvas({
                   pos={pos}
                   label={getLabel(item.id)}
                   tokens={tokens}
-                  selected={selectedId === item.id}
+                  selected={selectedIdSet.has(item.id)}
                   designMode={designMode}
                   isDragging={draggingId === item.id}
                   activeGesture={draggingId === item.id ? activeDragKind : null}

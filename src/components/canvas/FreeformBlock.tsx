@@ -33,7 +33,7 @@ interface Props {
   deepFocusAnchor?: boolean;
   children: React.ReactNode;
   onBlockMouseDown: (id: string, e: React.MouseEvent, type: 'move' | 'resize') => void;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, opts?: { toggle?: boolean }) => void;
   onRemove?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   /** Free Space: enter “connect to…” mode from this object */
@@ -163,7 +163,7 @@ export function FreeformBlock({
       data-freeform-block={id}
       onClick={e => {
         e.stopPropagation();
-        onSelect(id);
+        onSelect(id, { toggle: e.shiftKey || e.metaKey || e.ctrlKey });
       }}
       onMouseEnter={() => {
         setHovered(true);

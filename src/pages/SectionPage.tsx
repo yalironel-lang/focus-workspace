@@ -25,16 +25,8 @@ import {
   markFirstWorkspaceEntryDone,
   unlockAdvancedLibraryNav,
 } from '../lib/firstSessionPrefs';
-import { WorkspaceGuidanceBar } from '../components/workspace-guidance/WorkspaceGuidanceBar';
-import { WorkspaceResumeLayer } from '../components/workspace-guidance/WorkspaceResumeLayer';
-import { WorkspaceStudyLoopBar } from '../components/workspace-guidance/WorkspaceStudyLoopBar';
-import {
-  buildStudyLoopActions,
-  pickStudyLinkTargets,
-  type StudyLoopAction,
-} from '../lib/studyConnections';
+import { pickStudyLinkTargets } from '../lib/studyConnections';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
-import { isResumeDismissed, markResumeDismissed } from '../lib/workspaceGuidancePrefs';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
 import { loadSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
@@ -78,6 +70,12 @@ import {
   computeFreeSpaceTemplateLayout,
   type FreeSpaceTemplateId,
 } from '../lib/sectionFreeSpaceLayoutTemplates';
+import {
+  computeArrangeByGoalLayout,
+  computeAutoArrangeLayout,
+  computeAutoArrangeSelectedLayout,
+  type ArrangeGoalId,
+} from '../lib/freeSpaceAutoArrange';
 import {
   installFwFreeSpaceDevTools,
   setFwFreeSpaceDevSectionContext,
@@ -127,7 +125,6 @@ import toast from 'react-hot-toast';
 import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
 import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
 import type { CompanionPanelContentFields } from '../lib/companionPanels';
-import type { WorkspaceContinuitySuggestion } from '../lib/workspaceContinuity';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -745,6 +742,7 @@ export function SectionPage() {
   const [showSpaceAdd, setShowSpaceAdd] = useState(false);
   const [companionComposerOpen, setCompanionComposerOpen] = useState(false);
   const [spaceSelectedId, setSpaceSelectedId] = useState<string | null>(null);
+  const [spaceSelectedIds, setSpaceSelectedIds] = useState<string[]>([]);
   const spaceSelectedIdRef = useRef<string | null>(null);
   spaceSelectedIdRef.current = spaceSelectedId;
   const [notebookSearchPulseId, setNotebookSearchPulseId] = useState<string | null>(null);
@@ -760,7 +758,6 @@ export function SectionPage() {
   const [starterExpanded, setStarterExpanded] = useState(false);
   const [starterDockVisible, setStarterDockVisible] = useState(false);
   const [starterRevealReady, setStarterRevealReady] = useState(false);
-  const [firstSessionQuiet, setFirstSessionQuiet] = useState(() => navState?.firstArrival === true);
   const firstArrivalHandledRef = useRef(false);
   const studyOsDemoHandledRef = useRef(false);
   // Refs for reading navState / location inside effects without making them deps.
@@ -771,16 +768,9 @@ export function SectionPage() {
   const locationRef = useRef(location);
   locationRef.current = location;
   const [starterHints, setStarterHints] = useState<string[] | null>(null);
-  const [lastArrangeAt, setLastArrangeAt] = useState<number | null>(null);
   const [mistakeReviewIndex, setMistakeReviewIndex] = useState(0);
   const [aiAssistResult, setAiAssistResult] = useState<{ title: string; body: string } | null>(null);
   const aiRunRef = useRef<AbortController | null>(null);
-  const [resumeVisible, setResumeVisible] = useState(false);
-  const [studyLoopDismissed, setStudyLoopDismissed] = useState(false);
-  const resumeSeedKeyRef = useRef('');
-  const cameraRestoreRafRef = useRef(0);
-  const pendingResumeSuggestionRef = useRef<WorkspaceContinuitySuggestion | null>(null);
-
   // ── Design Mode state ─────────────────────────────────────────────────────
   const [designMode,      setDesignMode]      = useState(false);
   const [notebookControlsOpen, setNotebookControlsOpen] = useState(false);
@@ -855,7 +845,7 @@ export function SectionPage() {
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragIdRef = useRef<string | null>(null);
 
-  const workspaceContinuity = useWorkspaceContinuity({
+  useWorkspaceContinuity({
     sectionId,
     objects: sectionObjects.objects,
     positions: sectionPositions.positions,
@@ -868,15 +858,12 @@ export function SectionPage() {
   });
 
   useEffect(() => {
-    cancelAnimationFrame(cameraRestoreRafRef.current);
     aiRunRef.current?.abort();
     aiRunRef.current = null;
     pendingFreeSpaceType.current = null;
     pendingCompanionComposerRef.current = false;
     pendingQuickCaptureRef.current = null;
-    pendingResumeSuggestionRef.current = null;
     quickCaptureStackRef.current = 0;
-    resumeSeedKeyRef.current = '';
     designSnapshot.current = null;
     dragIdRef.current = null;
 
@@ -897,11 +884,8 @@ export function SectionPage() {
     setMistakeReviewOpen(false);
     setMistakeReviewQueue([]);
     setStarterHints(null);
-    setLastArrangeAt(null);
     setMistakeReviewIndex(0);
     setAiAssistResult(null);
-    setResumeVisible(false);
-    setStudyLoopDismissed(false);
     setDesignMode(false);
     setNotebookControlsOpen(false);
     setDragId(null);
@@ -1021,6 +1005,37 @@ export function SectionPage() {
   };
 
   /** Must run before any early return — hooks order must be identical every render (React #310). */
+  const applyArrangeResult = useCallback(
+    (
+      patches: Record<string, { x: number; y: number; w: number; h: number }> | null | undefined,
+      stats?: { clusterCount: number; overlapsResolved: number; isolatedCount: number },
+      withSummaryToast = false,
+    ) => {
+      if (!patches || Object.keys(patches).length === 0) return;
+      sectionPositions.applyPositions(patches);
+      if (withSummaryToast && stats) {
+        toast.dismiss('fw-auto-arrange-summary');
+        toast(
+          `Workspace reorganized\n\n• ${stats.clusterCount} clusters identified\n• ${stats.overlapsResolved} overlaps resolved\n• ${stats.isolatedCount} isolated items detected`,
+          {
+            id: 'fw-auto-arrange-summary',
+            duration: 4500,
+            style: {
+              whiteSpace: 'pre-line',
+              fontSize: 12.5,
+              lineHeight: 1.45,
+              border: `1px solid ${tokens.cardBorder}`,
+              background: tokens.cardBg,
+              color: tokens.textPrimary,
+            },
+          },
+        );
+      }
+    },
+    [sectionPositions, tokens.cardBorder, tokens.cardBg, tokens.textPrimary],
+  );
+
+  /** Must run before any early return — hooks order must be identical every render (React #310). */
   const handleApplySpaceTemplate = useCallback(
     (templateId: FreeSpaceTemplateId) => {
       try {
@@ -1029,15 +1044,78 @@ export function SectionPage() {
           sectionObjects.objects,
           sectionPositions.positions,
         );
-        if (!patches || Object.keys(patches).length === 0) return;
-        sectionPositions.applyPositions(patches);
-        setLastArrangeAt(Date.now());
+        applyArrangeResult(patches);
       } catch (e) {
         console.error('[FreeSpace] template apply failed', e);
         toast.error('Could not apply layout. Try again.');
       }
     },
-    [sectionObjects.objects, sectionPositions.positions, sectionPositions.applyPositions],
+    [applyArrangeResult, sectionObjects.objects, sectionPositions.positions],
+  );
+
+  const handleAutoArrange = useCallback(() => {
+    try {
+      const result = computeAutoArrangeLayout(
+        sectionObjects.objects,
+        sectionPositions.positions,
+      );
+      applyArrangeResult(result.patches, result.stats, true);
+    } catch (e) {
+      console.error('[FreeSpace] auto arrange failed', e);
+      toast.error('Could not auto arrange. Try again.');
+    }
+  }, [applyArrangeResult, sectionObjects.objects, sectionPositions.positions]);
+
+  const handleArrangeSelected = useCallback(() => {
+    try {
+      if (spaceSelectedIds.length < 2) return;
+      const result = computeAutoArrangeSelectedLayout(
+        sectionObjects.objects,
+        sectionPositions.positions,
+        spaceSelectedIds,
+      );
+      applyArrangeResult(result.patches, result.stats, false);
+    } catch (e) {
+      console.error('[FreeSpace] selected arrange failed', e);
+      toast.error('Could not arrange selection. Try again.');
+    }
+  }, [applyArrangeResult, sectionObjects.objects, sectionPositions.positions, spaceSelectedIds]);
+
+  const handleArrangeByGoal = useCallback((goal: ArrangeGoalId) => {
+    try {
+      const result = computeArrangeByGoalLayout(
+        goal,
+        sectionObjects.objects,
+        sectionPositions.positions,
+      );
+      applyArrangeResult(result.patches, result.stats, false);
+    } catch (e) {
+      console.error('[FreeSpace] goal arrange failed', e);
+      toast.error('Could not apply goal layout. Try again.');
+    }
+  }, [applyArrangeResult, sectionObjects.objects, sectionPositions.positions]);
+
+  const handleSpaceSelection = useCallback(
+    (id: string | null, opts?: { toggle?: boolean }) => {
+      if (!id) {
+        setSpaceSelectedId(null);
+        setSpaceSelectedIds([]);
+        return;
+      }
+      if (opts?.toggle) {
+        setSpaceSelectedIds((prev) => {
+          const has = prev.includes(id);
+          const next = has ? prev.filter((v) => v !== id) : [...prev, id];
+          const primary = has ? (spaceSelectedId === id ? (next[next.length - 1] ?? null) : spaceSelectedId) : id;
+          setSpaceSelectedId(primary);
+          return next;
+        });
+        return;
+      }
+      setSpaceSelectedId(id);
+      setSpaceSelectedIds([id]);
+    },
+    [spaceSelectedId],
   );
 
   const viewportCenterWorld = useCallback((offsetX = 0, offsetY = 0) => {
@@ -1259,92 +1337,6 @@ export function SectionPage() {
     [addSpaceObject, updateSpaceObjectFields, initPos, viewportCenterWorld],
   );
 
-  const animateToContinuityViewport = useCallback(
-    (target: { zoom: number; panX: number; panY: number } | null) => {
-      if (!target) return;
-      cancelAnimationFrame(cameraRestoreRafRef.current);
-      if (prefersReducedMotion) {
-        sectionCanvas.setViewport(target.zoom, target.panX, target.panY);
-        return;
-      }
-      const start = {
-        zoom: Math.max(0.55, target.zoom * 0.94),
-        panX: target.panX + 48,
-        panY: target.panY + 28,
-      };
-      sectionCanvas.setViewport(start.zoom, start.panX, start.panY);
-      const startedAt = performance.now();
-      const durationMs = 820;
-      const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-      const tick = (now: number) => {
-        const progress = Math.min(1, (now - startedAt) / durationMs);
-        const eased = easeOut(progress);
-        sectionCanvas.setViewport(
-          start.zoom + (target.zoom - start.zoom) * eased,
-          start.panX + (target.panX - start.panX) * eased,
-          start.panY + (target.panY - start.panY) * eased,
-        );
-        if (progress < 1) cameraRestoreRafRef.current = requestAnimationFrame(tick);
-      };
-      cameraRestoreRafRef.current = requestAnimationFrame(tick);
-    },
-    [prefersReducedMotion, sectionCanvas],
-  );
-
-  const applyWorkspaceResumeSuggestion = useCallback(
-    (suggestion: WorkspaceContinuitySuggestion) => {
-      if (suggestion.id === 'resume-mistake-loop') {
-        setResumeVisible(false);
-        if (sectionViewMode !== 'free-space') {
-          setSectionViewMode('free-space');
-        }
-        const q = buildMistakeReviewQueueFiltered(sectionObjects.objects, 'neglected');
-        setMistakeReviewQueue(q);
-        setMistakeReviewIndex(0);
-        setMistakeReviewOpen(q.length > 0);
-        return;
-      }
-
-      const targetId = suggestion.objectId ?? workspaceContinuity.restoreSelectionId;
-      if (suggestion.focusMode !== undefined) setFocusMode(suggestion.focusMode ?? null);
-
-      if (suggestion.openCompanion && targetId) {
-        const object = getSpaceObject(targetId);
-        if (object?.type === 'companion') {
-          const content = ensureProjectObjectContent('companion', object.content);
-          if (content.type === 'companion' && content.url) {
-            window.open(content.url, '_blank', 'noopener,noreferrer');
-            updateSpaceObjectContent(targetId, {
-              ...content,
-              lastOpenedAt: Date.now(),
-            });
-          }
-        }
-      }
-
-      setResumeVisible(false);
-
-      if (sectionViewMode !== 'free-space') {
-        pendingResumeSuggestionRef.current = suggestion;
-        setSectionViewMode('free-space');
-        return;
-      }
-
-      if (targetId) setSpaceSelectedId(targetId);
-      animateToContinuityViewport(workspaceContinuity.restoreViewport);
-    },
-    [
-      animateToContinuityViewport,
-      getSpaceObject,
-      updateSpaceObjectContent,
-      sectionViewMode,
-      setFocusMode,
-      workspaceContinuity.restoreSelectionId,
-      workspaceContinuity.restoreViewport,
-      sectionObjects.objects,
-    ],
-  );
-
   const createNotebookRecallItem = useCallback(
     (notebookId: string, rawPrompt: string) => {
       const prompt = rawPrompt.trim();
@@ -1562,48 +1554,6 @@ export function SectionPage() {
     pendingFreeSpaceType.current = null;
     handleAddToSpace(pending);
   }, [sectionViewMode, createQuickCaptureNote, createQuickCaptureMistake, handleAddToSpace]);
-
-  useEffect(() => {
-    return () => cancelAnimationFrame(cameraRestoreRafRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (loading) return;
-    const seedKey = `${sectionId}|${workspaceContinuity.continuity?.savedAt ?? 0}`;
-    if (resumeSeedKeyRef.current === seedKey) return;
-    resumeSeedKeyRef.current = seedKey;
-    setResumeVisible(
-      !!(
-        !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') &&
-        !isResumeDismissed(sectionId) &&
-        workspaceContinuity.continuityRecent &&
-        workspaceContinuity.resumeCopy &&
-        sectionObjects.objects.length > 0
-      ),
-    );
-  }, [
-    loading,
-    sectionId,
-    sectionObjects.objects.length,
-    workspaceContinuity.continuity?.savedAt,
-    workspaceContinuity.continuityRecent,
-    workspaceContinuity.resumeCopy,
-  ]);
-
-  useEffect(() => {
-    if (sectionViewMode !== 'free-space') return;
-    const pending = pendingResumeSuggestionRef.current;
-    if (!pending) return;
-    pendingResumeSuggestionRef.current = null;
-    const targetId = pending.objectId ?? workspaceContinuity.restoreSelectionId;
-    if (targetId) setSpaceSelectedId(targetId);
-    animateToContinuityViewport(workspaceContinuity.restoreViewport);
-  }, [
-    animateToContinuityViewport,
-    sectionViewMode,
-    workspaceContinuity.restoreSelectionId,
-    workspaceContinuity.restoreViewport,
-  ]);
 
   useEffect(() => {
     if (!id || !section) return;
@@ -1900,33 +1850,6 @@ export function SectionPage() {
     [sectionObjects.objects],
   );
 
-  const studyLoopActions = useMemo(
-    () => buildStudyLoopActions(sectionObjects.objects, workspaceContinuity.continuity),
-    [
-      sectionObjects.objects,
-      workspaceContinuity.continuity?.savedAt,
-      workspaceContinuity.continuity?.lastSelectedObjectId,
-      workspaceContinuity.continuity?.recentNotebookId,
-      workspaceContinuity.continuity?.activeClusterObjectIds,
-    ],
-  );
-
-  const handleStudyLoopAction = useCallback(
-    (action: StudyLoopAction) => {
-      setStudyLoopDismissed(true);
-      if (action.kind === 'review-mistakes') {
-        openMistakeReview(action.reviewMode ?? 'all');
-        return;
-      }
-      if (action.objectId) {
-        setSectionViewMode('free-space');
-        setSpaceSelectedId(action.objectId);
-        if (action.kind === 'resume-source') setFocusMode('reading');
-      }
-    },
-    [openMistakeReview, setSectionViewMode, setFocusMode],
-  );
-
   useEffect(() => {
     if (mistakeReviewQueue.length === 0) {
       if (mistakeReviewIndex !== 0) setMistakeReviewIndex(0);
@@ -1970,8 +1893,6 @@ export function SectionPage() {
     }
   }, [sectionId]);
 
-  const clearStarterHints = useCallback(() => setStarterHints(null), []);
-
   const dismissWorkspaceStarterOverlay = useCallback(() => {
     if (!sectionId) return;
     try {
@@ -2004,7 +1925,6 @@ export function SectionPage() {
       }
       sectionObjects.appendObjects(pack.objects);
       sectionPositions.applyPositions(positions);
-      setFirstSessionQuiet(false);
       setStarterHints(pack.hints);
       const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
       const vh =
@@ -2119,9 +2039,6 @@ export function SectionPage() {
       replace: true,
       state: { ...ns, firstArrival: false },
     });
-
-    const quietTimer = window.setTimeout(() => setFirstSessionQuiet(false), 14_000);
-    return () => window.clearTimeout(quietTimer);
   }, [
     applyExploreFocus,
     frameArrivalScene,
@@ -2375,10 +2292,22 @@ export function SectionPage() {
 
   useEffect(() => {
     const valid = new Set(sectionObjects.objects.map(o => o.id));
+    setSpaceSelectedIds((prev) => prev.filter((id) => valid.has(id)));
     if (spaceSelectedId && !valid.has(spaceSelectedId)) setSpaceSelectedId(null);
     if (spaceEditingId && !valid.has(spaceEditingId)) setSpaceEditingId(null);
     if (connectSourceId && !valid.has(connectSourceId)) setConnectSourceId(null);
   }, [sectionObjects.objects, spaceSelectedId, spaceEditingId, connectSourceId]);
+
+  useEffect(() => {
+    if (!spaceSelectedId) {
+      setSpaceSelectedIds((prev) => (prev.length ? [] : prev));
+      return;
+    }
+    setSpaceSelectedIds((prev) => {
+      if (prev.length && prev.includes(spaceSelectedId)) return prev;
+      return [spaceSelectedId];
+    });
+  }, [spaceSelectedId]);
 
   const renderSpaceObject = useCallback((objectId: string): React.ReactNode | null => {
     const store = sectionObjectsRef.current;
@@ -2390,6 +2319,7 @@ export function SectionPage() {
         allObjects={store.objects}
         tokens={tokens}
         freeSpaceSectionId={sectionId}
+        freeSpaceBoardId={sectionBoards.activeBoardId}
         onChange={content => store.updateObjectContent(objectId, content)}
         onTitleChange={
           obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
@@ -2403,7 +2333,7 @@ export function SectionPage() {
         onCreateNotebookRecall={createNotebookRecallItem}
       />
     );
-  }, [sectionId, tokens, createNotebookRecallItem]);
+  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem]);
 
   if (!section && loading) {
     return (
@@ -2687,51 +2617,15 @@ export function SectionPage() {
             paddingTop: WORKSPACE_SHELL_TOP_INSET,
           }}
         >
-          {resumeVisible && !isExploreFocus && workspaceContinuity.continuity && workspaceContinuity.resumeCopy && (
-            <WorkspaceResumeLayer
-              tokens={tokens}
-              inShell
-              continuity={workspaceContinuity.continuity}
-              resumeCopy={workspaceContinuity.resumeCopy}
-              suggestions={workspaceContinuity.suggestions}
-              onDismiss={() => {
-                markResumeDismissed(sectionId);
-                setResumeVisible(false);
-              }}
-              onSuggestionClick={applyWorkspaceResumeSuggestion}
-            />
-          )}
-          {!showWorkspaceStarter &&
-            !showStarterDock &&
-            !resumeVisible &&
-            !studyLoopDismissed &&
-            studyLoopActions.length > 0 && (
-              <WorkspaceStudyLoopBar
-                tokens={tokens}
-                inShell
-                actions={studyLoopActions}
-                onAction={handleStudyLoopAction}
-                onDismiss={() => setStudyLoopDismissed(true)}
-              />
-            )}
-          {!isExploreFocus && !showWorkspaceStarter && !showStarterDock && !resumeVisible && (
-            <WorkspaceGuidanceBar
-              sectionId={sectionId}
-              tokens={tokens}
-              topOffset={0}
-              objects={sectionObjects.objects}
-              focusMode={focusMode}
-              priorityHints={starterHints}
-              onClearPriorityHints={clearStarterHints}
-              lastArrangeAt={lastArrangeAt}
-              chromeQuiet={firstSessionQuiet || !!spaceEditingId}
-            />
-          )}
           <FreeSpaceArrangeControl
             tokens={tokens}
             inShell
             objectCount={sectionObjects.objects.length}
+            selectedCount={spaceSelectedIds.length}
             onApplyTemplate={handleApplySpaceTemplate}
+            onAutoArrange={handleAutoArrange}
+            onArrangeSelected={handleArrangeSelected}
+            onArrangeByGoal={handleArrangeByGoal}
             chromeQuiet={!!spaceEditingId}
           />
           <FreeSpaceCanvasErrorBoundary tokens={freeSpaceTokens} fillParent>
@@ -2747,10 +2641,11 @@ export function SectionPage() {
               canvasState={sectionCanvas}
               designMode={true}
               selectedId={spaceSelectedId}
+              selectedIds={spaceSelectedIds}
               focusEditingId={spaceEditingId}
               spatialAmbient={!isStabilityFeatureDisabled('disableFreeSpaceSpatialAmbient')}
               onSetPos={sectionPositions.setPos}
-              onSelect={id => setSpaceSelectedId(id)}
+              onSelect={handleSpaceSelection}
               onRemoveModule={() => {}}
               onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
               onRemoveTool={() => {}}
@@ -2783,13 +2678,13 @@ export function SectionPage() {
               calmEffects={performanceCalm}
               workspaceClarity={freeSpaceClarity}
               focusStrength={global.focusStrength ?? 'soft'}
-              continuityObjectIds={workspaceContinuity.continuityObjectIds}
-              continuityClusterIds={workspaceContinuity.continuityClusterIds}
-              continuityEdgeKeys={workspaceContinuity.continuityEdgeKeys}
+              continuityObjectIds={[]}
+              continuityClusterIds={[]}
+              continuityEdgeKeys={[]}
             />
           </FreeSpaceCanvasErrorBoundary>
 
-          {freeSpaceSurfaceVisible && sectionObjects.objects.length === 0 && !resumeVisible && !showWorkspaceStarter && !showStarterDock && !spaceEditingId && (
+          {freeSpaceSurfaceVisible && sectionObjects.objects.length === 0 && !showWorkspaceStarter && !showStarterDock && !spaceEditingId && (
             <FreeSpaceEmptyGuidance
               tokens={freeSpaceTokens}
               onAddPdf={() => handleAddToSpace('pdf')}
@@ -2980,23 +2875,14 @@ export function SectionPage() {
 
             <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 88px', maxWidth: '720px' }}>
 
-              <MissionControlView
-                objects={sectionObjects.objects}
-                accent={accentColor}
-                onOpenObject={focusNotebookOnCanvas}
-              />
-
-              {/* ── MISSION CONTROL HEADER ─────────────────────────────── */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px', paddingLeft: '14px', borderLeft: `2px solid ${accentColor}55` }}>
+              {/* Workspace context — quiet */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 6px', fontSize: 9, fontWeight: 750, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.55)' }}>
-                    Today&apos;s priorities
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                     {customization.icon && (
-                      <span style={{ fontSize: '16px', lineHeight: 1 }} role="img">{customization.icon}</span>
+                      <span style={{ fontSize: '15px', lineHeight: 1 }} role="img">{customization.icon}</span>
                     )}
-                    <h1 style={{ fontSize: '18px', fontWeight: 700, color: '#e2e8f0', letterSpacing: '-0.02em', margin: 0 }}>
+                    <h1 style={{ fontSize: '17px', fontWeight: 650, color: 'rgba(226,232,240,0.88)', letterSpacing: '-0.02em', margin: 0 }}>
                       {section.title}
                     </h1>
                     {spaceAge(section.created_at) && (
@@ -3005,69 +2891,7 @@ export function SectionPage() {
                       </span>
                     )}
                   </div>
-
-                  {totalItems > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      {allDone ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 600, color: '#10b981' }}>
-                          <CheckCircle2 className="w-3.5 h-3.5" /> All caught up
-                        </span>
-                      ) : (
-                        <>
-                          <span style={{ fontSize: '12px', color: '#4b5563' }}>
-                            <span style={{ color: '#94a3b8', fontWeight: 600 }}>{remaining}</span> remaining
-                          </span>
-                          <span style={{ fontSize: '12px', color: '#1a2230' }}>·</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <div style={{ width: '80px', height: '3px', borderRadius: '2px', backgroundColor: '#111827', overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${progress}%`, backgroundColor: progressColor, borderRadius: '2px', transition: 'width 0.7s ease' }} />
-                            </div>
-                            <span style={{ fontSize: '11px', color: '#374151', fontWeight: 600 }}>{progress}%</span>
-                          </div>
-                        </>
-                      )}
-
-                      {/* Exam date inline */}
-                      {editingExamDate ? (
-                        <input
-                          type="date"
-                          defaultValue={section.exam_date ?? ''}
-                          autoFocus
-                          style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc', outline: 'none' }}
-                          onBlur={e => { setEditingExamDate(false); setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date')); }}
-                          onKeyDown={e => { if (e.key === 'Escape') setEditingExamDate(false); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                        />
-                      ) : section.exam_date ? (
-                        <button
-                          onClick={() => setEditingExamDate(true)}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-                          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-                        >
-                          <Calendar className="w-3 h-3" />
-                          {formatExamDate(section.exam_date)}
-                          {examDays !== null && (
-                            <span style={{ color: examDays <= 0 ? '#4b5563' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#4b5563', fontWeight: 600 }}>
-                              · {examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today!' : 'Past'}
-                            </span>
-                          )}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => setEditingExamDate(true)}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-                          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
-                        >
-                          <Calendar className="w-3 h-3" /> Set exam date
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '12px', color: '#263043', margin: 0 }}>Add tasks to start tracking progress</p>
-                  )}
                 </div>
-
                 <button
                   onClick={() => setShowCustomize(true)}
                   style={{ flexShrink: 0, fontSize: '10px', padding: '4px 6px', borderRadius: '4px', color: '#1e2a38', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', marginTop: '2px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
@@ -3077,6 +2901,74 @@ export function SectionPage() {
                 >
                   ✦
                 </button>
+              </div>
+
+              <MissionControlView
+                objects={sectionObjects.objects}
+                accent={accentColor}
+                onOpenObject={focusNotebookOnCanvas}
+              />
+
+              {/* Recessed lane progress — not the visual center */}
+              <div style={{ marginBottom: 24, opacity: 0.72 }}>
+                {totalItems > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    {allDone ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 500, color: '#10b981' }}>
+                        <CheckCircle2 className="w-3 h-3" /> All caught up
+                      </span>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: '11px', color: '#4b5563' }}>
+                          <span style={{ color: '#64748b', fontWeight: 500 }}>{remaining}</span> remaining
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#1a2230' }}>·</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ width: '56px', height: '2px', borderRadius: '2px', backgroundColor: '#111827', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${progress}%`, backgroundColor: progressColor, borderRadius: '2px', transition: 'width 0.7s ease' }} />
+                          </div>
+                          <span style={{ fontSize: '10px', color: '#374151', fontWeight: 500 }}>{progress}%</span>
+                        </div>
+                      </>
+                    )}
+                    {editingExamDate ? (
+                      <input
+                        type="date"
+                        defaultValue={section.exam_date ?? ''}
+                        autoFocus
+                        style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc', outline: 'none' }}
+                        onBlur={e => { setEditingExamDate(false); setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date')); }}
+                        onKeyDown={e => { if (e.key === 'Escape') setEditingExamDate(false); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                      />
+                    ) : section.exam_date ? (
+                      <button
+                        onClick={() => setEditingExamDate(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
+                        onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+                      >
+                        <Calendar className="w-3 h-3" />
+                        {formatExamDate(section.exam_date)}
+                        {examDays !== null && (
+                          <span style={{ color: examDays <= 0 ? '#4b5563' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#4b5563', fontWeight: 600 }}>
+                            · {examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today!' : 'Past'}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setEditingExamDate(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
+                        onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
+                      >
+                        <Calendar className="w-3 h-3" /> Set exam date
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '11px', color: '#263043', margin: 0 }}>Add tasks to track progress</p>
+                )}
               </div>
 
               {/* ── PANIC BANNER ─────────────────────────────────────────── */}

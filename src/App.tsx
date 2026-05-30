@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { CommandPaletteProvider } from './command/CommandPaletteContext';
 import { GlobalCommandPalette } from './command/GlobalCommandPalette';
@@ -96,6 +97,12 @@ function AppRoutes() {
 }
 
 function AppShell() {
+  useEffect(() => {
+    void import('./lib/knowledge/tombstoneStore').then(({ purgeExpiredTombstones }) =>
+      purgeExpiredTombstones(),
+    );
+  }, []);
+
   return (
     <>
       <AppRoutes />

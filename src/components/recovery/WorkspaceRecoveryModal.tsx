@@ -4,6 +4,8 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { clearFreeSpacePersistenceForSection } from '../../lib/freeSpacePersistence';
 import { deleteAllPdfBlobsForSection } from '../../lib/freeSpacePdfIdb';
 import { runSectionPersistenceHealth } from '../../lib/persistenceHealth';
+import { RecentlyDeletedPanel } from './RecentlyDeletedPanel';
+import { NotebookSnapshotsSection } from './NotebookSnapshotsPanel';
 import {
   applyWorkspaceBackupToSection,
   buildWorkspaceBackupV1,
@@ -231,6 +233,19 @@ export function WorkspaceRecoveryModal({ open, onClose, tokens, sectionId, secti
             <p className="text-[11px] leading-snug m-0" style={{ color: tokens.textGhost }}>
               {lastNote}
             </p>
+          ) : null}
+
+          <div className="pt-2 space-y-3" style={{ borderTop: `1px solid ${border}` }}>
+            <h3 className="text-[12px] font-semibold m-0" style={{ color: tokens.textSecondary }}>
+              Recently deleted
+            </h3>
+            <RecentlyDeletedPanel tokens={tokens} sectionId={sectionId} />
+          </div>
+
+          {sectionId ? (
+            <div className="pt-2 space-y-3" style={{ borderTop: `1px solid ${border}` }}>
+              <NotebookSnapshotsSection tokens={tokens} sectionId={sectionId} />
+            </div>
           ) : null}
         </div>
       </div>

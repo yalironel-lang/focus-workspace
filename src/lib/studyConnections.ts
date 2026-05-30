@@ -3,7 +3,6 @@
  * No separate link store; pure derivation for UI and auto-linking on create.
  */
 
-import type { WorkspaceContinuityMemory } from './workspaceContinuity';
 import {
   coerceFreeSpaceConnectionIds,
   ensureProjectObjectContent,
@@ -40,8 +39,6 @@ export interface StudyLoopAction {
   reviewMode?: 'all' | 'neglected' | 'low';
   insight?: MistakeInsight;
 }
-
-const MS_DAY = 86_400_000;
 
 function byId(objects: ProjectSpaceObject[]): Map<string, ProjectSpaceObject> {
   return new Map(objects.map(o => [o.id, o]));
@@ -188,7 +185,6 @@ export function pickStudyLinkTargets(
 
 export function buildStudyLoopActions(
   objects: ProjectSpaceObject[],
-  continuity: WorkspaceContinuityMemory | null,
   now = Date.now(),
 ): StudyLoopAction[] {
   const actions: StudyLoopAction[] = [];
@@ -221,49 +217,6 @@ export function buildStudyLoopActions(
       subtitle: tagInsight.message,
       insight: tagInsight,
       reviewMode: 'all',
-    });
-  }
-
-  if (continuity?.lastSelectedObjectId) {
-    const anchor = objects.find(o => o.id === continuity.lastSelectedObjectId);
-    if (anchor) {
-      const ago = Math.round((now - continuity.savedAt) / MS_DAY);
-      const when = ago < 1 ? 'earlier today' : ago === 1 ? 'yesterday' : `${ago} days ago`;
-      push({
-        id: 'resume-anchor',
-        kind: 'resume-object',
-        label: `Continue ${titleOf(anchor)}`,
-        subtitle: `You were here ${when}.`,
-        objectId: anchor.id,
-      });
-    }
-  }
-
-  const pdf =
-    continuity?.activeClusterObjectIds
-      .map(id => objects.find(o => o.id === id))
-      .find(o => o?.type === 'pdf') ??
-    objects.find(o => o.type === 'pdf' && o.updatedAt > now - 5 * MS_DAY);
-
-  if (pdf && pdf.id !== continuity?.lastSelectedObjectId) {
-    push({
-      id: 'resume-source',
-      kind: 'resume-source',
-      label: `Return to ${titleOf(pdf)}`,
-      subtitle: 'Pick up the source you were reading.',
-      objectId: pdf.id,
-    });
-  }
-
-  const notebookId = continuity?.recentNotebookId;
-  const notebook = notebookId ? objects.find(o => o.id === notebookId) : null;
-  if (notebook && (notebook.type === 'notebook' || notebook.type === 'note')) {
-    push({
-      id: 'resume-notebook',
-      kind: 'resume-notebook',
-      label: `Open ${titleOf(notebook)}`,
-      subtitle: 'Your latest writing surface.',
-      objectId: notebook.id,
     });
   }
 

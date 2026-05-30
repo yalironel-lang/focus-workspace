@@ -14,6 +14,7 @@ import type {
   RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { flushSync } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
@@ -42,6 +43,44 @@ import {
 } from '../../lib/mathStemShortcuts';
 import { notebookBodyToMarkdown, notebookBodyToPlainText } from '../../lib/notebookExport';
 import toast from 'react-hot-toast';
+import type { InlineMark } from '../../lib/notebookInlineMarks';
+import {
+  applyMarkToggle,
+  clearAllMarksInRange,
+  duplicateRange,
+} from '../../lib/notebookInlineMarks';
+import {
+  attachMarksToText,
+  mergeBlockMarks,
+  morphBlockKind,
+  serializeBlockText,
+} from '../../lib/notebookBlockRichText';
+import {
+  anchorFromSelection,
+  copyRichSlice,
+  findRichEditable,
+  type NotebookSelectionState,
+  type StoredNotebookSelection,
+  type ToolbarCommand,
+} from '../../lib/notebookSelectionToolbar';
+import {
+  getCaretOffsetIn,
+  setCaretOffsetIn,
+  setSelectionOffsetsIn,
+  getSelectionOffsetsIn,
+  rangeHeightFromStartToCaret,
+  rangeHeightFromCaretToEnd,
+  lineHeightOf,
+  caretInFirstVisualLine,
+  caretInLastVisualLine,
+  caretAtVisualLineStart,
+  caretAtVisualLineEnd,
+} from '../../lib/notebookCaret';
+import { RichEditableLine } from '../notebook/RichEditableLine';
+import { NotebookSelectionToolbar } from '../notebook/NotebookSelectionToolbar';
+import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
+import { nbAgentLog } from '../../lib/notebookDebugIngest';
+import { isSelectionInMathEditor } from '../../lib/tiptapSelectionRegistry';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
@@ -140,19 +179,21 @@ function parseNotebookLine(raw: string): NotebookLine {
   return { kind: 'paragraph', text: normalized };
 }
 
+type BlockMarks = { marks?: InlineMark[] };
+
 type Block =
-  | { id: string; kind: 'title'; text: string }
-  | { id: string; kind: 'section'; text: string }
-  | { id: string; kind: 'bullet'; text: string; depth: number }
-  | { id: string; kind: 'ordered'; number: number; text: string }
-  | { id: string; kind: 'task'; text: string; checked: boolean }
-  | { id: string; kind: 'quote'; text: string }
-  | { id: string; kind: 'step'; text: string }
-  | { id: string; kind: 'callout'; tone: CalloutTone; text: string }
-  | { id: string; kind: 'math'; text: string }
-  | { id: string; kind: 'image-ref'; key: string; alt: string }
-  | { id: string; kind: 'divider' }
-  | { id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant };
+  | ({ id: string; kind: 'title'; text: string } & BlockMarks)
+  | ({ id: string; kind: 'section'; text: string } & BlockMarks)
+  | ({ id: string; kind: 'bullet'; text: string; depth: number } & BlockMarks)
+  | ({ id: string; kind: 'ordered'; number: number; text: string } & BlockMarks)
+  | ({ id: string; kind: 'task'; text: string; checked: boolean } & BlockMarks)
+  | ({ id: string; kind: 'quote'; text: string } & BlockMarks)
+  | ({ id: string; kind: 'step'; text: string } & BlockMarks)
+  | ({ id: string; kind: 'callout'; tone: CalloutTone; text: string } & BlockMarks)
+  | ({ id: string; kind: 'math'; text: string } & BlockMarks)
+  | ({ id: string; kind: 'image-ref'; key: string; alt: string })
+  | ({ id: string; kind: 'divider' })
+  | ({ id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
 
 let blockIdSeq = 0;
 function newBlockId(): string {
@@ -243,41 +284,46 @@ function normalizeOrderedSequences(blocks: Block[]): Block[] {
   return changed ? out : blocks;
 }
 
+function withLineMarks(b: Block): Block {
+  if (b.kind === 'divider' || b.kind === 'image-ref') return b;
+  return attachMarksToText(b) as Block;
+}
+
 function lineToBlock(line: string): Block {
   const id = newBlockId();
   const parsed = parseNotebookLine(line);
   switch (parsed.kind) {
     case 'blank':
-      return { id, kind: 'paragraph', text: '' };
+      return withLineMarks({ id, kind: 'paragraph', text: '' });
     case 'title':
-      return { id, kind: 'title', text: parsed.text };
+      return withLineMarks({ id, kind: 'title', text: parsed.text });
     case 'section':
-      return { id, kind: 'section', text: parsed.text };
+      return withLineMarks({ id, kind: 'section', text: parsed.text });
     case 'ordered':
-      return { id, kind: 'ordered', number: parsed.number, text: parsed.text };
+      return withLineMarks({ id, kind: 'ordered', number: parsed.number, text: parsed.text });
     case 'bullet':
-      return { id, kind: 'bullet', depth: parsed.depth, text: parsed.text };
+      return withLineMarks({ id, kind: 'bullet', depth: parsed.depth, text: parsed.text });
     case 'divider':
       return { id, kind: 'divider' };
     case 'task':
-      return { id, kind: 'task', text: parsed.text, checked: parsed.checked };
+      return withLineMarks({ id, kind: 'task', text: parsed.text, checked: parsed.checked });
     case 'quote':
-      return { id, kind: 'quote', text: parsed.text };
+      return withLineMarks({ id, kind: 'quote', text: parsed.text });
     case 'step':
-      return { id, kind: 'step', text: parsed.text };
+      return withLineMarks({ id, kind: 'step', text: parsed.text });
     case 'callout':
-      return { id, kind: 'callout', tone: parsed.tone, text: parsed.text };
+      return withLineMarks({ id, kind: 'callout', tone: parsed.tone, text: parsed.text });
     case 'math':
-      return { id, kind: 'math', text: parsed.text };
+      return withLineMarks({ id, kind: 'math', text: parsed.text });
     case 'image-ref':
       return { id, kind: 'image-ref', key: parsed.key, alt: parsed.alt };
     case 'paragraph':
-      return {
+      return withLineMarks({
         id,
         kind: 'paragraph',
         text: parsed.text,
         ...(parsed.variant ? { variant: parsed.variant } : {}),
-      };
+      });
   }
 }
 
@@ -330,34 +376,38 @@ function clampCaretOffset(block: Block, offset: number): number {
   return Math.max(0, Math.min(offset, block.text.length));
 }
 
+function blockTextPayload(b: { text: string; marks?: InlineMark[] }): string {
+  return serializeBlockText(b.text, b.marks);
+}
+
 function blockToLine(b: Block): string {
   switch (b.kind) {
     case 'title':
-      return `# ${b.text}`;
+      return `# ${blockTextPayload(b)}`;
     case 'section':
-      return `## ${b.text}`;
+      return `## ${blockTextPayload(b)}`;
     case 'ordered':
-      return `${b.number}. ${b.text}`;
+      return `${b.number}. ${blockTextPayload(b)}`;
     case 'bullet':
-      return `${'  '.repeat(b.depth)}- ${b.text}`;
+      return `${'  '.repeat(b.depth)}- ${blockTextPayload(b)}`;
     case 'task':
-      return `- [${b.checked ? 'x' : ' '}] ${b.text}`;
+      return `- [${b.checked ? 'x' : ' '}] ${blockTextPayload(b)}`;
     case 'quote':
-      return `> ${b.text}`;
+      return `> ${blockTextPayload(b)}`;
     case 'step':
-      return `=> ${b.text}`;
+      return `=> ${blockTextPayload(b)}`;
     case 'callout':
-      return `!${b.tone} ${b.text}`;
+      return `!${b.tone} ${blockTextPayload(b)}`;
     case 'math':
-      return `$$ ${b.text}`;
+      return `$$ ${blockTextPayload(b)}`;
     case 'image-ref':
       return `::img::${b.key}::${b.alt}::`;
     case 'divider':
       return '---';
     case 'paragraph':
-      if (b.variant === 'muted') return `\u00b6 ${b.text}`;
-      if (b.variant === 'fine') return `\u00b6\u00b6 ${b.text}`;
-      return b.text;
+      if (b.variant === 'muted') return `\u00b6 ${blockTextPayload(b)}`;
+      if (b.variant === 'fine') return `\u00b6\u00b6 ${blockTextPayload(b)}`;
+      return blockTextPayload(b);
   }
 }
 
@@ -481,147 +531,39 @@ function blockTextLen(b: Block): number {
   return b.text.length;
 }
 
-function getCaretOffsetIn(el: HTMLElement): number {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) return el.textContent?.length ?? 0;
-  const range = sel.getRangeAt(0);
-  const pre = range.cloneRange();
-  pre.selectNodeContents(el);
-  pre.setEnd(range.startContainer, range.startOffset);
-  return pre.toString().length;
-}
-
-function setCaretOffsetIn(el: HTMLElement, offset: number) {
-  const sel = window.getSelection();
-  if (!sel) return;
-  const range = document.createRange();
-  let remaining = offset;
-  const walk = (node: Node): boolean => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const len = node.textContent?.length ?? 0;
-      if (remaining <= len) {
-        range.setStart(node, remaining);
-        range.collapse(true);
-        return true;
-      }
-      remaining -= len;
-      return false;
-    }
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      for (let i = 0; i < node.childNodes.length; i += 1) {
-        if (walk(node.childNodes[i]!)) return true;
-      }
-    }
-    return false;
-  };
-  if (!walk(el)) {
-    range.selectNodeContents(el);
-    range.collapse(false);
-  }
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-function rangeHeightFromStartToCaret(editable: HTMLElement): number {
-  const sel = window.getSelection();
-  const an = sel?.anchorNode;
-  if (!sel?.rangeCount || !an || !editable.contains(an)) return 0;
-  const range = document.createRange();
-  try {
-    range.selectNodeContents(editable);
-    range.setEnd(an, sel.anchorOffset);
-  } catch {
-    return 0;
-  }
-  const h = range.getBoundingClientRect().height;
-  return Number.isFinite(h) ? h : 0;
-}
-
-function rangeHeightFromCaretToEnd(editable: HTMLElement): number {
-  const sel = window.getSelection();
-  const an = sel?.anchorNode;
-  if (!sel?.rangeCount || !an || !editable.contains(an)) return 0;
-  const range = document.createRange();
-  try {
-    range.selectNodeContents(editable);
-    range.setStart(an, sel.anchorOffset);
-  } catch {
-    return 0;
-  }
-  return range.getBoundingClientRect().height;
-}
-
-function lineHeightOf(el: HTMLElement): number {
-  const lh = parseFloat(getComputedStyle(el).lineHeight);
-  if (!Number.isNaN(lh) && lh > 0) return lh;
-  const fs = parseFloat(getComputedStyle(el).fontSize) || 16;
-  return fs * 1.5;
-}
-
-function caretInFirstVisualLine(el: HTMLElement): boolean {
-  const h = rangeHeightFromStartToCaret(el);
-  return h <= lineHeightOf(el) * 1.35;
-}
-
-function caretInLastVisualLine(el: HTMLElement): boolean {
-  const h = rangeHeightFromCaretToEnd(el);
-  return h <= lineHeightOf(el) * 1.35;
-}
-
-function caretAtVisualLineStart(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  if (!sel?.rangeCount || !el.contains(sel.anchorNode)) return getCaretOffsetIn(el) === 0;
-  const r = sel.getRangeAt(0).cloneRange();
-  r.collapse(true);
-  const cr = r.getBoundingClientRect();
-  const er = el.getBoundingClientRect();
-  if (cr.width === 0 && cr.height === 0) return getCaretOffsetIn(el) === 0;
-  return cr.left <= er.left + 10;
-}
-
-function caretAtVisualLineEnd(el: HTMLElement): boolean {
-  const sel = window.getSelection();
-  if (!sel?.rangeCount || !el.contains(sel.anchorNode)) return true;
-  const r = sel.getRangeAt(0).cloneRange();
-  r.collapse(true);
-  const cr = r.getBoundingClientRect();
-  const er = el.getBoundingClientRect();
-  if (cr.width === 0 && cr.height === 0) return true;
-  return cr.right >= er.right - 10;
-}
-
 const SOFT_BREAK = '\u2028';
 
 function mergeBlocks(prev: Block, next: Block): Block {
   if (prev.kind === 'divider' || prev.kind === 'image-ref') return next;
   const nextText = next.kind === 'divider' || next.kind === 'image-ref' ? '' : next.text;
-  const mergedText = prev.text + nextText;
+  const nextMarks = next.kind === 'divider' || next.kind === 'image-ref' ? undefined : next.marks;
+  const merged = mergeBlockMarks(prev.text, prev.marks, nextText, nextMarks);
   switch (prev.kind) {
     case 'title':
-      return { id: prev.id, kind: 'title', text: mergedText };
+      return { id: prev.id, kind: 'title', ...merged };
     case 'section':
-      return { id: prev.id, kind: 'section', text: mergedText };
+      return { id: prev.id, kind: 'section', ...merged };
     case 'ordered':
-      return { id: prev.id, kind: 'ordered', number: prev.number, text: mergedText };
+      return { id: prev.id, kind: 'ordered', number: prev.number, ...merged };
     case 'bullet':
-      return { id: prev.id, kind: 'bullet', depth: prev.depth, text: mergedText };
+      return { id: prev.id, kind: 'bullet', depth: prev.depth, ...merged };
     case 'quote':
-      return { id: prev.id, kind: 'quote', text: mergedText };
+      return { id: prev.id, kind: 'quote', ...merged };
     case 'step':
-      return { id: prev.id, kind: 'step', text: mergedText };
+      return { id: prev.id, kind: 'step', ...merged };
     case 'callout':
-      return { id: prev.id, kind: 'callout', tone: prev.tone, text: mergedText };
+      return { id: prev.id, kind: 'callout', tone: prev.tone, ...merged };
     case 'math':
-      return { id: prev.id, kind: 'math', text: mergedText };
+      return { id: prev.id, kind: 'math', ...merged };
     case 'task':
-      return { id: prev.id, kind: 'task', text: mergedText, checked: prev.checked };
+      return { id: prev.id, kind: 'task', ...merged, checked: prev.checked };
     case 'paragraph':
-      if (next.kind !== 'paragraph') return { id: prev.id, kind: 'paragraph', text: mergedText };
-      if (prev.variant !== next.variant) return { id: prev.id, kind: 'paragraph', text: mergedText };
+      if (next.kind !== 'paragraph') return { id: prev.id, kind: 'paragraph', ...merged };
+      if (prev.variant !== next.variant) return { id: prev.id, kind: 'paragraph', ...merged };
       return {
         id: prev.id,
         kind: 'paragraph',
-        text: mergedText,
+        ...merged,
         ...(prev.variant ? { variant: prev.variant } : {}),
       };
   }
@@ -769,12 +711,54 @@ function getSlashFiltered(
 interface EditableLineProps {
   id: string;
   text: string;
+  marks?: InlineMark[];
   tokens: AtmosphereTokens;
   placeholder: string;
   style: CSSProperties;
-  onUpdate: (id: string, raw: string) => void;
+  onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+  suppressInputRef?: RefObject<boolean>;
+  ignoreDomInputBlockIdRef?: RefObject<string | null>;
+  domCommitLockUntilRef?: RefObject<number>;
+  toolbarActiveBlockIdRef?: RefObject<string | null>;
+}
+
+function EditableLine({
+  id,
+  text,
+  marks,
+  tokens,
+  placeholder,
+  style,
+  onUpdate,
+  onFocusIndex,
+  onAfterInput,
+  onSelectionChange,
+  suppressInputRef,
+  ignoreDomInputBlockIdRef,
+  domCommitLockUntilRef,
+  toolbarActiveBlockIdRef,
+}: EditableLineProps) {
+  return (
+    <RichEditableLine
+      id={id}
+      plain={text}
+      marks={marks}
+      tokens={tokens}
+      placeholder={placeholder}
+      style={style}
+      onUpdate={(bid, upd) => onUpdate(bid, upd.plain, upd.marks)}
+      onFocusIndex={onFocusIndex}
+      onAfterInput={onAfterInput}
+      onSelectionChange={onSelectionChange}
+      suppressInputRef={suppressInputRef}
+      ignoreDomInputBlockIdRef={ignoreDomInputBlockIdRef}
+      domCommitLockUntilRef={domCommitLockUntilRef}
+      toolbarActiveBlockIdRef={toolbarActiveBlockIdRef}
+    />
+  );
 }
 
 /** Free Space: fixed chrome height + scrollable writing/preview; wheel does not bubble to canvas. */
@@ -845,99 +829,6 @@ function NotebookBodyScroll({
   );
 }
 
-function EditableLine({
-  id,
-  text,
-  tokens,
-  placeholder,
-  style,
-  onUpdate,
-  onFocusIndex,
-  onAfterInput,
-}: EditableLineProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const focusedRef = useRef(false);
-  const [focused, setFocused] = useState(false);
-  const isEmpty = text.length === 0;
-  const lineHeight = typeof style.lineHeight === 'number' ? style.lineHeight : 1.65;
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const domText = el.textContent ?? '';
-    if (focusedRef.current) {
-      if (domText !== text) {
-        const offset = getCaretOffsetIn(el);
-        el.textContent = text;
-        setCaretOffsetIn(el, Math.min(offset, text.length));
-      }
-      return;
-    }
-    if (domText !== text) el.textContent = text;
-  }, [text, id]);
-
-  return (
-    <div
-      style={{ position: 'relative', width: '100%' }}
-      onFocusCapture={() => {
-        focusedRef.current = true;
-        setFocused(true);
-      }}
-      onBlurCapture={() => {
-        focusedRef.current = false;
-        setFocused(false);
-      }}
-    >
-      {isEmpty ? (
-        <div
-          aria-hidden
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            right: 0,
-            pointerEvents: 'none',
-            userSelect: 'none',
-            color: tokens.textMuted,
-            opacity: focused ? 0.28 : 0.38,
-            fontWeight: 400,
-            fontSize: style.fontSize,
-            lineHeight: style.lineHeight ?? lineHeight,
-            letterSpacing: '0.02em',
-            transition: 'opacity 0.2s ease',
-          }}
-        >
-          {placeholder}
-        </div>
-      ) : null}
-      <div
-        ref={ref}
-        data-editable-id={id}
-        data-block-id={id}
-        contentEditable
-        suppressContentEditableWarning
-        spellCheck={false}
-        onInput={(ev) => {
-          const raw = ev.currentTarget.textContent ?? '';
-          onUpdate(id, raw);
-          // Capture the element now — React nullifies ev.currentTarget after the
-          // handler returns (async/rAF closures over ev.currentTarget always get null).
-          const target = ev.currentTarget;
-          requestAnimationFrame(() => onAfterInput?.(target));
-        }}
-        onFocus={() => {
-          onFocusIndex(id);
-        }}
-        style={{
-          ...style,
-          minHeight: isEmpty ? `${lineHeight}em` : undefined,
-          transition: `${style.transition ? `${style.transition}, ` : ''}color 0.2s ease`,
-        }}
-      />
-    </div>
-  );
-}
-
 interface Props {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -955,6 +846,9 @@ interface Props {
   context?: 'free-space' | 'inline';
   /** Notify host when this notebook enters or exits edit mode (for cinematic focus on Free Space). */
   onEditingChange?: (isEditing: boolean) => void;
+  /** Section + board for knowledge journal (tombstones / snapshots). */
+  freeSpaceSectionId?: string;
+  freeSpaceBoardId?: string;
 }
 
 function formatRelativeTime(ts: number): string {
@@ -979,6 +873,8 @@ export function ProjectNotebookBlock({
   onCreateRecallItem,
   context = 'inline',
   onEditingChange,
+  freeSpaceSectionId,
+  freeSpaceBoardId = '',
 }: Props) {
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
@@ -995,12 +891,7 @@ export function ProjectNotebookBlock({
   const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
   const [surfaceWidth, setSurfaceWidth] = useState(0);
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
-  const [typoRail, setTypoRail] = useState<{
-    top: number;
-    left: number;
-    blockId: string;
-    level: 1 | 2 | 3 | 4 | 5;
-  } | null>(null);
+  const [selectionToolbar, setSelectionToolbar] = useState<NotebookSelectionState | null>(null);
   const [paperPopoverOpen, setPaperPopoverOpen] = useState(false);
   const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
@@ -1026,6 +917,117 @@ export function ProjectNotebookBlock({
   onEditingChangeRef.current = onEditingChange;
   const notebookPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
+  const notebookEditCountRef = useRef(0);
+  const selectionSnapshotRef = useRef<StoredNotebookSelection | null>(null);
+  const toolbarInteractingRef = useRef(false);
+  const ignoreDomInputBlockIdRef = useRef<string | null>(null);
+  /** Timestamp (ms) until which DOM-derived text commits are rejected (toolbar/mark apply). */
+  const domCommitLockUntilRef = useRef(0);
+  /** While set, RichEditableLine rejects every onInput commit for this block id. */
+  const toolbarActiveBlockIdRef = useRef<string | null>(null);
+  const frozenRichElsRef = useRef<HTMLElement[]>([]);
+
+  const syncFreezeRichEditables = useCallback(() => {
+    const root =
+      isFocusModeOpen && focusEditorRootRef.current
+        ? focusEditorRootRef.current
+        : editorRootRef.current;
+    if (!root) return;
+    frozenRichElsRef.current = [];
+    root.querySelectorAll<HTMLElement>('[data-rich-editable="1"]').forEach(el => {
+      frozenRichElsRef.current.push(el);
+      el.dataset.nbPrevPe = el.style.pointerEvents;
+      el.style.pointerEvents = 'none';
+      el.contentEditable = 'false';
+    });
+    // #region agent log
+    nbAgentLog(
+      'ProjectNotebookBlock:syncFreezeRichEditables',
+      'sync-dom-freeze',
+      { count: frozenRichElsRef.current.length },
+      'H',
+      'post-fix',
+    );
+    // #endregion
+  }, [isFocusModeOpen]);
+
+  const syncUnfreezeRichEditables = useCallback(() => {
+    for (const el of frozenRichElsRef.current) {
+      el.contentEditable = 'true';
+      el.style.pointerEvents = el.dataset.nbPrevPe ?? '';
+      delete el.dataset.nbPrevPe;
+    }
+    frozenRichElsRef.current = [];
+  }, []);
+
+  const lockDomTextCommits = useCallback((durationMs = 480) => {
+    domCommitLockUntilRef.current = Math.max(
+      domCommitLockUntilRef.current,
+      Date.now() + durationMs,
+    );
+    toolbarInteractingRef.current = true;
+  }, []);
+
+  const isDomTextCommitLocked = useCallback((): boolean => {
+    return Date.now() < domCommitLockUntilRef.current || toolbarInteractingRef.current;
+  }, []);
+
+  const releaseDomTextCommitLock = useCallback((delayMs = 0) => {
+    const attempt = () => {
+      if (Date.now() >= domCommitLockUntilRef.current) {
+        toolbarInteractingRef.current = false;
+        ignoreDomInputBlockIdRef.current = null;
+      }
+    };
+    if (delayMs <= 0) attempt();
+    else window.setTimeout(attempt, delayMs);
+  }, []);
+
+  const EditableLineGuarded = useCallback(
+    (props: Omit<
+      EditableLineProps,
+      'suppressInputRef' | 'ignoreDomInputBlockIdRef' | 'domCommitLockUntilRef' | 'toolbarActiveBlockIdRef'
+    >) => {
+      const { onUpdate, ...rest } = props;
+      return (
+        <EditableLine
+          {...rest}
+          suppressInputRef={toolbarInteractingRef}
+          ignoreDomInputBlockIdRef={ignoreDomInputBlockIdRef}
+          domCommitLockUntilRef={domCommitLockUntilRef}
+          toolbarActiveBlockIdRef={toolbarActiveBlockIdRef}
+          onUpdate={(id, raw, marks) => {
+            if (ignoreDomInputBlockIdRef.current === id) {
+              // #region agent log
+              nbAgentLog(
+                'ProjectNotebookBlock:EditableLineGuarded',
+                'onUpdate-blocked-mark-apply',
+                { id, raw },
+                'D',
+              );
+              // #endregion
+              return;
+            }
+            const snap = selectionSnapshotRef.current;
+            if (snap?.blockId === id && raw !== snap.plain) {
+              // #region agent log
+              nbAgentLog(
+                'ProjectNotebookBlock:EditableLineGuarded',
+                'onUpdate-blocked-snapshot-mismatch',
+                { id, raw, snapshotPlain: snap.plain, lockUntil: domCommitLockUntilRef.current },
+                'D',
+                'post-fix',
+              );
+              // #endregion
+              return;
+            }
+            onUpdate(id, raw, marks);
+          }}
+        />
+      );
+    },
+    [],
+  );
 
   const flushNotebookPersist = useCallback(() => {
     if (notebookPersistTimerRef.current) {
@@ -1045,11 +1047,24 @@ export function ProjectNotebookBlock({
         onChangeRef.current(next);
         return;
       }
+      notebookEditCountRef.current += 1;
+      if (freeSpaceSectionId && objectId) {
+        void import('../../lib/knowledge/notebookSnapshotStore').then(({ scheduleNotebookSnapshot }) => {
+          scheduleNotebookSnapshot({
+            sectionId: freeSpaceSectionId,
+            boardId: freeSpaceBoardId,
+            objectId,
+            objectTitle: objectTitle ?? 'Notebook',
+            body: next.body ?? '',
+            editGeneration: notebookEditCountRef.current,
+          });
+        });
+      }
       pendingNotebookContentRef.current = next;
       if (notebookPersistTimerRef.current) clearTimeout(notebookPersistTimerRef.current);
       notebookPersistTimerRef.current = setTimeout(flushNotebookPersist, 420);
     },
-    [content.body, flushNotebookPersist],
+    [content.body, flushNotebookPersist, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle],
   );
 
   useEffect(() => () => flushNotebookPersist(), [flushNotebookPersist]);
@@ -1149,13 +1164,15 @@ export function ProjectNotebookBlock({
   }, [isFocusModeOpen]);
 
   const isNotebookEditorFocused = useCallback((): boolean => {
+    if (isDomTextCommitLocked()) return true;
     const active = document.activeElement;
     if (!active) return false;
+    if (active.closest('.nb-selection-toolbar')) return true;
     return !!(
       editorRootRef.current?.contains(active) ||
       focusEditorRootRef.current?.contains(active)
     );
-  }, []);
+  }, [isDomTextCommitLocked]);
 
   const captureCaretForBlock = useCallback(
     (blockId: string): number | null => {
@@ -1203,9 +1220,10 @@ export function ProjectNotebookBlock({
     setBlocks((prev) => {
       if (serializeBlocks(prev) === body) return prev;
       if (isNotebookEditorFocused()) return prev;
+      if (isDomTextCommitLocked()) return prev;
       return parseBodyToBlocks(body, prev);
     });
-  }, [content.body, isNotebookEditorFocused]);
+  }, [content.body, isNotebookEditorFocused, isDomTextCommitLocked]);
 
   useEffect(() => {
     if (!morphPulseId) return;
@@ -1584,47 +1602,328 @@ export function ProjectNotebookBlock({
   );
 
   useLayoutEffect(() => {
-    if (editorMode !== 'edit' || slashMenu) {
-      setTypoRail(null);
-      return;
+    if (editorMode !== 'edit') {
+      setSelectionToolbar(null);
+      selectionSnapshotRef.current = null;
     }
-    if (!surfaceFocusBlockId) {
-      setTypoRail(null);
-      return;
-    }
-    const blk = blocks.find((b) => b.id === surfaceFocusBlockId);
-    if (!blk || (blk.kind !== 'title' && blk.kind !== 'section' && blk.kind !== 'paragraph')) {
-      setTypoRail(null);
-      return;
-    }
-    const wrap = getEditorRoot()?.querySelector<HTMLElement>(
-      `[data-nb-surface-block][data-block-id="${surfaceFocusBlockId}"]`,
+  }, [editorMode]);
+
+  const dismissSelectionToolbar = useCallback(() => {
+    setSelectionToolbar(null);
+    selectionSnapshotRef.current = null;
+    toolbarActiveBlockIdRef.current = null;
+    toolbarInteractingRef.current = false;
+    ignoreDomInputBlockIdRef.current = null;
+    domCommitLockUntilRef.current = 0;
+    syncUnfreezeRichEditables();
+  }, [syncUnfreezeRichEditables]);
+
+  const restoreRichSelection = useCallback(
+    (blockId: string, start: number, end: number) => {
+      const root = getEditorRoot();
+      if (!root) return;
+      const el = findRichEditable(root, blockId);
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      setSelectionOffsetsIn(el, start, end);
+    },
+    [getEditorRoot],
+  );
+
+  const refreshToolbarFromSnapshot = useCallback(
+    (snapshot: StoredNotebookSelection) => {
+      const blk = blocksRef.current.find(b => b.id === snapshot.blockId);
+      const marks =
+        blk && blk.kind !== 'divider' && blk.kind !== 'image-ref'
+          ? (blk.marks ?? [])
+          : snapshot.marks;
+      selectionSnapshotRef.current = { ...snapshot, marks };
+      toolbarActiveBlockIdRef.current = snapshot.blockId;
+      setSelectionToolbar(prev =>
+        prev
+          ? { ...prev, marks, plain: snapshot.plain, start: snapshot.start, end: snapshot.end }
+          : prev,
+      );
+    },
+    [],
+  );
+
+  const syncSelectionToolbar = useCallback(() => {
+    const sel = window.getSelection();
+    // #region agent log
+    nbAgentLog(
+      'ProjectNotebookBlock:syncSelectionToolbar',
+      'selectionchange',
+      {
+        collapsed: sel?.isCollapsed ?? true,
+        text: sel?.toString().slice(0, 40) ?? '',
+        editorMode,
+        hasSlashMenu: Boolean(slashMenu),
+        toolbarInteracting: toolbarInteractingRef.current,
+        inMathEditor: isSelectionInMathEditor(),
+      },
+      'trace',
     );
-    if (!wrap) {
-      setTypoRail(null);
+    // #endregion
+    if (editorMode !== 'edit' || slashMenu) {
+      dismissSelectionToolbar();
       return;
     }
-    const level = getBlockLevel(blk);
-    if (level === null) {
-      setTypoRail(null);
+    if (isSelectionInMathEditor()) {
+      dismissSelectionToolbar();
       return;
     }
-    const r = wrap.getBoundingClientRect();
-    const railW = 96;
-    const railH = 26;
-    const m = 10;
-    // Small pill tucked to the block’s top-right — stays near the line, not floating mid-air.
-    let top = Math.round(r.top + 2);
-    let left = Math.round(r.right - railW - 6);
-    if (typeof window !== 'undefined') {
-      if (left < m) left = Math.round(r.left + 6);
-      left = Math.min(Math.max(m, left), window.innerWidth - railW - m);
-      top = Math.min(Math.max(m, top), window.innerHeight - railH - m);
-    } else {
-      left = Math.max(m, left);
+    const root = getEditorRoot();
+    if (!root) {
+      dismissSelectionToolbar();
+      return;
     }
-    setTypoRail({ top, left, blockId: surfaceFocusBlockId, level });
-  }, [editorMode, slashMenu, surfaceFocusBlockId, blocks, getEditorRoot]);
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      if (toolbarInteractingRef.current) return;
+      dismissSelectionToolbar();
+      return;
+    }
+    const editable = sel.anchorNode instanceof Node
+      ? (sel.anchorNode.nodeType === Node.ELEMENT_NODE
+          ? (sel.anchorNode as Element).closest('[data-rich-editable="1"]')
+          : sel.anchorNode.parentElement?.closest('[data-rich-editable="1"]'))
+      : null;
+    if (!editable || !root.contains(editable)) {
+      if (toolbarInteractingRef.current) return;
+      dismissSelectionToolbar();
+      return;
+    }
+    const blockId = editable.getAttribute('data-block-id');
+    if (!blockId) {
+      dismissSelectionToolbar();
+      return;
+    }
+    const offsets = getSelectionOffsetsIn(editable as HTMLElement);
+    if (!offsets || offsets.collapsed) {
+      if (toolbarInteractingRef.current) return;
+      dismissSelectionToolbar();
+      return;
+    }
+    const blk = blocksRef.current.find(b => b.id === blockId);
+    if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') {
+      dismissSelectionToolbar();
+      return;
+    }
+    const plain = blk.text;
+    const anchor = anchorFromSelection();
+    if (!anchor) {
+      if (toolbarInteractingRef.current) return;
+      dismissSelectionToolbar();
+      return;
+    }
+    const snapshot: StoredNotebookSelection = {
+      blockId,
+      start: offsets.start,
+      end: offsets.end,
+      plain,
+      marks: blk.marks ?? [],
+    };
+    selectionSnapshotRef.current = snapshot;
+    toolbarActiveBlockIdRef.current = blockId;
+    setSelectionToolbar({ ...snapshot, anchor });
+    // #region agent log
+    nbAgentLog(
+      'ProjectNotebookBlock:syncSelectionToolbar',
+      'toolbar-visible',
+      { blockId, start: offsets.start, end: offsets.end, plain },
+      'A',
+    );
+    // #endregion
+  }, [editorMode, slashMenu, getEditorRoot, dismissSelectionToolbar]);
+
+  const toolbarIsOpen = selectionToolbar != null;
+
+  useEffect(() => {
+    if (!toolbarIsOpen) return;
+    const onBeforeInput = (e: Event) => {
+      const t = e.target;
+      if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
+      const ie = e as InputEvent;
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:toolbarOpenGuard',
+        'beforeinput-blocked',
+        { inputType: ie.inputType, data: ie.data ?? null },
+        'B',
+        'post-fix',
+      );
+      // #endregion
+      e.preventDefault();
+    };
+    const onInputCapture = (e: Event) => {
+      const t = e.target;
+      if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:toolbarOpenGuard',
+        'input-blocked-capture',
+        {
+          inputType: (e as InputEvent).inputType,
+          data: (e as InputEvent).data ?? null,
+          domText: t.textContent?.slice(0, 60) ?? '',
+        },
+        'C',
+        'post-fix',
+      );
+      // #endregion
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    document.addEventListener('beforeinput', onBeforeInput, { capture: true });
+    document.addEventListener('input', onInputCapture, { capture: true });
+    return () => {
+      document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
+      document.removeEventListener('input', onInputCapture, { capture: true });
+    };
+  }, [toolbarIsOpen]);
+
+  /** Freeze rich editables while toolbar is open — depend on open/closed only, not toolbar prop updates. */
+  useLayoutEffect(() => {
+    if (!toolbarIsOpen) {
+      syncUnfreezeRichEditables();
+      return;
+    }
+    syncFreezeRichEditables();
+    lockDomTextCommits(800);
+  }, [
+    toolbarIsOpen,
+    syncFreezeRichEditables,
+    syncUnfreezeRichEditables,
+    lockDomTextCommits,
+  ]);
+
+  useEffect(() => {
+    // #region agent log
+    nbAgentLog(
+      'ProjectNotebookBlock',
+      'mounted',
+      { editorMode, hasBody: Boolean(content.body?.length) },
+      'init',
+    );
+    // #endregion
+  }, []);
+
+  useEffect(() => {
+    if (editorMode !== 'edit') return;
+    const onSel = () => syncSelectionToolbar();
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, [editorMode, syncSelectionToolbar]);
+
+  const applyMarksToBlock = useCallback(
+    (blockId: string, start: number, end: number, updater: (marks: InlineMark[]) => InlineMark[]) => {
+      const prev = blocksRef.current;
+      const i = prev.findIndex(b => b.id === blockId);
+      if (i === -1) return;
+      const block = prev[i]!;
+      if (block.kind === 'divider' || block.kind === 'image-ref') return;
+      const snapshot = selectionSnapshotRef.current;
+      const plainText =
+        snapshot?.blockId === blockId ? snapshot.plain : block.text;
+      nbToolbarDebug('applyMarksToBlock before', {
+        blockId,
+        text: block.text,
+        snapshotPlain: snapshot?.plain,
+        marks: block.marks,
+      });
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:applyMarksToBlock',
+        'apply-marks',
+        { blockId, start, end, plainText, blockText: block.text },
+        'D',
+      );
+      // #endregion
+      const marks = updater(block.marks ?? []);
+      const nextBlock = {
+        ...block,
+        text: plainText,
+        marks: marks.length ? marks : undefined,
+      } as Block;
+      nbToolbarDebug('applyMarksToBlock after', {
+        text: plainText,
+        marks,
+      });
+      const next = [...prev.slice(0, i), nextBlock, ...prev.slice(i + 1)];
+      lockDomTextCommits(520);
+      ignoreDomInputBlockIdRef.current = blockId;
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:applyMarksToBlock',
+        'flushSync-start',
+        { blockId, plainText, markCount: marks.length },
+        'D',
+        'post-fix',
+      );
+      // #endregion
+      flushSync(() => {
+        setBlocks(next);
+      });
+      const nextContent = { ...content, body: serializeBlocks(next) };
+      pushContent(nextContent);
+      flushNotebookPersist();
+      if (snapshot?.blockId === blockId) {
+        const nextMarks =
+          nextBlock.kind !== 'divider' && nextBlock.kind !== 'image-ref'
+            ? (nextBlock.marks ?? [])
+            : [];
+        selectionSnapshotRef.current = { ...snapshot, plain: plainText, marks: nextMarks };
+        refreshToolbarFromSnapshot(selectionSnapshotRef.current);
+      }
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:applyMarksToBlock',
+        'flushSync-done',
+        { blockId, plainText, persistedBody: nextContent.body?.slice(0, 80) ?? '' },
+        'D',
+        'post-fix',
+      );
+      // #endregion
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          restoreRichSelection(blockId, start, end);
+          releaseDomTextCommitLock(600);
+        });
+      });
+    },
+    [
+      content,
+      pushContent,
+      flushNotebookPersist,
+      restoreRichSelection,
+      refreshToolbarFromSnapshot,
+      lockDomTextCommits,
+      releaseDomTextCommitLock,
+      syncUnfreezeRichEditables,
+    ],
+  );
+
+  const toggleInlineMarkFromSnapshot = useCallback(
+    (markKey: 'b' | 'i' | 'u' | 's' | InlineMark['t'], value?: string) => {
+      const snapshot = selectionSnapshotRef.current;
+      if (!snapshot) {
+        // #region agent log
+        nbAgentLog(
+          'ProjectNotebookBlock:toggleInlineMarkFromSnapshot',
+          'no-snapshot',
+          { markKey },
+          'E',
+        );
+        // #endregion
+        return;
+      }
+      const { blockId, start, end } = snapshot;
+      applyMarksToBlock(blockId, start, end, m =>
+        applyMarkToggle(m, start, end, markKey, value),
+      );
+    },
+    [applyMarksToBlock],
+  );
 
   const slashFiltered = useMemo(
     () => (slashMenu ? getSlashFiltered(slashMenu.query, isMathNotebook) : []),
@@ -1758,15 +2057,43 @@ export function ProjectNotebookBlock({
   );
 
   const updateBlockText = useCallback(
-    (id: string, rawText: string) => {
+    (id: string, rawText: string, marksOverride?: InlineMark[]) => {
+      const snap = selectionSnapshotRef.current;
+      if (snap?.blockId === id && rawText !== snap.plain) {
+        // #region agent log
+        nbAgentLog(
+          'ProjectNotebookBlock:updateBlockText',
+          'update-block-text-blocked-snapshot',
+          {
+            id,
+            rawText,
+            snapshotPlain: snap.plain,
+            lockActive: isDomTextCommitLocked(),
+          },
+          'D',
+          'post-fix',
+        );
+        // #endregion
+        return;
+      }
+      nbToolbarDebug('updateBlockText', { id, rawText, marksOverride });
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:updateBlockText',
+        'update-block-text',
+        { id, rawText, marksOverrideLen: marksOverride?.length ?? null },
+        'D',
+      );
+      // #endregion
       const caretBefore = captureCaretForBlock(id);
       const prev = blocksRef.current;
       const i = prev.findIndex((b) => b.id === id);
       if (i === -1) return;
       const block = prev[i]!;
-      if (block.kind === 'divider') return;
+      if (block.kind === 'divider' || block.kind === 'image-ref') return;
 
       const text = rawText.replace(/\r\n/g, '\n');
+      const nextMarks = marksOverride ?? block.marks;
 
       if (block.kind === 'paragraph') {
         const transformed = morphParagraphLine(text, block.id);
@@ -1778,7 +2105,6 @@ export function ProjectNotebookBlock({
           if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref') {
             scheduleCaret(last, caretBefore);
           }
-          // Multi-block paste morph: pulse the first non-divider block
           const firstMorphed = transformed.find(b => b.kind !== 'divider' && b.kind !== 'paragraph');
           if (firstMorphed) setMorphPulseId(firstMorphed.id);
           return;
@@ -1788,40 +2114,176 @@ export function ProjectNotebookBlock({
             ? true
             : (transformed.variant ?? undefined) === (block.variant ?? undefined);
         const transformedText = (transformed as { text?: string }).text ?? '';
-        const blockText = (block as { text?: string }).text ?? '';
+        const blockText = block.text ?? '';
         const sameShape =
           transformed.kind === block.kind &&
           transformedText === blockText &&
           transformed.id === block.id &&
-          variantMatch;
+          variantMatch &&
+          JSON.stringify(nextMarks ?? []) === JSON.stringify(block.marks ?? []);
         if (sameShape && text === blockText) return;
-        const next = [...prev.slice(0, i), transformed, ...prev.slice(i + 1)];
+        const withMarks = {
+          ...transformed,
+          ...(nextMarks?.length ? { marks: nextMarks } : {}),
+        } as Block;
+        const next = [...prev.slice(0, i), withMarks, ...prev.slice(i + 1)];
         setBlocks(next);
         pushContent({ ...content, body: serializeBlocks(next) });
-        if (caretBefore !== null && transformed.kind !== 'divider' && transformed.kind !== 'image-ref') {
-          scheduleCaret(transformed, caretBefore);
+        if (caretBefore !== null && withMarks.kind !== 'divider' && withMarks.kind !== 'image-ref') {
+          scheduleCaret(withMarks, caretBefore);
         }
-        // Single-block morph: pulse when block kind changes (e.g. paragraph → step/quote/title)
-        if (transformed.kind !== 'paragraph') setMorphPulseId(transformed.id);
+        if (withMarks.kind !== 'paragraph') setMorphPulseId(withMarks.id);
         return;
       }
 
       const singleLine = text.includes('\n') ? (text.split('\n')[0] ?? '') : text;
       const edited: Block = applyVisualEditToStructuredBlock(block, singleLine);
       const editedText = (edited as { text?: string }).text ?? '';
-      const blockText2 = (block as { text?: string }).text ?? '';
+      const blockText2 = block.text ?? '';
       const same =
         edited.kind === block.kind &&
         editedText === blockText2 &&
+        JSON.stringify(nextMarks ?? []) === JSON.stringify(block.marks ?? []) &&
         (block.kind !== 'task' || (edited.kind === 'task' && edited.checked === block.checked)) &&
         (block.kind !== 'ordered' || (edited.kind === 'ordered' && edited.number === block.number));
       if (same && text === blockText2) return;
-      const next = [...prev.slice(0, i), edited, ...prev.slice(i + 1)];
+      const withMarks = {
+        ...edited,
+        ...(nextMarks?.length ? { marks: nextMarks } : {}),
+      } as Block;
+      const next = [...prev.slice(0, i), withMarks, ...prev.slice(i + 1)];
       setBlocks(next);
       pushContent({ ...content, body: serializeBlocks(next) });
-      if (caretBefore !== null) scheduleCaret(edited, caretBefore);
+      if (caretBefore !== null) scheduleCaret(withMarks, caretBefore);
     },
-    [content, pushContent, captureCaretForBlock, scheduleCaret],
+    [content, pushContent, captureCaretForBlock, scheduleCaret, isDomTextCommitLocked],
+  );
+
+  const handleToolbarCommand = useCallback(
+    (cmd: ToolbarCommand) => {
+      const snapshot = selectionSnapshotRef.current;
+      nbToolbarDebug('handleToolbarCommand', { cmd, snapshot });
+      const active = document.activeElement;
+      const toolbarRoot = document.querySelector('[data-nb-format-toolbar="1"]');
+      const beforeBlock = snapshot
+        ? blocksRef.current.find(b => b.id === snapshot.blockId)
+        : undefined;
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:handleToolbarCommand',
+        'command-assert-start',
+        {
+          cmd,
+          activeElement: active instanceof HTMLElement ? active.tagName : String(active),
+          activeInContentEditable:
+            active instanceof HTMLElement &&
+            (active.isContentEditable || !!active.closest('[contenteditable="true"]')),
+          toolbarPortaledToBody: toolbarRoot?.parentElement === document.body,
+          toolbarInsideContentEditable:
+            toolbarRoot instanceof Element &&
+            !!toolbarRoot.closest('[contenteditable="true"]'),
+          snapshot,
+          beforeText: beforeBlock && 'text' in beforeBlock ? beforeBlock.text : null,
+          beforeMarks: beforeBlock && 'marks' in beforeBlock ? beforeBlock.marks ?? [] : null,
+        },
+        'E',
+        'post-fix',
+      );
+      // #endregion
+      if (!snapshot) return;
+      const { blockId, start, end, plain, marks } = snapshot;
+      switch (cmd.type) {
+        case 'toggleMark':
+          toggleInlineMarkFromSnapshot(cmd.mark, cmd.value);
+          break;
+        case 'setFontSize':
+          toggleInlineMarkFromSnapshot('fs', String(cmd.px));
+          break;
+        case 'setTextColor':
+          toggleInlineMarkFromSnapshot('fg', cmd.color);
+          break;
+        case 'setHighlight':
+          toggleInlineMarkFromSnapshot('hl', cmd.color);
+          break;
+        case 'morphBlock': {
+          const prev = blocksRef.current;
+          const i = prev.findIndex(b => b.id === blockId);
+          if (i === -1) break;
+          const morphed = morphBlockKind(prev[i]! as Parameters<typeof morphBlockKind>[0], cmd.target) as Block;
+          const next = [...prev.slice(0, i), morphed, ...prev.slice(i + 1)];
+          setBlocks(next);
+          pushContent({ ...content, body: serializeBlocks(next) });
+          setMorphPulseId(blockId);
+          requestAnimationFrame(() => restoreRichSelection(blockId, start, end));
+          break;
+        }
+        case 'copy':
+          void copyRichSlice(plain, start, end);
+          toast.success('Copied');
+          requestAnimationFrame(() => restoreRichSelection(blockId, start, end));
+          break;
+        case 'duplicate': {
+          const dup = duplicateRange(plain, marks, start, end);
+          selectionSnapshotRef.current = {
+            blockId,
+            start: dup.selectionStart,
+            end: dup.selectionEnd,
+            plain: dup.plain,
+            marks: dup.marks,
+          };
+          toolbarActiveBlockIdRef.current = blockId;
+          updateBlockText(blockId, dup.plain, dup.marks);
+          requestAnimationFrame(() => {
+            restoreRichSelection(blockId, dup.selectionStart, dup.selectionEnd);
+            if (selectionSnapshotRef.current) refreshToolbarFromSnapshot(selectionSnapshotRef.current);
+          });
+          break;
+        }
+        case 'clearFormatting':
+          applyMarksToBlock(blockId, start, end, m => clearAllMarksInRange(m, start, end));
+          break;
+      }
+      const afterBlock = blocksRef.current.find(b => b.id === blockId);
+      // #region agent log
+      nbAgentLog(
+        'ProjectNotebookBlock:handleToolbarCommand',
+        'command-assert-done',
+        {
+          cmd,
+          afterText: afterBlock && 'text' in afterBlock ? afterBlock.text : null,
+          afterMarks: afterBlock && 'marks' in afterBlock ? afterBlock.marks ?? [] : null,
+        },
+        'E',
+        'post-fix',
+      );
+      // #endregion
+    },
+    [
+      applyMarksToBlock,
+      content,
+      pushContent,
+      updateBlockText,
+      restoreRichSelection,
+      refreshToolbarFromSnapshot,
+      getEditorRoot,
+      toggleInlineMarkFromSnapshot,
+    ],
+  );
+
+  const handleToolbarPointerDown = useCallback(() => {
+    lockDomTextCommits(520);
+    syncFreezeRichEditables();
+  }, [lockDomTextCommits, syncFreezeRichEditables]);
+
+  const handleToolbarPointerUp = useCallback(() => {
+    releaseDomTextCommitLock(400);
+  }, [releaseDomTextCommitLock]);
+
+  const handleRichSelectionChange = useCallback(
+    (_blockId: string, _el: HTMLDivElement) => {
+      syncSelectionToolbar();
+    },
+    [syncSelectionToolbar],
   );
 
   const toggleTask = useCallback(
@@ -1842,6 +2304,19 @@ export function ProjectNotebookBlock({
     (index: number) => {
       const prev = blocksRef.current;
       if (index < 0 || index >= prev.length) return;
+      const removed = prev[index];
+      if (freeSpaceSectionId && objectId && removed) {
+        void import('../../lib/knowledge/tombstoneStore').then(({ writeNotebookBlockTombstone }) =>
+          writeNotebookBlockTombstone({
+            sectionId: freeSpaceSectionId,
+            boardId: freeSpaceBoardId,
+            objectId,
+            objectTitle: objectTitle ?? 'Notebook',
+            blockIndex: index,
+            block: { ...removed } as import('../../lib/knowledge/knowledgeTypes').NotebookBlockSnapshot,
+          }),
+        );
+      }
       const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
       const filled = next.length === 0 ? parseBodyToBlocks('') : next;
       setBlocks(filled);
@@ -1855,7 +2330,7 @@ export function ProjectNotebookBlock({
         };
       }
     },
-    [content, pushContent],
+    [content, pushContent, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle],
   );
 
   const insertMathSnippet = useCallback(
@@ -2100,6 +2575,44 @@ export function ProjectNotebookBlock({
       if (index === -1) return;
       const block = blocks[index]!;
       if (block.kind === 'image-ref') return;
+
+      if (
+        editable.getAttribute('data-rich-editable') === '1' &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        const k = e.key.toLowerCase();
+        const markKey: 'b' | 'i' | 'u' | null =
+          k === 'b' ? 'b' : k === 'i' ? 'i' : k === 'u' ? 'u' : null;
+        if (markKey) {
+          const offsets = getSelectionOffsetsIn(editable);
+          if (offsets && !offsets.collapsed && block.kind !== 'divider') {
+            e.preventDefault();
+            const plainText = block.text;
+            const blockMarks = block.marks ?? [];
+            selectionSnapshotRef.current = {
+              blockId: id,
+              start: offsets.start,
+              end: offsets.end,
+              plain: plainText,
+              marks: blockMarks,
+            };
+            // #region agent log
+            nbAgentLog(
+              'ProjectNotebookBlock:handleEditorKeyCapture',
+              'keyboard-toggle-mark',
+              { markKey, blockId: id, start: offsets.start, end: offsets.end, plainText },
+              'keyboard',
+            );
+            // #endregion
+            applyMarksToBlock(id, offsets.start, offsets.end, m =>
+              applyMarkToggle(m, offsets.start, offsets.end, markKey),
+            );
+            return;
+          }
+        }
+      }
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
         if (block.kind === 'divider') return;
@@ -2401,6 +2914,7 @@ export function ProjectNotebookBlock({
       focusEditableBlock,
       getEditorRoot,
       scheduleCaret,
+      applyMarksToBlock,
     ],
   );
 
@@ -2458,10 +2972,12 @@ export function ProjectNotebookBlock({
       }
       if (block.kind === 'title') {
         return (
-          <EditableLine
+          <EditableLineGuarded
             key={block.id}
             id={block.id}
             text={block.text}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
             tokens={tokens}
             placeholder="Untitled"
             onUpdate={updateBlockText}
@@ -2482,10 +2998,12 @@ export function ProjectNotebookBlock({
             borderBottom: `1px solid ${isPaperSurface ? 'rgba(180,83,9,0.35)' : 'rgba(245,158,11,0.18)'}`,
             paddingBottom: 6, marginBottom: 24,
           }}>
-            <EditableLine
+            <EditableLineGuarded
               id={block.id}
               text={block.text}
-              tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
               placeholder="Section label…"
               onUpdate={updateBlockText}
               onFocusIndex={setFocusIndexById}
@@ -2510,10 +3028,12 @@ export function ProjectNotebookBlock({
             borderRadius: '0 8px 8px 0',
             marginBottom: 10,
           }}>
-            <EditableLine
+            <EditableLineGuarded
               id={block.id}
               text={block.text}
-              tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
               placeholder={`${calloutLabel(block.tone)}…`}
               onUpdate={updateBlockText}
               onFocusIndex={setFocusIndexById}
@@ -2558,10 +3078,11 @@ export function ProjectNotebookBlock({
             ink={ink}
             typeScale={typeScale}
             blockSurfaceChrome={{}}
-            EditableLine={EditableLine}
+            EditableLine={EditableLineGuarded}
             onUpdate={updateBlockText}
             onFocusIndex={setFocusIndexById}
             onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+            onSelectionChange={handleRichSelectionChange}
           />
         );
       }
@@ -2573,7 +3094,7 @@ export function ProjectNotebookBlock({
             key={block.id}
             blockId={block.id}
             text={block.text}
-            tokens={tokens}
+                     tokens={tokens}
             notebookInk={notebookInk}
             typeScale={typeScale}
             marginStyle={{ margin: '12px 0' }}
@@ -2581,7 +3102,7 @@ export function ProjectNotebookBlock({
             isFocused={surfaceFocusBlockId === block.id}
             isMathNotebook={isMathNotebook}
             isMathWorkspace={notebookMode === 'math-workspace'}
-            EditableLine={EditableLine}
+            EditableLine={EditableLineGuarded}
             onUpdate={updateBlockText}
             onFocusIndex={setFocusIndexById}
             onAfterInput={(el) => onEditableAfterInput(block.id, el)}
@@ -2599,14 +3120,14 @@ export function ProjectNotebookBlock({
             key={block.id}
             id={block.id}
             text={block.text}
-            tokens={tokens}
+                    tokens={tokens}
             placeholder="Write…"
             textColor={ink.primary}
             mutedColor={tokens.textMuted}
             onUpdate={updateBlockText}
             onFocusIndex={setFocusIndexById}
             onAfterInput={(el) => onEditableAfterInput(block.id, el)}
-            EditableLine={EditableLine}
+            EditableLine={EditableLineGuarded}
             style={{
               width: '100%', border: 'none', outline: 'none', background: 'transparent',
               color: ink.primary, fontSize: `${typeScale.l3}px`, fontWeight: 400,
@@ -2620,11 +3141,11 @@ export function ProjectNotebookBlock({
 
       // Default: paragraph (non-math) and other block kinds (quote, bullet, etc.)
       return (
-        <EditableLine
+        <EditableLineGuarded
           key={block.id}
           id={block.id}
           text={block.text}
-          tokens={tokens}
+                    tokens={tokens}
           placeholder="Write…"
           onUpdate={updateBlockText}
           onFocusIndex={setFocusIndexById}
@@ -3019,80 +3540,16 @@ export function ProjectNotebookBlock({
         </div>
       </div>
 
-      {editorMode === 'edit' && typoRail && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              data-nb-typo-rail
-              role="toolbar"
-              aria-label="Text scale"
-              style={{
-                position: 'fixed',
-                zIndex: 10045,
-                top: typoRail.top,
-                left: typoRail.left,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1px',
-                padding: '2px 4px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.06)',
-                background: 'rgba(12,14,18,0.94)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-                opacity: 0.55,
-                transition: 'opacity 0.2s ease',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.opacity = '1';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.opacity = '0.55';
-              }}
-            >
-              {([1, 2, 3, 4, 5] as const).map((lv) => {
-                const on = typoRail.level === lv;
-                return (
-                  <button
-                    key={lv}
-                    type="button"
-                    title={
-                      lv === 1
-                        ? 'Title'
-                        : lv === 2
-                          ? 'Section'
-                          : lv === 3
-                            ? 'Body'
-                            : lv === 4
-                              ? 'Subtle'
-                              : 'Fine'
-                    }
-                    onMouseDown={(ev) => {
-                      ev.preventDefault();
-                      applyBlockLevel(typoRail.blockId, lv);
-                    }}
-                    style={{
-                      border: 'none',
-                      borderRadius: '5px',
-                      width: '18px',
-                      height: '20px',
-                      cursor: 'pointer',
-                      fontFamily: "'Space Grotesk', monospace",
-                      fontSize: '9px',
-                      fontWeight: 700,
-                      letterSpacing: '0.02em',
-                      color: on ? ink.primary : ink.ghost,
-                      background: on ? 'rgba(255,255,255,0.1)' : 'transparent',
-                      opacity: on ? 1 : 0.72,
-                      transition: 'background 0.16s ease, color 0.16s ease, opacity 0.16s ease',
-                    }}
-                  >
-                    {lv}
-                  </button>
-                );
-              })}
-            </div>,
-            document.body,
-          )
-        : null}
+      {editorMode === 'edit' && selectionToolbar ? (
+        <NotebookSelectionToolbar
+          tokens={tokens}
+          selection={selectionToolbar}
+          onCommand={handleToolbarCommand}
+          onDismiss={dismissSelectionToolbar}
+          onToolbarPointerDown={handleToolbarPointerDown}
+          onToolbarPointerUp={handleToolbarPointerUp}
+        />
+      ) : null}
 
       {editorMode === 'edit' && slashMenu && typeof document !== 'undefined'
         ? createPortal(
@@ -3381,9 +3838,11 @@ export function ProjectNotebookBlock({
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                   style={blockSurfaceChrome(block.id)}
                 >
-                  <EditableLine
+                  <EditableLineGuarded
                     id={block.id}
                     text={block.text}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
                     tokens={tokens}
                     placeholder="Untitled"
                     onUpdate={updateBlockText}
@@ -3425,10 +3884,12 @@ export function ProjectNotebookBlock({
                     marginBottom: '20px',
                     borderBottom: `1px solid ${tokens.accent}28`,
                   }}>
-                    <EditableLine
+                    <EditableLineGuarded
                       id={block.id}
                       text={block.text}
-                      tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
                       placeholder="Section label…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -3485,10 +3946,12 @@ export function ProjectNotebookBlock({
                     {block.number}.
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLine
+                    <EditableLineGuarded
                       id={block.id}
                       text={block.text}
-                      tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
                       placeholder="List item…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -3548,10 +4011,12 @@ export function ProjectNotebookBlock({
                     {bulletGlyph}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLine
+                    <EditableLineGuarded
                       id={block.id}
                       text={block.text}
-                      tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
                       placeholder="List item…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -3649,10 +4114,12 @@ export function ProjectNotebookBlock({
                     </span>
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLine
+                    <EditableLineGuarded
                       id={block.id}
                       text={block.text}
-                      tokens={tokens}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
+                    tokens={tokens}
                       placeholder="Checklist line…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -3694,9 +4161,11 @@ export function ProjectNotebookBlock({
                     backgroundColor: `${tokens.accent}06`,
                   }}
                 >
-                  <EditableLine
+                  <EditableLineGuarded
                     id={block.id}
                     text={block.text}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
                     tokens={tokens}
                     placeholder="Source quote or passage…"
                     onUpdate={updateBlockText}
@@ -3744,10 +4213,11 @@ export function ProjectNotebookBlock({
                   typeScale={typeScale}
                   morphPulse={morphPulseId === block.id}
                   blockSurfaceChrome={blockSurfaceChrome(block.id)}
-                  EditableLine={EditableLine}
+                  EditableLine={EditableLineGuarded}
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
                   onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+                  onSelectionChange={handleRichSelectionChange}
                 />
               );
             }
@@ -3797,9 +4267,11 @@ export function ProjectNotebookBlock({
                       {calloutLabel(block.tone)}
                     </span>
                   </div>
-                  <EditableLine
+                  <EditableLineGuarded
                     id={block.id}
                     text={block.text}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
                     tokens={tokens}
                     placeholder={`${calloutLabel(block.tone)}…`}
                     onUpdate={updateBlockText}
@@ -3830,7 +4302,7 @@ export function ProjectNotebookBlock({
                   key={block.id}
                   blockId={block.id}
                   text={block.text}
-                  tokens={tokens}
+                    tokens={tokens}
                   notebookInk={notebookInk}
                   typeScale={typeScale}
                   marginStyle={{ margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0` }}
@@ -3838,7 +4310,7 @@ export function ProjectNotebookBlock({
                   isFocused={surfaceFocusBlockId === block.id}
                   isMathNotebook={isMathNotebook}
                   isMathWorkspace={notebookMode === 'math-workspace'}
-                  EditableLine={EditableLine}
+                  EditableLine={EditableLineGuarded}
                   onUpdate={updateBlockText}
                   onFocusIndex={setFocusIndexById}
                   onAfterInput={el => onEditableAfterInput(block.id, el)}
@@ -3933,7 +4405,7 @@ export function ProjectNotebookBlock({
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
                     onAfterInput={el => onEditableAfterInput(block.id, el)}
-                    EditableLine={EditableLine}
+                    EditableLine={EditableLineGuarded}
                     textColor={ink.primary}
                     mutedColor={tokens.textMuted}
                     style={{
@@ -3954,9 +4426,11 @@ export function ProjectNotebookBlock({
                     }}
                   />
                 ) : (
-                  <EditableLine
+                  <EditableLineGuarded
                     id={block.id}
                     text={block.text}
+                    marks={block.marks}
+                    onSelectionChange={handleRichSelectionChange}
                     tokens={tokens}
                     placeholder={paragraphPlaceholder}
                     onUpdate={updateBlockText}
@@ -4441,7 +4915,7 @@ export function ProjectNotebookBlock({
                   isLikelyMathLine(line.text) ? (
                     <MathRichText
                       text={line.text}
-                      autoPlainMath={isMathNotebook}
+                    autoPlainMath={isMathNotebook}
                       textColor={fine ? ink.muted : muted ? ink.secondary : ink.primary}
                       mutedColor={tokens.textMuted}
                     />

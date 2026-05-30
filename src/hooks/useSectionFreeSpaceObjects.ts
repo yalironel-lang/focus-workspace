@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
-import { copyPdfBlob, deletePdfBlob } from '../lib/freeSpacePdfIdb';
-import { copyImageBlob, deleteImageBlob } from '../lib/freeSpaceImageIdb';
+import { copyPdfBlob } from '../lib/freeSpacePdfIdb';
+import { copyImageBlob } from '../lib/freeSpaceImageIdb';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
-import { copyStudyFileBlob, deleteStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
+import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -935,15 +935,17 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   const removeObject = useCallback((id: string) => {
     setObjects(prev => {
       const victim = prev.find(o => o.id === id);
-      if (victim?.type === 'pdf') void deletePdfBlob(sectionId, id);
-      if (victim?.type === 'image') void deleteImageBlob(sectionId, id);
-      if (victim?.type === 'studyfile') void deleteStudyFileBlob(sectionId, id);
+      if (victim) {
+        void import('../lib/knowledge/tombstoneStore').then(({ writeFreeSpaceObjectTombstone }) =>
+          writeFreeSpaceObjectTombstone(sectionId, boardId, victim),
+        );
+      }
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
       schedulePersist(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const duplicateObject = useCallback((id: string): ProjectSpaceObject | null => {
     const source = objects.find(o => o.id === id);
