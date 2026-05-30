@@ -32,6 +32,8 @@ interface Props {
   onClose: () => void;
   onUpdateMistake: (id: string, content: MistakeBody) => void;
   onPersistSourceAttempt?: (target: LearningAttemptTarget, patch: Partial<MistakeBody>) => void;
+  hasQueueNext?: boolean;
+  onAdvanceQueue?: () => void;
 }
 
 export function LearningAttemptOverlay({
@@ -44,6 +46,8 @@ export function LearningAttemptOverlay({
   onClose,
   onUpdateMistake,
   onPersistSourceAttempt,
+  hasQueueNext = false,
+  onAdvanceQueue,
 }: Props) {
   const [phase, setPhase] = useState<Phase>('try');
   const [belief, setBelief] = useState('');
@@ -76,6 +80,11 @@ export function LearningAttemptOverlay({
     setDraftCorrection(mistakeBody?.correction ?? resolved?.hiddenAnswer ?? '');
     setDraftWhy(mistakeBody?.whyConfused ?? '');
   }, [open, target?.objectId, target?.kind, mistakeBody?.correction, mistakeBody?.whyConfused, resolved?.hiddenAnswer]);
+
+  useEffect(() => {
+    if (!open || !target) return;
+    if (!resolved) onClose();
+  }, [open, target, resolved, onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -122,16 +131,9 @@ export function LearningAttemptOverlay({
       setPhase('done');
       return;
     }
-    onPersistSourceAttempt?.(target, {
-      lastAttemptOutcome: 'pass',
-      lastAttemptAt: Date.now(),
-      loopOpen: false,
-      pendingReAttempt: false,
-      confidence: 'high',
-    });
     setDoneMessage('Attempt recorded.');
     setPhase('done');
-  }, [target, mistakeBody, mistakeObj, onUpdateMistake, onPersistSourceAttempt]);
+  }, [target, mistakeBody, mistakeObj, onUpdateMistake]);
 
   const handleMissed = useCallback(() => {
     setPhase('belief');
@@ -396,14 +398,30 @@ export function LearningAttemptOverlay({
                   <p className="text-[14px] font-semibold mb-2" style={{ color: tokens.textPrimary }}>
                     {doneMessage ?? 'Attempt recorded.'}
                   </p>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 rounded-xl text-[12px] font-semibold"
-                    style={{ backgroundColor: tokens.wellBg, color: tokens.textSecondary }}
-                  >
-                    Done
-                  </button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {hasQueueNext && onAdvanceQueue ? (
+                      <button
+                        type="button"
+                        onClick={onAdvanceQueue}
+                        className="px-4 py-2 rounded-xl text-[12px] font-semibold"
+                        style={{
+                          backgroundColor: `${tokens.accent}22`,
+                          color: tokens.accent,
+                          border: `1px solid ${tokens.accent}44`,
+                        }}
+                      >
+                        Next in queue
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-4 py-2 rounded-xl text-[12px] font-semibold"
+                      style={{ backgroundColor: tokens.wellBg, color: tokens.textSecondary }}
+                    >
+                      Done
+                    </button>
+                  </div>
                 </div>
               )}
             </>

@@ -355,9 +355,9 @@ export const EquationBlockEditor = memo(function EquationBlockEditor({
             onFocusIndex(blockId);
             requestAnimationFrame(() => {
               if (useSimple) {
-                document.querySelector<HTMLInputElement>(`[data-equation-simple="${blockId}"]`)?.focus();
+                document.querySelector<HTMLInputElement>(`[data-equation-simple="${blockId}"]`)?.focus({ preventScroll: true });
               } else {
-                document.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`)?.focus();
+                document.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`)?.focus({ preventScroll: true });
               }
             });
           }}

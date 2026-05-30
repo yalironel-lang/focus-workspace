@@ -1773,10 +1773,14 @@ export function SectionPage() {
       if (sectionViewMode !== 'free-space') {
         setSectionViewMode('free-space');
       }
+      const objects = sectionObjectsRef.current.objects;
       const q =
         mode === 'all'
-          ? buildLearningLoopQueue(sectionObjectsRef.current.objects)
-          : buildMistakeReviewQueueFiltered(sectionObjectsRef.current.objects, mode);
+          ? (() => {
+              const loopQ = buildLearningLoopQueue(objects);
+              return loopQ.length > 0 ? loopQ : buildMistakeReviewQueueFiltered(objects, 'all');
+            })()
+          : buildMistakeReviewQueueFiltered(objects, mode);
       if (q.length === 0) {
         toast('No learning loops need attention right now.');
         return;
@@ -2021,9 +2025,31 @@ export function SectionPage() {
     if (!learningAttemptOpen || learningAttemptQueue.length === 0) return;
     const id = learningAttemptQueue[learningAttemptIndex];
     const obj = sectionObjects.objects.find(o => o.id === id);
-    const target = obj ? learningTargetFromObject(obj) : null;
+    if (!obj) {
+      const liveIds = new Set(sectionObjects.objects.map(o => o.id));
+      const nextQ = learningAttemptQueue.filter(qid => liveIds.has(qid));
+      if (nextQ.length === 0) {
+        setLearningAttemptOpen(false);
+        setLearningAttemptTarget(null);
+        setLearningAttemptQueue([]);
+        setLearningAttemptIndex(0);
+      } else {
+        setLearningAttemptQueue(nextQ);
+        setLearningAttemptIndex(i => Math.min(i, nextQ.length - 1));
+      }
+      return;
+    }
+    const target = learningTargetFromObject(obj);
     if (target) setLearningAttemptTarget(target);
   }, [learningAttemptOpen, learningAttemptQueue, learningAttemptIndex, sectionObjects.objects]);
+
+  const advanceLearningAttemptQueue = useCallback(() => {
+    setLearningAttemptIndex(i => {
+      const next = i + 1;
+      if (next >= learningAttemptQueue.length) return i;
+      return next;
+    });
+  }, [learningAttemptQueue.length]);
 
   useEffect(() => {
     installFwFreeSpaceDevTools();
@@ -2754,6 +2780,11 @@ export function SectionPage() {
         target={learningAttemptTarget}
         queueIds={learningAttemptQueue}
         queueIndex={learningAttemptIndex}
+        hasQueueNext={
+          learningAttemptQueue.length > 0 &&
+          learningAttemptIndex < learningAttemptQueue.length - 1
+        }
+        onAdvanceQueue={advanceLearningAttemptQueue}
         onClose={() => {
           setLearningAttemptOpen(false);
           setLearningAttemptTarget(null);

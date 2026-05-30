@@ -21,7 +21,7 @@ import {
   findLinkedSource,
 } from '../../lib/studyConnections';
 import { mistakeContent, mistakeNeedsReview, mistakeReviewLabel } from '../../lib/mistakeIntelligence';
-import { isLearningLoopOpen, learningLoopFields } from '../../lib/learningLoop';
+import { isLearningLoopClosed, learningLoopFields } from '../../lib/learningLoop';
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
@@ -308,7 +308,7 @@ function ProjectSpaceObjectRendererInner({
               }
               needsReview={needsReview}
               reviewLabel={reviewLabel}
-              loopOpen={loop ? isLearningLoopOpen(content) : true}
+              loopOpen={loop ? !isLearningLoopClosed(content) : true}
               pendingReAttempt={loop?.pendingReAttempt ?? false}
               onChange={c => onChange(c)}
               onTitleChange={onTitleChange}

@@ -11,6 +11,7 @@ import type {
   CSSProperties,
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -376,6 +377,14 @@ function clampCaretOffset(block: Block, offset: number): number {
   if (block.kind === 'divider' || block.kind === 'image-ref') return 0;
   return Math.max(0, Math.min(offset, block.text.length));
 }
+
+type CaretScrollPolicy = 'force' | 'ifNeeded' | 'never';
+
+type PendingCaretIntent = {
+  id: string;
+  offset: number;
+  scroll: CaretScrollPolicy;
+};
 
 function blockTextPayload(b: { text: string; marks?: InlineMark[] }): string {
   return serializeBlockText(b.text, b.marks);
@@ -910,7 +919,7 @@ export function ProjectNotebookBlock({
   const slashMenuRef = useRef(slashMenu);
   slashMenuRef.current = slashMenu;
   const focusIndexRef = useRef(0);
-  const pendingCaretRef = useRef<{ id: string; offset: number } | null>(null);
+  const pendingCaretRef = useRef<PendingCaretIntent | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   // Stable ref so onEditingChange reference churn never fires the editing effect
@@ -918,7 +927,10 @@ export function ProjectNotebookBlock({
   onEditingChangeRef.current = onEditingChange;
   const notebookPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const posePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const poseRestoredRef = useRef(false);
+  const poseRestoreAttemptedRef = useRef(false);
+  /** User scrolled the notebook body — suppress caret-follow until explicit focus/navigation. */
+  const userControlledScrollRef = useRef(false);
+  const isProgrammaticScrollRef = useRef(false);
   const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
   const notebookEditCountRef = useRef(0);
   const selectionSnapshotRef = useRef<StoredNotebookSelection | null>(null);
@@ -1055,30 +1067,45 @@ export function ProjectNotebookBlock({
   );
 
   useEffect(() => {
-    poseRestoredRef.current = false;
+    poseRestoreAttemptedRef.current = false;
+    userControlledScrollRef.current = false;
   }, [freeSpaceSectionId, freeSpaceBoardId, objectId]);
 
   useEffect(() => {
-    if (context !== 'free-space' || !freeSpaceSectionId || !objectId || poseRestoredRef.current) return;
-    const pose = loadNotebookPose(freeSpaceSectionId, freeSpaceBoardId, objectId);
-    if (!pose) return;
-    poseRestoredRef.current = true;
+    if (context !== 'free-space' || !freeSpaceSectionId || !objectId || poseRestoreAttemptedRef.current) {
+      return;
+    }
+    if (blocks.length === 0) return;
     const sc = notebookBodyScrollRef.current;
-    if (sc && pose.scrollTop > 0) {
-      requestAnimationFrame(() => {
+    if (!sc) return;
+
+    const pose = loadNotebookPose(freeSpaceSectionId, freeSpaceBoardId, objectId);
+    poseRestoreAttemptedRef.current = true;
+
+    if (pose) {
+      userControlledScrollRef.current = false;
+      const applyScroll = () => {
+        isProgrammaticScrollRef.current = true;
         sc.scrollTop = pose.scrollTop;
-      });
+        isProgrammaticScrollRef.current = false;
+      };
+      requestAnimationFrame(() => requestAnimationFrame(applyScroll));
+      if (pose.blockId && blocks.some(b => b.id === pose.blockId)) {
+        setSurfaceFocusBlockId(pose.blockId);
+      }
     }
-    if (pose.blockId && blocks.some(b => b.id === pose.blockId)) {
-      setSurfaceFocusBlockId(pose.blockId);
-    }
-  }, [context, freeSpaceSectionId, freeSpaceBoardId, objectId, blocks]);
+  }, [context, freeSpaceSectionId, freeSpaceBoardId, objectId, blocks.length]);
 
   useEffect(() => {
     if (context !== 'free-space') return;
     const sc = notebookBodyScrollRef.current;
     if (!sc) return;
-    const onScroll = () => schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
+    const onScroll = () => {
+      if (!isProgrammaticScrollRef.current) {
+        userControlledScrollRef.current = true;
+      }
+      schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
+    };
     sc.addEventListener('scroll', onScroll, { passive: true });
     return () => sc.removeEventListener('scroll', onScroll);
   }, [context, schedulePosePersist, surfaceFocusBlockId]);
@@ -1230,9 +1257,16 @@ export function ProjectNotebookBlock({
     [getEditorRoot],
   );
 
-  const scheduleCaret = useCallback((block: Block, offset: number) => {
-    pendingCaretRef.current = { id: block.id, offset: clampCaretOffset(block, offset) };
-  }, []);
+  const scheduleCaret = useCallback(
+    (block: Block, offset: number, scroll: CaretScrollPolicy = 'never') => {
+      pendingCaretRef.current = {
+        id: block.id,
+        offset: clampCaretOffset(block, offset),
+        scroll,
+      };
+    },
+    [],
+  );
 
   const applyBlockLevel = useCallback(
     (blockId: string, level: 1 | 2 | 3 | 4 | 5) => {
@@ -1425,18 +1459,61 @@ export function ProjectNotebookBlock({
     }
     const wrap = t?.closest?.('[data-nb-surface-block]') as HTMLElement | null;
     const bid = wrap?.dataset?.blockId;
-    if (bid) setSurfaceFocusBlockId(bid);
+    if (bid) {
+      setSurfaceFocusBlockId(bid);
+    }
   }, []);
 
-  const handleSurfaceBlur = useCallback((e: ReactFocusEvent<HTMLDivElement>) => {
-    const rt = e.relatedTarget as Node | null;
-    if (rt instanceof HTMLElement) {
-      if (e.currentTarget.contains(rt)) return;
-      if (rt.closest('[data-nb-slash-menu]')) return;
-      if (rt.closest('[data-nb-typo-rail]')) return;
-    }
-    setSurfaceFocusBlockId(null);
+  const handleSurfaceBlur = useCallback(
+    (e: ReactFocusEvent<HTMLDivElement>) => {
+      const rt = e.relatedTarget as Node | null;
+      if (rt instanceof HTMLElement) {
+        if (e.currentTarget.contains(rt)) return;
+        if (rt.closest('[data-nb-slash-menu]')) return;
+        if (rt.closest('[data-nb-typo-rail]')) return;
+      }
+      pendingCaretRef.current = null;
+      if (context === 'free-space') {
+        const sc = notebookBodyScrollRef.current;
+        if (sc) schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
+      }
+      setSurfaceFocusBlockId(null);
+    },
+    [context, schedulePosePersist, surfaceFocusBlockId],
+  );
+
+  const handlePreviewActivate = useCallback((lineIndex: number) => {
+    const block = blocksRef.current[lineIndex];
+    if (!block || block.kind === 'divider' || block.kind === 'image-ref') return;
+    pendingCaretRef.current = {
+      id: block.id,
+      offset: 0,
+      scroll: 'never',
+    };
+    setSurfaceFocusBlockId(block.id);
+    setEditorMode('edit');
   }, []);
+
+  const handlePreviewMouseDown = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      const line = (e.target as HTMLElement).closest('[data-nb-preview-line]');
+      if (!line) return;
+      const idx = Number(line.getAttribute('data-nb-preview-line'));
+      if (!Number.isFinite(idx)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handlePreviewActivate(idx);
+    },
+    [handlePreviewActivate],
+  );
+
+  const previewLineActivateProps = useCallback(
+    (lineIndex: number, kind: string): { 'data-nb-preview-line'?: number } => {
+      if (kind === 'blank' || kind === 'divider' || kind === 'image-ref') return {};
+      return { 'data-nb-preview-line': lineIndex };
+    },
+    [],
+  );
 
   const blockSurfaceChrome = useCallback(
     (blockId: string): CSSProperties => {
@@ -1504,21 +1581,29 @@ export function ProjectNotebookBlock({
   }, [isMathNotebook]);
 
   const ensureNotebookBodyCaretVisible = useCallback(
-    (host: HTMLElement) => {
+    (host: HTMLElement, opts?: { force?: boolean }) => {
       const sc = notebookBodyScrollRef.current;
       if (context !== 'free-space' || !sc?.contains(host)) return;
+      if (!opts?.force && userControlledScrollRef.current) return;
       const sel = window.getSelection();
       if (!sel?.rangeCount) return;
       const r = sel.getRangeAt(0).getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return;
       const sr = sc.getBoundingClientRect();
       const pad = 28;
+      let adjusted = false;
       if (r.bottom > sr.bottom - pad) {
+        isProgrammaticScrollRef.current = true;
         sc.scrollTop += Math.max(1, r.bottom - sr.bottom + pad);
+        isProgrammaticScrollRef.current = false;
+        adjusted = true;
       } else if (r.top < sr.top + pad) {
+        isProgrammaticScrollRef.current = true;
         sc.scrollTop -= Math.max(1, sr.top + pad - r.top);
+        isProgrammaticScrollRef.current = false;
+        adjusted = true;
       }
-      schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
+      if (adjusted) schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
     },
     [context, schedulePosePersist, surfaceFocusBlockId],
   );
@@ -1538,23 +1623,39 @@ export function ProjectNotebookBlock({
     const pending = pendingCaretRef.current;
     if (!pending) return;
     const root = focusEditorRootRef.current ?? editorRootRef.current;
-    if (!root) return;
+    if (!root) {
+      pendingCaretRef.current = null;
+      return;
+    }
+    if (pending.scroll === 'force') {
+      userControlledScrollRef.current = false;
+    }
     const row = root.querySelector<HTMLElement>(
       `[data-divider-row][data-block-id="${pending.id}"]`,
     );
     if (row) {
-      row.focus();
+      row.focus({ preventScroll: true });
       pendingCaretRef.current = null;
+      if (pending.scroll !== 'never') {
+        requestAnimationFrame(() => {
+          ensureNotebookBodyCaretVisible(row, { force: pending.scroll === 'force' });
+        });
+      }
       return;
     }
     const host = root.querySelector<HTMLElement>(`[data-editable-id="${pending.id}"]`);
-    if (!host) return;
+    if (!host) {
+      pendingCaretRef.current = null;
+      return;
+    }
+    host.focus({ preventScroll: true });
     setCaretOffsetIn(host, pending.offset);
     pendingCaretRef.current = null;
+    if (pending.scroll === 'never') return;
     requestAnimationFrame(() => {
-      ensureNotebookBodyCaretVisible(host);
+      ensureNotebookBodyCaretVisible(host, { force: pending.scroll === 'force' });
     });
-  }, [blocks, ensureNotebookBodyCaretVisible]);
+  }, [blocks, editorMode, ensureNotebookBodyCaretVisible]);
 
   const applySlashCommand = useCallback(
     (blockId: string, cmd: SlashCommandId) => {
@@ -1625,7 +1726,7 @@ export function ProjectNotebookBlock({
           setMorphPulseId(blockId);
           setBlocks(next);
           pushContent({ ...content, body: serializeBlocks(next) });
-          pendingCaretRef.current = { id: pid, offset: rest.length };
+          pendingCaretRef.current = { id: pid, offset: rest.length, scroll: 'ifNeeded' };
           return;
         }
         default: {
@@ -1640,7 +1741,7 @@ export function ProjectNotebookBlock({
       setMorphPulseId(blockId);
       setBlocks(next);
       pushContent({ ...content, body: serializeBlocks(next) });
-      pendingCaretRef.current = { id: nb.id, offset: rest.length };
+      pendingCaretRef.current = { id: nb.id, offset: rest.length, scroll: 'ifNeeded' };
     },
     [content, pushContent],
   );
@@ -1649,6 +1750,7 @@ export function ProjectNotebookBlock({
     if (editorMode !== 'edit') {
       setSelectionToolbar(null);
       selectionSnapshotRef.current = null;
+      pendingCaretRef.current = null;
     }
   }, [editorMode]);
 
@@ -2371,6 +2473,7 @@ export function ProjectNotebookBlock({
         pendingCaretRef.current = {
           id: focusBlock.id,
           offset: focusBlock.text.length,
+          scroll: 'ifNeeded',
         };
       }
     },
@@ -2394,7 +2497,7 @@ export function ProjectNotebookBlock({
       const insert = snippet.endsWith(' ') ? snippet : `${snippet} `;
       const newText = blk.text.slice(0, offset) + insert + blk.text.slice(offset);
       updateBlockText(blockId, newText);
-      pendingCaretRef.current = { id: blockId, offset: offset + insert.length };
+      pendingCaretRef.current = { id: blockId, offset: offset + insert.length, scroll: 'never' };
     },
     [surfaceFocusBlockId, updateBlockText, getEditorRoot],
   );
@@ -2418,15 +2521,18 @@ export function ProjectNotebookBlock({
 
   const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
     if (block.kind === 'divider') {
-      (root.querySelector(`[data-divider-row][data-block-id="${block.id}"]`) as HTMLElement | null)?.focus();
+      (root.querySelector(`[data-divider-row][data-block-id="${block.id}"]`) as HTMLElement | null)?.focus({
+        preventScroll: true,
+      });
       return;
     }
     if (block.kind === 'image-ref') return;
     const o = clampCaretOffset(block, offset);
-    pendingCaretRef.current = { id: block.id, offset: o };
+    userControlledScrollRef.current = false;
+    pendingCaretRef.current = { id: block.id, offset: o, scroll: 'ifNeeded' };
     requestAnimationFrame(() => {
       const el = root.querySelector<HTMLElement>(`[data-editable-id="${block.id}"]`);
-      el?.focus();
+      el?.focus({ preventScroll: true });
     });
   }, []);
 
@@ -2475,7 +2581,7 @@ export function ProjectNotebookBlock({
               if (expanded) {
                 e.preventDefault();
                 updateBlockText(blockId, expanded.text);
-                pendingCaretRef.current = { id: blockId, offset: expanded.caret };
+                pendingCaretRef.current = { id: blockId, offset: expanded.caret, scroll: 'never' };
                 return;
               }
             }
@@ -2535,7 +2641,7 @@ export function ProjectNotebookBlock({
                   const next = [...prevBlocks.slice(0, i), { ...b, text: nt }, ...prevBlocks.slice(i + 1)];
                   setBlocks(next);
                   pushContent({ ...content, body: serializeBlocks(next) });
-                  pendingCaretRef.current = { id: blockId, offset: 0 };
+                  pendingCaretRef.current = { id: blockId, offset: 0, scroll: 'never' };
                 }
               }
             }
@@ -2751,7 +2857,7 @@ export function ProjectNotebookBlock({
                           : { id: block.id, kind: 'math', text: nextText };
         const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
         persist(next);
-        pendingCaretRef.current = { id: block.id, offset: offset + 1 };
+        pendingCaretRef.current = { id: block.id, offset: offset + 1, scroll: 'never' };
         return;
       }
 
@@ -2775,7 +2881,7 @@ export function ProjectNotebookBlock({
           const nb: Block = { id: block.id, kind: 'paragraph', text: '' };
           const next = [...blocks.slice(0, index), nb, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: nb.id, offset: 0 };
+          pendingCaretRef.current = { id: nb.id, offset: 0, scroll: 'force' };
           return;
         }
 
@@ -2785,7 +2891,7 @@ export function ProjectNotebookBlock({
           const fresh: Block = { id: newBlockId(), kind: 'paragraph', text: '' };
           const next = [...blocks.slice(0, index + 1), fresh, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: fresh.id, offset: 0 };
+          pendingCaretRef.current = { id: fresh.id, offset: 0, scroll: 'force' };
           return;
         }
 
@@ -2815,7 +2921,7 @@ export function ProjectNotebookBlock({
               : { id: newBlockId(), kind: 'paragraph', text: after };
           const next = [...blocks.slice(0, index), updated, nextBlock, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
+          pendingCaretRef.current = { id: nextBlock.id, offset: 0, scroll: 'force' };
           return;
         }
 
@@ -2829,7 +2935,7 @@ export function ProjectNotebookBlock({
                 ? { ...b, kind: 'callout' as const, tone: transform.tone, text: transform.body }
                 : b
             ));
-            pendingCaretRef.current = { id, offset: transform.body.length };
+            pendingCaretRef.current = { id, offset: transform.body.length, scroll: 'ifNeeded' };
             return;
           }
         }
@@ -2840,7 +2946,7 @@ export function ProjectNotebookBlock({
         const nextBlock: Block = { id: newBlockId(), kind: 'paragraph', text: after };
         const next = [...blocks.slice(0, index), updated, nextBlock, ...blocks.slice(index + 1)];
         persist(next);
-        pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
+        pendingCaretRef.current = { id: nextBlock.id, offset: 0, scroll: 'force' };
         return;
       }
 
@@ -2858,7 +2964,7 @@ export function ProjectNotebookBlock({
         const merged = mergeBlocks(block, nx);
         const next = [...blocks.slice(0, index), merged, ...blocks.slice(index + 2)];
         persist(next);
-        pendingCaretRef.current = { id: merged.id, offset: blockTextLen(block) };
+        pendingCaretRef.current = { id: merged.id, offset: blockTextLen(block), scroll: 'ifNeeded' };
         return;
       }
 
@@ -2883,6 +2989,7 @@ export function ProjectNotebookBlock({
             pendingCaretRef.current = {
               id,
               offset: offset - pattern.length + replacement.length + 1,
+              scroll: 'never',
             };
             return;
           }
@@ -2905,7 +3012,7 @@ export function ProjectNotebookBlock({
           const nextBlock: Block = { id: block.id, kind: 'paragraph', text: '' };
           const next = [...blocks.slice(0, index), nextBlock, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
+          pendingCaretRef.current = { id: nextBlock.id, offset: 0, scroll: 'force' };
           return;
         }
 
@@ -2925,7 +3032,7 @@ export function ProjectNotebookBlock({
           const nextBlock: Block = { id: block.id, kind: 'paragraph', text: '' };
           const next = [...blocks.slice(0, index), nextBlock, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: nextBlock.id, offset: 0 };
+          pendingCaretRef.current = { id: nextBlock.id, offset: 0, scroll: 'force' };
           return;
         }
 
@@ -2940,7 +3047,11 @@ export function ProjectNotebookBlock({
           const merged = mergeBlocks(prev, block);
           const next = [...blocks.slice(0, index - 1), merged, ...blocks.slice(index + 1)];
           persist(next);
-          pendingCaretRef.current = { id: merged.id, offset: prev.kind === 'image-ref' ? 0 : prev.text.length };
+          pendingCaretRef.current = {
+            id: merged.id,
+            offset: prev.kind === 'image-ref' ? 0 : prev.text.length,
+            scroll: 'ifNeeded',
+          };
         }
       }
     },
@@ -3848,7 +3959,7 @@ export function ProjectNotebookBlock({
                       const fresh: Block = { id: newBlockId(), kind: 'paragraph', text: '' };
                       const b = blocksRef.current;
                       persist([...b.slice(0, index + 1), fresh, ...b.slice(index + 1)]);
-                      pendingCaretRef.current = { id: fresh.id, offset: 0 };
+                      pendingCaretRef.current = { id: fresh.id, offset: 0, scroll: 'force' };
                       return;
                     }
                     if (ev.key === 'Backspace' || ev.key === 'Delete') {
@@ -4504,7 +4615,12 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       ) : (
-        <div role="document" aria-label="Notebook preview" style={editorSurfaceStyle}>
+        <div
+          role="document"
+          aria-label="Notebook preview"
+          style={editorSurfaceStyle}
+          onMouseDown={handlePreviewMouseDown}
+        >
           <div style={writingColumnStyle}>
           {(content.body ?? '').trim() === '' ? (
             <>
@@ -4556,6 +4672,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     fontSize: `${typeScale.l1}px`,
                     fontWeight: 700,
@@ -4579,6 +4696,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     fontSize: `${typeScale.l2}px`,
                     fontWeight: 600,
@@ -4610,6 +4728,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
@@ -4650,6 +4769,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     display: 'flex',
                     alignItems: 'baseline',
@@ -4696,6 +4816,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
@@ -4731,6 +4852,7 @@ export function ProjectNotebookBlock({
               return (
                 <blockquote
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     margin: `${typeScale.s3 + 8}px 0`,
                     paddingLeft: '22px',
@@ -4760,6 +4882,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     margin: `${typeScale.s2 + 8}px 0`,
                     display: 'flex',
@@ -4801,6 +4924,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2 + 4}px 0`,
                     paddingLeft: '18px',
@@ -4855,6 +4979,7 @@ export function ProjectNotebookBlock({
               return (
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     margin: `${prevKind === 'title' ? typeScale.s3 : typeScale.s2}px 0`,
                     padding: '15px 18px',
@@ -4943,6 +5068,7 @@ export function ProjectNotebookBlock({
                 // and <div> inside <p> is invalid HTML (triggers React warning).
                 <div
                   key={lineKey}
+                  {...previewLineActivateProps(index, line.kind)}
                   style={{
                     margin: `${paraTop}px 0 ${typeScale.s4 - 2}px`,
                     color: fine ? ink.muted : muted ? ink.secondary : ink.primary,

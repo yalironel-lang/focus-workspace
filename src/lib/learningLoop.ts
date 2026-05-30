@@ -43,11 +43,27 @@ export function learningLoopFields(content: MistakeLearningBody) {
   };
 }
 
+/** Loop is fully closed — no further closed-book attempts required. */
+export function isLearningLoopClosed(content: MistakeLearningBody): boolean {
+  if (content.loopOpen === false) return true;
+  if (content.confidence === 'mastered' && content.pendingReAttempt !== true) return true;
+  return false;
+}
+
+/**
+ * Loop needs re-entry / queue attention (failed attempt or awaiting re-attempt).
+ * Legacy mistakes with only `whatWrong` text are not active until the user engages the loop.
+ */
+export function isLearningLoopActive(content: MistakeLearningBody): boolean {
+  if (isLearningLoopClosed(content)) return false;
+  if (content.pendingReAttempt === true) return true;
+  if (content.lastAttemptOutcome === 'fail') return true;
+  return false;
+}
+
+/** @alias isLearningLoopActive */
 export function isLearningLoopOpen(content: MistakeLearningBody): boolean {
-  const f = learningLoopFields(content);
-  if (f.loopOpen === false) return false;
-  if (content.confidence === 'mastered' && !f.pendingReAttempt) return false;
-  return Boolean(content.whatWrong?.trim());
+  return isLearningLoopActive(content);
 }
 
 export function needsReAttempt(content: MistakeLearningBody): boolean {
