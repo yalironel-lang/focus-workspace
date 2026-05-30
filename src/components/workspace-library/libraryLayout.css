@@ -416,55 +416,6 @@
 
 /* ─── End spatial scene ──────────────────────────────────────────────────── */
 
-/* ─── Cinematic MC entry (dashboard) ─────────────────────────────────────── */
-
-.library-shell--mc-entry .library-top-bar {
-  margin-bottom: 16px;
-}
-
-.library-search-wrap--ghost {
-  border: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-  transition: border-color 220ms cubic-bezier(0.32, 0.72, 0, 1), width 300ms cubic-bezier(0.32, 0.72, 0, 1) !important;
-}
-
-.library-search-wrap--ghost:focus-within {
-  border-bottom-color: rgba(255, 255, 255, 0.18) !important;
-}
-
-.library-shell--mc-entry .library-main {
-  background: transparent;
-}
-
-.library-shell--mc-entry .library-sidebar-slot {
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
-}
-
-.library-grid--mc-entry {
-  position: relative;
-  border-top: none;
-  padding-top: 40px !important;
-}
-
-.library-grid--mc-entry::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 120px;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    rgba(4, 8, 16, 0.35) 55%,
-    rgba(4, 8, 16, 0.65) 100%
-  );
-}
-
 @media (prefers-reduced-motion: reduce) {
   .library-sidebar-slot,
   .library-main,

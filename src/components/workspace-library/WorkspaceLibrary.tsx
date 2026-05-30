@@ -36,11 +36,7 @@ import { InstallAppBanner } from '../install/InstallAppBanner';
 import { LIBRARY_OPEN_CREATE_FLAG } from '../../command/constants';
 import { EXPLORE_FOCUS_SECTION_TITLE, exploreFocusNavState } from '../../lib/exploreFocus';
 import { ExploreFocusCTA } from './ExploreFocusCTA';
-import { MissionControlEnvironment } from '../mission-control/MissionControlEnvironment';
-import { ContinuationSurface } from '../mission-control/ContinuationSurface';
-import { NearbyWorldOrb } from '../mission-control/NearbyWorldOrb';
 import { DashboardRecentlyDeletedModal } from '../recovery/DashboardRecentlyDeletedModal';
-import '../mission-control/missionControl.css';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -57,6 +53,19 @@ function getGreeting(): string {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const mins  = Math.floor(ms / 60_000);
+  const hours = Math.floor(ms / 3_600_000);
+  const days  = Math.floor(ms / 86_400_000);
+  if (mins  < 2)  return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  === 1) return 'yesterday';
+  return `${days}d ago`;
 }
 
 function DeleteWorkspaceDialog({
@@ -177,14 +186,6 @@ function WorkspaceLibraryView() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const { folders, addFolder, removeFolder, setSectionFolder, getFolderForSection } = useWorkspaceFolders();
   const creatingRef = useRef(false);
-  const allWorkspacesRef = useRef<HTMLDivElement>(null);
-
-  const scrollToAllWorkspaces = useCallback(() => {
-    const el = allWorkspacesRef.current;
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    el.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
 
   const [search,          setSearch]          = useState('');
   const [searchFocused,   setSearchFocused]   = useState(false);
@@ -259,9 +260,7 @@ function WorkspaceLibraryView() {
     return [...byRecency, ...rest];
   }, [sections, recentIdsOrdered]);
 
-  // Mission Control entry stage — disabled until layout is stable in production.
-  const showMcStage = false;
-  // Restore 3-screen spatial carousel (regression fix: d4cfc20 disabled this).
+  // Show 3-screen spatial stage when unfiltered and not searching
   const showSpatialScene = hasWorkspaces && filterFolder === 'all' && !search && !loading;
 
   // ── Spatial navigation — which workspace occupies the primary slot ───────────
@@ -282,11 +281,6 @@ function WorkspaceLibraryView() {
     const staged = new Set([s0?.id, s1?.id, s2?.id].filter((id): id is string => Boolean(id)));
     return { s0, s1, s2, rail: spatialOrder.filter(s => !staged.has(s.id)) };
   }, [spatialOrder, primaryIdx]);
-
-  const flankSections = useMemo(() => {
-    if (!continueWorkspace) return spatialOrder.slice(0, 2);
-    return spatialOrder.filter(s => s.id !== continueWorkspace.id).slice(0, 2);
-  }, [spatialOrder, continueWorkspace]);
 
   const filterChips = useMemo(() => [
     { id: 'all' as const, label: 'All' },
@@ -368,35 +362,20 @@ function WorkspaceLibraryView() {
   const deadlinesFor = useCallback((id: string) => deadlines.filter(d => d.section_id === id), [deadlines]);
 
   // Asymmetric grid: first card wide (2fr), remainder fills normally
-  const gridAtmospheric = showMcStage && filterFolder === 'all' && !search;
-
   const renderGrid = (list: SectionWithProgress[], baseDelay = 0) => {
     if (!list.length) return null;
     const [first, ...rest] = list;
     const asymmetric = !sidebar.isMobile && rest.length > 0;
     const minCard = sidebar.isMobile ? 'min(100%, 1fr)' : 'minmax(255px, 1fr)';
-    const density = gridAtmospheric ? 'light' as const : 'full' as const;
-    const cardProps = (s: SectionWithProgress, wide?: boolean) => ({
-      section: s,
-      deadlines: deadlinesFor(s.id),
-      tokens,
-      folders,
-      folderId: getFolderForSection(s.id),
-      onFolderChange: setSectionFolder,
-      onDelete: setDeleteTarget,
-      openedAt: openedAt(s.id) ?? undefined,
-      atmosphericDensity: density,
-      wide,
-    });
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: asymmetric ? '2fr 1fr' : '1fr', gap: 14 }}>
           <div style={{ animation: `libFadeUp 0.38s ${baseDelay}s ease both` }}>
-            <SpatialLibraryCard {...cardProps(first, true)} />
+            <SpatialLibraryCard section={first} deadlines={deadlinesFor(first.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(first.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(first.id) ?? undefined} wide />
           </div>
           {rest[0] && (
             <div style={{ animation: `libFadeUp 0.38s ${baseDelay + 0.05}s ease both` }}>
-              <SpatialLibraryCard {...cardProps(rest[0])} />
+              <SpatialLibraryCard section={rest[0]} deadlines={deadlinesFor(rest[0].id)} tokens={tokens} folders={folders} folderId={getFolderForSection(rest[0].id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(rest[0].id) ?? undefined} />
             </div>
           )}
         </div>
@@ -404,7 +383,7 @@ function WorkspaceLibraryView() {
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, ${minCard})`, gap: 14 }}>
             {rest.slice(1).map((s, i) => (
               <div key={s.id} style={{ animation: `libFadeUp 0.36s ${baseDelay + 0.10 + i * 0.04}s ease both` }}>
-                <SpatialLibraryCard {...cardProps(s)} />
+                <SpatialLibraryCard section={s} deadlines={deadlinesFor(s.id)} tokens={tokens} folders={folders} folderId={getFolderForSection(s.id)} onFolderChange={setSectionFolder} onDelete={setDeleteTarget} openedAt={openedAt(s.id) ?? undefined} />
               </div>
             ))}
           </div>
@@ -423,7 +402,7 @@ function WorkspaceLibraryView() {
   return (
     <>
       <div
-        className={`library-shell${showMcStage ? ' library-shell--mc-entry' : ''}`}
+        className="library-shell"
         data-sidebar-collapsed={sidebar.railCollapsed ? 'true' : 'false'}
         style={{
         minHeight: '100vh', display: 'flex',
@@ -436,7 +415,7 @@ function WorkspaceLibraryView() {
       }}>
 
 
-        <LibrarySpatialAtmosphere accent={sA} featured={showMcStage && !!continueWorkspace} mcEntry={showMcStage} homeTone={homeTone} />
+        <LibrarySpatialAtmosphere accent={sA} featured={!!continueWorkspace && !search} homeTone={homeTone} />
         <LibrarySidebar
           tokens={tokens}
           accent={sA}
@@ -480,32 +459,34 @@ function WorkspaceLibraryView() {
               className="library-top-bar"
               style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: showMcStage ? 12 : 28, position: 'relative', zIndex: 2,
+              marginBottom: 28, position: 'relative', zIndex: 2,
               animation: 'libFadeIn 0.5s 0.05s ease both',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {sidebar.isMobile && (
                   <LibraryMobileMenuButton accent={sA} onOpen={sidebar.openMobile} />
                 )}
-                <span data-guide-home="greeting" style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.02em', color: 'rgba(255,255,255,0.24)' }}>
-                  {getGreeting()}{displayName ? `, ${displayName}` : ''}
+                <span data-guide-home="greeting" style={{ fontSize: 9.5, fontWeight: 900, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.20)' }}>
+                  {getGreeting()}{displayName ? `, ${displayName}` : ''} ·{' '}
+                  <span style={{ color: sA, transition: 'color 1.2s ease' }}>
+                    {sections.length > 0 ? `${sections.length} study space${sections.length > 1 ? 's' : ''}` : 'calm study space'}
+                  </span>
                 </span>
                 <HomeGuideTrigger onClick={() => setGuideOpen(true)} accent={sA} />
               </div>
 
               {/* Search */}
               <div
-                className={`library-search-wrap${showMcStage ? ' library-search-wrap--ghost' : ''}`}
-                style={showMcStage ? {
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  height: 36, padding: '0 4px 0 0',
-                  width: sidebar.isMobile ? '100%' : searchFocused ? 280 : 140,
-                } : {
+                className="library-search-wrap"
+                style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 height: 40, padding: '0 12px',
                 borderRadius: 12,
                 border: `1px solid ${searchFocused ? `${sA}55` : 'rgba(255,255,255,0.090)'}`,
-                background: searchFocused ? 'rgba(12,16,28,0.92)' : 'rgba(8,12,22,0.78)',
+                background: searchFocused
+                  ? 'rgba(255,255,255,0.07)'
+                  : 'linear-gradient(145deg, rgba(255,255,255,0.048), rgba(255,255,255,0.022))',
+                backdropFilter: 'blur(20px) saturate(1.5)', WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
                 boxShadow: searchFocused
                   ? `0 0 0 3px ${sA}12, 0 8px 28px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.10)`
                   : 'inset 0 1px 0 rgba(255,255,255,0.08)',
@@ -528,6 +509,45 @@ function WorkspaceLibraryView() {
                 )}
               </div>
             </div>
+
+            {/* RE-ENTRY TRACE — a mark left by the last session, not a component */}
+            {continueWorkspace && !search && (() => {
+              const ts = openedAt(continueWorkspace.id);
+              return (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/section/${continueWorkspace.id}`)}
+                  aria-label={`Return to ${continueWorkspace.title}`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 11,
+                    background: 'none', border: 'none', padding: '2px 0',
+                    cursor: 'pointer', textAlign: 'left',
+                    marginBottom: 32,
+                    transition: 'filter 0.2s ease',
+                    animation: 'libFadeIn 0.5s 0.12s ease both',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.22)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.filter = 'none'; }}
+                >
+                  {/* The thread — a vertical accent mark, not a border */}
+                  <div style={{
+                    width: 2, height: 28, borderRadius: 2, flexShrink: 0,
+                    background: `linear-gradient(180deg, ${sA}cc 0%, ${sA}44 60%, transparent 100%)`,
+                    transition: 'background 1.2s ease',
+                  }} />
+                  <div>
+                    <span style={{ fontSize: 12.5, fontWeight: 450, color: 'rgba(255,255,255,0.46)', letterSpacing: '-0.01em' }}>
+                      ↩ {continueWorkspace.title}
+                    </span>
+                    {ts && (
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.22)', marginLeft: 8 }}>
+                        · {relativeTime(ts)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })()}
 
             {/* EMPTY STATE HERO */}
             {!hasWorkspaces && libraryReady && !error && (
@@ -601,79 +621,13 @@ function WorkspaceLibraryView() {
 
           </div>
 
-          {/* ═══════════════════════════════════════════════════════════════
-              MISSION CONTROL ENTRY — continuation monument + living worlds
-          ═══════════════════════════════════════════════════════════════ */}
-          {showMcStage && continueWorkspace && (
-            <MissionControlEnvironment accent={sA} className="mc-environment--entry" interactive>
-              <div className="library-page-pad" style={{ paddingTop: 4 }}>
-                <div className="mc-stage">
-                  <div className="mc-stage__hero">
-                    <ContinuationSurface
-                      title={continueWorkspace.title}
-                      icon={getWorkspaceCustomization(continueWorkspace.id).icon}
-                      openedAt={openedAt(continueWorkspace.id) ?? null}
-                      accent={sA}
-                      onResume={() => navigate(`/section/${continueWorkspace.id}`)}
-                    />
-                  </div>
-                  {flankSections.length > 0 && (
-                    <div className="mc-stage__flank">
-                      <div className="mc-nearby-plinth">
-                        <span className="mc-flank-label">Other workspaces</span>
-                        {flankSections.map((s, i) => (
-                          <NearbyWorldOrb
-                            key={s.id}
-                            section={s}
-                            staggerIndex={i}
-                            openedAt={openedAt(s.id) ?? undefined}
-                            onOpen={() => navigate(`/section/${s.id}`)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {sections.length > 1 + flankSections.length && (
-                    <button
-                      type="button"
-                      className="mc-view-all"
-                      onClick={scrollToAllWorkspaces}
-                    >
-                      View all workspaces
-                      <ArrowRight style={{ width: 14, height: 14, opacity: 0.7 }} strokeWidth={2} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </MissionControlEnvironment>
-          )}
-
-          {showMcStage && !continueWorkspace && hasWorkspaces && (
-            <MissionControlEnvironment accent={sA} className="mc-environment--entry" interactive>
-              <div className="library-page-pad" style={{ paddingTop: 8, paddingBottom: 48 }}>
-                <div className="mc-stage">
-                  <div className="mc-nearby-plinth">
-                    {spatialOrder.slice(0, 3).map(s => (
-                      <NearbyWorldOrb
-                        key={s.id}
-                        section={s}
-                        openedAt={openedAt(s.id) ?? undefined}
-                        onOpen={() => navigate(`/section/${s.id}`)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </MissionControlEnvironment>
-          )}
-
-          {hasWorkspaces && !showMcStage && (
+          {hasWorkspaces && (
             <div className="library-page-pad" style={{ paddingTop: 10, paddingBottom: 4, flexShrink: 0 }}>
               <InstallAppBanner tokens={tokens} compact />
             </div>
           )}
 
-          {/* COMMAND STRIP — filters always available when workspaces exist */}
+          {/* COMMAND STRIP */}
           {hasWorkspaces && (
             <div
               className="library-command-strip library-page-pad"
@@ -802,7 +756,9 @@ function WorkspaceLibraryView() {
             </div>
           )}
 
-          {/* Legacy spatial carousel — disabled; grid fallback when filtering/searching */}
+          {/* ═══════════════════════════════════════════════════════════════
+              SPATIAL SCENE — 3-screen perspective stage
+          ═══════════════════════════════════════════════════════════════ */}
           {showSpatialScene && (() => {
             const { s0, s1, s2, rail } = spatialSlots;
             const spatialLen = spatialOrder.length;
@@ -935,18 +891,13 @@ function WorkspaceLibraryView() {
             );
           })()}
 
-          {/* WORKSPACE GRID — full library (always below MC entry preview) */}
-          {hasWorkspaces && !showSpatialScene && (
+          {/* WORKSPACE GRID — filtered / search / loading fallback */}
+          {!showSpatialScene && (
             <div
-              ref={allWorkspacesRef}
-              id="library-all-workspaces"
-              className={`library-page-pad${showMcStage ? ' library-grid--mc-entry' : ''}`}
+              className="library-page-pad"
               style={{
-              flex: 1, overflowY: 'auto', overflowX: 'hidden',
-              paddingTop: showMcStage ? 28 : 18,
-              paddingBottom: 80,
-              position: 'relative',
-              maskImage: showMcStage ? 'none' : 'linear-gradient(180deg, black 0%, black 90%, transparent 100%)',
+              flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingTop: 18, paddingBottom: 80, position: 'relative',
+              maskImage: 'linear-gradient(180deg, black 0%, black 90%, transparent 100%)',
             }}>
               {hasWorkspaces && (
                 <div style={{
@@ -967,13 +918,7 @@ function WorkspaceLibraryView() {
                     <>
                       <div style={{ marginBottom: 14 }}>
                         <h2 style={{ fontSize: 9, fontWeight: 920, letterSpacing: '0.26em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)', margin: 0 }}>
-                          {showMcStage && filterFolder === 'all' && !search
-                            ? 'All workspaces'
-                            : filterFolder === 'all'
-                              ? 'Your workspaces'
-                              : filterFolder === 'unfiled'
-                                ? 'Unfiled'
-                                : (folders.find(f => f.id === filterFolder)?.name ?? 'Workspaces')}
+                          {filterFolder === 'all' ? 'Your workspaces' : filterFolder === 'unfiled' ? 'Unfiled' : (folders.find(f => f.id === filterFolder)?.name ?? 'Workspaces')}
                         </h2>
                       </div>
 
@@ -1031,7 +976,6 @@ function WorkspaceLibraryView() {
           onClose={() => setGuideOpen(false)}
           accent={sA}
         />
-
         <DashboardRecentlyDeletedModal
           open={recentlyDeletedOpen}
           onClose={() => setRecentlyDeletedOpen(false)}

@@ -5,13 +5,11 @@ interface Props {
   accent: string;
   /** Featured workspace visible — strengthens hero monument + spotlight */
   featured?: boolean;
-  /** Cinematic MC entry — soften competing stage light, align spotlight */
-  mcEntry?: boolean;
   /** Living background preset tint for home continuity */
   homeTone?: LibraryHomeTone | null;
 }
 
-export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = false, homeTone }: Props) {
+export function LibrarySpatialAtmosphere({ accent, featured = false, homeTone }: Props) {
   const spatial = useLibrarySpatial();
   const far = spatialParallaxOffset(spatial, 0.35);
   const mid = spatialParallaxOffset(spatial, 0.55);
@@ -27,9 +25,8 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = f
   const transformEase = 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)';
   const bgEase = 'background 1.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 1.2s ease';
 
-  const heroSpotX = spatial.focusRegion === 'field' ? focus.left : (mcEntry ? '48%' : '28%');
-  const heroSpotY = spatial.focusRegion === 'field' ? focus.top : (mcEntry ? '40%' : '34%');
-  const goldMul = mcEntry ? 0.52 : 1;
+  const heroSpotX = spatial.focusRegion === 'field' ? focus.left : '28%';
+  const heroSpotY = spatial.focusRegion === 'field' ? focus.top : '34%';
   const env = homeTone?.blend ?? 0;
   const envGlow1 = homeTone?.glow1 ?? 'transparent';
   const envGlow2 = homeTone?.glow2 ?? 'transparent';
@@ -67,13 +64,13 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = f
             </radialGradient>
             {/* Central warm light shaft — inner beam */}
             <linearGradient id="libArchShaftWarm" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.12" />
+              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.26" />
               <stop offset="100%" stopColor="#ffd580" stopOpacity="0" />
             </linearGradient>
             {/* Wide stage cone — theatrical spotlight, warm amber */}
             <linearGradient id="libStageLight" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.14" />
-              <stop offset="60%" stopColor="#ffd580" stopOpacity="0.04" />
+              <stop offset="0%" stopColor="#ffd580" stopOpacity="0.28" />
+              <stop offset="60%" stopColor="#ffd580" stopOpacity="0.08" />
               <stop offset="100%" stopColor="#ffd580" stopOpacity="0" />
             </linearGradient>
             {/* Side cool shaft — teal flanks */}
@@ -112,7 +109,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = f
           {/* 3. Ceiling light panel — warm glow strip */}
           <rect x="460" y="80" width="520" height="120" fill={`url(#libArchCeilLight)`} />
           {/* Gold slit at base of panel — clearly visible */}
-          <rect x="510" y="196" width="420" height="2" fill="#ffd580" fillOpacity={0.72 * goldMul} rx="1" />
+          <rect x="510" y="196" width="420" height="2" fill="#ffd580" fillOpacity="0.72" rx="1" />
 
           {/* 4. Left near-wall mass */}
           <polygon points="0,0 200,0 160,900 0,900" fill="#020610" />
@@ -161,7 +158,7 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = f
             fill="url(#libFloorGrad)"
           />
           {/* Warm front-floor highlight — stage light reaching camera-near floor */}
-          <ellipse cx="720" cy="852" rx="310" ry="22" fill="#ffd580" fillOpacity={0.048 * goldMul} />
+          <ellipse cx="720" cy="852" rx="310" ry="22" fill="#ffd580" fillOpacity="0.048" />
           {/* Floor horizon seam — strong separation line */}
           <line x1="0" y1="720" x2="1440" y2="720" stroke={accent} strokeOpacity="0.28" strokeWidth="1.5" />
           {/* Floor depth lines — perspective */}
@@ -170,8 +167,8 @@ export function LibrarySpatialAtmosphere({ accent, featured = false, mcEntry = f
           <line x1="880" y1="720" x2="1280" y2="900" stroke="rgba(80,140,240,0.08)" strokeWidth="1" />
 
           {/* Floor specular — warm reflection pool under the stage cone */}
-          <ellipse cx="720" cy="740" rx="180" ry="28" fill="#ffd580" fillOpacity={0.10 * goldMul} />
-          <ellipse cx="720" cy="740" rx="90" ry="14" fill="#ffd580" fillOpacity={0.14 * goldMul} />
+          <ellipse cx="720" cy="740" rx="180" ry="28" fill="#ffd580" fillOpacity="0.10" />
+          <ellipse cx="720" cy="740" rx="90" ry="14" fill="#ffd580" fillOpacity="0.14" />
 
           {/* 12. Light shafts — wide stage cone + tight inner beam */}
           {/* Wide cone: theatrical spotlight illuminating the main stage */}

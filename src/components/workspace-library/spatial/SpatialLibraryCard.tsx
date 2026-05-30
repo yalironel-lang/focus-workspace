@@ -172,8 +172,6 @@ export interface SpatialLibraryCardProps {
   openedAt?: string;
   /** Spatial scene variant — 'primary' enlarges cap + text; 'secondary' compacts */
   spatialVariant?: 'primary' | 'secondary';
-  /** Lighter glass on MC entry grid (performance + less visual noise) */
-  atmosphericDensity?: 'full' | 'light';
 }
 
 export function SpatialLibraryCard({
@@ -187,7 +185,6 @@ export function SpatialLibraryCard({
   wide,
   openedAt,
   spatialVariant,
-  atmosphericDensity = 'full',
 }: SpatialLibraryCardProps) {
   const reducedMotion = usePrefersReducedMotion();
   const { setFocusRegion } = useLibrarySpatial();
@@ -296,18 +293,8 @@ export function SpatialLibraryCard({
         border: `1px solid ${hovered ? borderHover : borderRest}`,
         opacity: cardOpacity,
         background: cardBg,
-        backdropFilter:
-          atmosphericDensity === 'light'
-            ? 'blur(6px) saturate(1.05)'
-            : isPrimary
-              ? 'blur(4px) saturate(1.1)'
-              : 'blur(18px) saturate(1.35)',
-        WebkitBackdropFilter:
-          atmosphericDensity === 'light'
-            ? 'blur(6px) saturate(1.05)'
-            : isPrimary
-              ? 'blur(4px) saturate(1.1)'
-              : 'blur(18px) saturate(1.35)',
+        backdropFilter: isPrimary ? 'blur(4px) saturate(1.1)' : 'blur(18px) saturate(1.35)',
+        WebkitBackdropFilter: isPrimary ? 'blur(4px) saturate(1.1)' : 'blur(18px) saturate(1.35)',
         boxShadow: hovered ? cardShadowHover : cardShadowRest,
         cursor: 'pointer',
         overflow: 'hidden',
