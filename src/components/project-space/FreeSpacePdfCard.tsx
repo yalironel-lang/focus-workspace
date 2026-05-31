@@ -18,6 +18,9 @@ interface FreeSpacePdfCardProps {
   suspendViewer?: boolean;
   linkedNotebookTitle?: string | null;
   relatedMistakeCount?: number;
+  /** Phase 0 Course Trap — fires once when PDF viewer becomes ready. */
+  onPdfViewerReady?: (payload: { objectId: string; fileName: string; title: string }) => void;
+  pdfTitle?: string;
 }
 
 export function FreeSpacePdfCard({
@@ -30,6 +33,8 @@ export function FreeSpacePdfCard({
   suspendViewer = false,
   linkedNotebookTitle,
   relatedMistakeCount = 0,
+  onPdfViewerReady,
+  pdfTitle = '',
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
@@ -99,6 +104,17 @@ export function FreeSpacePdfCard({
       if (url) URL.revokeObjectURL(url);
     };
   }, [sectionId, objectId, content.fileName, content.fileSize, revokeIf]);
+
+  const viewerReadyFiredRef = useRef(false);
+  useEffect(() => {
+    if (loadState !== 'ready' || !content.fileName || viewerReadyFiredRef.current) return;
+    viewerReadyFiredRef.current = true;
+    onPdfViewerReady?.({
+      objectId,
+      fileName: content.fileName,
+      title: pdfTitle || content.fileName,
+    });
+  }, [loadState, content.fileName, objectId, pdfTitle, onPdfViewerReady]);
 
   const applyFile = useCallback(
     async (file: File) => {

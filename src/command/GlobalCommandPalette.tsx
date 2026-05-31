@@ -54,6 +54,8 @@ import {
 import { useAIAvailability } from '../hooks/useAIAvailability';
 import { LIBRARY_OPEN_CREATE_FLAG } from './constants';
 import type { CommandItem } from './types';
+import { exportCourseTrapMetricsToClipboard } from '../lib/courseTrap/courseTrapPrototypeMetrics';
+import { isCourseTrapPrototypeEnabled } from '../lib/courseTrap/courseTrapPrototypeConfig';
 
 function Kbd({ children }: { children: string }) {
   return (
@@ -196,6 +198,26 @@ export function GlobalCommandPalette() {
         setWorkspaceRecoveryOpen(true);
       },
     });
+
+    if (isCourseTrapPrototypeEnabled()) {
+      list.push({
+        id: 'course-trap-export-metrics',
+        group: 'recovery',
+        groupLabel: 'Recovery',
+        label: 'Export Impulse Round metrics',
+        subtitle: 'Copy V0 validation events JSON to clipboard',
+        keywords: ['course trap', 'metrics', 'prototype', 'validation', 'mlx'],
+        icon: ClipboardList,
+        priority: 5.36,
+        run: () => {
+          closePalette();
+          void exportCourseTrapMetricsToClipboard().then(ok => {
+            if (ok) toast.success('Impulse Round metrics copied to clipboard');
+            else toast.error('Could not copy metrics');
+          });
+        },
+      });
+    }
 
     const fmSnap = getFocusModeHandlersSnapshot();
     const fmActive = fmSnap?.getMode() ?? null;

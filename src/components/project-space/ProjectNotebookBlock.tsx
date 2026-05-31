@@ -35,7 +35,16 @@ import {
   textLikelyHasPlainMath,
   type MathTemplateId,
 } from '../../lib/mathInputAssistant';
-import { isEmptyMathStarterBody, MATH_CALCULUS_NOTEBOOK_SEED } from '../../lib/mathNotebookSeed';
+import {
+  isEmptyMathStarterBody,
+  isMathNotebookStarterContent,
+  MATH_CALCULUS_NOTEBOOK_SEED,
+} from '../../lib/mathNotebookSeed';
+import type { NotebookMode } from '../../hooks/useSectionFreeSpaceObjects';
+import {
+  getMathNotebookDiscoverabilityLabel,
+  NOTEBOOK_MODE_OPTIONS,
+} from '../../lib/notebookModeLabels';
 import {
   getMathSlashFiltered,
   MATH_SLASH_TEMPLATES,
@@ -839,6 +848,125 @@ function NotebookBodyScroll({
   );
 }
 
+function MathNotebookQuickRefStrip({ prominent }: { prominent?: boolean }) {
+  const [hovered, setHovered] = useState(false);
+  const ghosted = !prominent && !hovered;
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '14px',
+        padding: '5px 18px 6px',
+        flexWrap: 'wrap',
+        borderBottom: '1px solid rgba(129,140,248,0.09)',
+        flexShrink: 0,
+        opacity: ghosted ? 0.12 : 1,
+        transition: 'opacity 0.25s ease',
+      }}
+    >
+      <span style={{
+        fontSize: 9.5, color: 'rgba(129,140,248,0.38)',
+        letterSpacing: '0.13em', textTransform: 'uppercase',
+        flexShrink: 0, userSelect: 'none',
+      }}>{prominent ? 'Get started' : 'Quick ref'}</span>
+      {([
+        { key: '=>', label: 'derivation step' },
+        { key: '/', label: 'commands' },
+        { key: 'int·Tab', label: 'integral' },
+        { key: 'lim·Tab', label: 'limit' },
+        { key: '/math', label: 'formula block' },
+      ] as const).map(({ key, label }) => (
+        <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          <kbd style={{
+            background: 'rgba(129,140,248,0.07)',
+            border: '1px solid rgba(129,140,248,0.16)',
+            borderRadius: 4, padding: '1px 5px',
+            fontSize: 10, fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+            color: 'rgba(129,140,248,0.70)', fontWeight: 500, letterSpacing: 0,
+          }}>{key}</kbd>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function MathNotebookStartGuide() {
+  return (
+    <div
+      style={{
+        margin: '0 0 18px',
+        padding: '14px 16px',
+        borderRadius: 12,
+        border: '1px solid rgba(129,140,248,0.22)',
+        background: 'linear-gradient(135deg, rgba(129,140,248,0.08), rgba(99,102,241,0.04))',
+      }}
+    >
+      <p style={{
+        margin: '0 0 8px', fontSize: 11, fontWeight: 650, letterSpacing: '0.1em',
+        textTransform: 'uppercase', color: 'rgba(129,140,248,0.75)',
+      }}>
+        Math in this notebook
+      </p>
+      <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'rgba(255,248,235,0.62)' }}>
+        Use the symbol bar above, or type <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>/</kbd> for
+        slash commands. Start a derivation with <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>=&gt;</kbd>,
+        add a formula with <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>/math</kbd>, and press Tab
+        after <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>int</kbd> or <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>lim</kbd> for templates.
+      </p>
+    </div>
+  );
+}
+
+function NotebookModeSelect({
+  mode,
+  paperStyle,
+  body,
+  onChange,
+}: {
+  mode: NotebookMode;
+  paperStyle: 'blank' | 'ruled' | 'grid';
+  body: string;
+  onChange: (patch: { notebookMode: NotebookMode; paperStyle?: 'blank' | 'ruled' | 'grid'; body?: string }) => void;
+}) {
+  return (
+    <select
+      value={mode}
+      title="Notebook mode"
+      aria-label="Notebook mode"
+      onChange={e => {
+        const next = e.target.value as NotebookMode;
+        onChange({
+          notebookMode: next,
+          ...(next === 'math' && paperStyle === 'ruled' ? { paperStyle: 'grid' as const } : {}),
+          ...(next === 'math' && isEmptyMathStarterBody(body) ? { body: MATH_CALCULUS_NOTEBOOK_SEED } : {}),
+        });
+      }}
+      style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 6,
+        color: mode === 'math' || mode === 'math-workspace' ? '#a5b4fc' : 'rgba(255,248,235,0.55)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        padding: '3px 6px',
+        cursor: 'pointer',
+        maxWidth: 108,
+      }}
+    >
+      {NOTEBOOK_MODE_OPTIONS.map(opt => (
+        <option key={opt.value} value={opt.value} style={{ color: '#1c1917' }}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 interface Props {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -1326,6 +1454,12 @@ export function ProjectNotebookBlock({
   const isPaperSurface = notebookSurface === 'paper';
   const notebookMode = content.notebookMode ?? 'normal';
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
+  const mathDiscoverabilityLabel = getMathNotebookDiscoverabilityLabel(notebookMode);
+  const showMathStartGuide =
+    isMathNotebook &&
+    editorMode === 'edit' &&
+    !isFocusModeOpen &&
+    isMathNotebookStarterContent(content.body ?? '');
 
   const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 38px';
 
@@ -3421,6 +3555,27 @@ export function ProjectNotebookBlock({
               }}
             >{content.icon ?? '◈'}</button>
 
+            {context === 'free-space' && mathDiscoverabilityLabel ? (
+              <span
+                title="This notebook supports formulas, steps, and derivations"
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 650,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: 'rgba(129,140,248,0.55)',
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(129,140,248,0.2)',
+                  background: 'rgba(129,140,248,0.06)',
+                  flexShrink: 0,
+                  userSelect: 'none',
+                }}
+              >
+                {mathDiscoverabilityLabel}
+              </span>
+            ) : null}
+
             <div
               contentEditable
               suppressContentEditableWarning
@@ -3590,48 +3745,12 @@ export function ProjectNotebookBlock({
               }}
             >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
           )}
-          {notebookMode === 'math-workspace' ? (
-            /* Notebook identity label — readable but ambient, not a control */
-            <span
-              title="Notebook — solving mode"
-              style={{
-                fontSize: 10, fontWeight: 600, letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                color: '#818cf8', opacity: 0.42, padding: '3px 5px',
-                userSelect: 'none',
-              }}
-            >∑ Zone</span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
-                  onChange({
-                    ...content,
-                    notebookMode: 'math',
-                    paperStyle: 'grid',
-                    body: MATH_CALCULUS_NOTEBOOK_SEED,
-                  });
-                  return;
-                }
-                const nextMode = notebookMode === 'math' ? 'normal' : 'math';
-                onChange({
-                  ...content,
-                  notebookMode: nextMode,
-                  ...(nextMode === 'math' && paperStyle === 'ruled'
-                    ? { paperStyle: 'grid' as const }
-                    : {}),
-                });
-              }}
-              title={notebookMode === 'math' ? 'Notebook mode' : 'Equation mode'}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
-                borderRadius: 4, color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.28)',
-                fontWeight: notebookMode === 'math' ? 600 : 400,
-                fontSize: 13, transition: 'color 0.15s',
-              }}
-            >√</button>
-          )}
+          <NotebookModeSelect
+            mode={notebookMode}
+            paperStyle={paperStyle}
+            body={content.body ?? ''}
+            onChange={patch => onChange({ ...content, ...patch })}
+          />
           {notebookMode !== 'math-workspace' && (
             <button
               type="button"
@@ -3825,48 +3944,9 @@ export function ProjectNotebookBlock({
           )
         : null}
 
-      {/* Math Zone command reference strip — ghosted at rest, fully visible on hover */}
-      {notebookMode === 'math-workspace' && (
-        <div
-          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.opacity = '1'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.opacity = '0.12'; }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '14px',
-            padding: '5px 18px 6px',
-            flexWrap: 'wrap',
-            borderBottom: '1px solid rgba(129,140,248,0.09)',
-            flexShrink: 0,
-            opacity: 0.12,
-            transition: 'opacity 0.25s ease',
-          }}
-        >
-          <span style={{
-            fontSize: 9.5, color: 'rgba(129,140,248,0.38)',
-            letterSpacing: '0.13em', textTransform: 'uppercase',
-            flexShrink: 0, userSelect: 'none',
-          }}>Quick ref</span>
-          {([
-            { key: '=>', label: 'step' },
-            { key: '/', label: 'commands' },
-            { key: 'int·Tab', label: 'integral' },
-            { key: 'lim·Tab', label: 'limit' },
-            { key: '/math', label: 'formula' },
-          ] as const).map(({ key, label }) => (
-            <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-              <kbd style={{
-                background: 'rgba(129,140,248,0.07)',
-                border: '1px solid rgba(129,140,248,0.16)',
-                borderRadius: 4, padding: '1px 5px',
-                fontSize: 10, fontFamily: 'ui-monospace, SFMono-Regular, monospace',
-                color: 'rgba(129,140,248,0.70)', fontWeight: 500, letterSpacing: 0,
-              }}>{key}</kbd>
-              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{label}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {isMathNotebook ? (
+        <MathNotebookQuickRefStrip prominent={showMathStartGuide} />
+      ) : null}
 
       <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
       <div
@@ -3904,7 +3984,7 @@ export function ProjectNotebookBlock({
               <div
                 style={{
                   opacity: notebookMode === 'math-workspace'
-                    ? (mathToolbarHovered ? 1 : 0.15)
+                    ? (mathToolbarHovered ? 1 : showMathStartGuide ? 0.92 : 0.15)
                     : 1,
                   transition: 'opacity 0.22s ease',
                 }}
@@ -3918,6 +3998,7 @@ export function ProjectNotebookBlock({
                   onApplyTemplate={applyMathTemplate}
                 />
               </div>
+              {showMathStartGuide ? <MathNotebookStartGuide /> : null}
             </>
           ) : null}
           {blocks.map((block, index) => {
@@ -5252,39 +5333,12 @@ export function ProjectNotebookBlock({
                   }}
                 >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
               )}
-              {/* Math mode indicator:
-                  math-workspace → ambient ∑ label (not a button — mode must not be changed here)
-                  math           → √ toggle to switch back to normal
-                  normal         → √ toggle to enable math */}
-              {notebookMode === 'math-workspace' ? (
-                <span style={{
-                  fontSize: 10, fontWeight: 600, letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: '#818cf8', opacity: 0.50, padding: '4px 8px',
-                  userSelect: 'none',
-                }}>∑ Zone</span>
-              ) : (
-                <button
-                  type="button"
-                  title={notebookMode === 'math' ? 'Normal mode' : 'Math mode'}
-                  onClick={() => {
-                    if (notebookMode !== 'math' && isEmptyMathStarterBody(content.body ?? '')) {
-                      onChange({ ...content, notebookMode: 'math', paperStyle: 'grid', body: MATH_CALCULUS_NOTEBOOK_SEED });
-                      return;
-                    }
-                    const nextMode = notebookMode === 'math' ? 'normal' : 'math';
-                    onChange({
-                      ...content, notebookMode: nextMode,
-                      ...(nextMode === 'math' && paperStyle === 'ruled' ? { paperStyle: 'grid' as const } : {}),
-                    });
-                  }}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-                    color: notebookMode === 'math' ? '#818cf8' : 'rgba(255,248,235,0.80)',
-                    fontSize: 14, fontWeight: notebookMode === 'math' ? 600 : 400,
-                  }}
-                >√</button>
-              )}
+              <NotebookModeSelect
+                mode={notebookMode}
+                paperStyle={paperStyle}
+                body={content.body ?? ''}
+                onChange={patch => onChange({ ...content, ...patch })}
+              />
 
               {/* Paper style cycle */}
               <button
@@ -5312,7 +5366,7 @@ export function ProjectNotebookBlock({
                 }}
               >×</button>
             </div>
-            {/* Title: shown in spatial fullscreen except math-workspace (its ∑ Zone label suffices) */}
+            {/* Title: hidden in derivation fullscreen — mode badge carries identity */}
             {!isPaperSurface && notebookMode !== 'math-workspace' ? (
               <h1 style={{
                 fontFamily: 'Georgia, serif', fontSize: 32, fontWeight: 400,
@@ -5330,13 +5384,13 @@ export function ProjectNotebookBlock({
                 {content.subtitle}
               </p>
             )}
-            {isMathNotebook && (
+            {mathDiscoverabilityLabel ? (
               <p style={{
                 fontSize: 10, color: 'rgba(129,140,248,0.55)',
                 letterSpacing: '0.12em', textTransform: 'uppercase',
                 marginBottom: 20,
-              }}>{notebookMode === 'math-workspace' ? '∑ Notebook' : '∑ Equation mode'}</p>
-            )}
+              }}>{mathDiscoverabilityLabel}</p>
+            ) : null}
             {renderFocusModeBlocks()}
             <div style={{
               marginTop: 48, paddingTop: 16,

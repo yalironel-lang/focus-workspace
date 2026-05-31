@@ -47,6 +47,8 @@ interface Props {
   onCreateNotebookRecall?: (sourceObjectId: string, prompt: string) => void;
   /** Start closed-book learning attempt for this object. */
   onStartLearningAttempt?: (objectId: string) => void;
+  /** Phase 0 Course Trap — PDF viewer ready hook. */
+  onPdfViewerReady?: (payload: { objectId: string; fileName: string; title: string }) => void;
 }
 
 function copyText(text: string): Promise<void> {
@@ -126,6 +128,7 @@ function ProjectSpaceObjectRendererInner({
   onRequestSelectObject,
   onCreateNotebookRecall,
   onStartLearningAttempt,
+  onPdfViewerReady,
 }: Props) {
   useEffect(() => {
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
@@ -412,6 +415,8 @@ function ProjectSpaceObjectRendererInner({
             suspendViewer={renderPolicy.suspendHeavyContent}
             linkedNotebookTitle={notebook?.title ?? null}
             relatedMistakeCount={mistakeCount}
+            pdfTitle={object.title}
+            onPdfViewerReady={onPdfViewerReady}
           />
           </div>
         </WorkspaceSurfaceErrorBoundary>
@@ -457,5 +462,6 @@ export const ProjectSpaceObjectRenderer = memo(
     prev.tokens === next.tokens &&
     prev.freeSpaceSectionId === next.freeSpaceSectionId &&
     prev.freeSpaceBoardId === next.freeSpaceBoardId &&
-    prev.allObjects === next.allObjects,
+    prev.allObjects === next.allObjects &&
+    prev.onPdfViewerReady === next.onPdfViewerReady,
 );

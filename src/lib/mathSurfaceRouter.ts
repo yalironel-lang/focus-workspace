@@ -3,9 +3,10 @@
  */
 
 import type { SectionViewMode } from './sectionViewMode';
-import { loadSectionViewModeRecord } from './sectionViewMode';
+import { loadSectionViewModeRecord, normalizeSectionViewMode } from './sectionViewMode';
 import { loadMathZoneLastWriteAt } from './mathZoneActivity';
 import { loadFreeSpaceLastWriteAt } from './notebookPose';
+import { isMathZoneDestinationEnabled } from './mathZoneDestinationConfig';
 
 export type MathThreadSurface = 'free-space' | 'math-zone';
 
@@ -19,22 +20,26 @@ export interface MathSurfaceRouterResult {
 }
 
 const MATH_ZONE_LABEL = '∑ Math studio';
-const FREE_SPACE_MATH_LABEL = 'Spatial math cluster';
+const FREE_SPACE_MATH_LABEL = 'Math notebooks';
 
 export function resolveMathSurfaceRouter(sectionId: string): MathSurfaceRouterResult {
   const viewRec = loadSectionViewModeRecord(sectionId);
   const mathZoneAt = loadMathZoneLastWriteAt(sectionId);
   const freeSpaceAt = loadFreeSpaceLastWriteAt(sectionId);
 
+  const destinationEnabled = isMathZoneDestinationEnabled();
   const preferMathZone =
+    destinationEnabled &&
     mathZoneAt != null &&
     (freeSpaceAt == null || mathZoneAt >= freeSpaceAt);
 
-  const preferredViewMode: SectionViewMode = preferMathZone
-    ? 'math-zone'
-    : viewRec?.mode === 'work-surface'
-      ? 'work-surface'
-      : 'free-space';
+  const preferredViewMode: SectionViewMode = normalizeSectionViewMode(
+    preferMathZone
+      ? 'math-zone'
+      : viewRec?.mode === 'work-surface'
+        ? 'work-surface'
+        : 'free-space',
+  );
 
   const threadSurface: MathThreadSurface = preferMathZone ? 'math-zone' : 'free-space';
   const threadLabel = preferMathZone ? MATH_ZONE_LABEL : FREE_SPACE_MATH_LABEL;
@@ -63,5 +68,5 @@ export function resolveSectionViewModeOnOpen(
     return 'work-surface';
   }
 
-  return router.preferredViewMode;
+  return normalizeSectionViewMode(router.preferredViewMode);
 }

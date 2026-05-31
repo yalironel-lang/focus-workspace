@@ -37,6 +37,8 @@ interface Props {
   suspendViewer?: boolean;
   linkedNotebookTitle?: string | null;
   relatedMistakeCount?: number;
+  onPdfViewerReady?: (payload: { objectId: string; fileName: string; title: string }) => void;
+  pdfTitle?: string;
 }
 
 function kindIcon(kind: StudyFileKind) {
@@ -59,6 +61,8 @@ export function FreeSpaceStudyFileCard({
   suspendViewer = false,
   linkedNotebookTitle,
   relatedMistakeCount = 0,
+  onPdfViewerReady,
+  pdfTitle = '',
 }: Props) {
   const content = ensureProjectObjectContent('studyfile', rawContent);
   if (content.type !== 'studyfile') return null;
@@ -79,6 +83,8 @@ export function FreeSpaceStudyFileCard({
         content={pdfContent}
         tokens={tokens}
         sectionId={sectionId}
+        pdfTitle={pdfTitle}
+        onPdfViewerReady={onPdfViewerReady}
         onChange={next => {
           if (next.type !== 'pdf') return;
           onChange({

@@ -34,3 +34,12 @@ export function isEmptyMathStarterBody(body: string): boolean {
   const t = (body ?? '').trim();
   return t === '' || t === '#\n\n' || /^#\s*Untitled\s*$/i.test(t);
 }
+
+/** True when the notebook still shows starter / placeholder math content. */
+export function isMathNotebookStarterContent(body: string): boolean {
+  const t = (body ?? '').trim();
+  if (isEmptyMathStarterBody(body)) return true;
+  if (t === '=>' || t === '=>\n') return true;
+  if (t === '# Math' || t === '# Math\n') return true;
+  return false;
+}

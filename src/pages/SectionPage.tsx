@@ -29,7 +29,6 @@ import { pickStudyLinkTargets } from '../lib/studyConnections';
 import { WorkspaceAppearancePanel } from '../components/workspace-appearance/WorkspaceAppearancePanel';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSectionDetail } from '../hooks/useSections';
-import { saveSectionViewMode } from '../lib/sectionViewMode';
 import { resolveSectionViewModeOnOpen } from '../lib/mathSurfaceRouter';
 import {
   loadWorkspaceContinuityMemory,
@@ -92,6 +91,17 @@ import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectS
 import { CompanionComposerModal } from '../components/project-space/CompanionComposerModal';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
 import { LearningAttemptOverlay } from '../components/project-space/LearningAttemptOverlay';
+import { CourseTrapPrototypeOverlay } from '../components/course-trap/CourseTrapPrototypeOverlay';
+import {
+  isCourseTrapAutoSurfaceEnabled,
+  isCourseTrapPrototypeEnabled,
+} from '../lib/courseTrap/courseTrapPrototypeConfig';
+import { isMathZoneDestinationEnabled } from '../lib/mathZoneDestinationConfig';
+import { normalizeSectionViewMode, saveSectionViewMode } from '../lib/sectionViewMode';
+import {
+  detectCourseTrapSubject,
+  type CourseTrapSubject,
+} from '../lib/courseTrap/detectCourseTrapSubject';
 import { buildMistakeReviewQueueFiltered } from '../lib/mistakeIntelligence';
 import {
   applyAttemptFail,
@@ -224,7 +234,8 @@ type FreeSpacePaletteItemId =
   | 'recall'
   | 'tutor'
   | 'quick-review'
-  | 'math-zone';
+  | 'math-notebook'
+  | 'math-setup';
 
 type FreeSpacePaletteGroup = {
   label: string;
@@ -252,7 +263,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
         { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
-        { id: 'math-zone', title: '∑ Math studio', description: 'Dedicated derivation studio with pages, refs, and scratch.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
+        { id: 'math-notebook', title: 'Math notebook', description: 'Formulas, steps, and derivations — math lives in notebooks.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
         { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
         { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
       ],
@@ -264,6 +275,7 @@ function FreeSpaceToolPalette({
         { id: 'recall', title: 'Flashcard / Recall', description: 'Create a prompt to review later.', icon: <Brain className="w-4 h-4" /> },
         { id: 'tutor', title: 'Tutor', description: 'Open a companion tutor panel.', icon: <MessageCircle className="w-4 h-4" /> },
         { id: 'quick-review', title: 'Quick Review', description: 'Review mistakes and recall cards.', icon: <RotateCcw className="w-4 h-4" /> },
+        { id: 'math-setup', title: 'Problem layout', description: 'Problem card + derivation + scratch notebooks on the canvas.', icon: <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>⊞</span> },
       ],
     },
     {
@@ -750,10 +762,11 @@ export function SectionPage() {
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
+      const effective = normalizeSectionViewMode(mode);
       pulsePerformancePressure('view-switch');
-      flickerDebugLog('view-mode', mode);
-      setSectionViewModeState(mode);
-      if (sectionId) saveSectionViewMode(sectionId, mode);
+      flickerDebugLog('view-mode', effective);
+      setSectionViewModeState(effective);
+      if (sectionId) saveSectionViewMode(sectionId, effective);
     },
     [sectionId],
   );
@@ -774,6 +787,10 @@ export function SectionPage() {
   const [learningAttemptTarget, setLearningAttemptTarget] = useState<LearningAttemptTarget | null>(null);
   const [learningAttemptQueue, setLearningAttemptQueue] = useState<string[]>([]);
   const [learningAttemptIndex, setLearningAttemptIndex] = useState(0);
+  const [courseTrapOpen, setCourseTrapOpen] = useState(false);
+  const [courseTrapPdfId, setCourseTrapPdfId] = useState<string | null>(null);
+  const [courseTrapSubject, setCourseTrapSubject] = useState<CourseTrapSubject | null>(null);
+  const courseTrapAutoSurfacedRef = useRef<Set<string>>(new Set());
   const [starterDismissed, setStarterDismissed] = useState(false);
   const [starterExpanded, setStarterExpanded] = useState(false);
   const [starterDockVisible, setStarterDockVisible] = useState(false);
@@ -798,6 +815,14 @@ export function SectionPage() {
   useEffect(() => {
     if (sectionViewMode !== 'math-zone') setNotebookControlsOpen(false);
   }, [sectionViewMode]);
+
+  useEffect(() => {
+    if (!sectionId) return;
+    if (sectionViewMode === 'math-zone' && !isMathZoneDestinationEnabled()) {
+      setSectionViewModeState('free-space');
+      saveSectionViewMode(sectionId, 'free-space');
+    }
+  }, [sectionId, sectionViewMode]);
 
   const performanceCalm = usePerformanceCalm();
   const environmentFocusGlow = useMemo(() => {
@@ -850,7 +875,8 @@ export function SectionPage() {
   const canvasBackgroundStyle = livingEnvironment.studio.canvasStyle;
   const freeSpaceClarity = livingEnvironment.clarity;
   const freeSpaceSurfaceVisible  = sectionViewMode === 'free-space';
-  const mathZoneSurfaceVisible   = sectionViewMode === 'math-zone';
+  const mathZoneSurfaceVisible =
+    sectionViewMode === 'math-zone' && isMathZoneDestinationEnabled();
   const workSurfaceVisible       = sectionViewMode === 'work-surface' && !designMode;
   const designSurfaceVisible     = sectionViewMode === 'work-surface' && designMode;
 
@@ -1406,6 +1432,24 @@ export function SectionPage() {
 
     setSpaceSelectedId(solution.id); // focus the derivation zone, not the problem card
     setShowSpaceAdd(false);
+    toast.success('Problem layout — math lives in these notebooks');
+  }, [addSpaceObject, initPos, viewportCenterWorld, updateSpaceObjectContent]);
+
+  const handleCreateMathNotebook = useCallback(() => {
+    const obj = addSpaceObject('notebook');
+    const base = viewportCenterWorld(0, 0);
+    initPos(obj.id, { x: base.x, y: base.y, w: 620, h: 520 });
+    updateSpaceObjectContent(obj.id, {
+      type: 'notebook',
+      body: '# Math\n\n',
+      paperStyle: 'grid',
+      notebookSurface: 'spatial',
+      notebookMode: 'math',
+      icon: '∑',
+    });
+    setSpaceSelectedId(obj.id);
+    setShowSpaceAdd(false);
+    toast.success('Math notebook — type / for formulas, => for steps');
   }, [addSpaceObject, initPos, viewportCenterWorld, updateSpaceObjectContent]);
 
   const handleAddRecallToSpace = useCallback(() => {
@@ -1477,6 +1521,28 @@ export function SectionPage() {
     },
     [addRecallItem, initPos, addSpaceConnection, viewportCenterWorld],
   );
+
+  const openCourseTrapSession = useCallback((pdfId: string, fileName: string, title: string) => {
+    if (!isCourseTrapPrototypeEnabled()) return;
+    setCourseTrapSubject(detectCourseTrapSubject(fileName, title));
+    setCourseTrapPdfId(pdfId);
+    setCourseTrapOpen(true);
+  }, []);
+
+  const handlePdfViewerReady = useCallback(
+    (payload: { objectId: string; fileName: string; title: string }) => {
+      if (!isCourseTrapPrototypeEnabled() || !isCourseTrapAutoSurfaceEnabled()) return;
+      if (courseTrapAutoSurfacedRef.current.has(payload.objectId)) return;
+      if (learningAttemptOpen || quickCaptureOpen) return;
+      courseTrapAutoSurfacedRef.current.add(payload.objectId);
+      openCourseTrapSession(payload.objectId, payload.fileName, payload.title);
+    },
+    [openCourseTrapSession, learningAttemptOpen, quickCaptureOpen],
+  );
+
+  const handleCourseTrapSubjectPick = useCallback((subject: CourseTrapSubject) => {
+    setCourseTrapSubject(subject);
+  }, []);
 
   const handlePdfDroppedOnCanvas = useCallback(
     async (file: File, worldX: number, worldY: number) => {
@@ -2523,9 +2589,10 @@ export function SectionPage() {
         onRequestSelectObject={setSpaceSelectedId}
         onCreateNotebookRecall={createNotebookRecallItem}
         onStartLearningAttempt={openLearningAttemptForObject}
+        onPdfViewerReady={handlePdfViewerReady}
       />
     );
-  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem, openLearningAttemptForObject]);
+  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem, openLearningAttemptForObject, handlePdfViewerReady]);
 
   if (!section && loading) {
     return (
@@ -2795,6 +2862,15 @@ export function SectionPage() {
         onPersistSourceAttempt={handlePersistSourceAttempt}
       />
 
+      <CourseTrapPrototypeOverlay
+        open={courseTrapOpen}
+        tokens={tokens}
+        subject={courseTrapSubject}
+        pdfObjectId={courseTrapPdfId}
+        onClose={() => setCourseTrapOpen(false)}
+        onSubjectPick={handleCourseTrapSubjectPick}
+      />
+
       <CompanionComposerModal
         open={companionComposerOpen}
         tokens={tokens}
@@ -2938,7 +3014,11 @@ export function SectionPage() {
               tokens={freeSpaceTokens}
               onClose={() => setShowSpaceAdd(false)}
               onPick={itemId => {
-                if (itemId === 'math-zone') {
+                if (itemId === 'math-notebook') {
+                  handleCreateMathNotebook();
+                  return;
+                }
+                if (itemId === 'math-setup') {
                   handleCreateMathZone();
                   return;
                 }

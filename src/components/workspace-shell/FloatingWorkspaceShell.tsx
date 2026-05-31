@@ -12,12 +12,17 @@ import type { ArrangeGoalId } from '../../lib/freeSpaceAutoArrange';
 import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
 import { glassIsland, shellIconBtn } from './shellGlass';
 import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
+import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
 
-const VIEW_MODES = [
+const VIEW_MODES_ALL = [
   { id: 'free-space' as const, label: 'Workspace' },
   { id: 'work-surface' as const, label: 'Mission Control' },
   { id: 'math-zone' as const, label: '∑ Studio' },
 ] as const;
+
+const VIEW_MODES = VIEW_MODES_ALL.filter(
+  opt => opt.id !== 'math-zone' || isMathZoneDestinationEnabled(),
+);
 
 export const WORKSPACE_CHROME_Z = 600;
 

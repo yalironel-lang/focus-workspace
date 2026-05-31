@@ -1,6 +1,14 @@
+import { isMathZoneDestinationEnabled } from './mathZoneDestinationConfig';
+
 const VIEW_MODE_KEY_V2 = 'fw_section_view_mode_v2';
 
 export type SectionViewMode = 'work-surface' | 'free-space' | 'math-zone';
+
+/** Coerce deprecated destinations when the feature flag is off. */
+export function normalizeSectionViewMode(mode: SectionViewMode): SectionViewMode {
+  if (mode === 'math-zone' && !isMathZoneDestinationEnabled()) return 'free-space';
+  return mode;
+}
 
 export interface SectionViewModeRecord {
   mode: SectionViewMode;
@@ -79,7 +87,8 @@ function saveMap(map: Record<string, SectionViewModeRecord>): void {
 export function loadSectionViewMode(sectionId: string): SectionViewMode {
   if (!sectionId || typeof window === 'undefined') return 'free-space';
   const map = loadMap();
-  return map[sectionId]?.mode ?? 'free-space';
+  const mode = map[sectionId]?.mode ?? 'free-space';
+  return normalizeSectionViewMode(mode);
 }
 
 export function loadSectionViewModeRecord(sectionId: string): SectionViewModeRecord | null {
@@ -91,7 +100,7 @@ export function loadSectionViewModeRecord(sectionId: string): SectionViewModeRec
 export function saveSectionViewMode(sectionId: string, mode: SectionViewMode): void {
   if (!sectionId || typeof window === 'undefined') return;
   const map = loadMap();
-  map[sectionId] = { mode, savedAt: Date.now() };
+  map[sectionId] = { mode: normalizeSectionViewMode(mode), savedAt: Date.now() };
   saveMap(map);
 }
 
