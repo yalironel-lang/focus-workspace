@@ -11,6 +11,7 @@ import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
 import { FreeSpaceImageCard } from './FreeSpaceImageCard';
 import { ProjectNotebookBlock } from './ProjectNotebookBlock';
+import { MathDeskPrototype } from './MathDeskPrototype';
 import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
 
@@ -114,6 +115,108 @@ function getCopyPayload(content: ProjectObjectContent): string | null {
     default:
       return null;
   }
+}
+
+type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
+
+function FreeSpaceMathNotebookRenderer({
+  content,
+  tokens,
+  object,
+  allObjects,
+  freeSpaceSectionId,
+  freeSpaceBoardId,
+  onChange,
+  onNotebookEditingChange,
+  onRequestSelectObject,
+  onCreateNotebookRecall,
+  attemptBtn,
+}: {
+  content: NotebookContent;
+  tokens: AtmosphereTokens;
+  object: ProjectSpaceObject;
+  allObjects?: ProjectSpaceObject[];
+  freeSpaceSectionId?: string;
+  freeSpaceBoardId?: string;
+  onChange: (content: ProjectObjectContent) => void;
+  onNotebookEditingChange?: (id: string, editing: boolean) => void;
+  onRequestSelectObject?: (id: string) => void;
+  onCreateNotebookRecall?: (sourceId: string, prompt: string) => void;
+  attemptBtn: ReactNode;
+}) {
+  const useDeskPrototype = content.notebookMode === 'math';
+  const [legacyOpen, setLegacyOpen] = useState(false);
+
+  if (useDeskPrototype && !legacyOpen) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <MathDeskPrototype
+          content={content}
+          tokens={tokens}
+          object={object}
+          allObjects={allObjects}
+          freeSpaceSectionId={freeSpaceSectionId}
+          freeSpaceBoardId={freeSpaceBoardId}
+          onChange={onChange}
+          onNotebookEditingChange={onNotebookEditingChange}
+          onRequestSelectObject={onRequestSelectObject}
+          onCreateNotebookRecall={onCreateNotebookRecall}
+          onShowClassic={() => setLegacyOpen(true)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {attemptBtn}
+      {useDeskPrototype && legacyOpen ? (
+        <button
+          type="button"
+          onClick={() => setLegacyOpen(false)}
+          style={{
+            alignSelf: 'flex-end',
+            margin: '4px 8px 0',
+            zIndex: 3,
+            fontSize: 10,
+            padding: '4px 8px',
+            borderRadius: 6,
+            border: `1px solid ${tokens.cardBorder}`,
+            background: tokens.wellBg,
+            color: tokens.textMuted,
+            cursor: 'pointer',
+          }}
+        >
+          ← Math desk
+        </button>
+      ) : null}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ProjectNotebookBlock
+          content={content}
+          tokens={tokens}
+          onChange={onChange}
+          context="free-space"
+          objectId={object.id}
+          objectTitle={object.title}
+          objectUpdatedAt={object.updatedAt}
+          allObjects={allObjects}
+          freeSpaceSectionId={freeSpaceSectionId}
+          freeSpaceBoardId={freeSpaceBoardId}
+          onRequestSelectObject={onRequestSelectObject}
+          onCreateRecallItem={
+            onCreateNotebookRecall
+              ? (prompt) => onCreateNotebookRecall(object.id, prompt)
+              : undefined
+          }
+          onEditingChange={
+            onNotebookEditingChange
+              ? (editing) => onNotebookEditingChange(object.id, editing)
+              : undefined
+          }
+        />
+      </div>
+    </div>
+  );
 }
 
 function ProjectSpaceObjectRendererInner({
@@ -248,32 +351,19 @@ function ProjectSpaceObjectRendererInner({
     case 'notebook':
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Notebook">
-          <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-            {attemptBtn}
-            <ProjectNotebookBlock
-              content={content}
-              tokens={tokens}
-              onChange={onChange}
-              context="free-space"
-              objectId={object.id}
-              objectTitle={object.title}
-              objectUpdatedAt={object.updatedAt}
-              allObjects={allObjects}
-              freeSpaceSectionId={freeSpaceSectionId}
-              freeSpaceBoardId={freeSpaceBoardId}
-              onRequestSelectObject={onRequestSelectObject}
-              onCreateRecallItem={
-                onCreateNotebookRecall
-                  ? (prompt) => onCreateNotebookRecall(object.id, prompt)
-                  : undefined
-              }
-              onEditingChange={
-                onNotebookEditingChange
-                  ? (editing) => onNotebookEditingChange(object.id, editing)
-                  : undefined
-              }
-            />
-          </div>
+          <FreeSpaceMathNotebookRenderer
+            content={content}
+            tokens={tokens}
+            object={object}
+            allObjects={allObjects}
+            freeSpaceSectionId={freeSpaceSectionId}
+            freeSpaceBoardId={freeSpaceBoardId}
+            onChange={onChange}
+            onNotebookEditingChange={onNotebookEditingChange}
+            onRequestSelectObject={onRequestSelectObject}
+            onCreateNotebookRecall={onCreateNotebookRecall}
+            attemptBtn={attemptBtn}
+          />
         </WorkspaceSurfaceErrorBoundary>
       );
     case 'note':

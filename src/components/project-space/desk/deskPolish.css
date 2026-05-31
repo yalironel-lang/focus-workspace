@@ -1,0 +1,469 @@
+/* Math Desk interaction polish — scoped under .math-desk only */
+
+.math-desk .desk-edge-handle {
+  gap: 6px;
+  height: 30px;
+  min-width: 62px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  opacity: 0.94;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    opacity 0.14s ease,
+    transform 0.1s ease;
+}
+
+.math-desk .desk-edge-handle:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.42);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.32);
+}
+
+.math-desk .desk-edge-handle:active {
+  transform: scale(0.97);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+.math-desk .desk-edge-handle[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.math-desk .desk-edge-handle__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.math-desk .desk-edge-handle:hover .desk-edge-handle__chevron {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.math-desk .desk-edge-handle--bottom {
+  min-width: 80px;
+}
+
+.math-desk .desk-header-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: default;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.math-desk .desk-header-check kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.math-desk .desk-check-line {
+  position: relative;
+}
+
+.math-desk .desk-check-line[data-desk-line-focused='1'] {
+  border-radius: 2px;
+  box-shadow: inset 2px 0 0 rgba(146, 64, 14, 0.42);
+}
+
+.math-desk .desk-check-line__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.math-desk .desk-check-line__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.math-desk .desk-check-line__suffix {
+  flex: 0 0 auto;
+  align-self: baseline;
+  line-height: inherit;
+}
+
+.math-desk .desk-check-btn {
+  flex: 0 0 auto;
+  align-self: baseline;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: rgba(92, 58, 18, 0.96);
+  background: linear-gradient(180deg, #fffdf8 0%, #faefd4 100%);
+  border: 1px solid rgba(161, 98, 26, 0.42);
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 1px 2px rgba(68, 40, 12, 0.1);
+  cursor: pointer;
+  padding: 4px 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    transform 0.08s ease;
+}
+
+.math-desk .desk-check-btn:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #fde9b8 100%);
+  border-color: rgba(161, 98, 26, 0.58);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 2px 5px rgba(68, 40, 12, 0.14);
+}
+
+.math-desk .desk-check-btn:active {
+  transform: translateY(1px);
+  background: #f5e6c4;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+}
+
+.math-desk .desk-check-btn__kbd {
+  font-size: 9px;
+  font-weight: 650;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(120, 70, 20, 0.62);
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.math-desk .desk-check-line__whisper {
+  margin-top: 2px;
+  padding-left: 2px;
+  line-height: 1.4;
+}
+
+.math-desk .desk-empty-guide {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 400;
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+  color: rgba(68, 64, 60, 0.58);
+  letter-spacing: 0.01em;
+}
+
+.math-desk .desk-empty-guide kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(68, 64, 60, 0.14);
+  color: rgba(55, 48, 42, 0.75);
+}
+
+.math-desk .desk-math-toolbar-zone {
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.22s ease,
+    max-height 0.24s ease,
+    margin 0.22s ease;
+}
+
+.math-desk .desk-math-toolbar-zone--visible {
+  pointer-events: auto;
+}
+
+.math-desk .desk-math-toolbar-reveal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+/* Side tool flyouts (Plot / Calc) */
+.math-desk .desk-tool-flyout {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(14, 13, 12, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.math-desk .desk-tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.math-desk .desk-tool-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.math-desk .desk-tool-panel__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.math-desk .desk-tool-panel__hint {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.38);
+  letter-spacing: 0.04em;
+}
+
+.math-desk .desk-tool-panel__badge {
+  font-size: 9px;
+  font-weight: 650;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.math-desk .desk-tool-panel__sub {
+  margin: -4px 0 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.math-desk .desk-tool-panel__sub strong {
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.math-desk .desk-tool-calc__label,
+.math-desk .desk-tool-plot__label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.math-desk .desk-tool-calc__input,
+.math-desk .desk-tool-plot__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px 4px 0 0;
+  padding: 8px 8px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.math-desk .desk-tool-calc__input:focus,
+.math-desk .desk-tool-plot__input:focus {
+  border-bottom-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.math-desk .desk-tool-calc__result-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.math-desk .desk-tool-calc__result-label {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.math-desk .desk-tool-calc__result-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 20px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: -0.02em;
+}
+
+.math-desk .desk-tool-calc__result-placeholder {
+  font-family: ui-monospace, monospace;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.math-desk .desk-tool-calc__error,
+.math-desk .desk-tool-plot__error {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #fca5a5;
+}
+
+.math-desk .desk-tool-calc__history-label {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.math-desk .desk-tool-calc__history-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 88px;
+  overflow-y: auto;
+}
+
+.math-desk .desk-tool-calc__history-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 5px 6px;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.math-desk .desk-tool-calc__history-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.math-desk .desk-tool-calc__history-expr {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.math-desk .desk-tool-calc__history-eq {
+  opacity: 0.45;
+}
+
+.math-desk .desk-tool-calc__history-res {
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.math-desk .desk-tool-plot__status {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.math-desk .desk-tool-plot__status--neutral {
+  color: rgba(255, 255, 255, 0.42);
+  font-style: italic;
+}
+
+.math-desk .desk-tool-plot__status code {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  font-style: normal;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.math-desk .desk-tool-plot__chart-wrap {
+  position: relative;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px 8px 4px;
+}
+
+.math-desk .desk-tool-plot__expr-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.math-desk .desk-tool-plot__chart {
+  width: 100%;
+  height: 120px;
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .math-desk .desk-edge-handle,
+  .math-desk .desk-check-btn,
+  .math-desk .desk-math-toolbar-zone {
+    transition: none;
+  }
+}

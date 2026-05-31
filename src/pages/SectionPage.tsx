@@ -1438,7 +1438,7 @@ export function SectionPage() {
   const handleCreateMathNotebook = useCallback(() => {
     const obj = addSpaceObject('notebook');
     const base = viewportCenterWorld(0, 0);
-    initPos(obj.id, { x: base.x, y: base.y, w: 620, h: 520 });
+    initPos(obj.id, { x: base.x, y: base.y, w: 1040, h: 680 });
     updateSpaceObjectContent(obj.id, {
       type: 'notebook',
       body: '# Math\n\n',

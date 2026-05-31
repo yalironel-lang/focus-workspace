@@ -12,6 +12,16 @@ import {
   type CompanionEmbedMode,
   type CompanionPanelContentFields,
 } from '../lib/companionPanels';
+import type { DeskComputeHistoryEntry, DeskFormulaItem, DeskLayoutState } from '../lib/mathDesk/types';
+import {
+  sanitizeDeskComputeHistory,
+  sanitizeDeskFormulas,
+  sanitizeDeskGraphExpression,
+  sanitizeDeskLayout,
+  sanitizeDeskScratch,
+} from '../lib/mathDesk/sanitize';
+
+export type { DeskFormulaItem, DeskLayoutState, DeskComputeHistoryEntry, DeskZoneId } from '../lib/mathDesk/types';
 
 export type ProjectObjectType =
   | 'notebook'
@@ -46,6 +56,12 @@ export type ProjectObjectContent =
       icon?: string;
       accentColor?: string;
       subtitle?: string;
+      /** Math desk — user formula memory cards */
+      deskFormulas?: DeskFormulaItem[];
+      deskScratch?: string;
+      deskLayout?: DeskLayoutState;
+      deskGraphExpression?: string;
+      deskComputeHistory?: DeskComputeHistoryEntry[];
     }
   | { type: 'note'; body: string }
   | {
@@ -315,11 +331,21 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const icon = typeof r.icon === 'string' && r.icon ? r.icon : undefined;
       const accentColor = typeof r.accentColor === 'string' && r.accentColor ? r.accentColor : undefined;
       const subtitle = typeof r.subtitle === 'string' && r.subtitle ? r.subtitle : undefined;
+      const deskFormulas = sanitizeDeskFormulas(r.deskFormulas);
+      const deskScratch = sanitizeDeskScratch(r.deskScratch);
+      const deskLayout = sanitizeDeskLayout(r.deskLayout);
+      const deskGraphExpression = sanitizeDeskGraphExpression(r.deskGraphExpression);
+      const deskComputeHistory = sanitizeDeskComputeHistory(r.deskComputeHistory);
       return {
         type: 'notebook', body, paperStyle, notebookMode, notebookSurface,
         ...(icon !== undefined ? { icon } : {}),
         ...(accentColor !== undefined ? { accentColor } : {}),
         ...(subtitle !== undefined ? { subtitle } : {}),
+        ...(deskFormulas !== undefined ? { deskFormulas } : {}),
+        ...(deskScratch !== undefined ? { deskScratch } : {}),
+        ...(deskLayout !== undefined ? { deskLayout } : {}),
+        ...(deskGraphExpression !== undefined ? { deskGraphExpression } : {}),
+        ...(deskComputeHistory !== undefined ? { deskComputeHistory } : {}),
       };
     }
     case 'note':

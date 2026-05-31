@@ -12,6 +12,7 @@ import type {
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  ReactNode,
   RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -92,6 +93,8 @@ import { NotebookSelectionToolbar } from '../notebook/NotebookSelectionToolbar';
 import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
 import { nbAgentLog } from '../../lib/notebookDebugIngest';
 import { isSelectionInMathEditor } from '../../lib/tiptapSelectionRegistry';
+import { computeDeskCheck } from '../../lib/mathDesk/deskCheck';
+import { DeskCheckRow, type DeskCheckRowState } from './desk/DeskCheckRow';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
 
@@ -987,6 +990,10 @@ interface Props {
   /** Section + board for knowledge journal (tombstones / snapshots). */
   freeSpaceSectionId?: string;
   freeSpaceBoardId?: string;
+  /** Desk layout: paper-first math surface inside MathDeskPrototype shell. */
+  presentation?: 'notebook' | 'desk';
+  /** Desk: notify shell when the focused derivation line changes (for Plot-from-line). */
+  onDeskFocusedLine?: (payload: { blockId: string | null; text: string }) => void;
 }
 
 function formatRelativeTime(ts: number): string {
@@ -1013,7 +1020,10 @@ export function ProjectNotebookBlock({
   onEditingChange,
   freeSpaceSectionId,
   freeSpaceBoardId = '',
+  presentation = 'notebook',
+  onDeskFocusedLine,
 }: Props) {
+  const isDeskPresentation = presentation === 'desk';
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
   const [slashMenu, setSlashMenu] = useState<{
@@ -1037,6 +1047,10 @@ export function ProjectNotebookBlock({
   const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
   const [mathToolbarHovered, setMathToolbarHovered] = useState(false);
+  const [deskSurfaceHovered, setDeskSurfaceHovered] = useState(false);
+  const [deskChecks, setDeskChecks] = useState<Record<string, DeskCheckRowState>>({});
+  const deskChecksRef = useRef(deskChecks);
+  deskChecksRef.current = deskChecks;
 
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
@@ -1275,6 +1289,19 @@ export function ProjectNotebookBlock({
     () => (surfaceFocusBlockId ? blocks.find((b) => b.id === surfaceFocusBlockId) ?? null : null),
     [blocks, surfaceFocusBlockId],
   );
+
+  useEffect(() => {
+    if (!isDeskPresentation || !onDeskFocusedLine) return;
+    if (
+      activeNotebookBlock &&
+      (activeNotebookBlock.kind === 'paragraph' || activeNotebookBlock.kind === 'step')
+    ) {
+      onDeskFocusedLine({ blockId: activeNotebookBlock.id, text: activeNotebookBlock.text });
+    } else {
+      onDeskFocusedLine({ blockId: null, text: '' });
+    }
+  }, [isDeskPresentation, onDeskFocusedLine, activeNotebookBlock]);
+
   const activeRecallPrompt = useMemo(() => {
     const focused = activeNotebookBlock && activeNotebookBlock.kind !== 'divider' && activeNotebookBlock.kind !== 'image-ref'
       ? activeNotebookBlock
@@ -1286,7 +1313,8 @@ export function ProjectNotebookBlock({
   }, [activeNotebookBlock, blocks]);
   const hasNotebookContext = contextData.totalCount > 0;
   const canDockContext = surfaceWidth >= 640;
-  const showNotebookContext = context === 'free-space' && hasNotebookContext && contextPanelOpen;
+  const showNotebookContext =
+    !isDeskPresentation && context === 'free-space' && hasNotebookContext && contextPanelOpen;
 
   useLayoutEffect(() => {
     const el = shellRef.current;
@@ -1456,10 +1484,69 @@ export function ProjectNotebookBlock({
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
   const mathDiscoverabilityLabel = getMathNotebookDiscoverabilityLabel(notebookMode);
   const showMathStartGuide =
+    !isDeskPresentation &&
     isMathNotebook &&
     editorMode === 'edit' &&
     !isFocusModeOpen &&
     isMathNotebookStarterContent(content.body ?? '');
+
+  const displayBlocks = useMemo(() => {
+    if (!isDeskPresentation) return blocks;
+    return blocks.filter(b => {
+      if (b.kind !== 'title') return true;
+      const t = b.text.trim().replace(/^#+\s*/, '');
+      return t !== '' && t.toLowerCase() !== 'math' && t.toLowerCase() !== 'untitled';
+    });
+  }, [blocks, isDeskPresentation]);
+
+  const deskFirstEmptyParaId = useMemo(() => {
+    if (!isDeskPresentation) return null;
+    const p = displayBlocks.find(
+      b => b.kind === 'paragraph' && !b.variant && b.text.trim() === '',
+    );
+    return p?.id ?? null;
+  }, [displayBlocks, isDeskPresentation]);
+
+  useEffect(() => {
+    if (isDeskPresentation && editorMode !== 'edit') setEditorMode('edit');
+  }, [isDeskPresentation, editorMode]);
+
+  const runDeskCheckForBlockId = useCallback((blockId: string) => {
+    const blk = blocksRef.current.find(b => b.id === blockId);
+    if (!blk || (blk.kind !== 'paragraph' && blk.kind !== 'step')) return;
+    const display = computeDeskCheck(blk.text);
+    setDeskChecks(prev => {
+      const next: Record<string, DeskCheckRowState> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (k !== blockId) next[k] = { ...v, stale: true };
+      }
+      next[blockId] = { display, stale: false };
+      return next;
+    });
+  }, []);
+
+  const wrapDeskCheck = useCallback(
+    (block: Block, inner: ReactNode) => {
+      if (!isDeskPresentation) return inner;
+      if (block.kind !== 'paragraph' && block.kind !== 'step') return inner;
+      return (
+        <DeskCheckRow
+          blockId={block.id}
+          isFocused={surfaceFocusBlockId === block.id}
+          state={deskChecks[block.id]}
+          onRequestCheck={() => runDeskCheckForBlockId(block.id)}
+        >
+          {inner}
+        </DeskCheckRow>
+      );
+    },
+    [
+      isDeskPresentation,
+      deskChecks,
+      surfaceFocusBlockId,
+      runDeskCheckForBlockId,
+    ],
+  );
 
   const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 38px';
 
@@ -1531,8 +1618,18 @@ export function ProjectNotebookBlock({
 
   /** Editorial ink — spatial (light on dark) vs document (dark on paper). */
   const notebookInk = useMemo(
-    () =>
-      isPaperSurface
+    () => {
+      if (isDeskPresentation) {
+        return {
+          headline: '#2c2824',
+          primary: '#2c2824',
+          section: '#44403c',
+          secondary: '#57534e',
+          muted: '#78716c',
+          ghost: '#a8a29e',
+        };
+      }
+      return isPaperSurface
         ? {
             headline: '#1c1917',
             primary: '#292524',
@@ -1548,8 +1645,9 @@ export function ProjectNotebookBlock({
             secondary: `color-mix(in srgb, ${tokens.textSecondary} 90%, #f8fafc 10%)`,
             muted: `color-mix(in srgb, ${tokens.textMuted} 88%, #f8fafc 12%)`,
             ghost: `color-mix(in srgb, ${tokens.textGhost} 82%, #e2e8f0 18%)`,
-          },
-    [isPaperSurface, tokens.textPrimary, tokens.textSecondary, tokens.textMuted, tokens.textGhost],
+          };
+    },
+    [isDeskPresentation, isPaperSurface, tokens.textPrimary, tokens.textSecondary, tokens.textMuted, tokens.textGhost],
   );
 
   const ink = notebookInk;
@@ -1657,10 +1755,12 @@ export function ProjectNotebookBlock({
       return {
         opacity: soften ? 0.985 : 1,
         filter: active ? 'brightness(1.012)' : 'none',
-        transition: 'opacity 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.22s ease',
+        transition: isDeskPresentation
+          ? 'opacity 0.12s ease, filter 0.12s ease'
+          : 'opacity 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94), filter 0.22s ease',
       };
     },
-    [surfaceFocusBlockId],
+    [surfaceFocusBlockId, isDeskPresentation],
   );
 
   const syncSlashFromParagraph = useCallback((blockId: string, el: HTMLDivElement) => {
@@ -2239,17 +2339,75 @@ export function ProjectNotebookBlock({
   const isScratch = notebookMode === 'scratch';
   const writingColumnStyle = useMemo(
     (): CSSProperties => ({
-      maxWidth: isMathNotebook ? 'min(760px, 100%)' : isPaperSurface ? 'min(640px, 100%)' : 'min(700px, 100%)',
-      margin: '0 auto',
+      ...(isDeskPresentation
+        ? {
+            flex: 1,
+            minHeight: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+          }
+        : {}),
+      maxWidth: isDeskPresentation
+        ? '100%'
+        : isMathNotebook
+          ? 'min(760px, 100%)'
+          : isPaperSurface
+            ? 'min(640px, 100%)'
+            : 'min(700px, 100%)',
+      margin: isDeskPresentation ? 0 : '0 auto',
       width: '100%',
-      // math-workspace: tighter horizontal padding to maximize the 680px derivation column
-      paddingLeft: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : isMathWorkspaceMode ? 'clamp(8px, 1.5vw, 16px)' : 'clamp(20px, 4vw, 44px)',
-      paddingRight: isPaperSurface ? 'clamp(32px, 6vw, 56px)' : isMathWorkspaceMode ? 'clamp(8px, 1.5vw, 16px)' : 'clamp(20px, 4vw, 44px)',
+      paddingLeft: isDeskPresentation
+        ? 4
+        : isPaperSurface
+          ? 'clamp(32px, 6vw, 56px)'
+          : isMathWorkspaceMode
+            ? 'clamp(8px, 1.5vw, 16px)'
+            : 'clamp(20px, 4vw, 44px)',
+      paddingRight: isDeskPresentation
+        ? 4
+        : isPaperSurface
+          ? 'clamp(32px, 6vw, 56px)'
+          : isMathWorkspaceMode
+            ? 'clamp(8px, 1.5vw, 16px)'
+            : 'clamp(20px, 4vw, 44px)',
     }),
-    [isMathNotebook, isPaperSurface, isMathWorkspaceMode],
+    [isDeskPresentation, isMathNotebook, isPaperSurface, isMathWorkspaceMode],
   );
 
   const editorSurfaceStyle = useMemo((): CSSProperties => {
+    if (isDeskPresentation) {
+      return {
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        minHeight: '100%',
+        flex: 1,
+        alignSelf: 'stretch',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+        backgroundColor: '#ebe4d6',
+        backgroundImage: `
+          linear-gradient(rgba(44,40,36,0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(44,40,36,0.07) 1px, transparent 1px),
+          linear-gradient(165deg, #f4f0e8 0%, #ebe4d6 48%, #e3dccf 100%)
+        `,
+        backgroundSize: '22px 22px, 22px 22px, 100% 100%',
+        backgroundAttachment: 'local',
+        color: ink.primary,
+        fontSize: '16px',
+        lineHeight: 1.75,
+        letterSpacing: '0.01em',
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        border: 'none',
+        borderRadius: 0,
+        boxShadow: 'none',
+        paddingTop: 16,
+        paddingBottom: 24,
+        outline: 'none',
+        WebkitFontSmoothing: 'antialiased',
+      };
+    }
     if (isPaperSurface) {
       return {
         position: 'relative',
@@ -2324,6 +2482,7 @@ export function ProjectNotebookBlock({
     isMathWorkspaceMode,
     isScratch,
     isPaperSurface,
+    isDeskPresentation,
   ]);
 
   const contextSummaryChips = useMemo(
@@ -2371,6 +2530,15 @@ export function ProjectNotebookBlock({
       if (i === -1) return;
       const block = prev[i]!;
       if (block.kind === 'divider' || block.kind === 'image-ref') return;
+
+      if (isDeskPresentation && (block.kind === 'paragraph' || block.kind === 'step')) {
+        setDeskChecks(prev => {
+          if (!prev[id]) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
 
       const text = rawText.replace(/\r\n/g, '\n');
       const nextMarks = marksOverride ?? block.marks;
@@ -2436,7 +2604,7 @@ export function ProjectNotebookBlock({
       pushContent({ ...content, body: serializeBlocks(next) });
       if (caretBefore !== null) scheduleCaret(withMarks, caretBefore);
     },
-    [content, pushContent, captureCaretForBlock, scheduleCaret, isDomTextCommitLocked],
+    [content, pushContent, captureCaretForBlock, scheduleCaret, isDomTextCommitLocked, isDeskPresentation],
   );
 
   const handleToolbarCommand = useCallback(
@@ -2693,6 +2861,19 @@ export function ProjectNotebookBlock({
       if (!root) return;
       const blocks = blocksRef.current;
       const sm = slashMenuRef.current;
+
+      if (isDeskPresentation && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        let blockId = surfaceFocusBlockId;
+        if (!blockId && focusIndexRef.current >= 0) {
+          blockId = blocks[focusIndexRef.current]?.id ?? null;
+        }
+        if (blockId) {
+          runDeskCheckForBlockId(blockId);
+        }
+        return;
+      }
 
       if (e.key === 'Tab' && isMathNotebook) {
         const sel = window.getSelection();
@@ -3192,6 +3373,9 @@ export function ProjectNotebookBlock({
     [
       editorMode,
       isMathNotebook,
+      isDeskPresentation,
+      surfaceFocusBlockId,
+      runDeskCheckForBlockId,
       persist,
       removeBlockAt,
       applySlashCommand,
@@ -3457,9 +3641,11 @@ export function ProjectNotebookBlock({
         ref={shellRef}
         onPaste={handleNotebookPaste}
         style={{
-          padding: context === 'free-space'
-            ? (isMathWorkspaceMode ? '12px 10px 10px' : '18px 18px 18px')
-            : '18px 24px 28px',
+          padding: isDeskPresentation
+            ? 0
+            : context === 'free-space'
+              ? (isMathWorkspaceMode ? '12px 10px 10px' : '18px 18px 18px')
+              : '18px 24px 28px',
           ...(context === 'free-space'
             ? {
                 display: 'flex',
@@ -3467,6 +3653,7 @@ export function ProjectNotebookBlock({
                 height: '100%',
                 minHeight: 0,
                 boxSizing: 'border-box',
+                ...(isDeskPresentation ? { flex: 1 } : {}),
               }
             : { minHeight: '420px' }),
           borderRadius: context === 'free-space' ? 0 : '22px',
@@ -3491,6 +3678,7 @@ export function ProjectNotebookBlock({
               }),
         }}
       >
+      {!isDeskPresentation ? (
       <div
         onMouseEnter={() => setHeaderHovered(true)}
         onMouseLeave={() => setHeaderHovered(false)}
@@ -3813,8 +4001,9 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       </div>
+      ) : null}
 
-      {editorMode === 'edit' && selectionToolbar ? (
+      {editorMode === 'edit' && selectionToolbar && !isDeskPresentation ? (
         <NotebookSelectionToolbar
           tokens={tokens}
           selection={selectionToolbar}
@@ -3944,7 +4133,7 @@ export function ProjectNotebookBlock({
           )
         : null}
 
-      {isMathNotebook ? (
+      {isMathNotebook && !isDeskPresentation ? (
         <MathNotebookQuickRefStrip prominent={showMathStartGuide} />
       ) : null}
 
@@ -3954,10 +4143,12 @@ export function ProjectNotebookBlock({
         onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
         style={{
           position: 'relative',
-          display: showNotebookContext && canDockContext ? 'grid' : 'block',
+          display: showNotebookContext && canDockContext ? 'grid' : 'flex',
+          flexDirection: showNotebookContext && canDockContext ? undefined : 'column',
+          flex: isDeskPresentation && context === 'free-space' ? 1 : undefined,
+          minHeight: context === 'free-space' ? '100%' : undefined,
           gridTemplateColumns: showNotebookContext && canDockContext ? 'minmax(0, 1fr) 232px' : undefined,
           gap: showNotebookContext && canDockContext ? '16px' : undefined,
-          minHeight: context === 'free-space' ? '100%' : undefined,
         }}
       >
       {editorMode === 'edit' && !isFocusModeOpen ? (
@@ -3967,26 +4158,83 @@ export function ProjectNotebookBlock({
           data-fw-cmd-ignore="1"
           role="textbox"
           aria-multiline
-          aria-label="Notebook"
+          aria-label={isDeskPresentation ? 'Math work surface' : 'Notebook'}
           tabIndex={-1}
           onKeyDownCapture={handleEditorKeyCapture}
           onFocusCapture={handleSurfaceFocusIn}
           onBlur={handleSurfaceBlur}
+          onMouseEnter={() => {
+            if (isDeskPresentation) setDeskSurfaceHovered(true);
+          }}
+          onMouseLeave={() => {
+            if (isDeskPresentation) setDeskSurfaceHovered(false);
+          }}
           className="nb-document-surface"
           data-nb-surface={notebookSurface}
-          style={editorSurfaceStyle}
+          data-desk-surface={isDeskPresentation ? '1' : undefined}
+          style={{
+            ...editorSurfaceStyle,
+            ...(isDeskPresentation
+              ? {
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column' as const,
+                  position: 'relative' as const,
+                }
+              : {}),
+          }}
         >
           <div style={writingColumnStyle}>
           {isMathNotebook ? (
             <>
-              <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
-              {/* Ghost the symbol row on math-workspace so math content has visual priority */}
+              {!isDeskPresentation ? <MathStudyInsight body={content.body ?? ''} tokens={tokens} /> : null}
+              {isDeskPresentation ? (
+                <div
+                  className="desk-math-toolbar-reveal"
+                  aria-hidden
+                  onMouseEnter={() => setMathToolbarHovered(true)}
+                />
+              ) : null}
               <div
+                className={
+                  isDeskPresentation
+                    ? `desk-math-toolbar-zone${
+                        mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
+                          ? ' desk-math-toolbar-zone--visible'
+                          : ''
+                      }`
+                    : undefined
+                }
                 style={{
-                  opacity: notebookMode === 'math-workspace'
-                    ? (mathToolbarHovered ? 1 : showMathStartGuide ? 0.92 : 0.15)
-                    : 1,
-                  transition: 'opacity 0.22s ease',
+                  opacity: isDeskPresentation
+                    ? mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
+                      ? 0.78
+                      : 0
+                    : notebookMode === 'math-workspace'
+                      ? mathToolbarHovered
+                        ? 1
+                        : showMathStartGuide
+                          ? 0.92
+                          : 0.15
+                      : 1,
+                  maxHeight: isDeskPresentation
+                    ? mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
+                      ? 88
+                      : 0
+                    : 120,
+                  overflow: 'hidden',
+                  pointerEvents:
+                    isDeskPresentation &&
+                    !mathToolbarHovered &&
+                    !deskSurfaceHovered &&
+                    !surfaceFocusBlockId
+                      ? 'none'
+                      : 'auto',
+                  transition: isDeskPresentation
+                    ? undefined
+                    : 'opacity 0.2s ease, max-height 0.2s ease',
+                  ...(isDeskPresentation ? { marginBottom: mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId ? 4 : 0 } : {}),
                 }}
                 onMouseEnter={() => setMathToolbarHovered(true)}
                 onMouseLeave={() => setMathToolbarHovered(false)}
@@ -4001,7 +4249,8 @@ export function ProjectNotebookBlock({
               {showMathStartGuide ? <MathNotebookStartGuide /> : null}
             </>
           ) : null}
-          {blocks.map((block, index) => {
+          {displayBlocks.map(block => {
+            const index = blocks.findIndex(b => b.id === block.id);
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
             if (block.kind === 'divider') {
               return (
@@ -4436,7 +4685,8 @@ export function ProjectNotebookBlock({
               }
               const isFirstStep = stepIndex === 1;
               const isLastStep = index >= blocks.length - 1 || blocks[index + 1]?.kind !== 'step';
-              return (
+              return wrapDeskCheck(
+                block,
                 <StepBlockRenderer
                   key={block.id}
                   block={block}
@@ -4454,7 +4704,7 @@ export function ProjectNotebookBlock({
                   onFocusIndex={setFocusIndexById}
                   onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                   onSelectionChange={handleRichSelectionChange}
-                />
+                />,
               );
             }
 
@@ -4615,16 +4865,21 @@ export function ProjectNotebookBlock({
               !paraFine &&
               !paraMuted &&
               ((isStarterNotebook && index === 1) || (isLegacySingleEmptyParagraph && index === 0));
-            const paragraphPlaceholder = notebookMode === 'scratch'
-              ? '…'  // blank/disposable margin paper — no instructional placeholder
-              : useStartWritingPlaceholder
-                ? 'Start writing...'
-                : paraFine
-                  ? 'Fine print…'
-                  : paraMuted
-                    ? 'Softer emphasis…'
-                    : 'Write…';
-            return (
+            const deskShowPlaceholder =
+              isDeskPresentation && block.id === deskFirstEmptyParaId && block.text.trim() === '';
+            const paragraphPlaceholder = isDeskPresentation
+              ? ''
+              : notebookMode === 'scratch'
+                ? '…'
+                : useStartWritingPlaceholder
+                  ? 'Start writing...'
+                  : paraFine
+                    ? 'Fine print…'
+                    : paraMuted
+                      ? 'Softer emphasis…'
+                      : 'Write…';
+            return wrapDeskCheck(
+              block,
               <div
                 key={block.id}
                 data-nb-surface-block
@@ -4632,6 +4887,11 @@ export function ProjectNotebookBlock({
                 data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
                 style={blockSurfaceChrome(block.id)}
               >
+                {deskShowPlaceholder ? (
+                  <p className="desk-empty-guide" role="note" style={{ marginTop: paraTop }}>
+                    Write a numeric step, then press <kbd>⌘↵</kbd> to check it.
+                  </p>
+                ) : null}
                 {(isMathNotebook || isLikelyMathLine(block.text)) && !paraFine && !paraMuted ? (
                   <MathEditableParagraph
                     id={block.id}
@@ -4652,11 +4912,15 @@ export function ProjectNotebookBlock({
                       color: ink.primary,
                       fontSize: `${typeScale.l3}px`,
                       fontWeight: 400,
-                      lineHeight: 1.84,
+                      lineHeight: isDeskPresentation ? 1.75 : 1.84,
                       letterSpacing: '0.004em',
-                      margin: `${paraTop}px 0 10px`,
+                      margin: isDeskPresentation
+                        ? deskShowPlaceholder
+                          ? '0 0 8px'
+                          : `${paraTop}px 0 8px`
+                        : `${paraTop}px 0 10px`,
                       opacity: 1,
-                      caretColor: tokens.accent,
+                      caretColor: isDeskPresentation ? '#92400e' : tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}
@@ -4680,19 +4944,26 @@ export function ProjectNotebookBlock({
                       color: paraFine ? ink.muted : paraMuted ? ink.secondary : notebookMode === 'scratch' ? ink.secondary : ink.primary,
                       fontSize: paraFine ? `${typeScale.l5}px` : paraMuted ? `${typeScale.l4}px` : `${typeScale.l3}px`,
                       fontWeight: paraMuted ? 500 : 400,
-                      lineHeight: paraFine ? 1.7 : notebookMode === 'scratch' ? 1.76 : 1.96,
+                      lineHeight: isDeskPresentation ? 1.75 : paraFine ? 1.7 : notebookMode === 'scratch' ? 1.76 : 1.96,
                       letterSpacing: paraFine ? '0.024em' : '0.004em',
-                      margin: `${paraTop}px 0 10px`,
+                      margin: isDeskPresentation
+                        ? deskShowPlaceholder
+                          ? '0 0 8px'
+                          : `${paraTop}px 0 8px`
+                        : `${paraTop}px 0 10px`,
                       opacity: paraFine ? 0.9 : paraMuted ? 0.94 : 1,
-                      caretColor: tokens.accent,
+                      caretColor: isDeskPresentation ? '#92400e' : tokens.accent,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}
                   />
                 )}
-              </div>
+              </div>,
             );
           })}
+          {isDeskPresentation ? (
+            <div aria-hidden style={{ flex: 1, minHeight: 'min(48vh, 420px)' }} />
+          ) : null}
           </div>
         </div>
       ) : (
