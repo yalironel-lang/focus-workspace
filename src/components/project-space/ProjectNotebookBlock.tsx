@@ -2056,6 +2056,10 @@ export function ProjectNotebookBlock({
       'trace',
     );
     // #endregion
+    if (isDeskPresentation) {
+      dismissSelectionToolbar();
+      return;
+    }
     if (editorMode !== 'edit' || slashMenu) {
       dismissSelectionToolbar();
       return;
@@ -2125,12 +2129,12 @@ export function ProjectNotebookBlock({
       'A',
     );
     // #endregion
-  }, [editorMode, slashMenu, getEditorRoot, dismissSelectionToolbar]);
+  }, [editorMode, slashMenu, getEditorRoot, dismissSelectionToolbar, isDeskPresentation]);
 
-  const toolbarIsOpen = selectionToolbar != null;
+  const richSelectionToolbarActive = selectionToolbar != null && !isDeskPresentation;
 
   useEffect(() => {
-    if (!toolbarIsOpen) return;
+    if (!richSelectionToolbarActive) return;
     const onBeforeInput = (e: Event) => {
       const t = e.target;
       if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
@@ -2171,22 +2175,26 @@ export function ProjectNotebookBlock({
       document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
       document.removeEventListener('input', onInputCapture, { capture: true });
     };
-  }, [toolbarIsOpen]);
+  }, [richSelectionToolbarActive]);
 
   /** Freeze rich editables while toolbar is open — depend on open/closed only, not toolbar prop updates. */
   useLayoutEffect(() => {
-    if (!toolbarIsOpen) {
+    if (!richSelectionToolbarActive) {
       syncUnfreezeRichEditables();
       return;
     }
     syncFreezeRichEditables();
     lockDomTextCommits(800);
   }, [
-    toolbarIsOpen,
+    richSelectionToolbarActive,
     syncFreezeRichEditables,
     syncUnfreezeRichEditables,
     lockDomTextCommits,
   ]);
+
+  useEffect(() => {
+    if (isDeskPresentation) dismissSelectionToolbar();
+  }, [isDeskPresentation, dismissSelectionToolbar]);
 
   useEffect(() => {
     // #region agent log
