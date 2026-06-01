@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import { classifyNetworkFailure, classifySupabaseError } from '../lib/networkError';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SectionWithProgress, SectionDetail, GroupWithItems, Item } from '../types';
 import { useAuth } from './useAuth';
 import { pulsePerformancePressure } from '../lib/performanceSafeMode';
@@ -45,63 +46,98 @@ export function useSections() {
   const [sections, setSections] = useState<SectionWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const retryOnReconnectRef = useRef(false);
 
   const fetchSections = useCallback(async () => {
     if (!user) {
       setSections([]);
       setLoading(false);
       setError(null);
+      retryOnReconnectRef.current = false;
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setSections([]);
+      setError('This deployment is missing database configuration.');
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
 
-    const { data: sectionsData, error: sectionsError } = await supabase
-      .from('sections')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    try {
+      const { data: sectionsData, error: sectionsError } = await supabase
+        .from('sections')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
-    if (sectionsError) {
-      setSections([]);
-      setError(sectionsError.message || 'Could not load workspaces');
+      if (sectionsError) {
+        setSections([]);
+        setError(classifySupabaseError(sectionsError.message, 'Could not load workspaces'));
+        retryOnReconnectRef.current = true;
+        setLoading(false);
+        return;
+      }
+
+      const sectionsWithProgress: SectionWithProgress[] = [];
+
+      for (const section of sectionsData || []) {
+        const { data: groupsData, error: groupsError } = await supabase
+          .from('groups')
+          .select('*, items(*)')
+          .eq('section_id', section.id)
+          .order('order_index');
+
+        if (groupsError) {
+          setSections(sectionsWithProgress);
+          setError(classifySupabaseError(groupsError.message, 'Could not load workspace details'));
+          retryOnReconnectRef.current = true;
+          setLoading(false);
+          return;
+        }
+
+        const groups = groupsData || [];
+        const allItems = groups.flatMap((g) => g.items || []);
+        const totalItems = allItems.length;
+        const completedItems = allItems.filter((i) => i.completed).length;
+        const progress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+
+        const existingGroupTitles = groups.map((g) => g.title);
+        const missingGroups = DEFAULT_GROUPS.filter((g) => !existingGroupTitles.includes(g));
+
+        sectionsWithProgress.push({
+          ...section,
+          total_items: totalItems,
+          completed_items: completedItems,
+          progress,
+          missing_groups: missingGroups,
+          next_item_title: findNextItemTitle(groups),
+        });
+      }
+
+      setSections(sectionsWithProgress);
+      retryOnReconnectRef.current = false;
       setLoading(false);
-      return;
+    } catch (err) {
+      setSections([]);
+      setError(classifyNetworkFailure(err, 'Could not load workspaces'));
+      retryOnReconnectRef.current = true;
+      setLoading(false);
     }
-
-    const sectionsWithProgress: SectionWithProgress[] = [];
-
-    for (const section of sectionsData || []) {
-      const { data: groupsData } = await supabase
-        .from('groups')
-        .select('*, items(*)')
-        .eq('section_id', section.id)
-        .order('order_index');
-
-      const groups = groupsData || [];
-      const allItems = groups.flatMap((g) => g.items || []);
-      const totalItems = allItems.length;
-      const completedItems = allItems.filter((i) => i.completed).length;
-      const progress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-
-      const existingGroupTitles = groups.map((g) => g.title);
-      const missingGroups = DEFAULT_GROUPS.filter((g) => !existingGroupTitles.includes(g));
-
-      sectionsWithProgress.push({
-        ...section,
-        total_items: totalItems,
-        completed_items: completedItems,
-        progress,
-        missing_groups: missingGroups,
-        next_item_title: findNextItemTitle(groups),
-      });
-    }
-
-    setSections(sectionsWithProgress);
-    setLoading(false);
   }, [user]);
 
   useEffect(() => { fetchSections(); }, [fetchSections]);
+
+  useEffect(() => {
+    const onOnline = () => {
+      if (!retryOnReconnectRef.current || !user) return;
+      retryOnReconnectRef.current = false;
+      void fetchSections();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [fetchSections, user]);
 
   const createSection = async (title: string) => {
     if (!user) return;
@@ -171,69 +207,103 @@ export function useSectionDetail(sectionId: string | undefined) {
     setNotFound(false);
     setFetchError(null);
 
-    const { data: sectionData, error: sectionError } = await supabase
-      .from('sections')
-      .select('*')
-      .eq('id', sectionId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (isStale()) return;
-    if (sectionError) {
+    if (!isSupabaseConfigured) {
       setSection(null);
-      setFetchError(sectionError.message || 'Could not load workspace');
-      setNotFound(false);
-      setLoading(false);
-      return;
-    }
-    if (!sectionData) {
-      setSection(null);
-      setNotFound(true);
-      setFetchError(null);
+      setFetchError('This deployment is missing database configuration.');
       setLoading(false);
       return;
     }
 
-    let { data: groupsData } = await supabase
-      .from('groups')
-      .select('*')
-      .eq('section_id', sectionId)
-      .order('order_index');
+    try {
+      const { data: sectionData, error: sectionError } = await supabase
+        .from('sections')
+        .select('*')
+        .eq('id', sectionId)
+        .eq('user_id', user.id)
+        .maybeSingle();
 
-    if (isStale()) return;
-
-    // Only run ensureDefaultGroups once per sectionId across the lifetime of this hook
-    if (ensuredRef.current !== sectionId) {
-      ensuredRef.current = sectionId;
-      const existingTitles = (groupsData || []).map((g) => g.title);
-      const hadMissing = await ensureDefaultGroups(sectionId, existingTitles);
       if (isStale()) return;
-      if (hadMissing) {
-        const { data: refetched } = await supabase
-          .from('groups')
-          .select('*')
-          .eq('section_id', sectionId)
-          .order('order_index');
-        groupsData = refetched;
-        if (isStale()) return;
+      if (sectionError) {
+        setSection(null);
+        setFetchError(classifySupabaseError(sectionError.message, 'Could not load workspace'));
+        setNotFound(false);
+        setLoading(false);
+        return;
       }
+      if (!sectionData) {
+        setSection(null);
+        setNotFound(true);
+        setFetchError(null);
+        setLoading(false);
+        return;
+      }
+
+      const { data: groupsInitial, error: groupsError } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('section_id', sectionId)
+        .order('order_index');
+
+      if (isStale()) return;
+      if (groupsError) {
+        setSection(null);
+        setFetchError(classifySupabaseError(groupsError.message, 'Could not load workspace'));
+        setLoading(false);
+        return;
+      }
+
+      let groupsData = groupsInitial;
+
+      // Only run ensureDefaultGroups once per sectionId across the lifetime of this hook
+      if (ensuredRef.current !== sectionId) {
+        ensuredRef.current = sectionId;
+        const existingTitles = (groupsData || []).map((g) => g.title);
+        const hadMissing = await ensureDefaultGroups(sectionId, existingTitles);
+        if (isStale()) return;
+        if (hadMissing) {
+          const { data: refetched, error: refetchError } = await supabase
+            .from('groups')
+            .select('*')
+            .eq('section_id', sectionId)
+            .order('order_index');
+          if (isStale()) return;
+          if (refetchError) {
+            setSection(null);
+            setFetchError(classifySupabaseError(refetchError.message, 'Could not load workspace'));
+            setLoading(false);
+            return;
+          }
+          groupsData = refetched;
+        }
+      }
+
+      const groupIds = (groupsData || []).map((g) => g.id);
+      const { data: allItemsData, error: itemsError } =
+        groupIds.length > 0
+          ? await supabase.from('items').select('*').in('group_id', groupIds).order('order_index')
+          : { data: [], error: null };
+      if (isStale()) return;
+      if (itemsError) {
+        setSection(null);
+        setFetchError(classifySupabaseError(itemsError.message, 'Could not load workspace'));
+        setLoading(false);
+        return;
+      }
+
+      const groups: GroupWithItems[] = (groupsData || []).map((group) => ({
+        ...group,
+        items: (allItemsData || []).filter((i) => i.group_id === group.id),
+      }));
+
+      if (isStale()) return;
+      setSection({ ...sectionData, groups });
+      setLoading(false);
+    } catch (err) {
+      if (isStale()) return;
+      setSection(null);
+      setFetchError(classifyNetworkFailure(err, 'Could not load workspace'));
+      setLoading(false);
     }
-
-    // Single batched items query — one round-trip for all groups
-    const groupIds = (groupsData || []).map(g => g.id);
-    const { data: allItemsData } = groupIds.length > 0
-      ? await supabase.from('items').select('*').in('group_id', groupIds).order('order_index')
-      : { data: [] };
-    if (isStale()) return;
-
-    const groups: GroupWithItems[] = (groupsData || []).map(group => ({
-      ...group,
-      items: (allItemsData || []).filter(i => i.group_id === group.id),
-    }));
-
-    if (isStale()) return;
-    setSection({ ...sectionData, groups });
-    setLoading(false);
   }, [user, sectionId]);
 
   useEffect(() => { fetchSection(); }, [fetchSection]);

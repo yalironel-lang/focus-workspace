@@ -210,6 +210,11 @@ type Block =
   | ({ id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
 
 let blockIdSeq = 0;
+/** Stable list keys even if block ids collide after parse/reuse. */
+function blockListKey(block: Block, index: number): string {
+  return `${block.id}:${index}`;
+}
+
 function newBlockId(): string {
   blockIdSeq += 1;
   return `nb-${blockIdSeq}`;
@@ -371,17 +376,22 @@ function parseBodyToBlocks(body: string, prev?: Block[]): Block[] {
     return defaults;
   }
   const lines = body.split(/\r?\n/);
+  const usedIds = new Set<string>();
   return lines.map((line, index) => {
     const fresh = lineToBlock(line);
     const prevAt = prev?.[index];
+    let id = fresh.id;
     if (prevAt && blockKindsAlign(prevAt, fresh)) {
-      return { ...fresh, id: prevAt.id };
+      id = prevAt.id;
+    } else {
+      const prevByLine = prev?.find((p) => blockToLine(p) === line);
+      if (prevByLine && prevByLine.kind === fresh.kind && !usedIds.has(prevByLine.id)) {
+        id = prevByLine.id;
+      }
     }
-    const prevByLine = prev?.find((p) => blockToLine(p) === line);
-    if (prevByLine && prevByLine.kind === fresh.kind) {
-      return { ...fresh, id: prevByLine.id };
-    }
-    return fresh;
+    if (usedIds.has(id)) id = newBlockId();
+    usedIds.add(id);
+    return { ...fresh, id };
   });
 }
 
@@ -1531,6 +1541,7 @@ export function ProjectNotebookBlock({
       if (block.kind !== 'paragraph' && block.kind !== 'step') return inner;
       return (
         <DeskCheckRow
+          key={block.id}
           blockId={block.id}
           isFocused={surfaceFocusBlockId === block.id}
           state={deskChecks[block.id]}
@@ -3436,9 +3447,10 @@ export function ProjectNotebookBlock({
 
   function renderFocusModeBlocks() {
     return blocks.map((block, index) => {
+      const listKey = blockListKey(block, index);
       if (block.kind === 'divider') {
         return (
-          <div key={block.id} style={{ display: 'flex', alignItems: 'center', margin: '28px 0' }}>
+          <div key={listKey} style={{ display: 'flex', alignItems: 'center', margin: '28px 0' }}>
             <div style={{ flex: 1, height: '1px', background: isPaperSurface ? 'rgba(28,25,23,0.12)' : 'rgba(255,248,235,0.12)' }} />
           </div>
         );
@@ -3446,7 +3458,7 @@ export function ProjectNotebookBlock({
       if (block.kind === 'title') {
         return (
           <EditableLineGuarded
-            key={block.id}
+            key={listKey}
             id={block.id}
             text={block.text}
                     marks={block.marks}
@@ -3467,7 +3479,7 @@ export function ProjectNotebookBlock({
       }
       if (block.kind === 'section') {
         return (
-          <div key={block.id} style={{
+          <div key={listKey} style={{
             borderBottom: `1px solid ${isPaperSurface ? 'rgba(180,83,9,0.35)' : 'rgba(245,158,11,0.18)'}`,
             paddingBottom: 6, marginBottom: 24,
           }}>
@@ -3494,7 +3506,7 @@ export function ProjectNotebookBlock({
       if (block.kind === 'callout') {
         const ct = calloutToneTokens(block.tone);
         return (
-          <div key={block.id} style={{
+          <div key={listKey} style={{
             borderLeft: `3px solid ${ct.bar}`,
             background: ct.bg,
             padding: '16px 18px 16px 20px',
@@ -3525,7 +3537,7 @@ export function ProjectNotebookBlock({
       if (block.kind === 'image-ref') {
         const src = nbImageGet(block.key);
         return src ? (
-          <div key={block.id} style={{ margin: '12px 0', userSelect: 'none' }}>
+          <div key={listKey} style={{ margin: '12px 0', userSelect: 'none' }}>
             <img src={src} alt={block.alt} style={{ width: '100%', display: 'block', maxHeight: 480, objectFit: 'contain', borderRadius: 8 }} />
           </div>
         ) : null;
@@ -3541,7 +3553,7 @@ export function ProjectNotebookBlock({
         const isLastStep = index >= blocks.length - 1 || blocks[index + 1]?.kind !== 'step';
         return (
           <StepBlockRenderer
-            key={block.id}
+            key={listKey}
             block={block}
             stepIndex={stepIndex}
             isFirst={isFirstStep}
@@ -3564,7 +3576,7 @@ export function ProjectNotebookBlock({
       if (block.kind === 'math') {
         return (
           <EquationBlockEditor
-            key={block.id}
+            key={listKey}
             blockId={block.id}
             text={block.text}
                      tokens={tokens}
@@ -3590,7 +3602,7 @@ export function ProjectNotebookBlock({
       if (block.kind === 'paragraph' && isMathNotebook) {
         return (
           <MathEditableParagraph
-            key={block.id}
+            key={listKey}
             id={block.id}
             text={block.text}
                     tokens={tokens}
@@ -3615,7 +3627,7 @@ export function ProjectNotebookBlock({
       // Default: paragraph (non-math) and other block kinds (quote, bullet, etc.)
       return (
         <EditableLineGuarded
-          key={block.id}
+          key={listKey}
           id={block.id}
           text={block.text}
                     tokens={tokens}
@@ -4249,13 +4261,14 @@ export function ProjectNotebookBlock({
               {showMathStartGuide ? <MathNotebookStartGuide /> : null}
             </>
           ) : null}
-          {displayBlocks.map(block => {
+          {displayBlocks.map((block, displayIndex) => {
             const index = blocks.findIndex(b => b.id === block.id);
+            const listKey = blockListKey(block, index >= 0 ? index : displayIndex);
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
             if (block.kind === 'divider') {
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-divider-row
@@ -4317,7 +4330,7 @@ export function ProjectNotebookBlock({
               const titleMarginTop = index === 0 ? 0 : typeScale.s1;
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4358,7 +4371,7 @@ export function ProjectNotebookBlock({
                 index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2 + 4;
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4403,7 +4416,7 @@ export function ProjectNotebookBlock({
             if (block.kind === 'ordered') {
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4467,7 +4480,7 @@ export function ProjectNotebookBlock({
               const prevIsBullet = prevKind === 'bullet';
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4529,7 +4542,7 @@ export function ProjectNotebookBlock({
             if (block.kind === 'task') {
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4632,7 +4645,7 @@ export function ProjectNotebookBlock({
             if (block.kind === 'quote') {
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4688,7 +4701,7 @@ export function ProjectNotebookBlock({
               return wrapDeskCheck(
                 block,
                 <StepBlockRenderer
-                  key={block.id}
+                  key={listKey}
                   block={block}
                   stepIndex={stepIndex}
                   isFirst={isFirstStep}
@@ -4712,7 +4725,7 @@ export function ProjectNotebookBlock({
               const ct = calloutToneTokens(block.tone);
               return (
                 <div
-                  key={block.id}
+                  key={listKey}
                   data-nb-surface-block
                   data-block-id={block.id}
                   data-nb-pulse={morphPulseId === block.id ? '1' : undefined}
@@ -4785,7 +4798,7 @@ export function ProjectNotebookBlock({
             if (block.kind === 'math') {
               return (
                 <EquationBlockEditor
-                  key={block.id}
+                  key={listKey}
                   blockId={block.id}
                   text={block.text}
                     tokens={tokens}
@@ -4809,7 +4822,7 @@ export function ProjectNotebookBlock({
             if (block.kind === 'image-ref') {
               const src = nbImageGet(block.key);
               return (
-                <div key={block.id} style={{ margin: '20px 0', userSelect: 'none' }}>
+                <div key={listKey} style={{ margin: '20px 0', userSelect: 'none' }}>
                   {src ? (
                     <div
                       className="nb-img-block"
@@ -4881,7 +4894,7 @@ export function ProjectNotebookBlock({
             return wrapDeskCheck(
               block,
               <div
-                key={block.id}
+                key={listKey}
                 data-nb-surface-block
                 data-block-id={block.id}
                 data-nb-pulse={morphPulseId === block.id ? '1' : undefined}

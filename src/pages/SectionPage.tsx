@@ -17,6 +17,7 @@ import { MathZone } from '../components/math-zone/MathZone';
 import { WORKSPACE_SHELL_TOP_INSET } from '../components/workspace-shell/shellGlass';
 import { ExploreFocusGuide } from '../components/explore-focus/ExploreFocusGuide';
 import { isStabilityFeatureDisabled } from '../lib/stabilityBaseline';
+import { clearPwaCachesAndReload } from '../lib/pwaRecovery';
 import type { WorkspaceStarterId } from '../workspaceStarter/workspaceStarterTypes';
 import { starterDismissStorageKey, WORKSPACE_STARTER_LABEL } from '../workspaceStarter/workspaceStarterTypes';
 import { WorkspaceStarterOverlay } from '../components/workspace-starter/WorkspaceStarterOverlay';
@@ -2674,6 +2675,14 @@ export function SectionPage() {
             style={{ backgroundColor: tokens.accent, color: '#0a0a0b' }}
           >
             Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => void clearPwaCachesAndReload()}
+            className="px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ color: tokens.textMuted, border: '1px solid rgba(255,255,255,0.12)' }}
+          >
+            Reset app cache
           </button>
           <Link to={LIBRARY_ROUTE} className="px-4 py-2 rounded-xl text-sm font-semibold" style={{ color: tokens.accent }}>
             Back to library

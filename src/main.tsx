@@ -6,11 +6,16 @@ import 'katex/dist/katex.min.css'
 import { logAppBuildInfo } from './lib/appBuildInfo'
 import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
+import {
+  initServiceWorkerUpdateChecks,
+  shouldReloadAfterServiceWorkerUpdate,
+} from './lib/serviceWorkerUpdate'
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
 logAppBuildInfo()
 initPerformanceSafeModeListeners()
 suppressVercelToolbar()
+initServiceWorkerUpdateChecks()
 
 // ── Service Worker update lifecycle ──────────────────────────────────────────
 //
@@ -42,6 +47,7 @@ if ('serviceWorker' in navigator) {
     // In-memory flag prevents the same page instance from reloading twice.
     // Cleared automatically on reload (new page instance, flag = false).
     if ((window as Window & { __swRefreshing?: boolean }).__swRefreshing) return
+    if (!shouldReloadAfterServiceWorkerUpdate()) return
 
     const reload = () => {
       ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true

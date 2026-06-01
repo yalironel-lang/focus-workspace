@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { getOAuthRedirectTo } from '../lib/authRedirect';
 import { User } from '@supabase/supabase-js';
 
@@ -17,6 +17,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
+
     // onAuthStateChange fires INITIAL_SESSION once the OAuth callback
     // (or any stored session) has been fully resolved, so loading stays
     // true until that exchange is complete — preventing PrivateRoute from
@@ -26,10 +31,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    const timeout = window.setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) console.warn('[Focus Workspace] Auth session check timed out');
+        return false;
+      });
+    }, 12_000);
+
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured for this deployment');
+    }
     const redirectTo = getOAuthRedirectTo();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

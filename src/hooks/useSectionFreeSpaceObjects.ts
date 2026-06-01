@@ -688,9 +688,15 @@ export function repairFreeSpaceObjectList(
       ? (rawRows[i] as Record<string, unknown>).connections
       : undefined;
     const connections = normalizeConnectionsField(o.id, rawConn, validIds);
-    const merged = { ...o, connections };
-    if (JSON.stringify(merged) !== JSON.stringify(staged[i])) repaired = true;
-    return merged;
+    const rawCoerced = coerceFreeSpaceConnectionIds(rawConn);
+    const nextCoerced = coerceFreeSpaceConnectionIds(connections);
+    if (
+      rawCoerced.length !== nextCoerced.length ||
+      rawCoerced.some((id, idx) => id !== nextCoerced[idx])
+    ) {
+      repaired = true;
+    }
+    return nextCoerced.length ? { ...o, connections: nextCoerced } : o;
   });
   if (parsed.length !== normalized.length) repaired = true;
   return { objects: normalized, repaired };
@@ -703,12 +709,15 @@ function load(sectionId: string, boardId = ''): ProjectSpaceObject[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     const { objects: normalized, repaired } = repairFreeSpaceObjectList(parsed, sectionId);
-    if (repaired) {
-      fwPersistWarn(
-        `Repaired Free Space objects for section "${sectionId}"; rewriting storage (${Array.isArray(parsed) ? parsed.length : 0} rows → ${normalized.length} valid).`,
-      );
+    const serialized = JSON.stringify(normalized);
+    if (repaired && serialized !== raw) {
+      if (import.meta.env.DEV) {
+        fwPersistWarn(
+          `Repaired Free Space objects for section "${sectionId}"; rewriting storage (${Array.isArray(parsed) ? parsed.length : 0} rows → ${normalized.length} valid).`,
+        );
+      }
       try {
-        localStorage.setItem(key(sectionId, boardId), JSON.stringify(normalized));
+        localStorage.setItem(key(sectionId, boardId), serialized);
       } catch { /* quota */ }
     }
     return normalized;

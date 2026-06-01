@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { isSupabaseConfigured } from '../lib/supabase';
 import { Loader2, BookOpenCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -76,6 +77,24 @@ export function Auth() {
           className="rounded-2xl p-7"
           style={{ backgroundColor: '#0d1424', border: '1px solid #1a2638' }}
         >
+          {!isSupabaseConfigured ? (
+            <div
+              className="rounded-xl p-4 text-sm leading-relaxed"
+              style={{
+                backgroundColor: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.28)',
+                color: '#fca5a5',
+              }}
+            >
+              <p className="font-semibold mb-2">App configuration error</p>
+              <p style={{ color: '#94a3b8' }}>
+                This deployment is missing Supabase environment variables. Add{' '}
+                <code className="text-xs">VITE_SUPABASE_URL</code> and{' '}
+                <code className="text-xs">VITE_SUPABASE_ANON_KEY</code> in Vercel, then redeploy.
+              </p>
+            </div>
+          ) : (
+          <>
           <p
             className="text-[10px] font-bold uppercase tracking-widest mb-5"
             style={{
@@ -111,6 +130,8 @@ export function Auth() {
             )}
             Continue with Google
           </button>
+          </>
+          )}
         </div>
 
         {/* Feature hints */}

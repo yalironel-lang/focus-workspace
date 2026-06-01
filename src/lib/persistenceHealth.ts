@@ -222,9 +222,12 @@ export function runSectionPersistenceHealth(sectionId: string): PersistenceHealt
     if (rawObs) {
       const parsed = JSON.parse(rawObs) as unknown;
       const { objects, repaired } = repairFreeSpaceObjectList(parsed, sectionId);
-      if (repaired) {
-        localStorage.setItem(keys.objects, JSON.stringify(objects));
-        fwPersistWarn(`Health: rewrote Free Space objects for "${sectionId}".`);
+      const serialized = JSON.stringify(objects);
+      if (repaired && serialized !== rawObs) {
+        localStorage.setItem(keys.objects, serialized);
+        if (import.meta.env.DEV) {
+          fwPersistWarn(`Health: rewrote Free Space objects for "${sectionId}".`);
+        }
         messages.push('Free Space objects were repaired.');
         wrote = true;
       }

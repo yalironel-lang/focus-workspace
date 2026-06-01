@@ -8,6 +8,15 @@ function ingestUrl(): string {
   return REMOTE_INGEST;
 }
 
+function nbAgentLogEnabled(): boolean {
+  if (import.meta.env.DEV) return true;
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('NB_AGENT_DEBUG') === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Runtime debug ingest for notebook toolbar investigation (debug session 3f83e8). */
 export function nbAgentLog(
   location: string,
@@ -16,6 +25,7 @@ export function nbAgentLog(
   hypothesisId: string,
   runId = 'pre-fix',
 ): void {
+  if (!nbAgentLogEnabled()) return;
   const entry = {
     sessionId: SESSION_ID,
     location,

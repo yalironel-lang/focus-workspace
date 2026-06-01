@@ -13,6 +13,7 @@ import { UniversePage } from './pages/UniversePage';
 import { SchedulePage } from './pages/SchedulePage';
 import { SessionPage } from './pages/SessionPage';
 import { Toaster } from 'react-hot-toast';
+import { AppConnectivityBanner } from './components/AppConnectivityBanner';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -105,6 +106,7 @@ function AppShell() {
 
   return (
     <>
+      <AppConnectivityBanner />
       <AppRoutes />
       <ArrivalExperienceGate />
       <GlobalCommandPalette />

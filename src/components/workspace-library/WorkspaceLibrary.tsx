@@ -23,6 +23,7 @@ import { getWorkspaceCustomization } from '../../hooks/useWorkspaceCustomization
 import type { WorkspaceNavigationState } from '../../lib/workspaceUniverse/types';
 import { isAdvancedLibraryNavUnlocked, isFirstWorkspaceEntryPending } from '../../lib/firstSessionPrefs';
 import { resolveLibraryHomeTone } from '../../lib/libraryHomeAtmosphere';
+import { clearPwaCachesAndReload } from '../../lib/pwaRecovery';
 import type { SectionWithProgress } from '../../types';
 import { useLibrarySidebar } from '../../hooks/useLibrarySidebar';
 import { LibrarySidebar, LibraryMobileMenuButton } from './LibrarySidebar';
@@ -612,10 +613,28 @@ function WorkspaceLibraryView() {
                   <p style={{ fontSize: 13, fontWeight: 600, color: tokens.textPrimary, margin: 0 }}>Couldn't load workspaces</p>
                   <p style={{ fontSize: 11, color: tokens.textMuted, margin: '3px 0 0' }}>{error}</p>
                 </div>
-                <button type="button" onClick={() => void fetchSections()}
-                  style={{ padding: '7px 14px', borderRadius: 9, background: sA, color: '#020508', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer', flexShrink: 0 }}>
-                  Retry
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+                  <button type="button" onClick={() => void fetchSections()}
+                    style={{ padding: '7px 14px', borderRadius: 9, background: sA, color: '#020508', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void clearPwaCachesAndReload()}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 9,
+                      background: 'transparent',
+                      color: tokens.textMuted,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Reset app cache
+                  </button>
+                </div>
               </div>
             )}
 
