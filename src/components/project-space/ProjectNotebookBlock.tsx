@@ -478,6 +478,14 @@ function morphParagraphLine(text: string, blockId: string): Block | Block[] {
   const normalized = normalizeNotebookSpaces(text).replace(/\r\n/g, '\n');
   if (!normalized.includes('\n')) {
     const parsed = parseNotebookLine(normalized);
+    const hasMeaningfulListText = (s: string) => s.trim().length > 0;
+    // Never steal active typing for empty list starters like "1. " or "- ".
+    if (parsed.kind === 'ordered' && !hasMeaningfulListText(parsed.text)) {
+      return { id: blockId, kind: 'paragraph', text: normalized };
+    }
+    if (parsed.kind === 'bullet' && !hasMeaningfulListText(parsed.text)) {
+      return { id: blockId, kind: 'paragraph', text: normalized };
+    }
     if (parsed.kind === 'blank') return { id: blockId, kind: 'paragraph', text: '' };
     if (parsed.kind === 'divider') return { id: blockId, kind: 'divider' };
     if (parsed.kind === 'paragraph')
@@ -511,56 +519,56 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
   const trimmed = line.trim();
   if (block.kind === 'title') {
     const m = trimmed.match(/^#(?!\#)\s*(.*)$/);
-    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+    return { ...block, text: m ? (m[1] ?? '') : line };
   }
   if (block.kind === 'section') {
     const m = trimmed.match(/^##\s*(.*)$/);
-    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+    return { ...block, text: m ? (m[1] ?? '') : line };
   }
   if (block.kind === 'ordered') {
-    const m = trimmed.match(/^(\d+)\.\s*(.*)$/);
+    const m = line.match(/^\s*(\d+)\.\s?(.*)$/);
     if (m) {
       return {
         ...block,
         number: Math.max(1, Number(m[1] ?? block.number) || block.number),
-        text: (m[2] ?? '').trimEnd(),
+        text: m[2] ?? '',
       };
     }
-    return { ...block, text: line.trimEnd() };
+    return { ...block, text: line };
   }
   if (block.kind === 'quote') {
-    const m = trimmed.match(/^>\s?(.*)$/);
-    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+    const m = line.match(/^\s*>\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '') : line };
   }
   if (block.kind === 'step') {
-    const m = trimmed.match(/^=>\s*(.*)$/);
-    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+    const m = line.match(/^\s*=>\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '') : line };
   }
   if (block.kind === 'callout') {
-    const m = trimmed.match(/^!(summary|concept|review|definition|theorem|example|mistake)\s*(.*)$/i);
+    const m = line.match(/^\s*!(summary|concept|review|definition|theorem|example|mistake)\s*(.*)$/i);
     if (m) {
       return {
         ...block,
         tone: m[1]!.toLowerCase() as CalloutTone,
-        text: (m[2] ?? '').trimEnd(),
+        text: m[2] ?? '',
       };
     }
-    return { ...block, text: line.trimEnd() };
+    return { ...block, text: line };
   }
   if (block.kind === 'math') {
-    const m = trimmed.match(/^\$\$\s*(.*)$/);
-    return { ...block, text: m ? (m[1] ?? '').trimEnd() : line.trimEnd() };
+    const m = line.match(/^\s*\$\$\s?(.*)$/);
+    return { ...block, text: m ? (m[1] ?? '') : line };
   }
   if (block.kind === 'bullet') {
-    return { ...block, text: line.trimEnd() };
+    return { ...block, text: line };
   }
   if (block.kind === 'task') {
     const parsed = parseNotebookLine(trimmed);
     if (parsed.kind === 'task') return { ...block, text: parsed.text, checked: parsed.checked };
-    return { ...block, text: line.trimEnd() };
+    return { ...block, text: line };
   }
   if (block.kind === 'paragraph') {
-    return { ...block, text: line.trimEnd() };
+    return { ...block, text: line };
   }
   return block;
 }
@@ -2205,10 +2213,20 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!richSelectionToolbarActive) return;
+    const allowNativeTyping = (inputType?: string | null) =>
+      inputType === 'insertText'
+      || inputType === 'insertCompositionText'
+      || inputType === 'insertFromComposition'
+      || inputType === 'insertParagraph'
+      || inputType === 'deleteContentBackward'
+      || inputType === 'deleteContentForward'
+      || inputType === 'deleteByCut'
+      || inputType === 'deleteByDrag';
     const onBeforeInput = (e: Event) => {
       const t = e.target;
       if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
       const ie = e as InputEvent;
+      if (allowNativeTyping(ie.inputType)) return;
       // #region agent log
       nbAgentLog(
         'ProjectNotebookBlock:toolbarOpenGuard',
@@ -2223,13 +2241,15 @@ export function ProjectNotebookBlock({
     const onInputCapture = (e: Event) => {
       const t = e.target;
       if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
+      const ie = e as InputEvent;
+      if (allowNativeTyping(ie.inputType)) return;
       // #region agent log
       nbAgentLog(
         'ProjectNotebookBlock:toolbarOpenGuard',
         'input-blocked-capture',
         {
-          inputType: (e as InputEvent).inputType,
-          data: (e as InputEvent).data ?? null,
+          inputType: ie.inputType,
+          data: ie.data ?? null,
           domText: t.textContent?.slice(0, 60) ?? '',
         },
         'C',
