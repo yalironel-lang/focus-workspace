@@ -99,8 +99,25 @@
 }
 
 .math-desk .desk-check-line[data-desk-line-focused='1'] {
-  border-radius: 2px;
-  box-shadow: inset 2px 0 0 rgba(146, 64, 14, 0.42);
+  border-radius: 4px;
+  background: rgba(255, 253, 248, 0.55);
+  box-shadow: inset 3px 0 0 rgba(146, 64, 14, 0.55);
+}
+
+.math-desk .desk-check-line__suffix--ok {
+  font-weight: 700;
+  color: rgba(52, 98, 52, 0.95);
+}
+
+.math-desk .desk-check-line__suffix--value {
+  font-weight: 650;
+  color: rgba(28, 25, 23, 0.92);
+}
+
+.math-desk .desk-check-line__suffix--hint {
+  font-weight: 500;
+  font-size: 0.94em;
+  color: rgba(68, 64, 60, 0.78);
 }
 
 .math-desk .desk-check-line__row {
@@ -203,6 +220,16 @@
   color: rgba(55, 48, 42, 0.75);
 }
 
+/* Desk writing surface — softer grid, formulas read above paper texture */
+.math-desk [data-desk-surface='1'].nb-document-surface {
+  background-color: #ebe4d6;
+  background-image:
+    linear-gradient(rgba(68, 64, 60, 0.038) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(68, 64, 60, 0.038) 1px, transparent 1px),
+    linear-gradient(165deg, #f4f0e8 0%, #ebe4d6 48%, #e3dccf 100%);
+  background-size: 24px 24px, 24px 24px, 100% 100%;
+}
+
 .math-desk .desk-math-toolbar-zone {
   overflow: hidden;
   pointer-events: none;
@@ -216,14 +243,113 @@
   pointer-events: auto;
 }
 
+.math-desk .desk-math-toolbar-zone--pinned {
+  opacity: 1 !important;
+}
+
 .math-desk .desk-math-toolbar-reveal {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  display: none;
+}
+
+/* Compact math strip on warm paper — no card tray */
+.math-desk .desk-math-palette--strip {
+  margin: 0 0 2px;
+  padding: 0;
+}
+
+.math-desk .desk-math-palette__strip {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-height: 40px;
+  padding: 4px 2px 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  border-bottom: 1px solid rgba(68, 64, 60, 0.1);
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.55) 0%, rgba(255, 253, 248, 0) 100%);
+}
+
+.math-desk .desk-math-palette__sep {
+  flex: 0 0 auto;
+  width: 1px;
   height: 18px;
-  z-index: 2;
-  pointer-events: auto;
+  margin: 0 2px;
+  background: rgba(68, 64, 60, 0.14);
+  align-self: center;
+}
+
+.math-desk .desk-math-palette__btn-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.math-desk .desk-math-palette__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid rgba(68, 64, 60, 0.16);
+  background: rgba(255, 254, 249, 0.92);
+  color: #1c1917;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  font-family: 'Times New Roman', 'STIX Two Math', 'Cambria Math', Georgia, serif;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.math-desk .desk-math-palette__btn:hover {
+  background: #fffef9;
+  border-color: rgba(146, 64, 14, 0.32);
+}
+
+.math-desk .desk-math-palette__btn--active {
+  border-color: rgba(146, 64, 14, 0.45);
+  background: #fff8eb;
+  box-shadow: inset 0 0 0 1px rgba(146, 64, 14, 0.12);
+}
+
+.math-desk .desk-math-palette__btn--lim {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.math-desk .desk-math-palette__btn--chevron {
+  min-width: 20px;
+  padding: 0 3px;
+  margin-left: -1px;
+  border-radius: 0 5px 5px 0;
+  font-size: 9px;
+  color: rgba(68, 64, 60, 0.58);
+}
+
+.math-desk .desk-math-palette__btn-wrap .desk-math-palette__btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.math-desk .desk-math-palette__btn-wrap .desk-math-palette__btn:only-child {
+  border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+  .math-desk .desk-math-toolbar-zone--pinned {
+    max-height: 52px !important;
+  }
 }
 
 /* Side tool flyouts (Plot / Calc) */

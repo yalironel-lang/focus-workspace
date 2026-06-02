@@ -13,6 +13,8 @@ import { DeskCollapseHandle } from './desk/DeskCollapseHandle';
 import { DeskComputeBar } from './desk/DeskComputeBar';
 import { DeskFormulaMemory } from './desk/DeskFormulaMemory';
 import { DeskMiniGraph, type DeskPlotPaperStatus } from './desk/DeskMiniGraph';
+import { MathDeskStudyLayoutMenu } from './MathDeskStudyLayoutMenu';
+import { sanitizeStudyLayout, type StudyLayoutMode } from '../../lib/mathDesk/studyLayout';
 import './desk/deskPolish.css';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
@@ -35,6 +37,26 @@ interface Props {
   onRequestSelectObject?: (id: string) => void;
   onCreateNotebookRecall?: (sourceId: string, prompt: string) => void;
   onShowClassic?: () => void;
+  studyLayout?: StudyLayoutMode;
+  onStudyLayoutChange?: (mode: StudyLayoutMode) => void;
+  sessionRestoreBlockId?: string | null;
+  onStudySessionWorkFocus?: (blockId: string | null) => void;
+  studySessionActive?: boolean;
+  studyFocusQuestionNumber?: number | null;
+  studyFocusQuestionToken?: number;
+  onStudySessionActiveQuestionNumber?: (questionNumber: number | null) => void;
+  /** Focus exam: hide desk header, tool handles, scratch; reduce side inset. */
+  studyDeskQuiet?: boolean;
+}
+
+function isStudyWorkNotebookEmpty(body: string | undefined): boolean {
+  const lines = (body ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return true;
+  if (lines.length === 1 && /^#\s*(Work|Math)?\s*$/i.test(lines[0]!)) return true;
+  return false;
 }
 
 function patchLayout(content: NotebookContent, collapsed: Partial<Record<DeskZoneId, boolean>>): NotebookContent {
@@ -73,8 +95,18 @@ export function MathDeskPrototype({
   onRequestSelectObject,
   onCreateNotebookRecall,
   onShowClassic,
+  studyLayout: studyLayoutProp,
+  onStudyLayoutChange,
+  sessionRestoreBlockId = null,
+  onStudySessionWorkFocus,
+  studySessionActive = false,
+  studyFocusQuestionNumber = null,
+  studyFocusQuestionToken = 0,
+  onStudySessionActiveQuestionNumber,
+  studyDeskQuiet = false,
 }: Props) {
   const [devMenuOpen, setDevMenuOpen] = useState(false);
+  const [studyHintDismissed, setStudyHintDismissed] = useState(false);
   const [deskFocusedLine, setDeskFocusedLine] = useState<{ blockId: string | null; text: string }>({
     blockId: null,
     text: '',
@@ -111,7 +143,23 @@ export function MathDeskPrototype({
 
   const onDeskFocusedLine = useCallback((payload: { blockId: string | null; text: string }) => {
     setDeskFocusedLine(payload);
-  }, []);
+    onStudySessionWorkFocus?.(payload.blockId);
+    if (payload.text.trim()) setStudyHintDismissed(true);
+  }, [onStudySessionWorkFocus]);
+
+  useEffect(() => {
+    if (!studySessionActive) return;
+    if (!isStudyWorkNotebookEmpty(content.body)) setStudyHintDismissed(true);
+  }, [studySessionActive, content.body]);
+
+  const showStudyHint =
+    studySessionActive &&
+    !studyDeskQuiet &&
+    !studyHintDismissed &&
+    isStudyWorkNotebookEmpty(content.body);
+
+  const edgeInset = studySessionActive ? (studyDeskQuiet ? 0 : 20) : EDGE_INSET;
+  const showDeskChrome = !studyDeskQuiet;
 
   useEffect(() => {
     if (graphCollapsed) return;
@@ -135,6 +183,23 @@ export function MathDeskPrototype({
   const plotExpression = graphExpression;
 
   const showDevMenu = Boolean(onShowClassic) && import.meta.env.DEV;
+  const studyLayout = sanitizeStudyLayout(studyLayoutProp ?? content.studyLayout);
+
+  const applyStudyLayout = useCallback(
+    (mode: StudyLayoutMode) => {
+      if (onStudyLayoutChange) {
+        onStudyLayoutChange(mode);
+        return;
+      }
+      if (mode === 'canvas') {
+        const { studyLayout: _removed, ...rest } = content;
+        onChange(rest);
+      } else {
+        onChange({ ...content, studyLayout: mode });
+      }
+    },
+    [content, onChange, onStudyLayoutChange],
+  );
 
   return (
     <div
@@ -147,58 +212,66 @@ export function MathDeskPrototype({
         flexDirection: 'column',
         boxSizing: 'border-box',
         background: tokens.pageBg,
-        borderRadius: 12,
+        borderRadius: studyDeskQuiet ? 0 : 12,
         overflow: 'hidden',
-        border: `1px solid rgba(255,255,255,0.05)`,
+        border: studyDeskQuiet ? 'none' : `1px solid rgba(255,255,255,0.05)`,
       }}
     >
-      <div
-        style={{
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '8px 10px 6px',
-          borderBottom: `1px solid rgba(255,255,255,0.04)`,
-        }}
-      >
-        <span
+      {showDeskChrome ? (
+        <div
           style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            color: tokens.textGhost,
             flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 10px 6px',
+            borderBottom: `1px solid rgba(255,255,255,0.04)`,
           }}
         >
-          Problem
-        </span>
-        <input
-          type="text"
-          value={content.subtitle ?? ''}
-          onChange={e => onChange({ ...content, subtitle: e.target.value })}
-          placeholder="What are you solving?"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            border: 'none',
-            outline: 'none',
-            background: 'transparent',
-            fontSize: 13,
-            fontWeight: 600,
-            color: tokens.textPrimary,
-            letterSpacing: '-0.02em',
-          }}
-        />
-        <span
-          className="desk-header-check"
-          title="Write a numeric step on the line, then press ⌘↵ — the line answers with numbers or balance"
-        >
-          <kbd>⌘↵</kbd>
-          <span>Check line</span>
-        </span>
-        {showDevMenu ? (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: tokens.textGhost,
+              flexShrink: 0,
+            }}
+          >
+            Problem
+          </span>
+          <input
+            type="text"
+            value={content.subtitle ?? ''}
+            onChange={e => onChange({ ...content, subtitle: e.target.value })}
+            placeholder="What are you solving?"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              fontSize: 13,
+              fontWeight: 600,
+              color: tokens.textPrimary,
+              letterSpacing: '-0.02em',
+            }}
+          />
+          <span
+            className="desk-header-check"
+            title="Write a numeric step on the line, then press ⌘↵ — the line answers with numbers or balance"
+          >
+            <kbd>⌘↵</kbd>
+            <span>Check line</span>
+          </span>
+          {onStudyLayoutChange ? (
+            <MathDeskStudyLayoutMenu
+              tokens={tokens}
+              layout={studyLayout}
+              onLayoutChange={applyStudyLayout}
+            />
+          ) : null}
+          {showDevMenu ? (
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
               type="button"
@@ -264,7 +337,8 @@ export function MathDeskPrototype({
             ) : null}
           </div>
         ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div
@@ -277,16 +351,40 @@ export function MathDeskPrototype({
             overflow: 'hidden',
           }}
         >
+          {showStudyHint ? (
+            <div
+              role="note"
+              style={{
+                flexShrink: 0,
+                margin: `6px ${edgeInset}px 0`,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: `1px solid ${tokens.cardBorder}`,
+                background: `${tokens.accent}12`,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: tokens.textSecondary,
+              }}
+            >
+              <div style={{ fontWeight: 600, color: tokens.textPrimary, marginBottom: 4 }}>
+                Start solving the question from the exam here.
+              </div>
+              <div>Type naturally: x^2, sqrt(x), pi</div>
+              <div>Press ⌘↵ to check a step</div>
+            </div>
+          ) : null}
           <div
             style={{
               flex: 1,
               minHeight: 0,
-              margin: `2px ${EDGE_INSET}px 2px ${EDGE_INSET}px`,
+              margin: studyDeskQuiet ? '0' : `2px ${edgeInset}px 2px ${edgeInset}px`,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              borderRadius: 4,
-              boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.12), 0 2px 12px rgba(0,0,0,0.15)',
+              borderRadius: studyDeskQuiet ? 0 : 4,
+              boxShadow: studyDeskQuiet
+                ? 'none'
+                : 'inset 0 0 0 1px rgba(0,0,0,0.12), 0 2px 12px rgba(0,0,0,0.15)',
             }}
           >
             <ProjectNotebookBlock
@@ -309,10 +407,14 @@ export function MathDeskPrototype({
                 onNotebookEditingChange ? editing => onNotebookEditingChange(object.id, editing) : undefined
               }
               onDeskFocusedLine={onDeskFocusedLine}
+              sessionRestoreBlockId={sessionRestoreBlockId}
+              studyFocusQuestionNumber={studyFocusQuestionNumber}
+              studyFocusQuestionToken={studyFocusQuestionToken}
+              onActiveQuestionNumber={onStudySessionActiveQuestionNumber}
             />
           </div>
 
-          {!formulaCollapsed
+          {showDeskChrome && !formulaCollapsed
             ? flyoutPanel(
                 <DeskFormulaMemory
                   tokens={tokens}
@@ -330,7 +432,7 @@ export function MathDeskPrototype({
               )
             : null}
 
-          {!graphCollapsed
+          {showDeskChrome && !graphCollapsed
             ? flyoutPanel(
                 <DeskMiniGraph
                   tokens={tokens}
@@ -344,7 +446,7 @@ export function MathDeskPrototype({
               )
             : null}
 
-          {!computeCollapsed
+          {showDeskChrome && !computeCollapsed
             ? flyoutPanel(
                 <DeskComputeBar
                   tokens={tokens}
@@ -355,61 +457,65 @@ export function MathDeskPrototype({
               )
             : null}
 
-          <div
-            style={{
-              position: 'absolute',
-              left: 6,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              zIndex: 5,
-            }}
-          >
-            <DeskCollapseHandle
-              tokens={tokens}
-              kind="formula"
-              collapsed={formulaCollapsed}
-              onToggle={() => toggleZone('formula')}
-              edge="left"
-              badge={formulas.length || undefined}
-              variant="peripheral"
-            />
-          </div>
+          {showDeskChrome ? (
+            <>
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 6,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  zIndex: 5,
+                }}
+              >
+                <DeskCollapseHandle
+                  tokens={tokens}
+                  kind="formula"
+                  collapsed={formulaCollapsed}
+                  onToggle={() => toggleZone('formula')}
+                  edge="left"
+                  badge={formulas.length || undefined}
+                  variant="peripheral"
+                />
+              </div>
 
-          <div
-            style={{
-              position: 'absolute',
-              right: 6,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              zIndex: 5,
-            }}
-          >
-            <DeskCollapseHandle
-              tokens={tokens}
-              kind="graph"
-              collapsed={graphCollapsed}
-              onToggle={() => toggleZone('graph')}
-              edge="right"
-              variant="peripheral"
-            />
-            <DeskCollapseHandle
-              tokens={tokens}
-              kind="compute"
-              collapsed={computeCollapsed}
-              onToggle={() => toggleZone('compute')}
-              edge="right"
-              variant="peripheral"
-            />
-          </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 6,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  zIndex: 5,
+                }}
+              >
+                <DeskCollapseHandle
+                  tokens={tokens}
+                  kind="graph"
+                  collapsed={graphCollapsed}
+                  onToggle={() => toggleZone('graph')}
+                  edge="right"
+                  variant="peripheral"
+                />
+                <DeskCollapseHandle
+                  tokens={tokens}
+                  kind="compute"
+                  collapsed={computeCollapsed}
+                  onToggle={() => toggleZone('compute')}
+                  edge="right"
+                  variant="peripheral"
+                />
+              </div>
+            </>
+          ) : null}
         </div>
 
-        {!scratchCollapsed ? (
+        {showDeskChrome && !scratchCollapsed ? (
           <div
             style={{
               flexShrink: 0,
@@ -441,23 +547,25 @@ export function MathDeskPrototype({
           </div>
         ) : null}
 
-        <div
-          style={{
-            flexShrink: 0,
-            padding: scratchCollapsed ? '2px 8px 4px' : '0 8px 4px',
-            display: 'flex',
-            justifyContent: 'center',
-          }}
-        >
-          <DeskCollapseHandle
-            tokens={tokens}
-            kind="scratch"
-            collapsed={scratchCollapsed}
-            onToggle={() => toggleZone('scratch')}
-            edge="bottom"
-            variant="peripheral"
-          />
-        </div>
+        {showDeskChrome ? (
+          <div
+            style={{
+              flexShrink: 0,
+              padding: scratchCollapsed ? '2px 8px 4px' : '0 8px 4px',
+              display: 'flex',
+              justifyContent: 'center',
+            }}
+          >
+            <DeskCollapseHandle
+              tokens={tokens}
+              kind="scratch"
+              collapsed={scratchCollapsed}
+              onToggle={() => toggleZone('scratch')}
+              edge="bottom"
+              variant="peripheral"
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

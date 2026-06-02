@@ -24,6 +24,105 @@ const GREEK_WORDS: Record<string, string> = {
 
 const LATEX_COMMAND = /\\(?:frac|int|sum|lim|sqrt|left|right|leq|geq|neq|to|alpha|beta|theta|pi)/;
 
+/** Unicode → Focus Linear Math (FLM) word/ASCII replacements for render + storage. */
+const UNICODE_GREEK_TO_WORD: Record<string, string> = {
+  '\u03B1': 'alpha',
+  '\u03B2': 'beta',
+  '\u03B3': 'gamma',
+  '\u03B4': 'delta',
+  '\u03B5': 'epsilon',
+  '\u03B8': 'theta',
+  '\u03BB': 'lambda',
+  '\u03BC': 'mu',
+  '\u03C0': 'pi',
+  '\u03C3': 'sigma',
+  '\u03C9': 'omega',
+  '\u03C6': 'phi',
+  '\u03C1': 'rho',
+  '\u03C4': 'tau',
+  '\u221E': 'infinity',
+};
+
+const UNICODE_SUPERSCRIPT_DIGITS: Record<string, string> = {
+  '\u2070': '0',
+  '\u00B9': '1',
+  '\u00B2': '2',
+  '\u00B3': '3',
+  '\u2074': '4',
+  '\u2075': '5',
+  '\u2076': '6',
+  '\u2077': '7',
+  '\u2078': '8',
+  '\u2079': '9',
+  '\u207B': '-',
+  '\u207A': '+',
+};
+
+/**
+ * Map pasted/typed Unicode math glyphs to FLM tokens (render path + normalize).
+ * Does not alter `$...$` regions or backslash LaTeX commands.
+ */
+export function applyUnicodeMathAliases(input: string): string {
+  if (!input) return input;
+
+  let s = input
+    .replace(/\u2212/g, '-')
+    .replace(/\u00D7|\u00B7/g, '*')
+    .replace(/\u2192/g, '->')
+    .replace(/\u2264/g, '<=')
+    .replace(/\u2265/g, '>=')
+    .replace(/\u2260/g, '!=');
+
+  for (const [glyph, word] of Object.entries(UNICODE_GREEK_TO_WORD)) {
+    s = s.split(glyph).join(word);
+  }
+
+  s = s.replace(/\u221A\s*\(\s*([^)]*)\s*\)/g, 'sqrt($1)');
+  s = s.replace(/\u221A\s*([a-zA-Z0-9]+)/g, 'sqrt($1)');
+  s = s.replace(/\u221A/g, 'sqrt(');
+
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    const mapped = UNICODE_SUPERSCRIPT_DIGITS[ch];
+    if (mapped !== undefined) {
+      let run = mapped;
+      i++;
+      while (i < s.length && UNICODE_SUPERSCRIPT_DIGITS[s[i]!] !== undefined) {
+        run += UNICODE_SUPERSCRIPT_DIGITS[s[i]!]!;
+        i++;
+      }
+      out += `^${run}`;
+      i--;
+      continue;
+    }
+    out += ch;
+  }
+
+  return out;
+}
+
+function hasMathDelimiters(text: string): boolean {
+  return /\$/.test(text);
+}
+
+/**
+ * Canonicalize a math line to FLM for storage (skip LaTeX and delimited regions).
+ */
+export function normalizeToLinearMath(input: string): string {
+  if (!input.trim()) return input;
+  if (hasMathDelimiters(input) || looksLikeLatex(input)) return input;
+
+  const stepMatch = input.match(/^(=>\s*)([\s\S]*)$/);
+  if (stepMatch) {
+    const body = applyUnicodeMathAliases(stepMatch[2]!);
+    return body === stepMatch[2] ? input : `${stepMatch[1]!}${body}`;
+  }
+
+  const normalized = applyUnicodeMathAliases(input);
+  return normalized === input ? input : normalized;
+}
+
 /** True when string is likely authored LaTeX (keep as-is). */
 export function looksLikeLatex(s: string): boolean {
   const t = s.trim();
@@ -72,11 +171,13 @@ export function plainMathToLatex(input: string): string {
   const raw = input.trim();
   if (!raw) return '';
 
-  if (looksLikeLatex(raw)) {
-    return raw;
+  const aliased = applyUnicodeMathAliases(raw);
+
+  if (looksLikeLatex(aliased)) {
+    return aliased;
   }
 
-  let s = raw;
+  let s = aliased;
 
   const fnEq = s.match(/^([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*=\s*(.+)$/);
   if (fnEq) {
@@ -328,6 +429,72 @@ export function getMathTemplate(id: MathTemplateId): MathTemplateDef | undefined
   return MATH_TEMPLATES.find(t => t.id === id);
 }
 
+/** Default field values for one-click template inserts (plain-friendly). */
+const MATH_TEMPLATE_DEFAULT_VALUES: Record<MathTemplateId, Record<string, string>> = {
+  fraction: { num: '', den: '' },
+  exponent: { base: 'x', exp: 'n' },
+  root: { x: 'x' },
+  integral: { lo: '0', hi: '1', expr: 'x^2', var: 'x' },
+  limit: { var: 'x', to: '0' },
+  sum: { i: 'i', lo: '1', hi: 'n', expr: 'i' },
+};
+
+/** Plain text snippet inserted on primary toolbar tap (not LaTeX). */
+export function buildSimpleDefault(templateId: MathTemplateId): string {
+  const def = getMathTemplate(templateId);
+  if (!def) return '';
+  return def.buildSimple(MATH_TEMPLATE_DEFAULT_VALUES[templateId]);
+}
+
+export type MathToolbarSymbol = { label: string; insert: string; title?: string };
+
+export type MathToolbarGroupId = 'structures' | 'operators' | 'symbols' | 'relations';
+
+export interface MathToolbarGroup {
+  id: MathToolbarGroupId;
+  label: string;
+  templates?: MathTemplateId[];
+  symbols?: MathToolbarSymbol[];
+}
+
+const RELATION_SYMBOLS: MathToolbarSymbol[] = [
+  { label: '→', insert: '->', title: 'Arrow' },
+  { label: '≥', insert: '>=', title: 'Greater or equal' },
+  { label: '≤', insert: '<=', title: 'Less or equal' },
+];
+
+const GREEK_SYMBOLS: MathToolbarSymbol[] = [
+  { label: 'α', insert: 'alpha', title: 'Alpha' },
+  { label: 'β', insert: 'beta', title: 'Beta' },
+  { label: 'θ', insert: 'theta', title: 'Theta' },
+  { label: 'π', insert: 'pi', title: 'Pi' },
+  { label: '∞', insert: 'infinity', title: 'Infinity' },
+];
+
+/** Grouped math palette for desk / structured toolbar layout. */
+export const MATH_TOOLBAR_GROUPS: MathToolbarGroup[] = [
+  {
+    id: 'structures',
+    label: 'Structures',
+    templates: ['fraction', 'exponent', 'root'],
+  },
+  {
+    id: 'operators',
+    label: 'Operators',
+    templates: ['integral', 'limit', 'sum'],
+  },
+  {
+    id: 'symbols',
+    label: 'Symbols',
+    symbols: GREEK_SYMBOLS,
+  },
+  {
+    id: 'relations',
+    label: 'Relations',
+    symbols: RELATION_SYMBOLS,
+  },
+];
+
 /** Quick symbol inserts (plain-friendly). */
 export const QUICK_MATH_SYMBOLS: Array<{ label: string; insert: string; title?: string }> = [
   { label: 'α', insert: 'alpha', title: 'Alpha' },
@@ -335,7 +502,5 @@ export const QUICK_MATH_SYMBOLS: Array<{ label: string; insert: string; title?: 
   { label: 'θ', insert: 'theta', title: 'Theta' },
   { label: 'π', insert: 'pi', title: 'Pi' },
   { label: '∞', insert: 'infinity', title: 'Infinity' },
-  { label: '→', insert: '->', title: 'Arrow' },
-  { label: '≥', insert: '>=', title: 'Greater or equal' },
-  { label: '≤', insert: '<=', title: 'Less or equal' },
+  ...RELATION_SYMBOLS,
 ];

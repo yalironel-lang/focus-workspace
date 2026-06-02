@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   MATH_TEMPLATES,
+  MATH_TOOLBAR_GROUPS,
   QUICK_MATH_SYMBOLS,
+  buildSimpleDefault,
   getMathTemplate,
   type MathTemplateId,
 } from '../../lib/mathInputAssistant';
@@ -11,6 +13,7 @@ import { MathTemplatePopover } from './MathTemplatePopover';
 interface Props {
   tokens: AtmosphereTokens;
   textColor: string;
+  variant?: 'spatial' | 'desk-paper';
   onInsertSymbol: (text: string) => void;
   onApplyTemplate: (templateId: MathTemplateId, values: Record<string, string>) => void;
 }
@@ -32,11 +35,13 @@ const btnStyle = (tokens: AtmosphereTokens): CSSProperties => ({
 export const MathInputToolbar = memo(function MathInputToolbar({
   tokens,
   textColor,
+  variant = 'spatial',
   onInsertSymbol,
   onApplyTemplate,
 }: Props) {
   const [openTemplate, setOpenTemplate] = useState<MathTemplateId | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const isDeskPaper = variant === 'desk-paper';
 
   const closePopover = useCallback(() => setOpenTemplate(null), []);
 
@@ -52,6 +57,88 @@ export const MathInputToolbar = memo(function MathInputToolbar({
   }, [openTemplate, closePopover]);
 
   const activeDef = openTemplate ? getMathTemplate(openTemplate) : undefined;
+
+  const insertDefaultTemplate = useCallback(
+    (id: MathTemplateId) => {
+      onInsertSymbol(buildSimpleDefault(id));
+    },
+    [onInsertSymbol],
+  );
+
+  if (isDeskPaper) {
+    return (
+      <div
+        className="desk-math-palette desk-math-palette--strip"
+        ref={wrapRef}
+        data-math-input-toolbar="1"
+        role="toolbar"
+        aria-label="Math tools"
+      >
+        <div className="desk-math-palette__strip">
+          {MATH_TOOLBAR_GROUPS.map((group, groupIndex) => (
+            <Fragment key={group.id}>
+              {groupIndex > 0 ? <span className="desk-math-palette__sep" aria-hidden /> : null}
+              {group.templates?.map(templateId => {
+                const t = getMathTemplate(templateId);
+                if (!t) return null;
+                const isLim = templateId === 'limit';
+                return (
+                  <div key={templateId} className="desk-math-palette__btn-wrap">
+                    <button
+                      type="button"
+                      className={`desk-math-palette__btn${isLim ? ' desk-math-palette__btn--lim' : ''}${
+                        openTemplate === templateId ? ' desk-math-palette__btn--active' : ''
+                      }`}
+                      title={`Insert ${t.title}`}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => insertDefaultTemplate(templateId)}
+                    >
+                      {t.label}
+                    </button>
+                    <button
+                      type="button"
+                      className="desk-math-palette__btn desk-math-palette__btn--chevron"
+                      title={`Customize ${t.title}`}
+                      aria-label={`Customize ${t.title}`}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() =>
+                        setOpenTemplate(prev => (prev === templateId ? null : templateId))
+                      }
+                    >
+                      ▾
+                    </button>
+                    {openTemplate === templateId && activeDef?.id === templateId ? (
+                      <MathTemplatePopover
+                        template={activeDef}
+                        tokens={tokens}
+                        textColor={textColor}
+                        onApply={values => onApplyTemplate(templateId, values)}
+                        onClose={closePopover}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+              {group.symbols?.map(s => (
+                <button
+                  key={s.insert}
+                  type="button"
+                  className="desk-math-palette__btn"
+                  title={s.title ?? s.label}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    onInsertSymbol(s.insert);
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginBottom: 8 }}>

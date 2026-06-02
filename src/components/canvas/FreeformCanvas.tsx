@@ -104,6 +104,7 @@ import {
 } from '../../lib/followPanSteering';
 import { createFollowPanCursorController } from './FreeSpaceFollowPanCursor';
 import { setPerformancePressure } from '../../lib/performanceSafeMode';
+import type { UniversalObjectSplitSide, UniversalObjectViewMode } from '../../hooks/useSectionFreeSpaceObjects';
 import {
   buildBlockRenderPolicies,
   buildCanvasScaleContext,
@@ -222,6 +223,12 @@ interface Props {
   /** Appearance clarity multipliers (fog, ambient, focus dim). */
   workspaceClarity?: WorkspaceClarity;
   focusStrength?: FocusStrength;
+  getObjectPresentation?: (id: string) => { mode: UniversalObjectViewMode; splitSide: UniversalObjectSplitSide };
+  onSetObjectPresentationMode?: (
+    id: string,
+    mode: UniversalObjectViewMode,
+    splitSide?: UniversalObjectSplitSide,
+  ) => void;
 }
 
 // ── Canvas controls ───────────────────────────────────────────────────────────
@@ -416,6 +423,8 @@ export function FreeformCanvas({
   calmEffects = false,
   workspaceClarity,
   focusStrength = 'soft',
+  getObjectPresentation,
+  onSetObjectPresentationMode,
 }: Props) {
   useEffect(() => {
     flickerDebugCount('FreeformCanvas');
@@ -2120,6 +2129,9 @@ export function FreeformCanvas({
                     item.kind === 'block' ? blocksById.get(item.id)?.type : undefined,
                   )}
                   materialShadowMul={scalePolicy?.materialShadowMul ?? 1}
+                  presentationMode={getObjectPresentation?.(item.id).mode}
+                  presentationSplitSide={getObjectPresentation?.(item.id).splitSide}
+                  onSetPresentationMode={onSetObjectPresentationMode}
                 >
                   {content}
                 </FreeformBlock>

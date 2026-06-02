@@ -64,7 +64,10 @@ import {
   useSectionFreeSpaceObjects,
   type ProjectObjectType,
   type ProjectObjectContent,
+  type UniversalObjectSplitSide,
+  type UniversalObjectViewMode,
   ensureProjectObjectContent,
+  coerceFreeSpaceConnectionIds,
 } from '../hooks/useSectionFreeSpaceObjects';
 import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
 import { GroupComponent } from '../components/GroupComponent';
@@ -89,6 +92,41 @@ import {
 } from '../lib/freeSpacePersistence';
 import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
+import { StudyLayoutDockPortal } from '../components/project-space/StudyLayoutDockPortal';
+import { StudySessionShell } from '../components/project-space/StudySessionShell';
+import { StudySessionPickWork } from '../components/project-space/StudySessionPickWork';
+import { UniversalObjectViewPortal } from '../components/project-space/UniversalObjectViewPortal';
+import { StudyContinueBanner } from '../components/workspace-guidance/StudyContinueBanner';
+import {
+  isStudyLayoutDocked,
+  sanitizeStudyLayout,
+  type StudyLayoutMode,
+} from '../lib/mathDesk/studyLayout';
+import { useStudySessionPrimary } from '../lib/studySession/featureFlags';
+import {
+  getMostRecentSession,
+  loadStudySession,
+  saveStudySession,
+  touchStudySession,
+} from '../lib/studySession/persistence';
+import { resolveStudyPair } from '../lib/studySession/resolveStudyPair';
+import {
+  applyPdfPageRestore,
+  buildRestorePayload,
+} from '../lib/studySession/sessionRestore';
+import type { StudySessionRecord } from '../lib/studySession/types';
+import type { StudyPaneFocus } from '../lib/studySession/computeSessionChrome';
+import {
+  formatLastStudied,
+  formatPageLabel,
+} from '../lib/studySession/formatStudySessionStatus';
+import { STUDY_SESSION_PDF_FIT_WIDTH_ZOOM } from '../components/project-space/FreeSpacePdfCard';
+import type { StudyExamPdfControls } from '../lib/studySession/examPdfControls';
+import {
+  EXAM_QUESTION_SEED_BODY,
+  parseExamQuestionsFromBody,
+} from '../lib/studySession/parseExamQuestions';
+import type { ProjectSpaceObject } from '../hooks/useSectionFreeSpaceObjects';
 import { CompanionComposerModal } from '../components/project-space/CompanionComposerModal';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
 import { LearningAttemptOverlay } from '../components/project-space/LearningAttemptOverlay';
@@ -760,6 +798,26 @@ export function SectionPage() {
     return sectionId ? resolveSectionViewModeOnOpen(sectionId) : 'free-space';
   });
   const [resumeDismissed, setResumeDismissed] = useState(false);
+  const studySessionPrimary = useStudySessionPrimary();
+  const [activeStudySession, setActiveStudySession] = useState<StudySessionRecord | null>(null);
+  const [studyPickWork, setStudyPickWork] = useState<{
+    sourceId: string;
+    candidates: ProjectSpaceObject[];
+  } | null>(null);
+  const [studyContinueDismissed, setStudyContinueDismissed] = useState(false);
+  const [studyRestoreBlockId, setStudyRestoreBlockId] = useState<string | null>(null);
+  const [activeQuestionNumber, setActiveQuestionNumber] = useState<number | null>(null);
+  const [studyFocusQuestionNumber, setStudyFocusQuestionNumber] = useState<number | null>(null);
+  const [studyFocusQuestionToken, setStudyFocusQuestionToken] = useState(0);
+  const [studyPaneFocus, setStudyPaneFocus] = useState<StudyPaneFocus>('exam');
+  const [studySplitRatio, setStudySplitRatio] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0.75;
+    const raw = window.localStorage.getItem('focus.studySession.splitRatio.v1');
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) ? Math.max(0.12, Math.min(0.88, n)) : 0.75;
+  });
+  const studySessionWorkPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const studySessionPagePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
@@ -788,6 +846,13 @@ export function SectionPage() {
   const [learningAttemptTarget, setLearningAttemptTarget] = useState<LearningAttemptTarget | null>(null);
   const [learningAttemptQueue, setLearningAttemptQueue] = useState<string[]>([]);
   const [learningAttemptIndex, setLearningAttemptIndex] = useState(0);
+
+  const closeLearningAttempt = useCallback(() => {
+    setLearningAttemptOpen(false);
+    setLearningAttemptTarget(null);
+    setLearningAttemptQueue([]);
+    setLearningAttemptIndex(0);
+  }, []);
   const [courseTrapOpen, setCourseTrapOpen] = useState(false);
   const [courseTrapPdfId, setCourseTrapPdfId] = useState<string | null>(null);
   const [courseTrapSubject, setCourseTrapSubject] = useState<CourseTrapSubject | null>(null);
@@ -1302,17 +1367,31 @@ export function SectionPage() {
 
   const openLearningAttemptForObject = useCallback(
     (objectId: string) => {
+      if (activeStudySession && sectionId) {
+        touchStudySession(sectionId, sectionBoards.activeBoardId, {
+          sourceObjectId: activeStudySession.sourceObjectId,
+          lastExitedAt: Date.now(),
+        });
+        setActiveStudySession(null);
+        setStudyRestoreBlockId(null);
+      }
       const obj = sectionObjectsRef.current.getObject(objectId);
       if (!obj) return;
       const target = learningTargetFromObject(obj);
       if (!target) return;
       if (sectionViewMode !== 'free-space') setSectionViewMode('free-space');
+      closeLearningAttempt();
       setLearningAttemptTarget(target);
-      setLearningAttemptQueue([]);
-      setLearningAttemptIndex(0);
       setLearningAttemptOpen(true);
     },
-    [sectionViewMode, setSectionViewMode],
+    [
+      activeStudySession,
+      sectionId,
+      sectionBoards.activeBoardId,
+      sectionViewMode,
+      setSectionViewMode,
+      closeLearningAttempt,
+    ],
   );
 
   const applyStudyLinksForObject = useCallback(
@@ -2567,33 +2646,530 @@ export function SectionPage() {
     });
   }, [spaceSelectedId]);
 
-  const renderSpaceObject = useCallback((objectId: string): React.ReactNode | null => {
-    const store = sectionObjectsRef.current;
-    const obj = store.getObject(objectId);
-    if (!obj) return null;
-    return (
-      <ProjectSpaceObjectRenderer
-        object={obj}
-        allObjects={store.objects}
-        tokens={tokens}
-        freeSpaceSectionId={sectionId}
-        freeSpaceBoardId={sectionBoards.activeBoardId}
-        onChange={content => store.updateObjectContent(objectId, content)}
-        onTitleChange={
-          obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
-            ? t => store.updateObjectFields(objectId, { title: t })
-            : undefined
+  const createWorkNotebookForStudy = useCallback(
+    (sourceId: string) => {
+      const obj = addSpaceObject('notebook');
+      const base = viewportCenterWorld(40, 0);
+      initPos(obj.id, { x: base.x, y: base.y, w: 1040, h: 680 });
+      updateSpaceObjectContent(obj.id, {
+        type: 'notebook',
+        body: '# Work\n\n',
+        paperStyle: 'grid',
+        notebookSurface: 'spatial',
+        notebookMode: 'math',
+        icon: '∑',
+      });
+      addSpaceConnection(sourceId, obj.id);
+      return obj.id;
+    },
+    [addSpaceObject, initPos, viewportCenterWorld, updateSpaceObjectContent, addSpaceConnection],
+  );
+
+  const commitStudySession = useCallback(
+    (sourceId: string, workId: string, restoreFromRecord: StudySessionRecord | null) => {
+      if (!sectionId) return;
+      closeLearningAttempt();
+      const boardId = sectionBoards.activeBoardId;
+      const source = getSpaceObject(sourceId);
+      const work = getSpaceObject(workId);
+      if (!source || source.type !== 'pdf' || !work) return;
+
+      const restore = buildRestorePayload(restoreFromRecord);
+      const workContent = ensureProjectObjectContent('notebook', work.content);
+      if (workContent.type === 'notebook') {
+        let workBody = workContent.body ?? '';
+        const trimmed = workBody.trim();
+        const canSeedStudyQuestions =
+          trimmed.length === 0 ||
+          /^#\s*(Work|Math)?\s*$/i.test(trimmed) ||
+          /^#\s*(Work|Math)?\s*\n\s*$/i.test(trimmed);
+        if (canSeedStudyQuestions && parseExamQuestionsFromBody(workBody).length === 0) {
+          workBody = EXAM_QUESTION_SEED_BODY;
         }
-        onNotebookEditingChange={(oid, isEditing) => {
-          setSpaceEditingId(prev => (isEditing ? oid : prev === oid ? null : prev));
-        }}
-        onRequestSelectObject={setSpaceSelectedId}
-        onCreateNotebookRecall={createNotebookRecallItem}
-        onStartLearningAttempt={openLearningAttemptForObject}
-        onPdfViewerReady={handlePdfViewerReady}
-      />
-    );
-  }, [sectionId, sectionBoards.activeBoardId, tokens, createNotebookRecallItem, openLearningAttemptForObject, handlePdfViewerReady]);
+        sectionObjectsRef.current.updateObjectContent(workId, {
+          ...workContent,
+          body: workBody,
+          deskLayout: {
+            collapsed: { formula: true, graph: true, compute: true, scratch: true },
+          },
+        });
+      }
+      const pdfContent = ensureProjectObjectContent('pdf', source.content);
+      const page =
+        restore.pdfPage ??
+        (pdfContent.type === 'pdf' ? pdfContent.page : 1);
+
+      let pagePatch = applyPdfPageRestore(source, page);
+      if (pagePatch) {
+        const pc = ensureProjectObjectContent('pdf', pagePatch);
+        if (pc.type === 'pdf' && pc.zoom <= 1) {
+          pagePatch = { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM };
+        }
+        sectionObjectsRef.current.updateObjectContent(sourceId, pagePatch);
+      } else if (pdfContent.type === 'pdf' && pdfContent.zoom <= 1) {
+        sectionObjectsRef.current.updateObjectContent(sourceId, {
+          ...pdfContent,
+          zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM,
+        });
+      }
+
+      const now = Date.now();
+      const record: StudySessionRecord = {
+        sourceObjectId: sourceId,
+        workObjectId: workId,
+        source: { page },
+        work: {
+          lastBlockId: restore.workBlockId,
+          lastCaretOffset: restoreFromRecord?.work.lastCaretOffset ?? null,
+        },
+        enteredAt: restoreFromRecord?.enteredAt ?? now,
+        lastActiveAt: now,
+        lastExitedAt: null,
+      };
+      saveStudySession(sectionId, boardId, record);
+      setActiveStudySession(record);
+      setStudyRestoreBlockId(restore.workBlockId);
+      if (restore.workBlockId) {
+        setActiveQuestionNumber(null);
+        setStudyFocusQuestionNumber(null);
+      } else {
+        setActiveQuestionNumber(1);
+        setStudyFocusQuestionNumber(1);
+        setStudyFocusQuestionToken(t => t + 1);
+      }
+      setStudyPaneFocus('exam');
+      setStudyContinueDismissed(true);
+      setSectionViewMode('free-space');
+      setSpaceSelectedId(workId);
+    },
+    [
+      sectionId,
+      sectionBoards.activeBoardId,
+      getSpaceObject,
+      setSectionViewMode,
+      closeLearningAttempt,
+    ],
+  );
+
+  const enterStudySession = useCallback(
+    (sourceId: string, opts?: { restore?: boolean }) => {
+      if (!studySessionPrimary || !sectionId) return;
+      closeLearningAttempt();
+      const objects = sectionObjectsRef.current.objects;
+      const source = objects.find(o => o.id === sourceId);
+      if (!source || source.type !== 'pdf') return;
+
+      const boardId = sectionBoards.activeBoardId;
+      const saved = opts?.restore ? loadStudySession(sectionId, boardId, sourceId) : null;
+      const resolution = resolveStudyPair(source, objects, sectionId, boardId);
+
+      if (resolution.kind === 'pick') {
+        setStudyPickWork({ sourceId, candidates: resolution.candidates });
+        return;
+      }
+
+      let workId = resolution.kind === 'ready' ? resolution.workObjectId : '';
+      if (resolution.kind === 'create') {
+        workId = createWorkNotebookForStudy(sourceId);
+      }
+      if (!workId) return;
+
+      if (resolution.kind === 'ready' && !saved) {
+        const linked = objects.find(o => o.id === workId);
+        const hasLink = coerceFreeSpaceConnectionIds(source.connections).includes(workId)
+          || (linked && coerceFreeSpaceConnectionIds(linked.connections).includes(sourceId));
+        if (!hasLink) addSpaceConnection(sourceId, workId);
+      }
+
+      commitStudySession(sourceId, workId, saved);
+    },
+    [
+      studySessionPrimary,
+      sectionId,
+      sectionBoards.activeBoardId,
+      createWorkNotebookForStudy,
+      commitStudySession,
+      addSpaceConnection,
+      closeLearningAttempt,
+    ],
+  );
+
+  const exitStudySession = useCallback(() => {
+    if (!activeStudySession || !sectionId) return;
+    const boardId = sectionBoards.activeBoardId;
+    touchStudySession(sectionId, boardId, {
+      sourceObjectId: activeStudySession.sourceObjectId,
+      lastExitedAt: Date.now(),
+    });
+    setActiveStudySession(null);
+    setStudyRestoreBlockId(null);
+    setActiveQuestionNumber(null);
+    setStudyFocusQuestionNumber(null);
+    setStudyPaneFocus('exam');
+    if (studySessionWorkPersistTimerRef.current) {
+      clearTimeout(studySessionWorkPersistTimerRef.current);
+      studySessionWorkPersistTimerRef.current = null;
+    }
+    if (studySessionPagePersistTimerRef.current) {
+      clearTimeout(studySessionPagePersistTimerRef.current);
+      studySessionPagePersistTimerRef.current = null;
+    }
+    toast.success('Study session saved — you can continue anytime.');
+  }, [activeStudySession, sectionId, sectionBoards.activeBoardId]);
+
+  const handleSelectStudyQuestion = useCallback((questionNumber: number) => {
+    setActiveQuestionNumber(questionNumber);
+    setStudyFocusQuestionNumber(questionNumber);
+    setStudyFocusQuestionToken(t => t + 1);
+  }, []);
+
+  const handleStudyPaneFocusChange = useCallback((focus: StudyPaneFocus) => {
+    setStudyPaneFocus(focus);
+    const preset = focus === 'exam' ? 0.75 : focus === 'work' ? 0.28 : 0.5;
+    setStudySplitRatio(preset);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('focus.studySession.splitRatio.v1', String(preset));
+    }
+  }, []);
+
+  const handleStudySplitRatioChange = useCallback((ratio: number) => {
+    setStudySplitRatio(Math.max(0.12, Math.min(0.88, ratio)));
+  }, []);
+
+  const handleStudySplitRatioCommit = useCallback((ratio: number) => {
+    const next = Math.max(0.12, Math.min(0.88, ratio));
+    setStudySplitRatio(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('focus.studySession.splitRatio.v1', String(next));
+    }
+  }, []);
+
+  const studyExamQuestions = useMemo(() => {
+    if (!activeStudySession) return [];
+    const work = sectionObjects.objects.find(o => o.id === activeStudySession.workObjectId);
+    if (!work || work.type !== 'notebook') return [];
+    const c = ensureProjectObjectContent('notebook', work.content);
+    if (c.type !== 'notebook') return [];
+    return parseExamQuestionsFromBody(c.body ?? '');
+  }, [activeStudySession, sectionObjects.objects]);
+
+  const studyExamPdfControls = useMemo((): StudyExamPdfControls | null => {
+    if (!activeStudySession || studyPaneFocus !== 'exam') return null;
+    const src = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
+    if (!src || src.type !== 'pdf') return null;
+    const c = ensureProjectObjectContent('pdf', src.content);
+    if (c.type !== 'pdf' || !c.fileName) return null;
+    const sourceId = activeStudySession.sourceObjectId;
+    return {
+      page: c.page,
+      pageCount: c.pageCount,
+      zoom: c.zoom,
+      ready: true,
+      onPageDelta: (delta: number) => {
+        const store = sectionObjectsRef.current;
+        const o = store.getObject(sourceId);
+        if (!o || o.type !== 'pdf') return;
+        const pc = ensureProjectObjectContent('pdf', o.content);
+        if (pc.type !== 'pdf') return;
+        store.updateObjectContent(sourceId, {
+          ...pc,
+          page: Math.max(1, pc.page + delta),
+        });
+      },
+      onZoomDelta: (delta: number) => {
+        const store = sectionObjectsRef.current;
+        const o = store.getObject(sourceId);
+        if (!o || o.type !== 'pdf') return;
+        const pc = ensureProjectObjectContent('pdf', o.content);
+        if (pc.type !== 'pdf') return;
+        const z = Math.min(2.5, Math.max(0.55, Math.round((pc.zoom + delta) * 100) / 100));
+        store.updateObjectContent(sourceId, { ...pc, zoom: z });
+      },
+      onFitWidth: () => {
+        const store = sectionObjectsRef.current;
+        const o = store.getObject(sourceId);
+        if (!o || o.type !== 'pdf') return;
+        const pc = ensureProjectObjectContent('pdf', o.content);
+        if (pc.type !== 'pdf') return;
+        store.updateObjectContent(sourceId, { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
+      },
+    };
+  }, [activeStudySession, studyPaneFocus, sectionObjects.objects]);
+
+  const handleStudySessionWorkFocus = useCallback(
+    (blockId: string | null) => {
+      if (!activeStudySession || !sectionId || !blockId) return;
+      if (studySessionWorkPersistTimerRef.current) {
+        clearTimeout(studySessionWorkPersistTimerRef.current);
+      }
+      studySessionWorkPersistTimerRef.current = setTimeout(() => {
+        const next = touchStudySession(sectionId, sectionBoards.activeBoardId, {
+          sourceObjectId: activeStudySession.sourceObjectId,
+          work: { lastBlockId: blockId, lastCaretOffset: null },
+        });
+        if (next) setActiveStudySession(next);
+        studySessionWorkPersistTimerRef.current = null;
+      }, 400);
+    },
+    [activeStudySession, sectionId, sectionBoards.activeBoardId],
+  );
+
+  useEffect(() => {
+    if (!activeStudySession || !sectionId || !studySessionPrimary) return;
+    const source = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
+    if (!source || source.type !== 'pdf') return;
+    const c = ensureProjectObjectContent('pdf', source.content);
+    if (c.type !== 'pdf' || c.page === activeStudySession.source.page) return;
+    if (studySessionPagePersistTimerRef.current) clearTimeout(studySessionPagePersistTimerRef.current);
+    studySessionPagePersistTimerRef.current = setTimeout(() => {
+      const next = touchStudySession(sectionId, sectionBoards.activeBoardId, {
+        sourceObjectId: activeStudySession.sourceObjectId,
+        source: { page: c.page },
+      });
+      if (next) setActiveStudySession(next);
+      studySessionPagePersistTimerRef.current = null;
+    }, 400);
+    return () => {
+      if (studySessionPagePersistTimerRef.current) {
+        clearTimeout(studySessionPagePersistTimerRef.current);
+        studySessionPagePersistTimerRef.current = null;
+      }
+    };
+  }, [activeStudySession, sectionId, sectionBoards.activeBoardId, sectionObjects.objects, studySessionPrimary]);
+
+  const studyContinueCandidate = useMemo(() => {
+    if (!studySessionPrimary || !sectionId || activeStudySession || studyContinueDismissed) {
+      return null;
+    }
+    return getMostRecentSession(sectionId, sectionBoards.activeBoardId);
+  }, [
+    studySessionPrimary,
+    sectionId,
+    sectionBoards.activeBoardId,
+    activeStudySession,
+    studyContinueDismissed,
+  ]);
+
+  const workspaceResumeSuggestions = useMemo(() => {
+    if (!studySessionPrimary || !studyContinueCandidate) return continuitySuggestions;
+    return continuitySuggestions.filter(s => !s.learningAttempt);
+  }, [continuitySuggestions, studySessionPrimary, studyContinueCandidate]);
+
+  const supportsUniversalPresentation = useCallback((o: ProjectSpaceObject): boolean => (
+    o.type === 'notebook'
+    || o.type === 'pdf'
+    || o.type === 'image'
+    || o.type === 'note'
+    || o.type === 'checklist'
+  ), []);
+
+  const isStudySessionObject = useCallback(
+    (objectId: string): boolean =>
+      Boolean(
+        activeStudySession &&
+        (objectId === activeStudySession.sourceObjectId || objectId === activeStudySession.workObjectId),
+      ),
+    [activeStudySession],
+  );
+
+  const getObjectPresentation = useCallback((objectId: string): {
+    mode: UniversalObjectViewMode;
+    splitSide: UniversalObjectSplitSide;
+  } => {
+    const obj = sectionObjectsRef.current.getObject(objectId);
+    if (!obj || !supportsUniversalPresentation(obj) || isStudySessionObject(objectId)) {
+      return { mode: 'floating', splitSide: 'right' };
+    }
+    return {
+      mode: obj.viewMode ?? 'floating',
+      splitSide: obj.splitSide ?? 'right',
+    };
+  }, [supportsUniversalPresentation, isStudySessionObject]);
+
+  const setObjectPresentationMode = useCallback((
+    objectId: string,
+    mode: UniversalObjectViewMode,
+    splitSide?: UniversalObjectSplitSide,
+  ) => {
+    const store = sectionObjectsRef.current;
+    const target = store.getObject(objectId);
+    if (!target || !supportsUniversalPresentation(target) || isStudySessionObject(objectId)) return;
+
+    if (mode === 'split') {
+      const side = splitSide ?? target.splitSide ?? 'right';
+      for (const o of store.objects) {
+        if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
+        if (isStudySessionObject(o.id)) continue;
+        if ((o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === side) {
+          store.updateObjectFields(o.id, { viewMode: 'floating' });
+        }
+      }
+      store.updateObjectFields(objectId, { viewMode: 'split', splitSide: side });
+    } else if (mode === 'fullscreen') {
+      for (const o of store.objects) {
+        if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
+        if ((o.viewMode ?? 'floating') === 'fullscreen') {
+          store.updateObjectFields(o.id, { viewMode: 'floating' });
+        }
+      }
+      store.updateObjectFields(objectId, { viewMode: 'fullscreen' });
+    } else {
+      store.updateObjectFields(objectId, { viewMode: 'floating' });
+    }
+    setSpaceSelectedId(objectId);
+  }, [supportsUniversalPresentation, isStudySessionObject]);
+
+  const handleStudyLayoutChange = useCallback((objectId: string, mode: StudyLayoutMode) => {
+    const store = sectionObjectsRef.current;
+    for (const o of store.objects) {
+      if (o.type !== 'notebook') continue;
+      const c = ensureProjectObjectContent('notebook', o.content);
+      if (c.type !== 'notebook') continue;
+
+      const current = sanitizeStudyLayout(c.studyLayout);
+      let target: StudyLayoutMode = current;
+      if (o.id === objectId) {
+        target = mode;
+      } else if (mode !== 'canvas' && isStudyLayoutDocked(current)) {
+        target = 'canvas';
+      } else {
+        continue;
+      }
+
+      if (target === current) continue;
+
+      const { studyLayout: _removed, ...base } = c;
+      const next =
+        target === 'canvas'
+          ? (base as ProjectObjectContent)
+          : ({ ...base, studyLayout: target } as ProjectObjectContent);
+      store.updateObjectContent(o.id, next);
+    }
+    if (mode !== 'canvas') {
+      setSpaceSelectedId(objectId);
+    }
+  }, []);
+
+  const renderSpaceObject = useCallback(
+    (
+      objectId: string,
+      contentHost: 'canvas' | 'study-dock' | 'study-session' = 'canvas',
+    ): React.ReactNode | null => {
+      const store = sectionObjectsRef.current;
+      const obj = store.getObject(objectId);
+      if (!obj) return null;
+
+      const inStudySession =
+        studySessionPrimary &&
+        activeStudySession &&
+        (activeStudySession.sourceObjectId === objectId ||
+          activeStudySession.workObjectId === objectId);
+
+      const studySessionChip =
+        inStudySession && contentHost === 'canvas'
+          ? {
+              subtitle:
+                activeStudySession!.sourceObjectId === objectId
+                  ? 'Exam is open in your study session'
+                  : 'Work is open in your study session',
+              onOpen: () => enterStudySession(activeStudySession!.sourceObjectId, { restore: true }),
+            }
+          : null;
+
+      const isStudyWorkNotebook =
+        inStudySession && activeStudySession?.workObjectId === objectId;
+
+      const studyExamReaderChrome = Boolean(
+        contentHost === 'study-session' &&
+          studyPaneFocus === 'exam' &&
+          activeStudySession?.sourceObjectId === objectId,
+      );
+
+      const studyDeskQuiet = Boolean(
+        contentHost === 'study-session' &&
+          studyPaneFocus === 'exam' &&
+          isStudyWorkNotebook,
+      );
+
+      const restoreBlockId =
+        contentHost === 'study-session' && isStudyWorkNotebook ? studyRestoreBlockId : null;
+
+      return (
+        <ProjectSpaceObjectRenderer
+          object={obj}
+          allObjects={store.objects}
+          tokens={tokens}
+          freeSpaceSectionId={sectionId}
+          freeSpaceBoardId={sectionBoards.activeBoardId}
+          contentHost={contentHost}
+          onChange={content => store.updateObjectContent(objectId, content)}
+          onTitleChange={
+            obj.type === 'mistake' || obj.type === 'pdf' || obj.type === 'companion'
+              ? t => store.updateObjectFields(objectId, { title: t })
+              : undefined
+          }
+          onNotebookEditingChange={(oid, isEditing) => {
+            setSpaceEditingId(prev => (isEditing ? oid : prev === oid ? null : prev));
+          }}
+          onRequestSelectObject={setSpaceSelectedId}
+          onCreateNotebookRecall={createNotebookRecallItem}
+          onStartLearningAttempt={openLearningAttemptForObject}
+          onPdfViewerReady={handlePdfViewerReady}
+          onStudyLayoutChange={
+            studySessionPrimary || obj.type !== 'notebook'
+              ? undefined
+              : mode => handleStudyLayoutChange(objectId, mode)
+          }
+          onStartStudySession={
+            studySessionPrimary && obj.type === 'pdf' && contentHost === 'canvas'
+              ? () => enterStudySession(objectId)
+              : undefined
+          }
+          studySessionChip={studySessionChip}
+          sessionRestoreBlockId={restoreBlockId}
+          onStudySessionWorkFocus={
+            isStudyWorkNotebook ? handleStudySessionWorkFocus : undefined
+          }
+          studyFocusQuestionNumber={isStudyWorkNotebook ? studyFocusQuestionNumber : undefined}
+          studyFocusQuestionToken={isStudyWorkNotebook ? studyFocusQuestionToken : undefined}
+          onStudySessionActiveQuestionNumber={
+            isStudyWorkNotebook ? setActiveQuestionNumber : undefined
+          }
+          suppressStudyToolbar={studyExamReaderChrome}
+          studyDeskQuiet={studyDeskQuiet}
+          suppressLearningAttemptChip={
+            studySessionPrimary &&
+            (contentHost === 'study-session' || obj.type === 'pdf')
+          }
+        />
+      );
+    },
+    [
+      sectionId,
+      sectionBoards.activeBoardId,
+      tokens,
+      createNotebookRecallItem,
+      openLearningAttemptForObject,
+      handlePdfViewerReady,
+      handleStudyLayoutChange,
+      studySessionPrimary,
+      activeStudySession,
+      studyRestoreBlockId,
+      studyFocusQuestionNumber,
+      studyFocusQuestionToken,
+      studyPaneFocus,
+      enterStudySession,
+      handleStudySessionWorkFocus,
+    ],
+  );
+
+  const studyDockedNotebooks = useMemo(() => {
+    return sectionObjects.objects.filter(o => {
+      if (o.type !== 'notebook') return false;
+      const c = ensureProjectObjectContent('notebook', o.content);
+      return c.type === 'notebook' && isStudyLayoutDocked(sanitizeStudyLayout(c.studyLayout));
+    });
+  }, [sectionObjects.objects]);
 
   if (!section && loading) {
     return (
@@ -2804,6 +3380,7 @@ export function SectionPage() {
         tokens={tokens}
         isCustomizing={designMode}
         isExploreFocus={isExploreFocus}
+        dimmed={studySessionPrimary && !!activeStudySession}
         backLabel={workspaceBackLabel}
         onBack={handleWorkspaceBack}
         onOpenSearch={openPalette}
@@ -2861,12 +3438,7 @@ export function SectionPage() {
           learningAttemptIndex < learningAttemptQueue.length - 1
         }
         onAdvanceQueue={advanceLearningAttemptQueue}
-        onClose={() => {
-          setLearningAttemptOpen(false);
-          setLearningAttemptTarget(null);
-          setLearningAttemptQueue([]);
-          setLearningAttemptIndex(0);
-        }}
+        onClose={closeLearningAttempt}
         onUpdateMistake={handleLearningAttemptUpdate}
         onPersistSourceAttempt={handlePersistSourceAttempt}
       />
@@ -2923,7 +3495,11 @@ export function SectionPage() {
               canvasBackgroundStyle={canvasBackgroundStyle}
               livingEnvironment={livingEnvironment}
               modules={[]}
-              blocks={sectionObjects.objects}
+              blocks={sectionObjects.objects.filter(o => {
+                if (activeStudySession) return true;
+                if (!supportsUniversalPresentation(o)) return true;
+                return (o.viewMode ?? 'floating') === 'floating';
+              })}
               tools={[]}
               positions={sectionPositions.positions}
               canvasState={sectionCanvas}
@@ -2969,20 +3545,182 @@ export function SectionPage() {
               continuityObjectIds={continuityObjectIds}
               continuityClusterIds={continuityClusterIds}
               continuityEdgeKeys={continuityEdgeKeys}
+              getObjectPresentation={getObjectPresentation}
+              onSetObjectPresentationMode={setObjectPresentationMode}
             />
           </FreeSpaceCanvasErrorBoundary>
+
+          {freeSpaceSurfaceVisible && !activeStudySession && (() => {
+            const eligible = sectionObjects.objects.filter(o => supportsUniversalPresentation(o));
+            const fullscreen = eligible
+              .filter(o => (o.viewMode ?? 'floating') === 'fullscreen')
+              .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+            if (fullscreen) {
+              return (
+                <UniversalObjectViewPortal
+                  key={`object-view-fullscreen-${fullscreen.id}`}
+                  title={fullscreen.title}
+                  tokens={freeSpaceTokens}
+                  mode="fullscreen"
+                  splitSide={fullscreen.splitSide ?? 'right'}
+                  onSetMode={mode => setObjectPresentationMode(fullscreen.id, mode)}
+                >
+                  {renderSpaceObject(fullscreen.id, 'canvas')}
+                </UniversalObjectViewPortal>
+              );
+            }
+            const splitLeft = eligible
+              .filter(o => (o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === 'left')
+              .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+            const splitRight = eligible
+              .filter(o => (o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === 'right')
+              .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+            return (
+              <>
+                {splitLeft ? (
+                  <UniversalObjectViewPortal
+                    key={`object-view-split-left-${splitLeft.id}`}
+                    title={splitLeft.title}
+                    tokens={freeSpaceTokens}
+                    mode="split"
+                    splitSide="left"
+                    onSetMode={mode => setObjectPresentationMode(splitLeft.id, mode)}
+                  >
+                    {renderSpaceObject(splitLeft.id, 'canvas')}
+                  </UniversalObjectViewPortal>
+                ) : null}
+                {splitRight ? (
+                  <UniversalObjectViewPortal
+                    key={`object-view-split-right-${splitRight.id}`}
+                    title={splitRight.title}
+                    tokens={freeSpaceTokens}
+                    mode="split"
+                    splitSide="right"
+                    onSetMode={mode => setObjectPresentationMode(splitRight.id, mode)}
+                  >
+                    {renderSpaceObject(splitRight.id, 'canvas')}
+                  </UniversalObjectViewPortal>
+                ) : null}
+              </>
+            );
+          })()}
+
+          {freeSpaceSurfaceVisible &&
+            !studySessionPrimary &&
+            studyDockedNotebooks.map(o => {
+              const c = ensureProjectObjectContent('notebook', o.content);
+              if (c.type !== 'notebook') return null;
+              const layout = sanitizeStudyLayout(c.studyLayout);
+              return (
+                <StudyLayoutDockPortal
+                  key={`study-dock-${o.id}`}
+                  layout={layout}
+                  objectTitle={o.title}
+                  tokens={freeSpaceTokens}
+                  onClose={() => handleStudyLayoutChange(o.id, 'canvas')}
+                  onLayoutChange={mode => handleStudyLayoutChange(o.id, mode)}
+                >
+                  {renderSpaceObject(o.id, 'study-dock')}
+                </StudyLayoutDockPortal>
+              );
+            })}
+
+          {freeSpaceSurfaceVisible &&
+            studySessionPrimary &&
+            activeStudySession &&
+            (() => {
+              const source = sectionObjects.objects.find(
+                o => o.id === activeStudySession.sourceObjectId,
+              );
+              let sourceTitle = source?.title ?? 'Exam';
+              if (source?.type === 'pdf') {
+                const sc = ensureProjectObjectContent('pdf', source.content);
+                if (sc.type === 'pdf' && sc.fileName) sourceTitle = sc.fileName;
+              }
+              const srcContent =
+                source?.type === 'pdf'
+                  ? ensureProjectObjectContent('pdf', source.content)
+                  : null;
+              const pageCount =
+                srcContent?.type === 'pdf' ? srcContent.pageCount : undefined;
+              const statusLine = [
+                formatPageLabel(activeStudySession.source.page, pageCount),
+                formatLastStudied(activeStudySession.lastActiveAt),
+              ].join(' · ');
+
+              return (
+                <StudySessionShell
+                  tokens={freeSpaceTokens}
+                  examTitle={sourceTitle || 'Exam'}
+                  statusLine={statusLine}
+                  shellTopInset={0}
+                  paneFocus={studyPaneFocus}
+                  onPaneFocusChange={handleStudyPaneFocusChange}
+                  splitRatio={studySplitRatio}
+                  onSplitRatioChange={handleStudySplitRatioChange}
+                  onSplitRatioCommit={handleStudySplitRatioCommit}
+                  onDoneStudying={exitStudySession}
+                  questions={studyExamQuestions}
+                  activeQuestionNumber={activeQuestionNumber}
+                  onSelectQuestion={handleSelectStudyQuestion}
+                  examPdfControls={studyExamPdfControls}
+                  sourcePanel={renderSpaceObject(activeStudySession.sourceObjectId, 'study-session')}
+                  workPanel={renderSpaceObject(activeStudySession.workObjectId, 'study-session')}
+                />
+              );
+            })()}
+
+          {freeSpaceSurfaceVisible &&
+            studySessionPrimary &&
+            studyContinueCandidate &&
+            !activeStudySession && (
+              <StudyContinueBanner
+                tokens={freeSpaceTokens}
+                examLabel={(() => {
+                  const src = sectionObjects.objects.find(
+                    o => o.id === studyContinueCandidate.sourceObjectId,
+                  );
+                  if (src?.type === 'pdf') {
+                    const c = ensureProjectObjectContent('pdf', src.content);
+                    if (c.type === 'pdf') return c.fileName || src.title;
+                  }
+                  return src?.title ?? 'Your exam';
+                })()}
+                pageLabel={(() => {
+                  const src = sectionObjects.objects.find(
+                    o => o.id === studyContinueCandidate.sourceObjectId,
+                  );
+                  if (src?.type === 'pdf') {
+                    const c = ensureProjectObjectContent('pdf', src.content);
+                    if (c.type === 'pdf') {
+                      return formatPageLabel(
+                        studyContinueCandidate.source.page,
+                        c.pageCount,
+                      );
+                    }
+                  }
+                  return formatPageLabel(studyContinueCandidate.source.page);
+                })()}
+                onContinue={() =>
+                  enterStudySession(studyContinueCandidate.sourceObjectId, { restore: true })
+                }
+                onDismiss={() => setStudyContinueDismissed(true)}
+              />
+            )}
 
           {freeSpaceSurfaceVisible &&
             continuity &&
             resumeCopy &&
             !resumeDismissed &&
+            !studyContinueCandidate &&
+            !activeStudySession &&
             !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') && (
             <WorkspaceResumeLayer
               tokens={freeSpaceTokens}
               inShell
               continuity={continuity}
               resumeCopy={resumeCopy}
-              suggestions={continuitySuggestions}
+              suggestions={workspaceResumeSuggestions}
               onDismiss={() => setResumeDismissed(true)}
               onSuggestionClick={handleResumeSuggestion}
             />
@@ -3015,6 +3753,31 @@ export function SectionPage() {
                 setStarterExpanded(false);
                 dismissWorkspaceStarterOverlay();
               }}
+            />
+          )}
+
+          {studyPickWork && studySessionPrimary && (
+            <StudySessionPickWork
+              tokens={freeSpaceTokens}
+              sourceTitle={(() => {
+                const src = sectionObjects.objects.find(o => o.id === studyPickWork.sourceId);
+                if (src?.type === 'pdf') {
+                  const c = ensureProjectObjectContent('pdf', src.content);
+                  if (c.type === 'pdf') return c.fileName || src.title;
+                }
+                return src?.title ?? 'this exam';
+              })()}
+              candidates={studyPickWork.candidates}
+              onPick={workId => {
+                const sourceId = studyPickWork.sourceId;
+                addSpaceConnection(sourceId, workId);
+                const saved = sectionId
+                  ? loadStudySession(sectionId, sectionBoards.activeBoardId, sourceId)
+                  : null;
+                commitStudySession(sourceId, workId, saved);
+                setStudyPickWork(null);
+              }}
+              onCancel={() => setStudyPickWork(null)}
             />
           )}
 

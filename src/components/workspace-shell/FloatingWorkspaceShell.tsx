@@ -82,6 +82,8 @@ interface Props {
   onSelectBoard?: (id: string) => void;
   onCreateBoard?: (name: string) => void;
   organize?: OrganizeProps;
+  /** Lower visual weight while study session reader is active. */
+  dimmed?: boolean;
 }
 
 export function FloatingWorkspaceShell({
@@ -107,6 +109,7 @@ export function FloatingWorkspaceShell({
   onSelectBoard,
   onCreateBoard,
   organize,
+  dimmed = false,
 }: Props) {
   const [searchHover, setSearchHover] = useState(false);
   const [overflowHover, setOverflowHover] = useState(false);
@@ -159,6 +162,8 @@ export function FloatingWorkspaceShell({
           padding: '6px 10px 6px 8px',
           borderRadius: 16,
           maxWidth: '100%',
+          opacity: dimmed ? 0.32 : 1,
+          transition: 'opacity 0.2s ease',
         }}
       >
         <button

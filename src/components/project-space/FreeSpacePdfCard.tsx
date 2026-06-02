@@ -21,7 +21,14 @@ interface FreeSpacePdfCardProps {
   /** Phase 0 Course Trap — fires once when PDF viewer becomes ready. */
   onPdfViewerReady?: (payload: { objectId: string; fileName: string; title: string }) => void;
   pdfTitle?: string;
+  /** Opens study session for this exam (Study Session V1). */
+  onStartStudySession?: () => void;
+  presentation?: 'canvas' | 'study-session';
+  /** Focus exam: page/zoom live in StudySessionShell merged bar. */
+  suppressStudyToolbar?: boolean;
 }
+
+export const STUDY_SESSION_PDF_FIT_WIDTH_ZOOM = 1.8;
 
 export function FreeSpacePdfCard({
   objectId,
@@ -35,9 +42,14 @@ export function FreeSpacePdfCard({
   relatedMistakeCount = 0,
   onPdfViewerReady,
   pdfTitle = '',
+  onStartStudySession,
+  presentation = 'canvas',
+  suppressStudyToolbar = false,
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
+
+  const inStudySession = presentation === 'study-session';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -145,9 +157,13 @@ export function FreeSpacePdfCard({
 
   const [displayPage, setDisplayPage] = useState(content.page);
   useEffect(() => {
+    if (inStudySession) {
+      setDisplayPage(content.page);
+      return;
+    }
     const timer = window.setTimeout(() => setDisplayPage(content.page), 280);
     return () => window.clearTimeout(timer);
-  }, [content.page]);
+  }, [content.page, inStudySession]);
 
   const iframeSrc =
     objectUrl && loadState === 'ready'
@@ -170,14 +186,66 @@ export function FreeSpacePdfCard({
     onChange({ ...content, zoom: z });
   };
 
+  const fitWidth = useCallback(() => {
+    onChange({ ...content, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
+  }, [content, onChange]);
+
   const border = tokens.cardBorder;
   const well = tokens.wellBg;
 
   const hasStudyLinks = !!(linkedNotebookTitle || relatedMistakeCount > 0);
 
+  const compactToolbar = (
+    <div
+      className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"
+      style={{ borderBottom: `1px solid ${border}`, backgroundColor: well }}
+    >
+      <button
+        type="button"
+        title="Previous page"
+        className="p-1 rounded-md"
+        style={{ color: tokens.textMuted }}
+        disabled={content.page <= 1 || loadState !== 'ready'}
+        onClick={() => bumpPage(-1)}
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
+        {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
+      </span>
+      <button
+        type="button"
+        title="Next page"
+        className="p-1 rounded-md"
+        style={{ color: tokens.textMuted }}
+        onClick={() => bumpPage(1)}
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+      <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
+      <button type="button" title="Zoom out" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(-0.1)}>
+        <Minus className="w-3.5 h-3.5" />
+      </button>
+      <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
+        {Math.round(content.zoom * 100)}%
+      </span>
+      <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        className="text-[10px] font-semibold px-2 py-0.5 rounded-md ml-1"
+        style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+        onClick={fitWidth}
+      >
+        Fit width
+      </button>
+    </div>
+  );
+
   return (
     <div
-      className="flex flex-col h-full min-h-[200px] rounded-xl overflow-hidden"
+      className={`flex flex-col h-full overflow-hidden${inStudySession ? '' : ' min-h-[200px] rounded-xl'}`}
       style={{
         backgroundColor: 'transparent',
         border: 'none',
@@ -212,37 +280,55 @@ export function FreeSpacePdfCard({
         }}
       />
 
-      <div
-        className="flex items-center gap-2 px-3 py-2 shrink-0"
-        style={{ borderBottom: `1px solid ${border}`, backgroundColor: well }}
-      >
-        <FileText className="w-4 h-4 shrink-0" strokeWidth={2} style={{ color: tokens.accent }} />
-        <span className="text-[12px] font-semibold truncate flex-1 min-w-0" style={{ color: tokens.textPrimary }}>
-          {content.documentTitle || content.fileName || 'PDF'}
-        </span>
-        <button
-          type="button"
-          className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
-          style={{ color: tokens.textMuted, border: `1px solid ${border}` }}
-          onClick={() => fileInputRef.current?.click()}
+      {inStudySession && !suppressStudyToolbar ? (
+        compactToolbar
+      ) : !inStudySession ? (
+        <div
+          className="flex items-center gap-2 px-3 py-2 shrink-0"
+          style={{ borderBottom: `1px solid ${border}`, backgroundColor: well }}
         >
-          {loadState === 'recover' ? 'Reconnect' : content.fileName ? 'Replace' : 'Choose'}
-        </button>
-        {objectUrl && loadState === 'ready' && (
-          <a
-            href={objectUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
-            style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+          <FileText className="w-4 h-4 shrink-0" strokeWidth={2} style={{ color: tokens.accent }} />
+          <span className="text-[12px] font-semibold truncate flex-1 min-w-0" style={{ color: tokens.textPrimary }}>
+            {content.documentTitle || content.fileName || 'PDF'}
+          </span>
+          <button
+            type="button"
+            className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
+            style={{ color: tokens.textMuted, border: `1px solid ${border}` }}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <ExternalLink className="w-3 h-3" />
-            Tab
-          </a>
-        )}
-      </div>
+            {loadState === 'recover' ? 'Reconnect' : content.fileName ? 'Replace' : 'Choose'}
+          </button>
+          {objectUrl && loadState === 'ready' && (
+            <a
+              href={objectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
+              style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+            >
+              <ExternalLink className="w-3 h-3" />
+              Tab
+            </a>
+          )}
+          {onStartStudySession && loadState === 'ready' && content.fileName ? (
+            <button
+              type="button"
+              className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
+              style={{
+                color: '#fff',
+                background: tokens.accent,
+                border: `1px solid ${tokens.accent}`,
+              }}
+              onClick={onStartStudySession}
+            >
+              Study this exam
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
-      {hasStudyLinks ? (
+      {!inStudySession && hasStudyLinks ? (
         <div
           className="px-3 py-1.5 shrink-0"
           style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.accent}0c` }}
@@ -263,39 +349,44 @@ export function FreeSpacePdfCard({
         </div>
       ) : null}
 
-      <div
-        className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"
-        style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.wellBg}dd` }}
-      >
-        <button
-          type="button"
-          title="Previous page"
-          className="p-1 rounded-md"
-          style={{ color: tokens.textMuted }}
-          disabled={content.page <= 1 || loadState !== 'ready'}
-          onClick={() => bumpPage(-1)}
+      {!inStudySession ? (
+        <div
+          className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"
+          style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.wellBg}dd` }}
         >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-          {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
-        </span>
-        <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
-        <button type="button" title="Zoom out" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(-0.1)}>
-          <Minus className="w-3.5 h-3.5" />
-        </button>
-        <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-          {Math.round(content.zoom * 100)}%
-        </span>
-        <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
+          <button
+            type="button"
+            title="Previous page"
+            className="p-1 rounded-md"
+            style={{ color: tokens.textMuted }}
+            disabled={content.page <= 1 || loadState !== 'ready'}
+            onClick={() => bumpPage(-1)}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
+            {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
+          </span>
+          <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
+          <button type="button" title="Zoom out" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(-0.1)}>
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
+            {Math.round(content.zoom * 100)}%
+          </span>
+          <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ) : null}
 
-      <div className="flex-1 min-h-0 relative" style={{ backgroundColor: tokens.wellBg }}>
+      <div
+        className={`flex-1 min-h-0 relative${inStudySession ? ' overflow-hidden' : ''}`}
+        style={{ backgroundColor: tokens.wellBg }}
+      >
         {/* Shimmer — shown while ingestion is in progress (brief, resolves to thumbnail) */}
         {content.ingestionPhase === 'materializing' && (
           <div
@@ -395,19 +486,27 @@ export function FreeSpacePdfCard({
         )}
 
         {iframeSrc && !suspendViewer && (
-          <div style={{ flex: 1, minHeight: 0, contain: 'layout paint', isolation: 'isolate' }}>
           <iframe
             title={content.fileName || 'PDF'}
             src={iframeSrc}
             className="border-0"
             style={
-              {
-                zoom: content.zoom,
-                width: '100%',
-                height: '100%',
-                minHeight: '420px',
-                backgroundColor: tokens.wellBg,
-              } as CSSProperties
+              inStudySession
+                ? ({
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    zoom: content.zoom,
+                    backgroundColor: tokens.wellBg,
+                  } as CSSProperties)
+                : ({
+                    zoom: content.zoom,
+                    width: '100%',
+                    height: '100%',
+                    minHeight: '420px',
+                    backgroundColor: tokens.wellBg,
+                  } as CSSProperties)
             }
             onError={() => {
               setObjectUrl(prev => {
@@ -417,7 +516,6 @@ export function FreeSpacePdfCard({
               setLoadState('error');
             }}
           />
-          </div>
         )}
       </div>
     </div>

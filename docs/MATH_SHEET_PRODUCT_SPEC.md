@@ -27,6 +27,8 @@ The Math Sheet is **not** an extension of notebook `notebookMode: 'math'`. It is
 - Replacing the notebook for lecture notes
 - Forcing LaTeX-only input (support visual + linear input paths over time)
 
+**Authoring dialect:** When implemented, `problem`, `steps[].expression`, and `scratch` use the same **Focus Linear Math** string type as math notebook lines ([FOCUS_LINEAR_MATH.md](./FOCUS_LINEAR_MATH.md)). KaTeX is display-only; storage is plain FLM text unless the user opts into `$...$` / LaTeX in advanced fields.
+
 ## Object model (proposed)
 
 ```ts
@@ -49,7 +51,7 @@ content: {
 type MathStep = {
   id: string;
   label?: string;            // e.g. "Substitute", "Simplify"
-  expression: string;        // primary math line (LaTeX or linear)
+  expression: string;        // primary math line — Focus Linear Math (see FOCUS_LINEAR_MATH.md)
   note?: string;             // short prose beside the step
   collapsed?: boolean;
 };

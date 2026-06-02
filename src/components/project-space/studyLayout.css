@@ -1,0 +1,23 @@
+.study-layout-panel__body .math-desk {
+  border-radius: 0;
+  border: none;
+  min-height: 0 !important;
+  height: 100%;
+}
+
+.study-layout-panel--fullscreen .study-layout-panel__body .math-desk {
+  border-radius: 0;
+}
+
+.study-layout-panel__body > div {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 768px) {
+  .study-layout-panel:not(.study-layout-panel--fullscreen) {
+    width: 100vw !important;
+    left: 0 !important;
+    right: 0 !important;
+  }
+}

@@ -32,6 +32,7 @@ import { nbImageGet, nbImageSet } from '../../lib/notebookImageStore';
 import {
   getMathTemplate,
   isLikelyMathLine,
+  normalizeToLinearMath,
   plainMathToLatex,
   textLikelyHasPlainMath,
   type MathTemplateId,
@@ -41,6 +42,12 @@ import {
   isMathNotebookStarterContent,
   MATH_CALCULUS_NOTEBOOK_SEED,
 } from '../../lib/mathNotebookSeed';
+import {
+  findOwningQuestionNumber,
+  findSectionBlockIdForOwningBlock,
+  findSectionBlockIdForQuestionNumber,
+  type ExamQuestionBlockRef,
+} from '../../lib/studySession/parseExamQuestions';
 import type { NotebookMode } from '../../hooks/useSectionFreeSpaceObjects';
 import {
   getMathNotebookDiscoverabilityLabel,
@@ -1004,6 +1011,21 @@ interface Props {
   presentation?: 'notebook' | 'desk';
   /** Desk: notify shell when the focused derivation line changes (for Plot-from-line). */
   onDeskFocusedLine?: (payload: { blockId: string | null; text: string }) => void;
+  /** Study session: one-time restore of focused block after resume. */
+  sessionRestoreBlockId?: string | null;
+  /** Study session: jump to a question section by number (rail). */
+  studyFocusQuestionNumber?: number | null;
+  studyFocusQuestionToken?: number;
+  /** Study session: report which question owns the focused block. */
+  onActiveQuestionNumber?: (questionNumber: number | null) => void;
+}
+
+function blocksToExamRefs(blocks: Block[]): ExamQuestionBlockRef[] {
+  return blocks.map(b => ({
+    id: b.id,
+    kind: b.kind,
+    text: 'text' in b ? String(b.text) : '',
+  }));
 }
 
 function formatRelativeTime(ts: number): string {
@@ -1032,8 +1054,13 @@ export function ProjectNotebookBlock({
   freeSpaceBoardId = '',
   presentation = 'notebook',
   onDeskFocusedLine,
+  sessionRestoreBlockId = null,
+  studyFocusQuestionNumber = null,
+  studyFocusQuestionToken = 0,
+  onActiveQuestionNumber,
 }: Props) {
   const isDeskPresentation = presentation === 'desk';
+  const sessionRestoreAppliedRef = useRef(false);
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
   const [slashMenu, setSlashMenu] = useState<{
@@ -1046,6 +1073,48 @@ export function ProjectNotebookBlock({
   } | null>(null);
   const [focusedDividerId, setFocusedDividerId] = useState<string | null>(null);
   const [surfaceFocusBlockId, setSurfaceFocusBlockId] = useState<string | null>(null);
+  useEffect(() => {
+    sessionRestoreAppliedRef.current = false;
+  }, [sessionRestoreBlockId]);
+
+  useEffect(() => {
+    if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
+    const refs = blocksToExamRefs(blocks);
+    const focusId =
+      findSectionBlockIdForOwningBlock(refs, sessionRestoreBlockId) ?? sessionRestoreBlockId;
+    if (!blocks.some(b => b.id === focusId)) return;
+    sessionRestoreAppliedRef.current = true;
+    setSurfaceFocusBlockId(focusId);
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-nb-surface-block][data-block-id="${focusId}"]`,
+      );
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [sessionRestoreBlockId, isDeskPresentation, blocks]);
+
+  useEffect(() => {
+    if (!isDeskPresentation || studyFocusQuestionNumber == null) return;
+    const refs = blocksToExamRefs(blocks);
+    const sectionId = findSectionBlockIdForQuestionNumber(refs, studyFocusQuestionNumber);
+    if (!sectionId) return;
+    sessionRestoreAppliedRef.current = true;
+    setSurfaceFocusBlockId(sectionId);
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-nb-surface-block][data-block-id="${sectionId}"]`,
+      );
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [studyFocusQuestionNumber, studyFocusQuestionToken, isDeskPresentation, blocks]);
+
+  useEffect(() => {
+    if (!onActiveQuestionNumber) return;
+    const n = findOwningQuestionNumber(blocksToExamRefs(blocks), surfaceFocusBlockId);
+    onActiveQuestionNumber(n);
+  }, [onActiveQuestionNumber, blocks, surfaceFocusBlockId]);
   const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
   const [surfaceWidth, setSurfaceWidth] = useState(0);
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
@@ -1057,7 +1126,6 @@ export function ProjectNotebookBlock({
   const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
   const [mathToolbarHovered, setMathToolbarHovered] = useState(false);
-  const [deskSurfaceHovered, setDeskSurfaceHovered] = useState(false);
   const [deskChecks, setDeskChecks] = useState<Record<string, DeskCheckRowState>>({});
   const deskChecksRef = useRef(deskChecks);
   deskChecksRef.current = deskChecks;
@@ -1714,8 +1782,10 @@ export function ProjectNotebookBlock({
         if (e.currentTarget.contains(rt)) return;
         if (rt.closest('[data-nb-slash-menu]')) return;
         if (rt.closest('[data-nb-typo-rail]')) return;
+        if (rt.closest('[data-math-input-toolbar]')) return;
+        if (rt.closest('.desk-math-palette')) return;
       }
-      pendingCaretRef.current = null;
+      // Keep pendingCaretRef — popover unmount / toolbar focus can race caret restore after insert.
       if (context === 'free-space') {
         const sc = notebookBodyScrollRef.current;
         if (sc) schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
@@ -2405,13 +2475,7 @@ export function ProjectNotebookBlock({
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        backgroundColor: '#ebe4d6',
-        backgroundImage: `
-          linear-gradient(rgba(44,40,36,0.07) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(44,40,36,0.07) 1px, transparent 1px),
-          linear-gradient(165deg, #f4f0e8 0%, #ebe4d6 48%, #e3dccf 100%)
-        `,
-        backgroundSize: '22px 22px, 22px 22px, 100% 100%',
+        backgroundColor: '#ece6d9',
         backgroundAttachment: 'local',
         color: ink.primary,
         fontSize: '16px',
@@ -2421,8 +2485,8 @@ export function ProjectNotebookBlock({
         border: 'none',
         borderRadius: 0,
         boxShadow: 'none',
-        paddingTop: 16,
-        paddingBottom: 24,
+        paddingTop: 4,
+        paddingBottom: 14,
         outline: 'none',
         WebkitFontSmoothing: 'antialiased',
       };
@@ -2559,7 +2623,10 @@ export function ProjectNotebookBlock({
         });
       }
 
-      const text = rawText.replace(/\r\n/g, '\n');
+      let text = rawText.replace(/\r\n/g, '\n');
+      if (isMathNotebook && block.kind === 'step') {
+        text = normalizeToLinearMath(text);
+      }
       const nextMarks = marksOverride ?? block.marks;
 
       if (block.kind === 'paragraph') {
@@ -2623,7 +2690,7 @@ export function ProjectNotebookBlock({
       pushContent({ ...content, body: serializeBlocks(next) });
       if (caretBefore !== null) scheduleCaret(withMarks, caretBefore);
     },
-    [content, pushContent, captureCaretForBlock, scheduleCaret, isDomTextCommitLocked, isDeskPresentation],
+    [content, pushContent, captureCaretForBlock, scheduleCaret, isDomTextCommitLocked, isDeskPresentation, isMathNotebook],
   );
 
   const handleToolbarCommand = useCallback(
@@ -2801,45 +2868,6 @@ export function ProjectNotebookBlock({
     [content, pushContent, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle],
   );
 
-  const insertMathSnippet = useCallback(
-    (snippet: string) => {
-      const blockId = surfaceFocusBlockId;
-      if (!blockId) return;
-      const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') return;
-      if (blk.kind === 'math') {
-        const latex = plainMathToLatex(snippet);
-        updateBlockText(blockId, latex);
-        return;
-      }
-      const root = getEditorRoot();
-      const el = root?.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
-      const offset = el ? getCaretOffsetIn(el) : blk.text.length;
-      const insert = snippet.endsWith(' ') ? snippet : `${snippet} `;
-      const newText = blk.text.slice(0, offset) + insert + blk.text.slice(offset);
-      updateBlockText(blockId, newText);
-      pendingCaretRef.current = { id: blockId, offset: offset + insert.length, scroll: 'never' };
-    },
-    [surfaceFocusBlockId, updateBlockText, getEditorRoot],
-  );
-
-  const applyMathTemplate = useCallback(
-    (templateId: MathTemplateId, values: Record<string, string>) => {
-      const template = getMathTemplate(templateId);
-      if (!template) return;
-      const blockId = surfaceFocusBlockId;
-      if (blockId) {
-        const blk = blocksRef.current.find(b => b.id === blockId);
-        if (blk?.kind === 'math') {
-          updateBlockText(blockId, template.buildLatex(values));
-          return;
-        }
-      }
-      insertMathSnippet(template.buildSimple(values));
-    },
-    [insertMathSnippet, surfaceFocusBlockId, updateBlockText],
-  );
-
   const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
     if (block.kind === 'divider') {
       (root.querySelector(`[data-divider-row][data-block-id="${block.id}"]`) as HTMLElement | null)?.focus({
@@ -2856,6 +2884,70 @@ export function ProjectNotebookBlock({
       el?.focus({ preventScroll: true });
     });
   }, []);
+
+  const scheduleMathLineFocus = useCallback(
+    (blockId: string, offset: number) => {
+      const blk = blocksRef.current.find(b => b.id === blockId);
+      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') return;
+      setSurfaceFocusBlockId(blockId);
+      const o = clampCaretOffset(blk, offset);
+      pendingCaretRef.current = { id: blockId, offset: o, scroll: 'never' };
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const root = getEditorRoot();
+          if (!root) return;
+          const el = root.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
+          if (!el) return;
+          el.focus({ preventScroll: true });
+          setCaretOffsetIn(el, o);
+          pendingCaretRef.current = null;
+        });
+      });
+    },
+    [getEditorRoot],
+  );
+
+  const insertMathSnippet = useCallback(
+    (snippet: string) => {
+      const blockId = surfaceFocusBlockId;
+      if (!blockId) return;
+      const blk = blocksRef.current.find(b => b.id === blockId);
+      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') return;
+      if (blk.kind === 'math') {
+        const latex = plainMathToLatex(snippet);
+        updateBlockText(blockId, latex);
+        scheduleMathLineFocus(blockId, latex.length);
+        return;
+      }
+      const root = getEditorRoot();
+      const el = root?.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
+      const offset = el ? getCaretOffsetIn(el) : blk.text.length;
+      const insert = snippet.endsWith(' ') ? snippet : `${snippet} `;
+      const newText = blk.text.slice(0, offset) + insert + blk.text.slice(offset);
+      updateBlockText(blockId, newText);
+      scheduleMathLineFocus(blockId, offset + insert.length);
+    },
+    [surfaceFocusBlockId, updateBlockText, getEditorRoot, scheduleMathLineFocus],
+  );
+
+  const applyMathTemplate = useCallback(
+    (templateId: MathTemplateId, values: Record<string, string>) => {
+      const template = getMathTemplate(templateId);
+      if (!template) return;
+      const blockId = surfaceFocusBlockId;
+      if (!blockId) return;
+      const blk = blocksRef.current.find(b => b.id === blockId);
+      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref') return;
+      if (blk.kind === 'math') {
+        const latex = template.buildLatex(values);
+        updateBlockText(blockId, latex);
+        scheduleMathLineFocus(blockId, latex.length);
+        return;
+      }
+      insertMathSnippet(template.buildSimple(values));
+    },
+    [insertMathSnippet, surfaceFocusBlockId, updateBlockText, scheduleMathLineFocus],
+  );
 
   const copyNotebook = useCallback(
     async (format: 'markdown' | 'plain') => {
@@ -4183,12 +4275,6 @@ export function ProjectNotebookBlock({
           onKeyDownCapture={handleEditorKeyCapture}
           onFocusCapture={handleSurfaceFocusIn}
           onBlur={handleSurfaceBlur}
-          onMouseEnter={() => {
-            if (isDeskPresentation) setDeskSurfaceHovered(true);
-          }}
-          onMouseLeave={() => {
-            if (isDeskPresentation) setDeskSurfaceHovered(false);
-          }}
           className="nb-document-surface"
           data-nb-surface={notebookSurface}
           data-desk-surface={isDeskPresentation ? '1' : undefined}
@@ -4209,27 +4295,18 @@ export function ProjectNotebookBlock({
           {isMathNotebook ? (
             <>
               {!isDeskPresentation ? <MathStudyInsight body={content.body ?? ''} tokens={tokens} /> : null}
-              {isDeskPresentation ? (
-                <div
-                  className="desk-math-toolbar-reveal"
-                  aria-hidden
-                  onMouseEnter={() => setMathToolbarHovered(true)}
-                />
-              ) : null}
               <div
                 className={
                   isDeskPresentation
                     ? `desk-math-toolbar-zone${
-                        mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
-                          ? ' desk-math-toolbar-zone--visible'
-                          : ''
+                        surfaceFocusBlockId ? ' desk-math-toolbar-zone--visible desk-math-toolbar-zone--pinned' : ''
                       }`
                     : undefined
                 }
                 style={{
                   opacity: isDeskPresentation
-                    ? mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
-                      ? 0.78
+                    ? surfaceFocusBlockId
+                      ? 1
                       : 0
                     : notebookMode === 'math-workspace'
                       ? mathToolbarHovered
@@ -4238,28 +4315,23 @@ export function ProjectNotebookBlock({
                           ? 0.92
                           : 0.15
                       : 1,
-                  maxHeight: isDeskPresentation
-                    ? mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId
-                      ? 88
-                      : 0
-                    : 120,
+                  maxHeight: isDeskPresentation ? (surfaceFocusBlockId ? 36 : 0) : 120,
                   overflow: 'hidden',
-                  pointerEvents:
-                    isDeskPresentation &&
-                    !mathToolbarHovered &&
-                    !deskSurfaceHovered &&
-                    !surfaceFocusBlockId
-                      ? 'none'
-                      : 'auto',
+                  pointerEvents: isDeskPresentation && !surfaceFocusBlockId ? 'none' : 'auto',
                   transition: isDeskPresentation
-                    ? undefined
+                    ? 'opacity 0.18s ease, max-height 0.2s ease, margin 0.18s ease'
                     : 'opacity 0.2s ease, max-height 0.2s ease',
-                  ...(isDeskPresentation ? { marginBottom: mathToolbarHovered || deskSurfaceHovered || surfaceFocusBlockId ? 4 : 0 } : {}),
+                  ...(isDeskPresentation ? { marginBottom: surfaceFocusBlockId ? 1 : 0 } : {}),
                 }}
-                onMouseEnter={() => setMathToolbarHovered(true)}
-                onMouseLeave={() => setMathToolbarHovered(false)}
+                onMouseEnter={() => {
+                  if (!isDeskPresentation) setMathToolbarHovered(true);
+                }}
+                onMouseLeave={() => {
+                  if (!isDeskPresentation) setMathToolbarHovered(false);
+                }}
               >
                 <MathInputToolbar
+                  variant={isDeskPresentation ? 'desk-paper' : 'spatial'}
                   tokens={tokens}
                   textColor={ink.headline}
                   onInsertSymbol={insertMathSnippet}
@@ -4375,8 +4447,9 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'section') {
-              const secTop =
-                index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2 + 4;
+              const secTop = isDeskPresentation
+                ? (index === 0 ? 6 : prevKind === 'section' ? 8 : 10)
+                : (index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2 + 4);
               return (
                 <div
                   key={listKey}
@@ -4386,9 +4459,11 @@ export function ProjectNotebookBlock({
                   style={{ ...blockSurfaceChrome(block.id), marginTop: `${secTop}px` }}
                 >
                   <div style={{
-                    paddingBottom: '7px',
-                    marginBottom: '20px',
-                    borderBottom: `1px solid ${tokens.accent}28`,
+                    paddingBottom: isDeskPresentation ? '3px' : '7px',
+                    marginBottom: isDeskPresentation ? '8px' : '20px',
+                    borderBottom: isDeskPresentation
+                      ? '1px solid rgba(68,64,60,0.18)'
+                      : `1px solid ${tokens.accent}28`,
                   }}>
                     <EditableLineGuarded
                       id={block.id}
@@ -4405,11 +4480,12 @@ export function ProjectNotebookBlock({
                         border: 'none',
                         outline: 'none',
                         background: 'transparent',
-                        color: ink.section,
-                        fontSize: `${typeScale.l2}px`,
-                        fontWeight: 600,
-                        letterSpacing: '-0.02em',
-                        lineHeight: 1.35,
+                        color: isDeskPresentation ? 'rgba(68,64,60,0.72)' : ink.section,
+                        fontSize: isDeskPresentation ? '11px' : `${typeScale.l2}px`,
+                        fontWeight: isDeskPresentation ? 600 : 600,
+                        letterSpacing: isDeskPresentation ? '0.08em' : '-0.02em',
+                        textTransform: isDeskPresentation ? 'uppercase' : 'none',
+                        lineHeight: isDeskPresentation ? 1.25 : 1.35,
                         margin: 0,
                         caretColor: tokens.accent,
                         whiteSpace: 'pre-wrap',

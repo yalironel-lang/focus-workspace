@@ -12,6 +12,7 @@ import { useRef, useState } from 'react';
 import { GripHorizontal, X, Copy, Link2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
+import type { UniversalObjectSplitSide, UniversalObjectViewMode } from '../../hooks/useSectionFreeSpaceObjects';
 import {
   freeSpaceMaterialStyle,
   type FreeSpaceMaterialTier,
@@ -49,6 +50,13 @@ interface Props {
   materialTier?: FreeSpaceMaterialTier;
   /** Canvas LOD: scales shadow depth (semantic quieting). */
   materialShadowMul?: number;
+  presentationMode?: UniversalObjectViewMode;
+  presentationSplitSide?: UniversalObjectSplitSide;
+  onSetPresentationMode?: (
+    id: string,
+    mode: UniversalObjectViewMode,
+    splitSide?: UniversalObjectSplitSide,
+  ) => void;
 }
 
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
@@ -76,9 +84,13 @@ export function FreeformBlock({
   presentationZBoost = 0,
   materialTier = 'utility',
   materialShadowMul = 1,
+  presentationMode = 'floating',
+  presentationSplitSide = 'right',
+  onSetPresentationMode,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
+  const [presentationMenuOpen, setPresentationMenuOpen] = useState(false);
   const material = freeSpaceMaterialStyle(materialTier);
 
   const w = pos.w > 0 ? pos.w : undefined;
@@ -93,6 +105,7 @@ export function FreeformBlock({
   const actionOpacity = headerHot || selected ? 1 : designMode ? 0.42 : 0;
 
   const showConnectAction = !!onBeginConnect && designMode && (headerHot || selected);
+  const showPresentationActions = !!onSetPresentationMode && (selected || headerHot);
   const isConnectTargetHover =
     !!connectModeSourceId && connectModeSourceId !== id && connectionChrome === 'connect-target';
 
@@ -312,6 +325,100 @@ export function FreeformBlock({
                 <Link2 style={{ width: '13px', height: '13px' }} strokeWidth={2} />
               </button>
             )}
+            {showPresentationActions ? (
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginRight: 2 }}>
+                <button
+                  type="button"
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => {
+                    e.stopPropagation();
+                    setPresentationMenuOpen(v => !v);
+                  }}
+                  title="Object view mode"
+                  style={{
+                    height: '24px',
+                    borderRadius: '7px',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'rgba(255,255,255,0.04)',
+                    cursor: 'pointer',
+                    color: tokens.textSecondary,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 8px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  View
+                </button>
+                {presentationMenuOpen ? (
+                  <>
+                    <div
+                      onClick={() => setPresentationMenuOpen(false)}
+                      style={{ position: 'fixed', inset: 0, zIndex: 200 }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 4px)',
+                        right: 0,
+                        zIndex: 201,
+                        minWidth: 150,
+                        borderRadius: 8,
+                        border: `1px solid ${tokens.cardBorder}`,
+                        background: tokens.cardBg,
+                        boxShadow: '0 10px 28px rgba(0,0,0,0.35)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {([
+                        { id: 'floating', label: 'Floating' },
+                        { id: 'split-left', label: 'Split left' },
+                        { id: 'split-right', label: 'Split right' },
+                        { id: 'fullscreen', label: 'Fullscreen' },
+                      ] as const).map(option => {
+                        const selectedMode =
+                          option.id === 'floating'
+                            ? presentationMode === 'floating'
+                            : option.id === 'fullscreen'
+                              ? presentationMode === 'fullscreen'
+                              : presentationMode === 'split' && presentationSplitSide === (option.id === 'split-left' ? 'left' : 'right');
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (option.id === 'floating') onSetPresentationMode?.(id, 'floating');
+                              else if (option.id === 'fullscreen') onSetPresentationMode?.(id, 'fullscreen');
+                              else onSetPresentationMode?.(id, 'split', option.id === 'split-left' ? 'left' : 'right');
+                              setPresentationMenuOpen(false);
+                            }}
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              border: 'none',
+                              borderBottom: `1px solid ${tokens.cardBorder}`,
+                              background: selectedMode ? `${tokens.accent}18` : 'transparent',
+                              color: selectedMode ? tokens.accent : tokens.textSecondary,
+                              fontSize: 12,
+                              fontWeight: selectedMode ? 700 : 600,
+                              padding: '8px 10px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
 
           {showActions && (
             <div

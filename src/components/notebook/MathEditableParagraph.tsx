@@ -8,7 +8,11 @@ import {
   type FocusEvent,
 } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import { isWholeLineMath, textLikelyHasPlainMath } from '../../lib/mathInputAssistant';
+import {
+  isWholeLineMath,
+  normalizeToLinearMath,
+  textLikelyHasPlainMath,
+} from '../../lib/mathInputAssistant';
 import { MathRichText } from './MathRichText';
 
 interface EditableLineProps {
@@ -72,11 +76,16 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
     (e: FocusEvent<HTMLDivElement>) => {
       const next = e.relatedTarget as HTMLElement | null;
       if (next?.closest('[data-math-input-toolbar]')) return;
+      if (next?.closest('.desk-math-palette')) return;
       if (next?.closest('[data-nb-slash-menu]')) return;
       if (next && wrapRef.current?.contains(next)) return;
-      if (hasMath) setEditing(false);
+      if (hasMath) {
+        const canonical = normalizeToLinearMath(text);
+        if (canonical !== text) onUpdate(id, canonical);
+        setEditing(false);
+      }
     },
-    [hasMath],
+    [hasMath, id, onUpdate, text],
   );
 
   if (!editing && hasMath) {

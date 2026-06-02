@@ -13,6 +13,7 @@ import {
   type CompanionPanelContentFields,
 } from '../lib/companionPanels';
 import type { DeskComputeHistoryEntry, DeskFormulaItem, DeskLayoutState } from '../lib/mathDesk/types';
+import { sanitizeStudyLayout, type StudyLayoutMode } from '../lib/mathDesk/studyLayout';
 import {
   sanitizeDeskComputeHistory,
   sanitizeDeskFormulas,
@@ -35,6 +36,9 @@ export type ProjectObjectType =
   | 'pdf'
   | 'studyfile'
   | 'companion';
+
+export type UniversalObjectViewMode = 'floating' | 'split' | 'fullscreen';
+export type UniversalObjectSplitSide = 'left' | 'right';
 
 export type MistakeConfidence = 'low' | 'medium' | 'high' | 'mastered';
 export type MistakeVariant = 'mistake' | 'recall';
@@ -62,6 +66,8 @@ export type ProjectObjectContent =
       deskLayout?: DeskLayoutState;
       deskGraphExpression?: string;
       deskComputeHistory?: DeskComputeHistoryEntry[];
+      /** Viewport study layout (math desk beside PDF); `canvas` = normal free-space card. */
+      studyLayout?: StudyLayoutMode;
     }
   | { type: 'note'; body: string }
   | {
@@ -155,8 +161,20 @@ export interface ProjectSpaceObject {
   content: ProjectObjectContent;
   /** Other Free Space object ids this object is linked to (directed; persisted in localStorage). */
   connections?: string[];
+  /** Universal object presentation mode (canvas default is floating). */
+  viewMode?: UniversalObjectViewMode;
+  /** Split-side preference when in split mode. */
+  splitSide?: UniversalObjectSplitSide;
   createdAt: number;
   updatedAt: number;
+}
+
+function sanitizeUniversalViewMode(raw: unknown): UniversalObjectViewMode {
+  return raw === 'split' || raw === 'fullscreen' ? raw : 'floating';
+}
+
+function sanitizeUniversalSplitSide(raw: unknown): UniversalObjectSplitSide {
+  return raw === 'left' ? 'left' : 'right';
 }
 
 const OBJECT_TYPES = new Set<ProjectObjectType>([
@@ -336,6 +354,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const deskLayout = sanitizeDeskLayout(r.deskLayout);
       const deskGraphExpression = sanitizeDeskGraphExpression(r.deskGraphExpression);
       const deskComputeHistory = sanitizeDeskComputeHistory(r.deskComputeHistory);
+      const studyLayout = sanitizeStudyLayout(r.studyLayout);
       return {
         type: 'notebook', body, paperStyle, notebookMode, notebookSurface,
         ...(icon !== undefined ? { icon } : {}),
@@ -346,6 +365,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ...(deskLayout !== undefined ? { deskLayout } : {}),
         ...(deskGraphExpression !== undefined ? { deskGraphExpression } : {}),
         ...(deskComputeHistory !== undefined ? { deskComputeHistory } : {}),
+        ...(studyLayout !== 'canvas' ? { studyLayout } : {}),
       };
     }
     case 'note':
@@ -584,7 +604,18 @@ function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
   const createdAt = typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : Date.now();
   const updatedAt = typeof o.updatedAt === 'number' && Number.isFinite(o.updatedAt) ? o.updatedAt : createdAt;
 
-  return { id, type, title, content, createdAt, updatedAt };
+  const viewMode = sanitizeUniversalViewMode(o.viewMode);
+  const splitSide = sanitizeUniversalSplitSide(o.splitSide);
+  return {
+    id,
+    type,
+    title,
+    content,
+    ...(viewMode !== 'floating' ? { viewMode } : {}),
+    ...(splitSide !== 'right' ? { splitSide } : {}),
+    createdAt,
+    updatedAt,
+  };
 }
 
 /**
@@ -749,7 +780,15 @@ export interface SectionFreeSpaceObjectsState {
   convertNoteToMistake: (id: string) => ProjectSpaceObject | null;
   updateObjectContent: (id: string, content: ProjectObjectContent) => void;
   /** Update title and/or content in one persist write (e.g. quick capture). */
-  updateObjectFields: (id: string, fields: { title?: string; content?: ProjectObjectContent }) => void;
+  updateObjectFields: (
+    id: string,
+    fields: {
+      title?: string;
+      content?: ProjectObjectContent;
+      viewMode?: UniversalObjectViewMode;
+      splitSide?: UniversalObjectSplitSide;
+    },
+  ) => void;
   addConnection: (fromId: string, toId: string) => void;
   clearConnectionsForObject: (id: string) => void;
   removeObject: (id: string) => void;
@@ -980,7 +1019,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   }, [schedulePersist, sectionId]);
 
   const updateObjectFields = useCallback(
-    (objectId: string, fields: { title?: string; content?: ProjectObjectContent }) => {
+    (
+      objectId: string,
+      fields: {
+        title?: string;
+        content?: ProjectObjectContent;
+        viewMode?: UniversalObjectViewMode;
+        splitSide?: UniversalObjectSplitSide;
+      },
+    ) => {
       setObjects(prev => {
         const i = prev.findIndex(o => o.id === objectId);
         if (i === -1) return prev;
@@ -989,6 +1036,12 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
           ...o,
           ...(fields.title !== undefined ? { title: fields.title } : {}),
           ...(fields.content !== undefined ? { content: fields.content } : {}),
+          ...(fields.viewMode !== undefined
+            ? (fields.viewMode === 'floating' ? { viewMode: undefined } : { viewMode: fields.viewMode })
+            : {}),
+          ...(fields.splitSide !== undefined
+            ? (fields.splitSide === 'right' ? { splitSide: undefined } : { splitSide: fields.splitSide })
+            : {}),
           updatedAt: Date.now(),
         };
         const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];

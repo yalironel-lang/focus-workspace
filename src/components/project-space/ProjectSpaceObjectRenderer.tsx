@@ -28,6 +28,15 @@ import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 import { useFreeSpaceRenderPolicy } from '../canvas/FreeSpaceRenderPolicyContext';
 import { FreeSpaceObjectShell } from './FreeSpaceObjectShell';
+import { StudyLayoutDockedPlaceholder } from './StudyLayoutDockedPlaceholder';
+import { StudySessionCardChip } from './StudySessionCardChip';
+import {
+  isStudyLayoutDocked,
+  sanitizeStudyLayout,
+  type StudyLayoutMode,
+} from '../../lib/mathDesk/studyLayout';
+
+export type NotebookContentHost = 'canvas' | 'study-dock' | 'study-session';
 
 interface Props {
   object: ProjectSpaceObject;
@@ -50,6 +59,23 @@ interface Props {
   onStartLearningAttempt?: (objectId: string) => void;
   /** Phase 0 Course Trap — PDF viewer ready hook. */
   onPdfViewerReady?: (payload: { objectId: string; fileName: string; title: string }) => void;
+  /** Where notebook body renders: canvas card vs viewport study dock portal. */
+  contentHost?: NotebookContentHost;
+  /** Apply study layout; host should dedupe single docked notebook. */
+  onStudyLayoutChange?: (mode: StudyLayoutMode) => void;
+  onStartStudySession?: () => void;
+  /** When set, canvas card shows a studying chip instead of live content. */
+  studySessionChip?: { subtitle: string; onOpen: () => void } | null;
+  sessionRestoreBlockId?: string | null;
+  onStudySessionWorkFocus?: (blockId: string | null) => void;
+  studyFocusQuestionNumber?: number | null;
+  studyFocusQuestionToken?: number;
+  onStudySessionActiveQuestionNumber?: (questionNumber: number | null) => void;
+  /** Hide Attempt chip (e.g. PDF with Study this exam, or objects inside study session shell). */
+  suppressLearningAttemptChip?: boolean;
+  studySessionActive?: boolean;
+  suppressStudyToolbar?: boolean;
+  studyDeskQuiet?: boolean;
 }
 
 function copyText(text: string): Promise<void> {
@@ -131,6 +157,15 @@ function FreeSpaceMathNotebookRenderer({
   onRequestSelectObject,
   onCreateNotebookRecall,
   attemptBtn,
+  contentHost = 'canvas',
+  onStudyLayoutChange,
+  studySessionChip = null,
+  sessionRestoreBlockId = null,
+  onStudySessionWorkFocus,
+  studyFocusQuestionNumber = null,
+  studyFocusQuestionToken = 0,
+  onStudySessionActiveQuestionNumber,
+  studyDeskQuiet = false,
 }: {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -143,9 +178,43 @@ function FreeSpaceMathNotebookRenderer({
   onRequestSelectObject?: (id: string) => void;
   onCreateNotebookRecall?: (sourceId: string, prompt: string) => void;
   attemptBtn: ReactNode;
+  contentHost?: NotebookContentHost;
+  onStudyLayoutChange?: (mode: StudyLayoutMode) => void;
+  studySessionChip?: { subtitle: string; onOpen: () => void } | null;
+  sessionRestoreBlockId?: string | null;
+  onStudySessionWorkFocus?: (blockId: string | null) => void;
+  studyFocusQuestionNumber?: number | null;
+  studyFocusQuestionToken?: number;
+  onStudySessionActiveQuestionNumber?: (questionNumber: number | null) => void;
+  studyDeskQuiet?: boolean;
 }) {
   const useDeskPrototype = content.notebookMode === 'math';
   const [legacyOpen, setLegacyOpen] = useState(false);
+  const studyLayout = sanitizeStudyLayout(content.studyLayout);
+  const docked = isStudyLayoutDocked(studyLayout);
+
+  if (contentHost === 'canvas' && studySessionChip) {
+    return (
+      <StudySessionCardChip
+        tokens={tokens}
+        title={object.title}
+        subtitle={studySessionChip.subtitle}
+        onOpen={studySessionChip.onOpen}
+      />
+    );
+  }
+
+  if (contentHost === 'canvas' && docked) {
+    return (
+      <StudyLayoutDockedPlaceholder
+        tokens={tokens}
+        title={object.title}
+        layout={studyLayout}
+        onReturnToCanvas={() => onStudyLayoutChange?.('canvas')}
+        onSelect={() => onRequestSelectObject?.(object.id)}
+      />
+    );
+  }
 
   if (useDeskPrototype && !legacyOpen) {
     return (
@@ -162,6 +231,15 @@ function FreeSpaceMathNotebookRenderer({
           onRequestSelectObject={onRequestSelectObject}
           onCreateNotebookRecall={onCreateNotebookRecall}
           onShowClassic={() => setLegacyOpen(true)}
+          studyLayout={studyLayout}
+          onStudyLayoutChange={onStudyLayoutChange}
+          sessionRestoreBlockId={sessionRestoreBlockId}
+          onStudySessionWorkFocus={onStudySessionWorkFocus}
+          studySessionActive={contentHost === 'study-session'}
+          studyFocusQuestionNumber={studyFocusQuestionNumber}
+          studyFocusQuestionToken={studyFocusQuestionToken}
+          onStudySessionActiveQuestionNumber={onStudySessionActiveQuestionNumber}
+          studyDeskQuiet={studyDeskQuiet}
         />
       </div>
     );
@@ -232,6 +310,18 @@ function ProjectSpaceObjectRendererInner({
   onCreateNotebookRecall,
   onStartLearningAttempt,
   onPdfViewerReady,
+  contentHost = 'canvas',
+  onStudyLayoutChange,
+  onStartStudySession,
+  studySessionChip = null,
+  sessionRestoreBlockId = null,
+  onStudySessionWorkFocus,
+  studyFocusQuestionNumber = null,
+  studyFocusQuestionToken = 0,
+  onStudySessionActiveQuestionNumber,
+  suppressLearningAttemptChip = false,
+  suppressStudyToolbar = false,
+  studyDeskQuiet = false,
 }: Props) {
   useEffect(() => {
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
@@ -254,6 +344,7 @@ function ProjectSpaceObjectRendererInner({
   }, [copyPayload]);
 
   const attemptBtn =
+    !suppressLearningAttemptChip &&
     onStartLearningAttempt &&
     (object.type === 'mistake' || object.type === 'note' || object.type === 'notebook' || object.type === 'pdf' || object.type === 'studyfile') ? (
       <button
@@ -363,6 +454,15 @@ function ProjectSpaceObjectRendererInner({
             onRequestSelectObject={onRequestSelectObject}
             onCreateNotebookRecall={onCreateNotebookRecall}
             attemptBtn={attemptBtn}
+            contentHost={contentHost}
+            onStudyLayoutChange={onStudyLayoutChange}
+            studySessionChip={studySessionChip}
+            sessionRestoreBlockId={sessionRestoreBlockId}
+            onStudySessionWorkFocus={onStudySessionWorkFocus}
+            studyFocusQuestionNumber={studyFocusQuestionNumber}
+            studyFocusQuestionToken={studyFocusQuestionToken}
+            onStudySessionActiveQuestionNumber={onStudySessionActiveQuestionNumber}
+            studyDeskQuiet={studyDeskQuiet}
           />
         </WorkspaceSurfaceErrorBoundary>
       );
@@ -491,6 +591,16 @@ function ProjectSpaceObjectRendererInner({
           </div>
         );
       }
+      if (contentHost === 'canvas' && studySessionChip) {
+        return (
+          <StudySessionCardChip
+            tokens={tokens}
+            title={object.title || content.fileName}
+            subtitle={studySessionChip.subtitle}
+            onOpen={studySessionChip.onOpen}
+          />
+        );
+      }
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="PDF">
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -507,6 +617,9 @@ function ProjectSpaceObjectRendererInner({
             relatedMistakeCount={mistakeCount}
             pdfTitle={object.title}
             onPdfViewerReady={onPdfViewerReady}
+            onStartStudySession={onStartStudySession}
+            presentation={contentHost === 'study-session' ? 'study-session' : 'canvas'}
+            suppressStudyToolbar={suppressStudyToolbar}
           />
           </div>
         </WorkspaceSurfaceErrorBoundary>
@@ -542,16 +655,4 @@ function ProjectSpaceObjectRendererInner({
   }
 }
 
-export const ProjectSpaceObjectRenderer = memo(
-  ProjectSpaceObjectRendererInner,
-  (prev, next) =>
-    prev.object.id === next.object.id &&
-    prev.object.type === next.object.type &&
-    prev.object.title === next.object.title &&
-    prev.object.content === next.object.content &&
-    prev.tokens === next.tokens &&
-    prev.freeSpaceSectionId === next.freeSpaceSectionId &&
-    prev.freeSpaceBoardId === next.freeSpaceBoardId &&
-    prev.allObjects === next.allObjects &&
-    prev.onPdfViewerReady === next.onPdfViewerReady,
-);
+export const ProjectSpaceObjectRenderer = memo(ProjectSpaceObjectRendererInner);

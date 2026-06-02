@@ -67,6 +67,26 @@
   letter-spacing: 0.008em;
 }
 
+/* Math Desk — rendered math above paper grid */
+[data-desk-surface='1'] .katex {
+  color: #1c1917;
+  font-size: 1.12em;
+}
+
+[data-desk-surface='1'] .math-katex-hero .katex,
+[data-desk-surface='1'] .math-nb-hero .katex {
+  font-size: 1.52em;
+}
+
+[data-desk-surface='1'] .math-nb-hero {
+  padding: 12px 8px 10px;
+}
+
+[data-desk-surface='1'] .math-nb-interactive:hover {
+  background: rgba(146, 64, 14, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(146, 64, 14, 0.1);
+}
+
 /* ── Design System Tokens ─────────────────────────────────────────────────── */
 :root {
   /* Shadows — 4-level depth system */

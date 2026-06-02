@@ -15,6 +15,8 @@
 - `content.body`: newline-delimited markdown-lite lines
 - `notebookMode: 'math'`: math toolbar + `MathEditableParagraph` + `$$` blocks in the **same** editor
 - KaTeX via `notebookMath.ts` / `MathRichText`
+- **Authoring dialect:** [FOCUS_LINEAR_MATH.md](./FOCUS_LINEAR_MATH.md) — linear strings in `block.text`, LaTeX for display only
+- **Study layout:** `content.studyLayout` on the same notebook object — viewport dock (right half / third, left half, fullscreen) or `canvas` (normal free-space card); see `src/lib/mathDesk/studyLayout.ts`
 
 ## Why split math out later
 
