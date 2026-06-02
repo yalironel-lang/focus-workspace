@@ -28,6 +28,8 @@ import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
 import { MathStudyInsight } from '../notebook/MathStudyInsight';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
+import { renderInlineFormatted } from '../../lib/mathZoneInlineFormat';
+import { parseRichLine } from '../../lib/notebookInlineMarks';
 import { nbImageGet, nbImageSet } from '../../lib/notebookImageStore';
 import {
   getMathTemplate,
@@ -198,6 +200,15 @@ function parseNotebookLine(raw: string): NotebookLine {
   }
 
   return { kind: 'paragraph', text: normalized };
+}
+
+/** Preview/read paths: never show mark envelope literals. */
+function previewInlineContent(text: string): ReactNode {
+  return renderInlineFormatted(text);
+}
+
+function previewPlainForMath(text: string): string {
+  return parseRichLine(text).plain;
 }
 
 type BlockMarks = { marks?: InlineMark[] };
@@ -5154,7 +5165,7 @@ export function ProjectNotebookBlock({
                   {showPreviewUntitled ? (
                     <span style={{ color: ink.muted, fontWeight: 600 }}>Untitled</span>
                   ) : (
-                    line.text
+                    previewInlineContent(line.text)
                   )}
                 </div>
               );
@@ -5175,7 +5186,7 @@ export function ProjectNotebookBlock({
                     color: ink.section,
                   }}
                 >
-                  {line.text}
+                  {previewInlineContent(line.text)}
                 </div>
               );
             }
@@ -5229,7 +5240,7 @@ export function ProjectNotebookBlock({
                       lineHeight: 1.84,
                     }}
                   >
-                    {line.text}
+                    {previewInlineContent(line.text)}
                   </span>
                 </div>
               );
@@ -5275,7 +5286,7 @@ export function ProjectNotebookBlock({
                     {line.checked ? '✓' : ''}
                   </span>
                   <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: `${typeScale.l3}px`, lineHeight: 1.84 }}>
-                    {line.text}
+                    {previewInlineContent(line.text)}
                   </span>
                 </div>
               );
@@ -5312,7 +5323,9 @@ export function ProjectNotebookBlock({
                     color: ink.primary,
                     fontWeight: 400,
                   }}>
-                    {line.text || <span style={{ color: ink.ghost, fontStyle: 'italic' }}>Empty</span>}
+                    {line.text
+                      ? previewInlineContent(line.text)
+                      : <span style={{ color: ink.ghost, fontStyle: 'italic' }}>Empty</span>}
                   </div>
                 </div>
               );
@@ -5338,7 +5351,7 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {line.text}
+                  {previewInlineContent(line.text)}
                 </blockquote>
               );
             }
@@ -5380,7 +5393,7 @@ export function ProjectNotebookBlock({
                     {stepIndex}
                   </span>
                   <MathRichText
-                    text={line.text}
+                    text={previewPlainForMath(line.text)}
                     autoPlainMath
                     textColor={ink.primary}
                     mutedColor={tokens.textMuted}
@@ -5439,7 +5452,7 @@ export function ProjectNotebookBlock({
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {line.text}
+                    {previewInlineContent(line.text)}
                   </div>
                 </div>
               );
@@ -5473,7 +5486,7 @@ export function ProjectNotebookBlock({
                   ) : null}
                   <div className={isMathNotebook ? 'math-nb-hero' : undefined}>
                     <KatexPreview
-                      latex={plainMathToLatex(line.text)}
+                      latex={plainMathToLatex(previewPlainForMath(line.text))}
                       displayMode
                       hero={isMathNotebook}
                       textColor={ink.headline}
@@ -5553,13 +5566,13 @@ export function ProjectNotebookBlock({
                   textLikelyHasPlainMath(line.text) ||
                   isLikelyMathLine(line.text) ? (
                     <MathRichText
-                      text={line.text}
+                      text={previewPlainForMath(line.text)}
                     autoPlainMath={isMathNotebook}
                       textColor={fine ? ink.muted : muted ? ink.secondary : ink.primary}
                       mutedColor={tokens.textMuted}
                     />
                   ) : (
-                    line.text
+                    previewInlineContent(line.text)
                   )}
                 </div>
               );

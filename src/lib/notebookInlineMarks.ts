@@ -59,19 +59,17 @@ export function mergeAdjacentMarks(marks: InlineMark[]): InlineMark[] {
   return out;
 }
 
-export function parseRichLine(raw: string): RichTextLine {
-  if (!raw.startsWith(MARK_PREFIX_OPEN)) {
-    return { plain: raw, marks: [] };
-  }
-  const closeIdx = raw.indexOf(MARK_PREFIX_CLOSE);
-  if (closeIdx === -1) {
-    return { plain: raw, marks: [] };
-  }
-  const jsonPart = raw.slice(MARK_PREFIX_OPEN.length, closeIdx);
-  const plain = raw.slice(closeIdx + MARK_PREFIX_CLOSE.length);
+/** Strip mark envelopes anywhere in a line (marks may follow block kind prefix). */
+const INLINE_MARKS_RE = /\u27e8m\u27e9[\s\S]*?\u27e8\/m\u27e9/g;
+
+export function stripInlineMarks(raw: string): string {
+  return raw.replace(INLINE_MARKS_RE, '');
+}
+
+function parseMarksJson(jsonPart: string, baseOffset: number): InlineMark[] {
   try {
     const parsed: unknown = JSON.parse(jsonPart);
-    if (!Array.isArray(parsed)) return { plain, marks: [] };
+    if (!Array.isArray(parsed)) return [];
     const marks: InlineMark[] = [];
     for (const row of parsed) {
       if (!row || typeof row !== 'object') continue;
@@ -79,30 +77,70 @@ export function parseRichLine(raw: string): RichTextLine {
       const s = typeof rec.s === 'number' ? rec.s : NaN;
       const e = typeof rec.e === 'number' ? rec.e : NaN;
       const t = rec.t as InlineMarkType;
-      const nm = normalizeMark({ s, e, t, v: typeof rec.v === 'string' ? rec.v : undefined }, plain.length);
-      if (nm) marks.push(nm);
+      if (!VALID_TYPES.has(t)) continue;
+      marks.push({
+        s: s + baseOffset,
+        e: e + baseOffset,
+        t,
+        ...(typeof rec.v === 'string' && rec.v !== '' ? { v: rec.v } : {}),
+      });
     }
-    return { plain, marks: mergeAdjacentMarks(marks) };
+    return marks;
   } catch {
-    return { plain, marks: [] };
+    return [];
   }
 }
 
+/**
+ * Parse inline marks from storage text. Envelopes may appear anywhere in the line
+ * (e.g. after "# " or "1. "), not only at index 0.
+ */
+export function parseRichLine(raw: string): RichTextLine {
+  if (!raw.includes(MARK_PREFIX_OPEN)) {
+    return { plain: raw, marks: [] };
+  }
+
+  let plain = '';
+  const marks: InlineMark[] = [];
+  let cursor = 0;
+
+  while (cursor < raw.length) {
+    const openIdx = raw.indexOf(MARK_PREFIX_OPEN, cursor);
+    if (openIdx === -1) {
+      plain += raw.slice(cursor);
+      break;
+    }
+    plain += raw.slice(cursor, openIdx);
+    const closeIdx = raw.indexOf(MARK_PREFIX_CLOSE, openIdx + MARK_PREFIX_OPEN.length);
+    if (closeIdx === -1) {
+      plain += raw.slice(openIdx);
+      break;
+    }
+    const jsonPart = raw.slice(openIdx + MARK_PREFIX_OPEN.length, closeIdx);
+    marks.push(...parseMarksJson(jsonPart, plain.length));
+    cursor = closeIdx + MARK_PREFIX_CLOSE.length;
+  }
+
+  if (plain.includes(MARK_PREFIX_OPEN) || plain.includes(MARK_PREFIX_CLOSE)) {
+    plain = stripInlineMarks(plain);
+  }
+
+  const normalized = marks
+    .map(m => normalizeMark(m, plain.length))
+    .filter((m): m is InlineMark => m != null);
+
+  return { plain, marks: mergeAdjacentMarks(normalized) };
+}
+
 export function serializeRichLine(line: RichTextLine): string {
-  const { plain, marks } = line;
+  const plain = stripInlineMarks(line.plain);
+  const marks = line.marks;
   if (!marks.length) return plain;
   const normalized = mergeAdjacentMarks(
     marks.map(m => normalizeMark(m, plain.length)).filter((m): m is InlineMark => m != null),
   );
   if (!normalized.length) return plain;
   return `${MARK_PREFIX_OPEN}${JSON.stringify(normalized)}${MARK_PREFIX_CLOSE}${plain}`;
-}
-
-/** Strip mark prefix for plain-text search/export (marks may follow block kind prefix). */
-const INLINE_MARKS_RE = /\u27e8m\u27e9[\s\S]*?\u27e8\/m\u27e9/g;
-
-export function stripInlineMarks(raw: string): string {
-  return raw.replace(INLINE_MARKS_RE, '');
 }
 
 /** Strip mark prefix when it leads the string (parseRichLine input). */

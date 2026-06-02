@@ -55,4 +55,23 @@ eq(clearAllMarksInRange(marks, 0, 5).length, 0, 'clear range');
 // strip inline marks mid-line
 eq(stripInlineMarks('# ⟨m⟩[{"s":0,"e":1,"t":"b"}]⟨/m⟩Hi'), '# Hi', 'strip marks after heading');
 
+// parse envelope after block prefix (Studio / preview contract)
+const prefixed = parseRichLine('# ⟨m⟩[{"s":0,"e":2,"t":"b"}]⟨/m⟩Hi');
+eq(prefixed.plain, '# Hi', 'parse marks after heading prefix');
+eq(prefixed.marks[0]?.s, 2, 'mark offset after prefix');
+eq(prefixed.marks[0]?.e, 4, 'mark end after prefix');
+
+// nested envelopes must not leak into plain
+const nested = parseRichLine('⟨m⟩[{"s":0,"e":2,"t":"b"}]⟨/m⟩⟨m⟩[{"s":0,"e":2,"t":"b"}]⟨/m⟩Hi');
+eq(nested.plain, 'Hi', 'nested envelopes stripped');
+assert(!nested.plain.includes('\u27e8m\u27e9'), 'no open delimiter in plain');
+assert(!nested.plain.includes('{"s":'), 'no json payload in plain');
+
+// serialize must not double-wrap
+const doubleGuard = serializeRichLine({
+  plain: '⟨m⟩[{"s":0,"e":1,"t":"b"}]⟨/m⟩Hi',
+  marks: [{ s: 0, e: 2, t: 'b' }],
+});
+assert(doubleGuard.indexOf('\u27e8m\u27e9') === doubleGuard.lastIndexOf('\u27e8m\u27e9'), 'single envelope');
+
 console.log('notebookInlineMarks.test.ts: all assertions passed');
