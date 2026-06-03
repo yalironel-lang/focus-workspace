@@ -800,6 +800,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistRef = useRef<{ sectionId: string; boardId: string; objects: ProjectSpaceObject[] } | null>(null);
+  /** Always-current scope — avoids stale boardId in callbacks after board switch (data loss / cross-board bleed). */
+  const scopeRef = useRef({ sectionId, boardId });
+  scopeRef.current = { sectionId, boardId };
+  const persistScopeGenRef = useRef(0);
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -812,13 +816,19 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     persist(pending.sectionId, pending.boardId, pending.objects);
   }, []);
 
-  const schedulePersist = useCallback((next: ProjectSpaceObject[], targetSectionId: string, targetBoardId: string) => {
-    if (!targetSectionId) return;
-    pendingPersistRef.current = { sectionId: targetSectionId, boardId: targetBoardId, objects: next };
+  const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
+    const { sectionId: sid, boardId: bid } = scopeRef.current;
+    if (!sid) {
+      fwPersistWarn('Free Space persist skipped: missing sectionId.');
+      return;
+    }
+    const gen = persistScopeGenRef.current;
+    pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
-      const pending = pendingPersistRef.current;
       persistTimerRef.current = null;
+      if (gen !== persistScopeGenRef.current) return;
+      const pending = pendingPersistRef.current;
       if (!pending) return;
       pendingPersistRef.current = null;
       persist(pending.sectionId, pending.boardId, pending.objects);
@@ -826,6 +836,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   }, []);
 
   useEffect(() => {
+    persistScopeGenRef.current += 1;
     flushPersist();
     setObjects(load(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
@@ -838,10 +849,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     if (!incoming.length) return;
     setObjects(prev => {
       const next = [...prev, ...incoming];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
     const d = makeDefaults(type);
@@ -856,11 +867,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return obj;
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -877,11 +888,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return obj;
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const addQuickCaptureMistake = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -917,11 +928,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return obj;
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const addRecallItem = useCallback((rawPrompt: string): ProjectSpaceObject => {
     const trimmed = rawPrompt.trim();
@@ -957,11 +968,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return obj;
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const convertNoteToMistake = useCallback((objectId: string): ProjectSpaceObject | null => {
     let out: ProjectSpaceObject | null = null;
@@ -1004,19 +1015,19 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       };
       out = nextObj;
       const next = prev.map(x => (x.id === objectId ? nextObj : x));
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return out;
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const updateObjectFields = useCallback(
     (
@@ -1045,11 +1056,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
           updatedAt: Date.now(),
         };
         const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];
-        schedulePersist(next, sectionId, boardId);
+        schedulePersist(next);
         return next;
       });
     },
-    [schedulePersist, sectionId],
+    [schedulePersist],
   );
 
   const addConnection = useCallback((fromId: string, toId: string) => {
@@ -1070,10 +1081,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
         if (cur.includes(toId)) return o;
         return { ...o, connections: [...cur, toId], updatedAt: Date.now() };
       });
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const clearConnectionsForObject = useCallback((id: string) => {
     if (!id) return;
@@ -1093,10 +1104,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
           updatedAt: Date.now(),
         };
       });
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist]);
 
   const removeObject = useCallback((id: string) => {
     setObjects(prev => {
@@ -1108,10 +1119,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       }
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [schedulePersist]);
 
   const duplicateObject = useCallback((id: string): ProjectSpaceObject | null => {
     const source = objects.find(o => o.id === id);
@@ -1139,7 +1150,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }
     setObjects(prev => {
       const next = [...prev, copy];
-      schedulePersist(next, sectionId, boardId);
+      schedulePersist(next);
       return next;
     });
     return copy;

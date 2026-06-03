@@ -1170,7 +1170,13 @@ export function ProjectNotebookBlock({
   /** User scrolled the notebook body — suppress caret-follow until explicit focus/navigation. */
   const userControlledScrollRef = useRef(false);
   const isProgrammaticScrollRef = useRef(false);
-  const pendingNotebookContentRef = useRef<NotebookContent | null>(null);
+  const pendingNotebookContentRef = useRef<{
+    objectId: string;
+    content: NotebookContent;
+    commit: (c: NotebookContent) => void;
+  } | null>(null);
+  const persistObjectIdRef = useRef(objectId ?? '');
+  persistObjectIdRef.current = objectId ?? '';
   const notebookEditCountRef = useRef(0);
   const selectionSnapshotRef = useRef<StoredNotebookSelection | null>(null);
   const toolbarInteractingRef = useRef(false);
@@ -1291,7 +1297,7 @@ export function ProjectNotebookBlock({
     const pending = pendingNotebookContentRef.current;
     if (!pending) return;
     pendingNotebookContentRef.current = null;
-    onChangeRef.current(pending);
+    pending.commit(pending.content);
   }, []);
 
   const schedulePosePersist = useCallback(
@@ -1369,7 +1375,11 @@ export function ProjectNotebookBlock({
           });
         });
       }
-      pendingNotebookContentRef.current = next;
+      pendingNotebookContentRef.current = {
+        objectId: persistObjectIdRef.current,
+        content: next,
+        commit: onChangeRef.current,
+      };
       if (notebookPersistTimerRef.current) clearTimeout(notebookPersistTimerRef.current);
       notebookPersistTimerRef.current = setTimeout(flushNotebookPersist, 420);
     },
@@ -1377,6 +1387,10 @@ export function ProjectNotebookBlock({
   );
 
   useEffect(() => () => flushNotebookPersist(), [flushNotebookPersist]);
+
+  useEffect(() => {
+    return () => flushNotebookPersist();
+  }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
 
   const contextData = useMemo(
     () => deriveNotebookContextData(objectId, allObjects),
@@ -2612,21 +2626,7 @@ export function ProjectNotebookBlock({
   const updateBlockText = useCallback(
     (id: string, rawText: string, marksOverride?: InlineMark[]) => {
       const snap = selectionSnapshotRef.current;
-      if (snap?.blockId === id && rawText !== snap.plain) {
-        // #region agent log
-        nbAgentLog(
-          'ProjectNotebookBlock:updateBlockText',
-          'update-block-text-blocked-snapshot',
-          {
-            id,
-            rawText,
-            snapshotPlain: snap.plain,
-            lockActive: isDomTextCommitLocked(),
-          },
-          'D',
-          'post-fix',
-        );
-        // #endregion
+      if (snap?.blockId === id && rawText !== snap.plain && isDomTextCommitLocked()) {
         return;
       }
       nbToolbarDebug('updateBlockText', { id, rawText, marksOverride });
