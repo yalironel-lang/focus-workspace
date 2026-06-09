@@ -7,6 +7,7 @@ import {
   type StudyPaneFocus,
 } from '../../lib/studySession/computeSessionChrome';
 import type { StudyExamPdfControls } from '../../lib/studySession/examPdfControls';
+import { StudySessionPdfMarksBar } from './StudySessionPdfMarksBar';
 import { Z_STUDY_SESSION_BACKDROP } from '../../lib/ui/zIndexLayers';
 import { acquireBodyScrollLock, pushEscapeHandler } from '../../lib/ui/overlayStack';
 import type { ExamQuestionSection } from '../../lib/studySession/parseExamQuestions';
@@ -449,6 +450,9 @@ export function StudySessionShell({
             Done studying
           </button>
         </header>
+        {pdf?.marks ? (
+          <StudySessionPdfMarksBar tokens={tokens} marks={pdf.marks} currentPage={pdf.page} />
+        ) : null}
         {showQuestionRail ? (
           <div
             role="toolbar"

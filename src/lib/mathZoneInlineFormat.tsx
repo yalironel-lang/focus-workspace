@@ -263,14 +263,21 @@ function wrapSegmentReact(
   return <span key={key}>{node}</span>;
 }
 
+/** Read-mode renderer for plain text + offset marks (no storage envelope). */
+export function renderPlainWithMarks(plain: string, marks: InlineMark[]): ReactNode {
+  if (!plain) return null;
+  if (!marks.length) return renderInlineMarkdownLegacy(plain);
+  const segments = buildSegments(sortMarks(marks), plain.length);
+  return segments.map((seg, i) =>
+    wrapSegmentReact(plain.slice(seg.start, seg.end), seg.types, String(i)),
+  );
+}
+
 /** Read-mode renderer for inline text (rich marks + legacy markdown). */
 export function renderInlineFormatted(raw: string): ReactNode {
   const { plain, marks } = parseRichLine(raw);
   if (marks.length > 0) {
-    const segments = buildSegments(sortMarks(marks), plain.length);
-    return segments.map((seg, i) =>
-      wrapSegmentReact(plain.slice(seg.start, seg.end), seg.types, String(i)),
-    );
+    return renderPlainWithMarks(plain, marks);
   }
   return renderInlineMarkdownLegacy(plain);
 }

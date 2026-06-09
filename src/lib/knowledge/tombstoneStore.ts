@@ -167,6 +167,8 @@ export async function deleteTombstonePermanently(tombstone: KnowledgeTombstone):
     if (objectType === 'pdf') {
       const { deletePdfBlob } = await import('../freeSpacePdfIdb');
       await deletePdfBlob(sectionId, objectId).catch(() => undefined);
+      const { deletePdfStudyMarks } = await import('../pdfStudyMarks/pdfStudyMarksIdb');
+      await deletePdfStudyMarks(sectionId, objectId).catch(() => undefined);
     } else if (objectType === 'image') {
       const { deleteImageBlob } = await import('../freeSpaceImageIdb');
       await deleteImageBlob(sectionId, objectId).catch(() => undefined);

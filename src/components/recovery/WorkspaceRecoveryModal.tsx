@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { clearFreeSpacePersistenceForSection } from '../../lib/freeSpacePersistence';
 import { deleteAllPdfBlobsForSection } from '../../lib/freeSpacePdfIdb';
+import { deleteAllPdfStudyMarksForSection } from '../../lib/pdfStudyMarks/pdfStudyMarksIdb';
 import { runSectionPersistenceHealth } from '../../lib/persistenceHealth';
 import { RecentlyDeletedPanel } from './RecentlyDeletedPanel';
 import { NotebookSnapshotsSection } from './NotebookSnapshotsPanel';
@@ -124,6 +125,7 @@ export function WorkspaceRecoveryModal({ open, onClose, tokens, sectionId, secti
     try {
       clearFreeSpacePersistenceForSection(sectionId);
       await deleteAllPdfBlobsForSection(sectionId);
+      await deleteAllPdfStudyMarksForSection(sectionId);
       toast.success('Free Space cleared. Reloading…');
       window.setTimeout(() => window.location.reload(), 400);
     } catch {

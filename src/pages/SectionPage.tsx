@@ -97,6 +97,9 @@ import { StudySessionShell } from '../components/project-space/StudySessionShell
 import { StudySessionPickWork } from '../components/project-space/StudySessionPickWork';
 import { UniversalObjectViewPortal } from '../components/project-space/UniversalObjectViewPortal';
 import { StudyContinueBanner } from '../components/workspace-guidance/StudyContinueBanner';
+import { CourseEntryStrip } from '../components/course-entry/CourseEntryStrip';
+import { isCourseEntryBehaviorV1Enabled } from '../lib/courseEntry/featureFlag';
+import { resolveCourseEntry } from '../lib/courseEntry/resolveCourseEntry';
 import {
   isStudyLayoutDocked,
   sanitizeStudyLayout,
@@ -122,6 +125,7 @@ import {
 } from '../lib/studySession/formatStudySessionStatus';
 import { STUDY_SESSION_PDF_FIT_WIDTH_ZOOM } from '../components/project-space/FreeSpacePdfCard';
 import type { StudyExamPdfControls } from '../lib/studySession/examPdfControls';
+import type { PdfStudyMarksChrome } from '../lib/pdfStudyMarks/usePdfStudyMarks';
 import {
   EXAM_QUESTION_SEED_BODY,
   parseExamQuestionsFromBody,
@@ -795,7 +799,9 @@ export function SectionPage() {
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space' | 'math-zone'>(() => {
     if (navState?.firstArrival) return 'free-space';
-    return sectionId ? resolveSectionViewModeOnOpen(sectionId) : 'free-space';
+    return sectionId
+      ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: isCourseEntryBehaviorV1Enabled() })
+      : 'free-space';
   });
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const studySessionPrimary = useStudySessionPrimary();
@@ -805,11 +811,14 @@ export function SectionPage() {
     candidates: ProjectSpaceObject[];
   } | null>(null);
   const [studyContinueDismissed, setStudyContinueDismissed] = useState(false);
+  const [courseEntryDismissed, setCourseEntryDismissed] = useState(false);
+  const [courseEntryWarmFallback, setCourseEntryWarmFallback] = useState(false);
   const [studyRestoreBlockId, setStudyRestoreBlockId] = useState<string | null>(null);
   const [activeQuestionNumber, setActiveQuestionNumber] = useState<number | null>(null);
   const [studyFocusQuestionNumber, setStudyFocusQuestionNumber] = useState<number | null>(null);
   const [studyFocusQuestionToken, setStudyFocusQuestionToken] = useState(0);
   const [studyPaneFocus, setStudyPaneFocus] = useState<StudyPaneFocus>('exam');
+  const [studyPdfMarksChrome, setStudyPdfMarksChrome] = useState<PdfStudyMarksChrome | null>(null);
   const [studySplitRatio, setStudySplitRatio] = useState<number>(() => {
     if (typeof window === 'undefined') return 0.75;
     const raw = window.localStorage.getItem('focus.studySession.splitRatio.v1');
@@ -819,6 +828,9 @@ export function SectionPage() {
   const studySessionWorkPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const studySessionPagePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
+  const courseEntryWarmAppliedRef = useRef<string | null>(null);
+  const courseEntryWarmWasPickRef = useRef(false);
+  const courseEntryEnabled = isCourseEntryBehaviorV1Enabled();
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
       const effective = normalizeSectionViewMode(mode);
@@ -1006,8 +1018,17 @@ export function SectionPage() {
     setEditingExamDate(false);
     setShowCustomize(false);
     setSectionViewModeState(
-      sectionId ? resolveSectionViewModeOnOpen(sectionId) : 'work-surface',
+      sectionId
+        ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: courseEntryEnabled })
+        : 'work-surface',
     );
+    setCourseEntryDismissed(false);
+    setCourseEntryWarmFallback(false);
+    courseEntryWarmAppliedRef.current = null;
+    courseEntryWarmWasPickRef.current = false;
+    setActiveStudySession(null);
+    setStudyPickWork(null);
+    setStudyRestoreBlockId(null);
     setShowSpaceAdd(false);
     setCompanionComposerOpen(false);
     setSpaceSelectedId(null);
@@ -2752,12 +2773,12 @@ export function SectionPage() {
   );
 
   const enterStudySession = useCallback(
-    (sourceId: string, opts?: { restore?: boolean }) => {
-      if (!studySessionPrimary || !sectionId) return;
+    (sourceId: string, opts?: { restore?: boolean }): 'entered' | 'pick' | 'failed' => {
+      if (!studySessionPrimary || !sectionId) return 'failed';
       closeLearningAttempt();
       const objects = sectionObjectsRef.current.objects;
       const source = objects.find(o => o.id === sourceId);
-      if (!source || source.type !== 'pdf') return;
+      if (!source || source.type !== 'pdf') return 'failed';
 
       const boardId = sectionBoards.activeBoardId;
       const saved = opts?.restore ? loadStudySession(sectionId, boardId, sourceId) : null;
@@ -2765,14 +2786,14 @@ export function SectionPage() {
 
       if (resolution.kind === 'pick') {
         setStudyPickWork({ sourceId, candidates: resolution.candidates });
-        return;
+        return 'pick';
       }
 
       let workId = resolution.kind === 'ready' ? resolution.workObjectId : '';
       if (resolution.kind === 'create') {
         workId = createWorkNotebookForStudy(sourceId);
       }
-      if (!workId) return;
+      if (!workId) return 'failed';
 
       if (resolution.kind === 'ready' && !saved) {
         const linked = objects.find(o => o.id === workId);
@@ -2782,6 +2803,7 @@ export function SectionPage() {
       }
 
       commitStudySession(sourceId, workId, saved);
+      return 'entered';
     },
     [
       studySessionPrimary,
@@ -2806,6 +2828,7 @@ export function SectionPage() {
     setActiveQuestionNumber(null);
     setStudyFocusQuestionNumber(null);
     setStudyPaneFocus('exam');
+    setStudyPdfMarksChrome(null);
     if (studySessionWorkPersistTimerRef.current) {
       clearTimeout(studySessionWorkPersistTimerRef.current);
       studySessionWorkPersistTimerRef.current = null;
@@ -2854,7 +2877,7 @@ export function SectionPage() {
   }, [activeStudySession, sectionObjects.objects]);
 
   const studyExamPdfControls = useMemo((): StudyExamPdfControls | null => {
-    if (!activeStudySession || studyPaneFocus !== 'exam') return null;
+    if (!activeStudySession) return null;
     const src = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
     if (!src || src.type !== 'pdf') return null;
     const c = ensureProjectObjectContent('pdf', src.content);
@@ -2865,6 +2888,7 @@ export function SectionPage() {
       pageCount: c.pageCount,
       zoom: c.zoom,
       ready: true,
+      marks: studyPdfMarksChrome,
       onPageDelta: (delta: number) => {
         const store = sectionObjectsRef.current;
         const o = store.getObject(sourceId);
@@ -2894,7 +2918,7 @@ export function SectionPage() {
         store.updateObjectContent(sourceId, { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
       },
     };
-  }, [activeStudySession, studyPaneFocus, sectionObjects.objects]);
+  }, [activeStudySession, sectionObjects.objects, studyPdfMarksChrome]);
 
   const handleStudySessionWorkFocus = useCallback(
     (blockId: string | null) => {
@@ -2954,6 +2978,160 @@ export function SectionPage() {
     if (!studySessionPrimary || !studyContinueCandidate) return continuitySuggestions;
     return continuitySuggestions.filter(s => !s.learningAttempt);
   }, [continuitySuggestions, studySessionPrimary, studyContinueCandidate]);
+
+  const courseEntryExamDays = useMemo(
+    () => (section?.exam_date ? daysUntil(section.exam_date) : null),
+    [section?.exam_date],
+  );
+
+  const courseEntryMostRecentSession = useMemo(() => {
+    if (!studySessionPrimary || !sectionId) return null;
+    return getMostRecentSession(sectionId, sectionBoards.activeBoardId);
+  }, [studySessionPrimary, sectionId, sectionBoards.activeBoardId]);
+
+  const courseEntryRestorableSourceId = courseEntryMostRecentSession?.sourceObjectId ?? null;
+
+  const courseEntryDecision = useMemo(() => {
+    if (!courseEntryEnabled || !sectionId) return { kind: 'none' as const };
+    return resolveCourseEntry({
+      now: Date.now(),
+      firstArrival: navState?.firstArrival ?? false,
+      objects: sectionObjects.objects,
+      studySessionPrimary,
+      mostRecentSession: courseEntryMostRecentSession,
+      hasActiveStudySession: !!activeStudySession,
+      examDays: courseEntryExamDays,
+      restorableNextSourceId: courseEntryRestorableSourceId,
+    });
+  }, [
+    courseEntryEnabled,
+    sectionId,
+    navState?.firstArrival,
+    sectionObjects.objects,
+    studySessionPrimary,
+    courseEntryMostRecentSession,
+    activeStudySession,
+    courseEntryExamDays,
+    courseEntryRestorableSourceId,
+  ]);
+
+  const courseEntryWarmFallbackStripVisible =
+    courseEntryEnabled &&
+    courseEntryDecision.kind === 'warm_restore' &&
+    courseEntryWarmFallback &&
+    !courseEntryDismissed &&
+    !activeStudySession &&
+    !studyPickWork;
+
+  const courseEntryActive =
+    courseEntryEnabled &&
+    ((courseEntryDecision.kind === 'strip' && !courseEntryDismissed) ||
+      courseEntryWarmFallbackStripVisible ||
+      (courseEntryDecision.kind === 'warm_restore' && !!activeStudySession));
+
+  const courseEntryStripVisible =
+    courseEntryEnabled &&
+    courseEntryDecision.kind === 'strip' &&
+    !courseEntryDismissed &&
+    !activeStudySession;
+
+  const courseEntryWarmFallbackCopy = useMemo(() => {
+    if (courseEntryDecision.kind !== 'warm_restore') return null;
+    const session = courseEntryMostRecentSession;
+    const src = sectionObjects.objects.find(o => o.id === courseEntryDecision.sourceId);
+    let examLabel = src?.title ?? 'Your exam';
+    let pageLabel: string | undefined;
+    if (src?.type === 'pdf') {
+      const c = ensureProjectObjectContent('pdf', src.content);
+      if (c.type === 'pdf') {
+        examLabel = c.fileName || src.title;
+        if (session) {
+          pageLabel = formatPageLabel(session.source.page, c.pageCount);
+        }
+      }
+    } else if (session) {
+      pageLabel = formatPageLabel(session.source.page);
+    }
+    const subtitle = [examLabel, pageLabel].filter(Boolean).join(' · ');
+    return { subtitle };
+  }, [
+    courseEntryDecision,
+    courseEntryMostRecentSession,
+    sectionObjects.objects,
+  ]);
+
+  useEffect(() => {
+    if (!courseEntryEnabled || !sectionId) return;
+    if (courseEntryDecision.kind !== 'warm_restore') {
+      setCourseEntryWarmFallback(false);
+      courseEntryWarmWasPickRef.current = false;
+      return;
+    }
+    if (activeStudySession) {
+      setCourseEntryWarmFallback(false);
+      courseEntryWarmWasPickRef.current = false;
+      return;
+    }
+    if (courseEntryWarmAppliedRef.current === sectionId) return;
+    courseEntryWarmAppliedRef.current = sectionId;
+    const result = enterStudySession(courseEntryDecision.sourceId, { restore: true });
+    if (result === 'failed') {
+      setCourseEntryWarmFallback(true);
+    } else if (result === 'pick') {
+      courseEntryWarmWasPickRef.current = true;
+    }
+  }, [
+    courseEntryEnabled,
+    sectionId,
+    courseEntryDecision,
+    activeStudySession,
+    enterStudySession,
+  ]);
+
+  useEffect(() => {
+    if (!courseEntryEnabled || !sectionId) return;
+    if (!courseEntryWarmWasPickRef.current) return;
+    if (courseEntryDecision.kind !== 'warm_restore') return;
+    if (activeStudySession || studyPickWork || courseEntryDismissed) return;
+    if (courseEntryWarmAppliedRef.current !== sectionId) return;
+    setCourseEntryWarmFallback(true);
+  }, [
+    courseEntryEnabled,
+    sectionId,
+    courseEntryDecision,
+    activeStudySession,
+    studyPickWork,
+    courseEntryDismissed,
+  ]);
+
+  const handleCourseEntryPrimary = useCallback(() => {
+    if (courseEntryDecision.kind !== 'strip') return;
+    setCourseEntryDismissed(true);
+    switch (courseEntryDecision.action) {
+      case 'restore_session':
+        if (courseEntryDecision.sessionSourceId) {
+          enterStudySession(courseEntryDecision.sessionSourceId, { restore: true });
+        }
+        break;
+      case 'focus':
+        if (courseEntryDecision.focusObjectId) {
+          focusNotebookOnCanvas(courseEntryDecision.focusObjectId);
+        }
+        break;
+      case 'begin':
+        handleAddToSpace('pdf');
+        break;
+      case 'enter':
+        break;
+    }
+  }, [courseEntryDecision, enterStudySession, focusNotebookOnCanvas, handleAddToSpace]);
+
+  const handleCourseEntryWarmFallback = useCallback(() => {
+    if (courseEntryDecision.kind !== 'warm_restore') return;
+    setCourseEntryDismissed(true);
+    setCourseEntryWarmFallback(false);
+    enterStudySession(courseEntryDecision.sourceId, { restore: true });
+  }, [courseEntryDecision, enterStudySession]);
 
   const supportsUniversalPresentation = useCallback((o: ProjectSpaceObject): boolean => (
     o.type === 'notebook'
@@ -3137,6 +3315,11 @@ export function SectionPage() {
           }
           suppressStudyToolbar={studyExamReaderChrome}
           studyDeskQuiet={studyDeskQuiet}
+          onStudyMarksChromeChange={
+            contentHost === 'study-session' && obj.type === 'pdf'
+              ? setStudyPdfMarksChrome
+              : undefined
+          }
           suppressLearningAttemptChip={
             studySessionPrimary &&
             (contentHost === 'study-session' || obj.type === 'pdf')
@@ -3673,7 +3856,8 @@ export function SectionPage() {
           {freeSpaceSurfaceVisible &&
             studySessionPrimary &&
             studyContinueCandidate &&
-            !activeStudySession && (
+            !activeStudySession &&
+            !courseEntryEnabled && (
               <StudyContinueBanner
                 tokens={freeSpaceTokens}
                 examLabel={(() => {
@@ -3708,12 +3892,38 @@ export function SectionPage() {
               />
             )}
 
+          {freeSpaceSurfaceVisible && courseEntryStripVisible && (
+            <CourseEntryStrip
+              tokens={freeSpaceTokens}
+              title={courseEntryDecision.primaryLabel}
+              subtitle={courseEntryDecision.secondaryLabel}
+              buttonLabel={courseEntryDecision.buttonLabel}
+              onPrimary={handleCourseEntryPrimary}
+              onDismiss={() => setCourseEntryDismissed(true)}
+            />
+          )}
+
+          {freeSpaceSurfaceVisible && courseEntryWarmFallbackStripVisible && courseEntryWarmFallbackCopy && (
+            <CourseEntryStrip
+              tokens={freeSpaceTokens}
+              title="Continue studying"
+              subtitle={courseEntryWarmFallbackCopy.subtitle}
+              buttonLabel="Continue studying"
+              onPrimary={handleCourseEntryWarmFallback}
+              onDismiss={() => {
+                setCourseEntryDismissed(true);
+                setCourseEntryWarmFallback(false);
+              }}
+            />
+          )}
+
           {freeSpaceSurfaceVisible &&
             continuity &&
             resumeCopy &&
             !resumeDismissed &&
             !studyContinueCandidate &&
             !activeStudySession &&
+            !courseEntryActive &&
             !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') && (
             <WorkspaceResumeLayer
               tokens={freeSpaceTokens}

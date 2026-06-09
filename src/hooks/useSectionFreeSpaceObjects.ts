@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
 import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { copyPdfBlob } from '../lib/freeSpacePdfIdb';
+import { copyPdfStudyMarks } from '../lib/pdfStudyMarks/pdfStudyMarksIdb';
 import { copyImageBlob } from '../lib/freeSpaceImageIdb';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
@@ -1141,6 +1142,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     if (source.type === 'pdf') {
       void copyPdfBlob(sectionId, source.id, copy.id);
+      void copyPdfStudyMarks(sectionId, source.id, copy.id);
     }
     if (source.type === 'image') {
       void copyImageBlob(sectionId, source.id, copy.id);

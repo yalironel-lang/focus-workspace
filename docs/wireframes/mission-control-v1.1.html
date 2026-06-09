@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mission Control V1.1 — Visual Wireframes</title>
+  <link rel="stylesheet" href="mc-wireframes.css" />
+</head>
+<body>
+  <header class="wf-toolbar">
+    <h1>MC V1.1 Wireframes</h1>
+    <label>
+      Viewport
+      <select id="viewport-select">
+        <option value="desktop">Desktop 1280×800</option>
+        <option value="mobile">Mobile 390×844</option>
+      </select>
+    </label>
+    <label>
+      Screen
+      <select id="screen-select">
+        <option value="cold">Cold Return</option>
+        <option value="warm">Warm Return</option>
+        <option value="new">New Course</option>
+        <option value="empty">Empty Course</option>
+        <option value="exam">Exam Week</option>
+      </select>
+    </label>
+    <button type="button" id="toggle-zones">Zones</button>
+    <button type="button" id="toggle-weights">Weights</button>
+    <button type="button" id="expand-setup">Expand Setup</button>
+    <button type="button" id="expand-active">Expand Active</button>
+    <button type="button" id="expand-library">Expand Library</button>
+    <span class="wf-legend">Structure only · one cabinet at a time</span>
+  </header>
+
+  <div class="wf-stage" id="stage">
+    <!-- Screens injected by JS -->
+  </div>
+
+  <script>
+    const SCREENS = {
+      cold: {
+        label: 'Cold Return — Mission Control',
+        l0: 'Exam in 9 days · You studied last night',
+        labelMon: 'CONTINUE',
+        title: 'Solow Model · Question 7',
+        context: 'Final Exam 2023 · Page 4 · Work notebook · Block 12',
+        meta: 'Last active yesterday at 11:42pm',
+        sub: null,
+        cta: 'Resume study session',
+        ghost: 'Open workspace →',
+        setupN: 0,
+        activeN: 3,
+        setupExpanded: false,
+        showActive: true,
+        showL3: true,
+        examEmphasis: false,
+      },
+      warm: {
+        warm: true,
+        label: 'Warm Return — Workspace',
+      },
+      new: {
+        label: 'New Course — Mission Control',
+        l0: "Welcome · Let's build your study space",
+        labelMon: 'START',
+        title: 'Set up Macroeconomics',
+        context: 'Three things make a course ready: an exam date, your materials, and Moodle.',
+        meta: null,
+        sub: 'Unfurnished desk',
+        cta: 'Add exam PDF',
+        ghost: 'Set up later →',
+        setupN: 2,
+        activeN: 0,
+        setupExpanded: true,
+        setupRows: [
+          ['○ Add exam PDF', 'Add →'],
+          ['○ Set exam date', 'Set →'],
+          ['+1 more in setup', ''],
+        ],
+        showActive: false,
+        showL3: false,
+        railAdd: true,
+      },
+      empty: {
+        label: 'Empty Course — Mission Control',
+        l0: 'No active study session',
+        labelMon: 'START',
+        title: 'Add your first study material',
+        context: 'Drop an exam PDF or create a notebook to begin.',
+        meta: null,
+        sub: null,
+        cta: 'Add first material',
+        ghost: null,
+        setupN: 2,
+        activeN: 0,
+        setupExpanded: true,
+        setupRows: [
+          ['○ Set exam date', 'Set →'],
+          ['○ Add Moodle link', 'Add →'],
+        ],
+        showActive: false,
+        showL3: false,
+      },
+      exam: {
+        label: 'Exam Week — Mission Control',
+        l0: 'Exam in 3 days · Pick up where you left off',
+        labelMon: 'CONTINUE',
+        title: 'Solow Model · Question 7',
+        context: 'Final Exam 2023 · Page 4 · Work notebook · Block 12',
+        meta: 'Last active yesterday at 11:42pm',
+        sub: null,
+        cta: 'Resume study session',
+        ghost: 'Open workspace →',
+        setupN: 0,
+        activeN: 3,
+        setupExpanded: false,
+        showActive: true,
+        showL3: true,
+        examEmphasis: true,
+      },
+    };
+
+    const ACTIVE_ROWS = [
+      { group: 'On your desk', items: [['Final Exam 2023 + Work notebook', 'last night']] },
+      { group: 'Nearby', items: [['Slides PDF', '2d ago']] },
+      { group: 'Needs review', items: [['Lagrange multiplier mistake', '4d ago']] },
+    ];
+
+    const LIBRARY_ROWS = {
+      resources: [
+        { group: 'Exams', items: [['Final Exam 2023', 'Open →']] },
+        { group: 'Links', items: [['Moodle', '↗']] },
+      ],
+      timeline: [
+        ['Yesterday · Solow Model · Q7 · 42m'],
+        ['Tue · Problem Set 3 notebook · 18m'],
+      ],
+    };
+
+    let viewport = 'desktop';
+    let screenKey = 'cold';
+    let expandedCabinet = null;
+    let showZones = false;
+    let showWeights = false;
+
+    function renderWarm(isMobile) {
+      const cls = isMobile ? 'wf-viewport wf-viewport--mobile wf-mobile' : 'wf-viewport wf-viewport--desktop';
+      return `
+        <div>
+          <div class="wf-frame-label">${SCREENS.warm.label} · ${isMobile ? '390px' : '1280px'}</div>
+          <div class="${cls}">
+            <div class="wf-warm" style="width:100%">
+              <div style="padding:20px 24px 0">
+                <div class="wf-shell">
+                  <span class="wf-tab wf-tab--active">Workspace</span>
+                  <span class="wf-tab">Mission Control</span>
+                  <span class="wf-tab">Studio</span>
+                </div>
+              </div>
+              <div class="wf-warm-canvas">
+                <span class="wf-warm-canvas-label">Workspace · Study session restored</span>
+                <span class="wf-warm-canvas-hint">Exam PDF · Page 4 · Work notebook</span>
+              </div>
+              <div class="wf-delegate-strip ${isMobile ? '' : ''}">
+                <span>18m ago · Solow Model · Question 7 · Final Exam p.4</span>
+                <button type="button" class="wf-cta-primary">Resume</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function renderMC(data, isMobile) {
+      const cls = isMobile
+        ? 'wf-viewport wf-viewport--mobile wf-mobile wf-mobile-only'
+        : 'wf-viewport wf-viewport--desktop';
+      const fold = !isMobile && data.showL3 ? '<div class="wf-fold-line"></div>' : '';
+      const weights = showWeights && !isMobile ? `
+        <span class="wf-weight-tag" style="top:120px;left:270px">wt 10% rail</span>
+        <span class="wf-weight-tag" style="top:200px;left:280px">wt 50% desk</span>
+        <span class="wf-weight-tag" style="top:200px;left:520px">wt 28% title</span>
+        <span class="wf-weight-tag" style="top:380px;left:300px">wt 12% CTA</span>
+        <span class="wf-weight-tag" style="top:480px;left:280px">wt 5% cabinets</span>
+      ` : '';
+
+      const rail = isMobile ? '' : `
+        <aside class="wf-rail">
+          <div class="wf-rail-section">
+            <div class="wf-rail-label">Quick links</div>
+            ${data.railAdd ? `
+              <div class="wf-rail-add">+ Add Moodle</div>
+              <div class="wf-rail-add">+ Add Drive</div>
+            ` : `
+              <a class="wf-rail-link" href="#">Moodle <span>↗</span></a>
+              <a class="wf-rail-link" href="#">Drive <span>↗</span></a>
+              <a class="wf-rail-link" href="#">ChatGPT <span>↗</span></a>
+            `}
+          </div>
+          <div class="wf-rail-divider"></div>
+          <div class="wf-rail-section">
+            <div class="wf-rail-label">Dates</div>
+            <div class="wf-rail-date">Problem set <span>3d</span></div>
+            <div class="wf-rail-date ${data.examEmphasis ? 'wf-rail-date--emphasis' : ''}">Macro exam <span>${data.examEmphasis ? '3d' : '9d'}</span></div>
+          </div>
+        </aside>`;
+
+      const mobilePeriphery = isMobile ? `
+        <div class="wf-mobile-periphery">
+          <a href="#">Moodle ↗</a>
+          <a href="#">Drive ↗</a>
+          <span>Exam ${data.examEmphasis ? '3d' : '9d'}</span>
+        </div>` : '';
+
+      const metaBlock = data.meta ? `<p class="wf-monument-meta">${data.meta}</p>` : '';
+      const subBlock = data.sub ? `<p class="wf-monument-sub">${data.sub}</p>` : '';
+      const ghostBlock = data.ghost ? `<button type="button" class="wf-cta-ghost">${data.ghost}</button>` : '';
+
+      const setupExpanded = expandedCabinet === 'setup' || (data.setupExpanded && expandedCabinet === null);
+      const activeExpanded = expandedCabinet === 'active';
+      const libraryExpanded = expandedCabinet === 'library';
+
+      const setupTrigger = data.setupN > 0 || data.setupExpanded
+        ? `<button type="button" class="wf-cabinet-trigger ${setupExpanded ? 'wf-cabinet-trigger--expanded' : ''}" data-cabinet="setup">${setupExpanded ? '▾' : '▸'} Setup (${data.setupN || 2})</button>`
+        : `<button type="button" class="wf-cabinet-trigger ${setupExpanded ? 'wf-cabinet-trigger--expanded' : ''}" data-cabinet="setup">${setupExpanded ? '▾' : '▸'} Setup (0)</button>`;
+
+      const activeTrigger = data.showActive !== false && data.activeN > 0
+        ? `<button type="button" class="wf-cabinet-trigger ${activeExpanded ? 'wf-cabinet-trigger--expanded' : ''}" data-cabinet="active">${activeExpanded ? '▾' : '▸'} Active (${data.activeN})</button>`
+        : '';
+
+      const libraryTrigger = `<button type="button" class="wf-cabinet-trigger ${libraryExpanded ? 'wf-cabinet-trigger--expanded' : ''}" data-cabinet="library">${libraryExpanded ? '▾' : '▸'} Library</button>`;
+
+      let setupPanel = '';
+      if (setupExpanded) {
+        const rows = data.setupRows || [
+          ['○ Add exam PDF', 'Add →'],
+          ['○ Set exam date', 'Set →'],
+          ['+1 more in setup', ''],
+        ];
+        setupPanel = `<div class="wf-cabinet-panel wf-cabinet-panel--open" data-panel="setup">
+          ${rows.map(r => r[1]
+            ? `<div class="wf-cabinet-row"><span>${r[0]}</span><span class="wf-cabinet-row-action">${r[1]}</span></div>`
+            : `<div class="wf-cabinet-more">${r[0]}</div>`).join('')}
+        </div>`;
+      }
+
+      let activePanel = '';
+      if (activeExpanded) {
+        activePanel = `<div class="wf-cabinet-panel wf-cabinet-panel--open" data-panel="active">
+          ${ACTIVE_ROWS.map(g => `
+            <div class="wf-cabinet-group-label">${g.group}</div>
+            ${g.items.map(i => `<div class="wf-cabinet-row"><span>${i[0]}</span><span class="wf-cabinet-row-action">${i[1]}</span></div>`).join('')}
+          `).join('')}
+          <div class="wf-cabinet-ghost">View all in workspace →</div>
+        </div>`;
+      }
+
+      let libraryPanel = '';
+      if (libraryExpanded) {
+        libraryPanel = `<div class="wf-cabinet-panel wf-cabinet-panel--open" data-panel="library">
+          <div class="wf-cabinet-group-label">Resources</div>
+          ${LIBRARY_ROWS.resources.map(g => `
+            <div class="wf-cabinet-group-label" style="font-size:10px;text-transform:none;letter-spacing:0;color:var(--text-ghost)">${g.group}</div>
+            ${g.items.map(i => `<div class="wf-cabinet-row"><span>${i[0]}</span><span class="wf-cabinet-row-action">${i[1]}</span></div>`).join('')}
+          `).join('')}
+          <div class="wf-cabinet-ghost">View all in workspace →</div>
+          <div class="wf-cabinet-group-label" style="margin-top:12px">Recent study</div>
+          ${LIBRARY_ROWS.timeline.map(t => `<div class="wf-cabinet-row"><span>${t[0]}</span></div>`).join('')}
+          <div class="wf-cabinet-ghost">View full history in workspace →</div>
+        </div>`;
+      }
+
+      const l3 = data.showL3 !== false ? `
+        <div class="wf-l3">
+          <div class="wf-l3-label">Storage wall · tasks · capture · shelf</div>
+          <div class="wf-l3-placeholder">L3 recessed · 72% opacity · below fold</div>
+        </div>` : '';
+
+      return `
+        <div>
+          <div class="wf-frame-label">${data.label} · ${isMobile ? '390px' : '1280px'}</div>
+          <div class="${cls} ${showZones ? 'wf-show-zones' : ''} ${showWeights ? 'wf-show-weights' : ''}">
+            ${fold}
+            ${weights}
+            ${rail}
+            <div class="wf-main">
+              <div class="wf-main-inner">
+                <div class="wf-shell">
+                  <span class="wf-tab">Workspace</span>
+                  <span class="wf-tab wf-tab--active">Mission Control</span>
+                  <span class="wf-tab">Studio</span>
+                </div>
+                <header class="wf-course-header">
+                  <h2 class="wf-course-title">📐 Macroeconomics</h2>
+                  <span class="wf-customize">✦</span>
+                </header>
+                <p class="wf-l0">${data.l0}</p>
+                <section class="wf-desk" aria-label="Desk zone">
+                  <p class="wf-monument-label">${data.labelMon}</p>
+                  <h3 class="wf-monument-title">${data.title}</h3>
+                  <p class="wf-monument-context">${data.context}</p>
+                  ${metaBlock}
+                  ${subBlock}
+                  <button type="button" class="wf-cta-primary">${data.cta}</button>
+                  ${ghostBlock}
+                </section>
+                ${mobilePeriphery}
+                <section class="wf-storage-band">
+                  <div class="wf-cabinets">
+                    ${setupTrigger}
+                    ${activeTrigger}
+                    ${libraryTrigger}
+                  </div>
+                  ${setupPanel}
+                  ${activePanel}
+                  ${libraryPanel}
+                </section>
+                ${l3}
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function render() {
+      const stage = document.getElementById('stage');
+      const isMobile = viewport === 'mobile';
+      stage.innerHTML = '';
+
+      if (screenKey === 'warm') {
+        stage.innerHTML = renderWarm(isMobile);
+        return;
+      }
+
+      const data = SCREENS[screenKey];
+      stage.innerHTML = renderMC(data, isMobile);
+
+      stage.querySelectorAll('[data-cabinet]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.cabinet;
+          expandedCabinet = expandedCabinet === id ? null : id;
+          render();
+        });
+      });
+    }
+
+    document.getElementById('viewport-select').addEventListener('change', e => {
+      viewport = e.target.value;
+      expandedCabinet = null;
+      render();
+    });
+
+    document.getElementById('screen-select').addEventListener('change', e => {
+      screenKey = e.target.value;
+      expandedCabinet = screenKey === 'new' || screenKey === 'empty' ? 'setup' : null;
+      render();
+    });
+
+    document.getElementById('toggle-zones').addEventListener('click', () => {
+      showZones = !showZones;
+      document.getElementById('toggle-zones').classList.toggle('active', showZones);
+      render();
+    });
+
+    document.getElementById('toggle-weights').addEventListener('click', () => {
+      showWeights = !showWeights;
+      document.getElementById('toggle-weights').classList.toggle('active', showWeights);
+      render();
+    });
+
+    document.getElementById('expand-setup').addEventListener('click', () => {
+      expandedCabinet = expandedCabinet === 'setup' ? null : 'setup';
+      render();
+    });
+    document.getElementById('expand-active').addEventListener('click', () => {
+      expandedCabinet = expandedCabinet === 'active' ? null : 'active';
+      render();
+    });
+    document.getElementById('expand-library').addEventListener('click', () => {
+      expandedCabinet = expandedCabinet === 'library' ? null : 'library';
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>

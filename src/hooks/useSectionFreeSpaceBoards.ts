@@ -77,6 +77,14 @@ export function useSectionFreeSpaceBoards(sectionId: string): SectionFreeSpaceBo
     const loaded = loadBoards(sectionId);
     return loadActiveBoard(sectionId, loaded);
   });
+  // SectionPage stays mounted across /section/:id — reload board scope synchronously.
+  const [syncedSectionId, setSyncedSectionId] = useState(sectionId);
+  if (sectionId !== syncedSectionId) {
+    setSyncedSectionId(sectionId);
+    const loaded = loadBoards(sectionId);
+    setBoards(loaded);
+    setActiveBoardIdRaw(loadActiveBoard(sectionId, loaded));
+  }
 
   const setActiveBoardId = useCallback((id: string) => {
     setActiveBoardIdRaw(id);

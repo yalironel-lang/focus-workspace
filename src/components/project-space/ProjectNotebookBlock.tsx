@@ -78,6 +78,7 @@ import {
 } from '../../lib/notebookBlockRichText';
 import {
   anchorFromSelection,
+  computeToolbarAnchor,
   copyRichSlice,
   findRichEditable,
   type NotebookSelectionState,
@@ -89,6 +90,7 @@ import {
   setCaretOffsetIn,
   setSelectionOffsetsIn,
   getSelectionOffsetsIn,
+  getSelectionClientRect,
   rangeHeightFromStartToCaret,
   rangeHeightFromCaretToEnd,
   lineHeightOf,
@@ -99,6 +101,13 @@ import {
 } from '../../lib/notebookCaret';
 import { RichEditableLine } from '../notebook/RichEditableLine';
 import { NotebookSelectionToolbar } from '../notebook/NotebookSelectionToolbar';
+import { DeskFormattingToolbar } from '../notebook/DeskFormattingToolbar';
+import {
+  readDeskFormattingV1,
+  useDeskFormattingV1,
+} from '../../lib/studySession/deskFormattingFeatureFlag';
+import { recordDeskFormatSyncEvent } from '../../lib/studySession/deskFormatSyncDebug';
+import { recordDeskFormattingMetric } from '../../lib/studySession/deskFormattingMetrics';
 import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
 import { nbAgentLog } from '../../lib/notebookDebugIngest';
 import { isSelectionInMathEditor } from '../../lib/tiptapSelectionRegistry';
@@ -428,6 +437,19 @@ type PendingCaretIntent = {
 
 function blockTextPayload(b: { text: string; marks?: InlineMark[] }): string {
   return serializeBlockText(b.text, b.marks);
+}
+
+/** Avoid wiping stored marks when DOM briefly reports [] without a text change. */
+function resolveBlockMarksAfterEdit(
+  prevPlain: string,
+  nextPlain: string,
+  prevMarks: InlineMark[] | undefined,
+  marksOverride: InlineMark[] | undefined,
+): InlineMark[] | undefined {
+  if (marksOverride === undefined) return prevMarks;
+  if (marksOverride.length > 0) return marksOverride;
+  if ((prevMarks?.length ?? 0) > 0 && nextPlain === prevPlain) return prevMarks;
+  return undefined;
 }
 
 function blockToLine(b: Block): string {
@@ -1079,6 +1101,8 @@ export function ProjectNotebookBlock({
   onActiveQuestionNumber,
 }: Props) {
   const isDeskPresentation = presentation === 'desk';
+  const deskFormattingV1 = useDeskFormattingV1();
+  const deskFormattingActive = isDeskPresentation && deskFormattingV1;
   const sessionRestoreAppliedRef = useRef(false);
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
@@ -2132,17 +2156,19 @@ export function ProjectNotebookBlock({
           ? (blk.marks ?? [])
           : snapshot.marks;
       selectionSnapshotRef.current = { ...snapshot, marks };
-      toolbarActiveBlockIdRef.current = snapshot.blockId;
+      toolbarActiveBlockIdRef.current =
+        isDeskPresentation && deskFormattingV1 ? null : snapshot.blockId;
       setSelectionToolbar(prev =>
         prev
           ? { ...prev, marks, plain: snapshot.plain, start: snapshot.start, end: snapshot.end }
           : prev,
       );
     },
-    [],
+    [isDeskPresentation, deskFormattingV1],
   );
 
   const syncSelectionToolbar = useCallback(() => {
+    const deskFmtOn = isDeskPresentation && readDeskFormattingV1();
     const sel = window.getSelection();
     // #region agent log
     nbAgentLog(
@@ -2159,7 +2185,8 @@ export function ProjectNotebookBlock({
       'trace',
     );
     // #endregion
-    if (isDeskPresentation) {
+    if (isDeskPresentation && !deskFmtOn) {
+      recordDeskFormatSyncEvent('dismiss', { reason: 'flag-off', deskFmtOn });
       dismissSelectionToolbar();
       return;
     }
@@ -2187,6 +2214,8 @@ export function ProjectNotebookBlock({
           : sel.anchorNode.parentElement?.closest('[data-rich-editable="1"]'))
       : null;
     if (!editable || !root.contains(editable)) {
+      recordDeskFormatSyncEvent('dismiss', { reason: 'no-rich-editable', deskFmtOn });
+      nbToolbarDebug('syncSelectionToolbar:dismiss', { reason: 'no-rich-editable', deskFmtOn });
       if (toolbarInteractingRef.current) return;
       dismissSelectionToolbar();
       return;
@@ -2208,8 +2237,20 @@ export function ProjectNotebookBlock({
       return;
     }
     const plain = blk.text;
-    const anchor = anchorFromSelection();
-    if (!anchor) {
+    let anchor = anchorFromSelection();
+    if (deskFmtOn) {
+      const selRect = getSelectionClientRect();
+      const editableRect = (editable as HTMLElement).getBoundingClientRect();
+      const rect =
+        selRect && (selRect.width > 0 || selRect.height > 0)
+          ? selRect
+          : editableRect.width > 0 || editableRect.height > 0
+            ? editableRect
+            : null;
+      anchor = rect ? computeToolbarAnchor(rect, 200) : { top: 12, left: 12, width: 200 };
+    } else if (!anchor) {
+      recordDeskFormatSyncEvent('dismiss', { reason: 'no-anchor', blockId });
+      nbToolbarDebug('syncSelectionToolbar:dismiss', { reason: 'no-anchor', blockId });
       if (toolbarInteractingRef.current) return;
       dismissSelectionToolbar();
       return;
@@ -2222,22 +2263,26 @@ export function ProjectNotebookBlock({
       marks: blk.marks ?? [],
     };
     selectionSnapshotRef.current = snapshot;
-    toolbarActiveBlockIdRef.current = blockId;
+    toolbarActiveBlockIdRef.current = deskFmtOn ? null : blockId;
     setSelectionToolbar({ ...snapshot, anchor });
-    // #region agent log
-    nbAgentLog(
-      'ProjectNotebookBlock:syncSelectionToolbar',
-      'toolbar-visible',
-      { blockId, start: offsets.start, end: offsets.end, plain },
-      'A',
-    );
-    // #endregion
+    recordDeskFormatSyncEvent('visible', {
+      blockId,
+      start: offsets.start,
+      end: offsets.end,
+      deskFmtOn,
+    });
+    nbToolbarDebug('syncSelectionToolbar:visible', {
+      blockId,
+      start: offsets.start,
+      end: offsets.end,
+      deskFmtOn,
+    });
   }, [editorMode, slashMenu, getEditorRoot, dismissSelectionToolbar, isDeskPresentation]);
 
-  const richSelectionToolbarActive = selectionToolbar != null && !isDeskPresentation;
+  const canvasRichSelectionToolbarActive = selectionToolbar != null && !isDeskPresentation;
 
   useEffect(() => {
-    if (!richSelectionToolbarActive) return;
+    if (!canvasRichSelectionToolbarActive) return;
     const allowNativeTyping = (inputType?: string | null) =>
       inputType === 'insertText'
       || inputType === 'insertCompositionText'
@@ -2290,26 +2335,26 @@ export function ProjectNotebookBlock({
       document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
       document.removeEventListener('input', onInputCapture, { capture: true });
     };
-  }, [richSelectionToolbarActive]);
+  }, [canvasRichSelectionToolbarActive]);
 
-  /** Freeze rich editables while toolbar is open — depend on open/closed only, not toolbar prop updates. */
+  /** Freeze rich editables while canvas floating toolbar is open (not desk). */
   useLayoutEffect(() => {
-    if (!richSelectionToolbarActive) {
+    if (!canvasRichSelectionToolbarActive) {
       syncUnfreezeRichEditables();
       return;
     }
     syncFreezeRichEditables();
     lockDomTextCommits(800);
   }, [
-    richSelectionToolbarActive,
+    canvasRichSelectionToolbarActive,
     syncFreezeRichEditables,
     syncUnfreezeRichEditables,
     lockDomTextCommits,
   ]);
 
   useEffect(() => {
-    if (isDeskPresentation) dismissSelectionToolbar();
-  }, [isDeskPresentation, dismissSelectionToolbar]);
+    if (isDeskPresentation && !deskFormattingV1) dismissSelectionToolbar();
+  }, [isDeskPresentation, deskFormattingV1, dismissSelectionToolbar]);
 
   useEffect(() => {
     // #region agent log
@@ -2658,7 +2703,12 @@ export function ProjectNotebookBlock({
       if (isMathNotebook && block.kind === 'step') {
         text = normalizeToLinearMath(text);
       }
-      const nextMarks = marksOverride ?? block.marks;
+      const nextMarks = resolveBlockMarksAfterEdit(
+        block.text,
+        text,
+        block.marks,
+        marksOverride,
+      );
 
       if (block.kind === 'paragraph') {
         const transformed = morphParagraphLine(text, block.id);
@@ -2726,6 +2776,7 @@ export function ProjectNotebookBlock({
 
   const handleToolbarCommand = useCallback(
     (cmd: ToolbarCommand) => {
+      if (deskFormattingActive) recordDeskFormattingMetric(cmd);
       const snapshot = selectionSnapshotRef.current;
       nbToolbarDebug('handleToolbarCommand', { cmd, snapshot });
       const active = document.activeElement;
@@ -2832,13 +2883,14 @@ export function ProjectNotebookBlock({
       refreshToolbarFromSnapshot,
       getEditorRoot,
       toggleInlineMarkFromSnapshot,
+      deskFormattingActive,
     ],
   );
 
   const handleToolbarPointerDown = useCallback(() => {
-    lockDomTextCommits(520);
-    syncFreezeRichEditables();
-  }, [lockDomTextCommits, syncFreezeRichEditables]);
+    lockDomTextCommits(deskFormattingActive ? 320 : 520);
+    if (!deskFormattingActive) syncFreezeRichEditables();
+  }, [lockDomTextCommits, syncFreezeRichEditables, deskFormattingActive]);
 
   const handleToolbarPointerUp = useCallback(() => {
     releaseDomTextCommitLock(400);
@@ -3736,13 +3788,16 @@ export function ProjectNotebookBlock({
             key={listKey}
             id={block.id}
             text={block.text}
-                    tokens={tokens}
+            marks={block.marks}
+            tokens={tokens}
             placeholder="Write…"
             textColor={ink.primary}
             mutedColor={tokens.textMuted}
             onUpdate={updateBlockText}
             onFocusIndex={setFocusIndexById}
             onAfterInput={(el) => onEditableAfterInput(block.id, el)}
+            onSelectionChange={handleRichSelectionChange}
+            deskFormattingKeepEditable={deskFormattingActive}
             EditableLine={EditableLineGuarded}
             style={{
               width: '100%', border: 'none', outline: 'none', background: 'transparent',
@@ -4281,6 +4336,23 @@ export function ProjectNotebookBlock({
       ) : null}
 
       <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
+      {deskFormattingActive &&
+      selectionToolbar &&
+      context === 'free-space' &&
+      typeof document !== 'undefined' &&
+      notebookBodyScrollRef.current
+        ? createPortal(
+            <DeskFormattingToolbar
+              tokens={tokens}
+              selection={selectionToolbar}
+              onCommand={handleToolbarCommand}
+              onDismiss={dismissSelectionToolbar}
+              onToolbarPointerDown={handleToolbarPointerDown}
+              onToolbarPointerUp={handleToolbarPointerUp}
+            />,
+            notebookBodyScrollRef.current,
+          )
+        : null}
       <div
         onDrop={handleWritingAreaDrop}
         onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
@@ -5024,11 +5096,14 @@ export function ProjectNotebookBlock({
                   <MathEditableParagraph
                     id={block.id}
                     text={block.text}
+                    marks={block.marks}
                     tokens={tokens}
                     placeholder={paragraphPlaceholder}
                     onUpdate={updateBlockText}
                     onFocusIndex={setFocusIndexById}
                     onAfterInput={el => onEditableAfterInput(block.id, el)}
+                    onSelectionChange={handleRichSelectionChange}
+                    deskFormattingKeepEditable={deskFormattingActive}
                     EditableLine={EditableLineGuarded}
                     textColor={ink.primary}
                     mutedColor={tokens.textMuted}

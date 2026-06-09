@@ -1,11 +1,25 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { ExternalLink, FileText, FolderOpen, Loader2, Minus, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  Highlighter,
+  Loader2,
+  Bookmark,
+  Minus,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlob } from '../../lib/freeSpacePdfIdb';
 import { flickerDebugLog } from '../../lib/flickerDebug';
+import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
+import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
+import { PdfStudyMarksOverlay } from './PdfStudyMarksOverlay';
 
 interface FreeSpacePdfCardProps {
   objectId: string;
@@ -26,6 +40,8 @@ interface FreeSpacePdfCardProps {
   presentation?: 'canvas' | 'study-session';
   /** Focus exam: page/zoom live in StudySessionShell merged bar. */
   suppressStudyToolbar?: boolean;
+  /** Lifts mark/highlight chrome into StudySessionShell header. */
+  onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
 }
 
 export const STUDY_SESSION_PDF_FIT_WIDTH_ZOOM = 1.8;
@@ -45,6 +61,7 @@ export function FreeSpacePdfCard({
   onStartStudySession,
   presentation = 'canvas',
   suppressStudyToolbar = false,
+  onStudyMarksChromeChange,
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
@@ -190,6 +207,22 @@ export function FreeSpacePdfCard({
     onChange({ ...content, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
   }, [content, onChange]);
 
+  const jumpToPage = useCallback(
+    (page: number) => {
+      onChange({ ...content, page: Math.max(1, page) });
+    },
+    [content, onChange],
+  );
+
+  const studyMarks = usePdfStudyMarks({
+    sectionId,
+    objectId,
+    page: content.page,
+    enabled: inStudySession && loadState === 'ready',
+    onJumpToPage: jumpToPage,
+    onChromeChange: onStudyMarksChromeChange,
+  });
+
   const border = tokens.cardBorder;
   const well = tokens.wellBg;
 
@@ -240,6 +273,31 @@ export function FreeSpacePdfCard({
       >
         Fit width
       </button>
+      {inStudySession && studyMarks.loaded && !onStudyMarksChromeChange ? (
+        <>
+          <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
+          <button
+            type="button"
+            title={studyMarks.isCurrentPageMarked ? 'Unmark page' : 'Mark page'}
+            className="p-1 rounded-md"
+            style={{ color: studyMarks.isCurrentPageMarked ? tokens.accent : tokens.textMuted }}
+            onClick={studyMarks.toggleMarkPage}
+          >
+            <Bookmark className="w-3.5 h-3.5" fill={studyMarks.isCurrentPageMarked ? 'currentColor' : 'none'} />
+          </button>
+          <button
+            type="button"
+            title="Highlight region"
+            className="p-1 rounded-md"
+            style={{
+              color: studyMarks.tool === 'highlight' ? tokens.accent : tokens.textMuted,
+            }}
+            onClick={() => studyMarks.setTool(studyMarks.tool === 'highlight' ? 'view' : 'highlight')}
+          >
+            <Highlighter className="w-3.5 h-3.5" />
+          </button>
+        </>
+      ) : null}
     </div>
   );
 
@@ -485,29 +543,59 @@ export function FreeSpacePdfCard({
           </div>
         )}
 
-        {iframeSrc && !suspendViewer && (
+        {iframeSrc && !suspendViewer && inStudySession ? (
+          <div className="absolute inset-0 overflow-auto" style={{ backgroundColor: tokens.wellBg }}>
+            <div
+              style={{
+                position: 'relative',
+                width: `${100 / content.zoom}%`,
+                minHeight: `${100 / content.zoom}%`,
+                transform: `scale(${content.zoom})`,
+                transformOrigin: 'top left',
+              }}
+            >
+              <iframe
+                title={content.fileName || 'PDF'}
+                src={iframeSrc}
+                className="border-0 block"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  minHeight: '720px',
+                  backgroundColor: tokens.wellBg,
+                }}
+                onError={() => {
+                  setObjectUrl(prev => {
+                    revokeIf(prev);
+                    return null;
+                  });
+                  setLoadState('error');
+                }}
+              />
+              {studyMarks.loaded ? (
+                <PdfStudyMarksOverlay
+                  tokens={tokens}
+                  regions={studyMarks.currentRegions}
+                  tool={studyMarks.tool}
+                  onAddRegion={studyMarks.addRegion}
+                  onRemoveRegion={studyMarks.removeRegion}
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {iframeSrc && !suspendViewer && !inStudySession ? (
           <iframe
             title={content.fileName || 'PDF'}
             src={iframeSrc}
             className="border-0"
-            style={
-              inStudySession
-                ? ({
-                    position: 'absolute',
-                    inset: 0,
-                    width: '100%',
-                    height: '100%',
-                    zoom: content.zoom,
-                    backgroundColor: tokens.wellBg,
-                  } as CSSProperties)
-                : ({
-                    zoom: content.zoom,
-                    width: '100%',
-                    height: '100%',
-                    minHeight: '420px',
-                    backgroundColor: tokens.wellBg,
-                  } as CSSProperties)
-            }
+            style={{
+              zoom: content.zoom,
+              width: '100%',
+              height: '100%',
+              minHeight: '420px',
+              backgroundColor: tokens.wellBg,
+            }}
             onError={() => {
               setObjectUrl(prev => {
                 revokeIf(prev);
@@ -516,7 +604,7 @@ export function FreeSpacePdfCard({
               setLoadState('error');
             }}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

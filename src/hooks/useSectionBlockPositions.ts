@@ -101,7 +101,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       schedulePersist(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const applyPositions = useCallback((patches: Record<string, BlockPos> | null | undefined) => {
     if (!patches || typeof patches !== 'object') return;
@@ -115,7 +115,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       schedulePersist(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
     setPositions(prev => {
@@ -124,7 +124,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       schedulePersist(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const seedMissingPositions = useCallback((ids: string[]) => {
     if (!sectionId || !ids.length) return;
@@ -154,7 +154,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       schedulePersist(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId]);
+  }, [schedulePersist, sectionId, boardId]);
 
   const removePos = useCallback((id: string) => {
     setPositions(prev => {

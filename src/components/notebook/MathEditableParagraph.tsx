@@ -8,6 +8,7 @@ import {
   type FocusEvent,
 } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import type { InlineMark } from '../../lib/notebookInlineMarks';
 import {
   isWholeLineMath,
   normalizeToLinearMath,
@@ -18,31 +19,38 @@ import { MathRichText } from './MathRichText';
 interface EditableLineProps {
   id: string;
   text: string;
+  marks?: InlineMark[];
   tokens: AtmosphereTokens;
   placeholder: string;
   style: CSSProperties;
-  onUpdate: (id: string, raw: string) => void;
+  onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
 }
 
 interface Props {
   id: string;
   text: string;
+  marks?: InlineMark[];
   tokens: AtmosphereTokens;
   placeholder: string;
   style: CSSProperties;
   textColor: string;
   mutedColor: string;
-  onUpdate: (id: string, raw: string) => void;
+  onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+  /** Desk Formatting V1: keep RichEditableLine surface (no math preview read mode). */
+  deskFormattingKeepEditable?: boolean;
   EditableLine: React.ComponentType<EditableLineProps>;
 }
 
 export const MathEditableParagraph = memo(function MathEditableParagraph({
   id,
   text,
+  marks,
   tokens,
   placeholder,
   style,
@@ -51,6 +59,8 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
   onUpdate,
   onFocusIndex,
   onAfterInput,
+  onSelectionChange,
+  deskFormattingKeepEditable = false,
   EditableLine,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -78,17 +88,18 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
       if (next?.closest('[data-math-input-toolbar]')) return;
       if (next?.closest('.desk-math-palette')) return;
       if (next?.closest('[data-nb-slash-menu]')) return;
+      if (next?.closest('[data-nb-format-toolbar]')) return;
       if (next && wrapRef.current?.contains(next)) return;
-      if (hasMath) {
+      if (hasMath && !deskFormattingKeepEditable) {
         const canonical = normalizeToLinearMath(text);
         if (canonical !== text) onUpdate(id, canonical);
         setEditing(false);
       }
     },
-    [hasMath, id, onUpdate, text],
+    [hasMath, deskFormattingKeepEditable, id, onUpdate, text],
   );
 
-  if (!editing && hasMath) {
+  if (!editing && hasMath && !deskFormattingKeepEditable) {
     return (
       <div
         role="button"
@@ -108,7 +119,13 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
           transition: 'opacity 0.1s ease',
         }}
       >
-        <MathRichText text={text} autoPlainMath textColor={textColor} mutedColor={mutedColor} />
+        <MathRichText
+          text={text}
+          marks={marks}
+          autoPlainMath
+          textColor={textColor}
+          mutedColor={mutedColor}
+        />
       </div>
     );
   }
@@ -118,6 +135,7 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
       <EditableLine
         id={id}
         text={text}
+        marks={marks}
         tokens={tokens}
         placeholder={hasMath ? (wholeLine ? 'y=x^2' : placeholder) : placeholder}
         onUpdate={onUpdate}
@@ -126,6 +144,7 @@ export const MathEditableParagraph = memo(function MathEditableParagraph({
           onFocusIndex(bid);
         }}
         onAfterInput={onAfterInput}
+        onSelectionChange={onSelectionChange}
         style={{ ...style, margin: 0 }}
       />
     </div>

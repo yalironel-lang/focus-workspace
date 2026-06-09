@@ -30,6 +30,7 @@ import {
   pdfBlobToBase64,
   savePdfBlob,
 } from './freeSpacePdfIdb';
+import { deleteAllPdfStudyMarksForSection } from './pdfStudyMarks/pdfStudyMarksIdb';
 
 export const WORKSPACE_BACKUP_FORMAT = 'focus-workspace-backup' as const;
 export const WORKSPACE_BACKUP_VERSION = 1 as const;
@@ -355,6 +356,7 @@ export async function applyWorkspaceBackupToSection(
   }
 
   await deleteAllPdfBlobsForSection(targetSectionId);
+  await deleteAllPdfStudyMarksForSection(targetSectionId);
   await deleteAllImageBlobsForSection(targetSectionId);
   const pdfBlobMap = fixed.pdfBlobs ?? {};
   for (const obj of fixed.freeSpace.objects) {

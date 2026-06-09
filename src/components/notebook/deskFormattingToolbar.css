@@ -1,0 +1,38 @@
+.nb-desk-format-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 2px 8px;
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.nb-desk-format-toolbar__size {
+  min-width: 52px;
+  color: rgba(28, 25, 23, 0.88);
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(120, 113, 108, 0.22);
+}
+
+.nb-desk-format-toolbar__btn {
+  color: rgba(28, 25, 23, 0.72);
+}
+
+.nb-desk-format-toolbar__btn:hover {
+  background: rgba(28, 25, 23, 0.06);
+  color: rgba(28, 25, 23, 0.95);
+}
+
+.nb-desk-format-toolbar__btn[data-active='true'] {
+  background: rgba(28, 25, 23, 0.1);
+  color: rgba(28, 25, 23, 1);
+}
+
+.nb-desk-format-toolbar__divider {
+  background: rgba(120, 113, 108, 0.2);
+}

@@ -35,6 +35,7 @@ import {
   sanitizeStudyLayout,
   type StudyLayoutMode,
 } from '../../lib/mathDesk/studyLayout';
+import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 
 export type NotebookContentHost = 'canvas' | 'study-dock' | 'study-session';
 
@@ -76,6 +77,7 @@ interface Props {
   studySessionActive?: boolean;
   suppressStudyToolbar?: boolean;
   studyDeskQuiet?: boolean;
+  onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
 }
 
 function copyText(text: string): Promise<void> {
@@ -322,6 +324,7 @@ function ProjectSpaceObjectRendererInner({
   suppressLearningAttemptChip = false,
   suppressStudyToolbar = false,
   studyDeskQuiet = false,
+  onStudyMarksChromeChange,
 }: Props) {
   useEffect(() => {
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
@@ -620,6 +623,7 @@ function ProjectSpaceObjectRendererInner({
             onStartStudySession={onStartStudySession}
             presentation={contentHost === 'study-session' ? 'study-session' : 'canvas'}
             suppressStudyToolbar={suppressStudyToolbar}
+            onStudyMarksChromeChange={onStudyMarksChromeChange}
           />
           </div>
         </WorkspaceSurfaceErrorBoundary>
