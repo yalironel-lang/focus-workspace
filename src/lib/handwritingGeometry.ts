@@ -25,32 +25,18 @@ export function canvasHasVisualScale(canvas: HTMLCanvasElement): boolean {
 
 /**
  * Map a pointer sample to normalized canvas coordinates.
- * Uses getBoundingClientRect() as the source of truth for size/position.
- * On iOS without ancestor scale, offsetX/offsetY are more reliable for Apple Pencil.
+ * clientX/clientY + getBoundingClientRect() is the single source of truth
+ * (works for desk, free-space zoom, and Safari Apple Pencil).
  */
 export function pointerToNormalized(
   canvas: HTMLCanvasElement,
-  e: Pick<PointerEvent, 'clientX' | 'clientY' | 'offsetX' | 'offsetY'>,
+  e: Pick<PointerEvent, 'clientX' | 'clientY'>,
 ): HandwritingPoint | null {
   const rect = canvas.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
 
-  const scaled = canvasHasVisualScale(canvas);
-  let localX: number;
-  let localY: number;
-
-  if (
-    !scaled &&
-    isIosLike() &&
-    Number.isFinite(e.offsetX) &&
-    Number.isFinite(e.offsetY)
-  ) {
-    localX = e.offsetX;
-    localY = e.offsetY;
-  } else {
-    localX = e.clientX - rect.left;
-    localY = e.clientY - rect.top;
-  }
+  const localX = e.clientX - rect.left;
+  const localY = e.clientY - rect.top;
 
   return {
     x: Math.max(0, Math.min(1, localX / rect.width)),

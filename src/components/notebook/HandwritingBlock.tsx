@@ -9,6 +9,7 @@ import {
 } from 'react';
 import toast from 'react-hot-toast';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import { hwDiagLog } from '../../lib/handwritingDiagnostics';
 import {
   appendPoint,
   canvasHasVisualScale,
@@ -18,7 +19,7 @@ import {
   readVisualViewportMetrics,
   strokesAfterEraser,
 } from '../../lib/handwritingGeometry';
-import { hwGet, hwSet } from '../../lib/notebookHandwritingStore';
+import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
   DEFAULT_CANVAS_MIN_HEIGHT,
   emptyHandwritingData,
@@ -56,6 +57,24 @@ const UNDO_CAP = 50;
 const ERASER_WIDTH = 16;
 const PEN_WIDTH = 2.5;
 const ERASER_RADIUS_NORM = 0.02;
+const SAVE_DEBOUNCE_MS = 120;
+const SAVE_RETRY_DELAY_MS = 250;
+
+function saveErrorMessage(result: HwSetResult): string {
+  if (result.failureStage === 'missing_params') {
+    return 'Could not save handwriting — notebook not ready.';
+  }
+  if (result.failureStage === 'sanitize' || result.failureStage === 'serialization') {
+    return 'Could not save handwriting — data error.';
+  }
+  if (result.isQuota) {
+    return 'Could not save handwriting — storage is full.';
+  }
+  if (result.failureStage === 'idb') {
+    return `Could not save handwriting — ${result.errorName ?? 'storage error'}.`;
+  }
+  return 'Could not save handwriting.';
+}
 
 /** Size bitmap from painted geometry; draw in CSS pixel coordinates (DPR via transform). */
 function syncCanvasFromRect(
@@ -89,6 +108,13 @@ function dismissEditableFocus(): void {
   }
 }
 
+/** Wait for keyboard dismiss / visualViewport layout to settle before first ink sample. */
+function afterLayoutSettle(run: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(run);
+  });
+}
+
 export function HandwritingBlock({
   objectId,
   blockKey,
@@ -112,6 +138,7 @@ export function HandwritingBlock({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveChainRef = useRef(Promise.resolve(true));
   const layoutRef = useRef({ w: 1, h: DEFAULT_CANVAS_MIN_HEIGHT });
+  const pointerCaptureRef = useRef<{ id: number; target: HTMLCanvasElement } | null>(null);
 
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
@@ -131,15 +158,10 @@ export function HandwritingBlock({
     if (!synced) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const { w, h, dpr } = synced;
+    const { w, h } = synced;
     layoutRef.current = { w, h };
     const refW = data.canvas.width;
-    const rect = canvas.getBoundingClientRect();
     const draft = draftRef.current;
-    const draftDrawY = draft?.points[0] ? draft.points[0].y * h : null;
-    // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:paint',message:'paint dims',data:{paintW:w,paintH:h,rectW:rect.width,rectH:rect.height,rectTop:rect.top,canvasW:canvas.width,canvasH:canvas.height,dpr,transformA:ctx.getTransform().a,strokeCount:data.strokes.length,refW,draftDrawY,visualViewport:readVisualViewportMetrics(),visualScale:canvasHasVisualScale(canvas),runId:'ipad-fix'},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     drawStrokes(ctx, data.strokes, w, h, refW, draft);
   }, []);
 
@@ -151,27 +173,46 @@ export function HandwritingBlock({
     });
   }, [paint]);
 
+  const persistPayload = useCallback(
+    async (payload: HandwritingBlockData, attempt: number): Promise<boolean> => {
+      if (!objectId || !blockKey) {
+        hwDiagLog('HandwritingBlock.tsx:persist', 'skipped — missing ids', {
+          objectId,
+          blockKey,
+          attempt,
+        });
+        return false;
+      }
+      const result = await hwSet(objectId, blockKey, payload);
+      hwDiagLog('HandwritingBlock.tsx:persist', result.ok ? 'save ok' : 'save failed', {
+        objectId,
+        blockKey,
+        storageKey: `${objectId}:${blockKey}`,
+        attempt,
+        strokeCount: payload.strokes.length,
+        ...result,
+      });
+      if (result.ok) return true;
+      if (attempt < 2 && result.failureStage === 'idb') {
+        await new Promise(r => setTimeout(r, SAVE_RETRY_DELAY_MS * attempt));
+        return persistPayload(payload, attempt + 1);
+      }
+      toast.error(saveErrorMessage(result));
+      return false;
+    },
+    [objectId, blockKey],
+  );
+
   const flushSave = useCallback((): Promise<boolean> => {
     const payload = pendingSaveRef.current;
-    if (!payload || !objectId || !blockKey) {
-      // #region agent log
-      fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:flushSave',message:'flush skipped',data:{hasPayload:!!payload,objectId,blockKey,failureStage:'missing_params'},timestamp:Date.now(),hypothesisId:'B',runId:'idb-fix'})}).catch(()=>{});
-      // #endregion
-      return Promise.resolve(false);
+    if (!payload) {
+      return Promise.resolve(true);
     }
     pendingSaveRef.current = null;
     const captured = payload;
-    saveChainRef.current = saveChainRef.current
-      .then(() => hwSet(objectId, blockKey, captured))
-      .then(ok => {
-        // #region agent log
-        fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:flushSave',message:'idb save result',data:{objectId,blockKey,storageKey:`${objectId}:${blockKey}`,ok,strokeCount:captured.strokes.length,canvas:captured.canvas},timestamp:Date.now(),hypothesisId:'B',runId:'idb-fix'})}).catch(()=>{});
-        // #endregion
-        if (!ok) toast.error('Could not save handwriting — storage may be full.');
-        return ok;
-      });
+    saveChainRef.current = saveChainRef.current.then(() => persistPayload(captured, 1));
     return saveChainRef.current;
-  }, [objectId, blockKey]);
+  }, [persistPayload]);
 
   const queueSave = useCallback(
     (data: HandwritingBlockData) => {
@@ -180,7 +221,7 @@ export function HandwritingBlock({
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null;
         void flushSave();
-      }, 80);
+      }, SAVE_DEBOUNCE_MS);
     },
     [flushSave],
   );
@@ -312,6 +353,7 @@ export function HandwritingBlock({
     const draft = draftRef.current;
     draftRef.current = null;
     drawingRef.current = false;
+    pointerCaptureRef.current = null;
     onDrawingChange?.(false);
     if (!draft || !dataRef.current) {
       schedulePaint();
@@ -328,47 +370,79 @@ export function HandwritingBlock({
     void flushSave();
   }, [commitData, onDrawingChange, schedulePaint, flushSave]);
 
+  const beginStroke = useCallback(
+    (sample: Pick<PointerEvent, 'clientX' | 'clientY' | 'pressure' | 'pointerType'>) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !dataRef.current) return;
+      const rect = canvas.getBoundingClientRect();
+      const pt = pointerToNormalized(canvas, sample);
+      if (!pt) return;
+      const clientOffsetY = sample.clientY - rect.top;
+      const expectedDrawY = pt.y * rect.height;
+      if (hwDebugEnabled()) {
+        setDebugDot({ x: pt.x * rect.width, y: expectedDrawY });
+      }
+      hwDiagLog('HandwritingBlock.tsx:beginStroke', 'pointer sample', {
+        clientX: sample.clientX,
+        clientY: sample.clientY,
+        rectLeft: rect.left,
+        rectTop: rect.top,
+        rectW: rect.width,
+        rectH: rect.height,
+        clientOffsetY,
+        expectedDrawY,
+        normX: pt.x,
+        normY: pt.y,
+        canvasW: canvas.width,
+        canvasH: canvas.height,
+        dpr: window.devicePixelRatio,
+        visualViewport: readVisualViewportMetrics(),
+        visualScale: canvasHasVisualScale(canvas),
+        pointerType: sample.pointerType,
+      });
+      if (sample.pressure > 0) pt.pressure = sample.pressure;
+      drawingRef.current = true;
+      onDrawingChange?.(true);
+      const activeTool = toolRef.current;
+      draftRef.current = {
+        id: newStrokeId(),
+        tool: activeTool,
+        color: activeTool === 'pen' ? inkColor : 'rgba(0,0,0,1)',
+        width: activeTool === 'pen' ? PEN_WIDTH : ERASER_WIDTH,
+        points: [pt],
+      };
+      schedulePaint();
+    },
+    [inkColor, onDrawingChange, schedulePaint],
+  );
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (readOnly || e.button !== 0) return;
+    const hadTextFocus =
+      document.activeElement instanceof HTMLElement &&
+      (document.activeElement.isContentEditable ||
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA');
     onDismissTextEditing?.();
     dismissEditableFocus();
     onFocus?.();
     e.stopPropagation();
     e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas || !dataRef.current) return;
-    const rect = canvas.getBoundingClientRect();
-    const pt = pointerToNormalized(canvas, e.nativeEvent);
-    if (!pt) return;
-    const offsetX = e.nativeEvent.offsetX;
-    const offsetY = e.nativeEvent.offsetY;
-    const clientOffsetY = e.clientY - rect.top;
-    const expectedDrawY = pt.y * rect.height;
-    const renderedX = pt.x * rect.width;
-    const renderedY = pt.y * rect.height;
-    if (hwDebugEnabled()) {
-      setDebugDot({ x: renderedX, y: renderedY });
-    }
-    // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:onPointerDown',message:'pointer vs paint',data:{clientX:e.clientX,clientY:e.clientY,offsetX,offsetY,rectLeft:rect.left,rectTop:rect.top,rectW:rect.width,rectH:rect.height,clientOffsetY,expectedDrawY,renderedX,renderedY,normX:pt.x,normY:pt.y,canvasW:canvas.width,canvasH:canvas.height,dpr:window.devicePixelRatio,visualViewport:readVisualViewportMetrics(),visualScale:canvasHasVisualScale(canvas),pointerType:e.pointerType,runId:'ipad-fix'},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    if (e.pressure > 0) pt.pressure = e.pressure;
+
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
+      pointerCaptureRef.current = { id: e.pointerId, target: e.currentTarget };
     } catch {
       /* ignore */
     }
-    drawingRef.current = true;
-    onDrawingChange?.(true);
-    const activeTool = toolRef.current;
-    draftRef.current = {
-      id: newStrokeId(),
-      tool: activeTool,
-      color: activeTool === 'pen' ? inkColor : 'rgba(0,0,0,1)',
-      width: activeTool === 'pen' ? PEN_WIDTH : ERASER_WIDTH,
-      points: [pt],
-    };
-    schedulePaint();
+
+    const sample = e.nativeEvent;
+    const start = () => beginStroke(sample);
+    if (hadTextFocus) {
+      afterLayoutSettle(start);
+    } else {
+      start();
+    }
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -399,6 +473,7 @@ export function HandwritingBlock({
     e.stopPropagation();
     draftRef.current = null;
     drawingRef.current = false;
+    pointerCaptureRef.current = null;
     onDrawingChange?.(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);

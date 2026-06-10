@@ -1171,7 +1171,10 @@ export function ProjectNotebookBlock({
     const hwKeys = blocks
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
-    void gcOrphanHandwritingKeys(objectId, hwKeys);
+    const timer = window.setTimeout(() => {
+      void gcOrphanHandwritingKeys(objectId, hwKeys);
+    }, 600);
+    return () => window.clearTimeout(timer);
   }, [objectId, blocks]);
 
   useEffect(() => {
