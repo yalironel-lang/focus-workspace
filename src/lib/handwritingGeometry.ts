@@ -5,8 +5,14 @@ import {
   recordPointerSamplePick,
 } from './handwritingPointerSamples';
 import { getHwRenderMode } from './handwritingRenderMode';
-
-const MIN_POINT_DIST_NORM = 0.002;
+import {
+  getMinPointDistNorm,
+  getHwSpikeSettings,
+  hwSpikeLog,
+  recordPointAppended,
+  recordPointDropped,
+  useFixedPressure,
+} from './handwritingSpikeDebug';
 
 let inkDevModule: typeof import('./handwritingInkDev') | null = null;
 let inkDevLoad: Promise<typeof import('./handwritingInkDev')> | null = null;
@@ -92,7 +98,9 @@ function drawStroke(
     return;
   }
 
-  if (import.meta.env.DEV && getHwRenderMode() === 'ink' && inkDevModule) {
+  const renderMode =
+    import.meta.env.DEV && getHwSpikeSettings().render === 'ink' ? 'ink' : getHwRenderMode();
+  if (import.meta.env.DEV && renderMode === 'ink' && inkDevModule) {
     inkDevModule.drawPenStrokeInkDev(ctx, stroke, canvasW, canvasH, refWidth, opts);
     return;
   }
@@ -174,10 +182,13 @@ export function appendPoint(
   if (last) {
     const dx = p.x - last.x;
     const dy = p.y - last.y;
-    if (dx * dx + dy * dy < MIN_POINT_DIST_NORM * MIN_POINT_DIST_NORM) {
+    const minDist = getMinPointDistNorm();
+    if (dx * dx + dy * dy < minDist * minDist) {
+      if (import.meta.env.DEV) recordPointDropped();
       return points;
     }
   }
+  if (import.meta.env.DEV) recordPointAppended();
   return [...points, p];
 }
 
@@ -247,6 +258,7 @@ export function strokesAfterEraser(
 }
 
 function effectivePressure(p: HandwritingPoint | undefined, fallback = 0.5): number {
+  if (import.meta.env.DEV && useFixedPressure()) return 0.5;
   if (p?.pressure !== undefined && p.pressure > 0) return p.pressure;
   return fallback;
 }
@@ -290,8 +302,51 @@ export function isIosLike(): boolean {
   return /iPad|iPhone|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
+let moveLogCounter = 0;
+
+export function logPointerCoordinateSample(
+  canvas: HTMLCanvasElement,
+  ev: Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerType' | 'pressure'> & {
+    offsetX?: number;
+    offsetY?: number;
+  },
+  phase: 'down' | 'move',
+): void {
+  if (!import.meta.env.DEV) return;
+  if (phase === 'move') {
+    moveLogCounter += 1;
+    if (moveLogCounter % 12 !== 0) return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const pt = pointerToNormalized(canvas, ev);
+  if (!pt) return;
+  const localX = ev.clientX - rect.left;
+  const localY = ev.clientY - rect.top;
+  hwSpikeLog('H-A', 'handwritingGeometry', `pointer ${phase}`, {
+    phase,
+    pointerType: ev.pointerType,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    offsetX: ev.offsetX,
+    offsetY: ev.offsetY,
+    localX,
+    localY,
+    normX: pt.x,
+    normY: pt.y,
+    rectW: rect.width,
+    rectH: rect.height,
+    canvasBitmapW: canvas.width,
+    canvasBitmapH: canvas.height,
+    dpr: window.devicePixelRatio,
+    visualScale: canvasHasVisualScale(canvas),
+    pressure: ev.pressure,
+    settings: getHwSpikeSettings(),
+  });
+}
+
 export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
   const canvas = e.currentTarget as HTMLCanvasElement;
+  logPointerCoordinateSample(canvas, e, 'move');
   const pick = pickPointerEventsForSample(e);
   recordPointerSamplePick(pick);
 
@@ -306,4 +361,33 @@ export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
     out.push(pt);
   }
   return out;
+}
+
+/** Corner sharpness heuristic for square-stroke diagnosis (0–1, higher = sharper). */
+export function strokeCornerSharpness(stroke: HandwritingStroke): {
+  pointCount: number;
+  sharpTurns: number;
+  maxAngleDeg: number;
+} {
+  const pts = stroke.points;
+  if (pts.length < 3) return { pointCount: pts.length, sharpTurns: 0, maxAngleDeg: 0 };
+  let sharpTurns = 0;
+  let maxAngleDeg = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1]!;
+    const b = pts[i]!;
+    const c = pts[i + 1]!;
+    const v1x = b.x - a.x;
+    const v1y = b.y - a.y;
+    const v2x = c.x - b.x;
+    const v2y = c.y - b.y;
+    const m1 = Math.hypot(v1x, v1y);
+    const m2 = Math.hypot(v2x, v2y);
+    if (m1 < 1e-5 || m2 < 1e-5) continue;
+    const dot = (v1x * v2x + v1y * v2y) / (m1 * m2);
+    const angleDeg = (Math.acos(Math.max(-1, Math.min(1, dot))) * 180) / Math.PI;
+    maxAngleDeg = Math.max(maxAngleDeg, angleDeg);
+    if (angleDeg >= 45) sharpTurns += 1;
+  }
+  return { pointCount: pts.length, sharpTurns, maxAngleDeg };
 }

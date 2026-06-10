@@ -28,13 +28,23 @@ import {
   collectPointerSamples,
   drawStrokes,
   isInkPointer,
+  logPointerCoordinateSample,
   pointerToNormalized,
   preloadInkDevRenderer,
   readVisualViewportMetrics,
+  strokeCornerSharpness,
   strokesAfterEraser,
 } from '../../lib/handwritingGeometry';
 import { hwPointerSamplingStats } from '../../lib/handwritingPointerSamples';
-import { getHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
+import {
+  getHwSpikeSettings,
+  getStrokeSampleStats,
+  recordPointAppended,
+  resetStrokeSampleStats,
+  hwSpikeLog,
+  type HwSpikeSettings,
+} from '../../lib/handwritingSpikeDebug';
+import { setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
   CANVAS_HEIGHT_MAX,
@@ -173,7 +183,16 @@ export function HandwritingBlock({
   const [menuOpen, setMenuOpen] = useState(false);
   const [debugDot, setDebugDot] = useState<{ x: number; y: number } | null>(null);
   const [devRenderMode, setDevRenderMode] = useState<HwRenderMode>(() =>
-    import.meta.env.DEV ? getHwRenderMode() : 'polyline',
+    import.meta.env.DEV ? getHwSpikeSettings().render : 'polyline',
+  );
+  const [spikeSettings, setSpikeSettings] = useState<HwSpikeSettings>(() =>
+    import.meta.env.DEV ? getHwSpikeSettings() : {
+      coalesced: 'auto',
+      pressure: 'real',
+      smoothing: 'low',
+      minDist: 'normal',
+      render: 'polyline',
+    },
   );
 
   toolRef.current = tool;
@@ -389,20 +408,26 @@ export function HandwritingBlock({
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    if (getHwRenderMode() === 'ink') {
-      void preloadInkDevRenderer().then(() => schedulePaint());
-    }
-    const onMode = () => {
-      const mode = getHwRenderMode();
-      setDevRenderMode(mode);
-      if (mode === 'ink') {
+    const syncFromSpike = () => {
+      const s = getHwSpikeSettings();
+      setSpikeSettings(s);
+      setDevRenderMode(s.render);
+      setHwRenderMode(s.render);
+      if (s.render === 'ink') {
         void preloadInkDevRenderer().then(() => schedulePaint());
       } else {
         schedulePaint();
       }
     };
+    syncFromSpike();
+    const onSpike = () => syncFromSpike();
+    const onMode = () => syncFromSpike();
+    window.addEventListener('fw-hw-spike-settings', onSpike);
     window.addEventListener('fw-hw-render-mode', onMode);
-    return () => window.removeEventListener('fw-hw-render-mode', onMode);
+    return () => {
+      window.removeEventListener('fw-hw-spike-settings', onSpike);
+      window.removeEventListener('fw-hw-render-mode', onMode);
+    };
   }, [schedulePaint]);
 
   useEffect(() => {
@@ -435,6 +460,10 @@ export function HandwritingBlock({
     const strokePressures = draft.points
       .map(p => p.pressure)
       .filter((v): v is number => v !== undefined && v > 0);
+    const sampleStats = getStrokeSampleStats();
+    const corners = draft.tool === 'pen' ? strokeCornerSharpness(draft) : null;
+    const canvas = canvasRef.current;
+    const rect = canvas?.getBoundingClientRect();
     hwDiagLog('HandwritingBlock.tsx:finishStroke', 'stroke committed', {
       tool: draft.tool,
       pointCount: draft.points.length,
@@ -443,15 +472,33 @@ export function HandwritingBlock({
       sessionPressure: hwDiagPressureSummary(),
       sampling: hwPointerSamplingStats(),
     });
+    hwSpikeLog('H-C', 'HandwritingBlock:finishStroke', 'stroke summary', {
+      tool: draft.tool,
+      pointCount: draft.points.length,
+      sampleStats,
+      corners,
+      pressureMin: strokePressures.length ? Math.min(...strokePressures) : null,
+      pressureMax: strokePressures.length ? Math.max(...strokePressures) : null,
+      settings: getHwSpikeSettings(),
+      canvasCss: rect ? { w: rect.width, h: rect.height } : null,
+      canvasBitmap: canvas ? { w: canvas.width, h: canvas.height } : null,
+      displayHeight,
+      dpr: window.devicePixelRatio,
+    });
     commitData({ ...base, strokes }, true);
     void flushSave();
   }, [commitData, onDrawingChange, schedulePaint, flushSave]);
 
   const beginStroke = useCallback(
-    (sample: Pick<PointerEvent, 'clientX' | 'clientY' | 'pressure' | 'pointerType'>) => {
+    (
+      sample: Pick<PointerEvent, 'clientX' | 'clientY' | 'pressure' | 'pointerType' | 'offsetX' | 'offsetY'>,
+    ) => {
       const canvas = canvasRef.current;
       if (!canvas || !dataRef.current) return;
+      resetStrokeSampleStats();
+      recordPointAppended();
       const rect = canvas.getBoundingClientRect();
+      logPointerCoordinateSample(canvas, sample, 'down');
       const pt = pointerToNormalized(canvas, sample);
       if (!pt) return;
       const expectedDrawY = pt.y * rect.height;
@@ -677,17 +724,19 @@ export function HandwritingBlock({
           </span>
           {import.meta.env.DEV ? (
             <span
-              title="Dev render A/B — console: __fwHwSetRenderMode('polyline'|'ink')"
+              title="Spike debug — console: __fwHwSpikeHelp()"
               style={{
-                fontSize: 10,
+                fontSize: 9,
                 padding: '2px 6px',
                 borderRadius: 4,
                 background: 'rgba(255,255,255,0.08)',
-                color: devRenderMode === 'ink' ? tokens.accent : tokens.textMuted,
-                letterSpacing: '0.03em',
+                color: tokens.textMuted,
+                letterSpacing: '0.02em',
+                lineHeight: 1.3,
               }}
             >
-              render:{devRenderMode}
+              {devRenderMode}|c:{spikeSettings.coalesced}|p:{spikeSettings.pressure}|d:
+              {spikeSettings.minDist}
             </span>
           ) : null}
           <button

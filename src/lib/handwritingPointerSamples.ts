@@ -3,6 +3,7 @@
  */
 
 import { hwDiagLog } from './handwritingDiagnostics';
+import { getHwSpikeSettings, hwSpikeLog, recordMovePick } from './handwritingSpikeDebug';
 
 const MAX_COALESCED_BATCH = 64;
 /** Reject coalesced samples farther than this from the parent pointermove (px). */
@@ -50,8 +51,24 @@ export type PointerSamplePickResult = {
  * Pick pointer events for one move sample: coalesced when safe, else parent only.
  */
 export function pickPointerEventsForSample(e: PointerEvent): PointerSamplePickResult {
+  if (getHwSpikeSettings().coalesced === 'off') {
+    const off: PointerSamplePickResult = {
+      events: [e],
+      usedCoalesced: false,
+      fallbackReason: 'dev_off',
+    };
+    recordMovePick(1, false, 'dev_off');
+    return off;
+  }
+
   if (typeof e.getCoalescedEvents !== 'function') {
-    return { events: [e], usedCoalesced: false, fallbackReason: 'no_api' };
+    const noApi: PointerSamplePickResult = {
+      events: [e],
+      usedCoalesced: false,
+      fallbackReason: 'no_api',
+    };
+    recordMovePick(1, false, 'no_api');
+    return noApi;
   }
 
   let batch: PointerEvent[];
@@ -62,18 +79,39 @@ export function pickPointerEventsForSample(e: PointerEvent): PointerSamplePickRe
   }
 
   if (!batch.length) {
-    return { events: [e], usedCoalesced: false, fallbackReason: 'empty_batch' };
+    const empty: PointerSamplePickResult = {
+      events: [e],
+      usedCoalesced: false,
+      fallbackReason: 'empty_batch',
+    };
+    recordMovePick(1, false, 'empty_batch');
+    return empty;
   }
 
   if (batch.length === 1) {
+    recordMovePick(1, true);
     return { events: batch, usedCoalesced: true };
   }
 
   const sorted = [...batch].sort((a, b) => a.timeStamp - b.timeStamp);
   if (!isCoalescedBatchSafe(sorted, e)) {
-    return { events: [e], usedCoalesced: false, fallbackReason: 'unsafe_batch' };
+    const unsafe: PointerSamplePickResult = {
+      events: [e],
+      usedCoalesced: false,
+      fallbackReason: 'unsafe_batch',
+    };
+    recordMovePick(batch.length, false, 'unsafe_batch');
+    hwSpikeLog('H-B', 'handwritingPointerSamples', 'coalesced rejected unsafe', {
+      batchSize: batch.length,
+      parentX: e.clientX,
+      parentY: e.clientY,
+      firstX: sorted[0]?.clientX,
+      lastX: sorted[sorted.length - 1]?.clientX,
+    });
+    return unsafe;
   }
 
+  recordMovePick(sorted.length, true);
   return { events: sorted, usedCoalesced: true };
 }
 

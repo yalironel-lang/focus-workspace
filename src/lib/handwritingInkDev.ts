@@ -5,6 +5,7 @@
 
 import { getStroke } from 'perfect-freehand';
 import type { HandwritingStroke } from './handwritingTypes';
+import { getHwSpikeSettings, useFixedPressure } from './handwritingSpikeDebug';
 
 type InkPoint = [number, number, number];
 
@@ -14,8 +15,11 @@ function strokeToInkPoints(
   canvasH: number,
 ): InkPoint[] {
   return stroke.points.map(p => {
-    const pressure =
-      p.pressure !== undefined && p.pressure > 0 ? p.pressure : 0.5;
+    const pressure = useFixedPressure()
+      ? 0.5
+      : p.pressure !== undefined && p.pressure > 0
+        ? p.pressure
+        : 0.5;
     return [p.x * canvasW, p.y * canvasH, pressure];
   });
 }
@@ -60,15 +64,16 @@ export function drawPenStrokeInkDev(
   }
 
   const size = stroke.width * (canvasW / Math.max(refWidth, 1)) * 1.15;
+  const lowSmooth = getHwSpikeSettings().smoothing === 'low';
   const outline = getStroke(inkPoints, {
     size: Math.max(2, size),
-    thinning: 0.62,
-    smoothing: 0.5,
-    streamline: 0.42,
-    simulatePressure: !hasRealPressure(stroke),
+    thinning: lowSmooth ? 0.5 : 0.62,
+    smoothing: lowSmooth ? 0.15 : 0.55,
+    streamline: lowSmooth ? 0.12 : 0.45,
+    simulatePressure: !useFixedPressure() && !hasRealPressure(stroke),
     last: opts?.isDraft !== true,
-    start: { taper: true, cap: true },
-    end: { taper: true, cap: true },
+    start: { taper: !lowSmooth, cap: true },
+    end: { taper: !lowSmooth, cap: true },
   });
 
   const path = inkPathFromOutline(outline);
