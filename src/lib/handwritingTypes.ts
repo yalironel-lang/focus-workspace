@@ -22,6 +22,14 @@ export type HandwritingBlockData = {
 
 export const MAX_STROKES_PER_BLOCK = 2000;
 export const DEFAULT_CANVAS_MIN_HEIGHT = 360;
+export const CANVAS_HEIGHT_MIN = DEFAULT_CANVAS_MIN_HEIGHT;
+export const CANVAS_HEIGHT_STEP = 180;
+export const CANVAS_HEIGHT_MAX = 1080;
+
+export function clampCanvasHeight(h: number): number {
+  if (!Number.isFinite(h)) return CANVAS_HEIGHT_MIN;
+  return Math.max(CANVAS_HEIGHT_MIN, Math.min(CANVAS_HEIGHT_MAX, Math.round(h)));
+}
 
 export function newHandwritingKey(): string {
   return `hw-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -81,8 +89,9 @@ export function sanitizeHandwritingData(raw: unknown): HandwritingBlockData | nu
   if (canvasRaw && typeof canvasRaw === 'object') {
     const c = canvasRaw as Record<string, unknown>;
     if (typeof c.width === 'number' && c.width > 0) width = c.width;
-    if (typeof c.height === 'number' && c.height > 0) height = c.height;
+    if (typeof c.height === 'number' && c.height > 0) height = clampCanvasHeight(c.height);
   }
+  height = clampCanvasHeight(height);
   const updatedAt = typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) ? r.updatedAt : Date.now();
   return { type: 'handwriting', strokes, canvas: { width, height }, updatedAt };
 }

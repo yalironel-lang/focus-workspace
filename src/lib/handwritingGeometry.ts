@@ -202,6 +202,11 @@ export function drawStrokes(
   }
 }
 
+/** Apple Pencil / stylus and desktop mouse draw ink; finger touch scrolls. */
+export function isInkPointer(e: Pick<PointerEvent, 'pointerType'>): boolean {
+  return e.pointerType === 'pen' || e.pointerType === 'mouse';
+}
+
 export function isIosLike(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;

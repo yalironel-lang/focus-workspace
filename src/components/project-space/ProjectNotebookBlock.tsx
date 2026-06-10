@@ -5144,6 +5144,7 @@ export function ProjectNotebookBlock({
                   surfaceChrome={blockSurfaceChrome(block.id)}
                   onFocus={() => setSurfaceFocusBlockId(block.id)}
                   onDismissTextEditing={dismissNotebookTextEditing}
+                  onDelete={() => removeBlockAt(index)}
                   onDrawingChange={drawing => {
                     if (drawing) dismissNotebookTextEditing();
                     if (context === 'free-space') onEditingChange?.(drawing);

@@ -7,6 +7,14 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import {
+  Eraser,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { hwDiagLog } from '../../lib/handwritingDiagnostics';
@@ -15,12 +23,17 @@ import {
   canvasHasVisualScale,
   collectPointerSamples,
   drawStrokes,
+  isInkPointer,
   pointerToNormalized,
   readVisualViewportMetrics,
   strokesAfterEraser,
 } from '../../lib/handwritingGeometry';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
+  CANVAS_HEIGHT_MAX,
+  CANVAS_HEIGHT_MIN,
+  CANVAS_HEIGHT_STEP,
+  clampCanvasHeight,
   DEFAULT_CANVAS_MIN_HEIGHT,
   emptyHandwritingData,
   newStrokeId,
@@ -41,6 +54,8 @@ type Props = {
   onDrawingChange?: (drawing: boolean) => void;
   /** Blur notebook text fields so the iPad software keyboard dismisses. */
   onDismissTextEditing?: () => void;
+  /** Remove this handwriting block from the notebook (parent handles IDB + body). */
+  onDelete?: () => void;
 };
 
 declare global {
@@ -125,9 +140,11 @@ export function HandwritingBlock({
   onFocus,
   onDrawingChange,
   onDismissTextEditing,
+  onDelete,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const dataRef = useRef<HandwritingBlockData | null>(null);
   const draftRef = useRef<HandwritingStroke | null>(null);
   const undoRef = useRef<HandwritingStroke[][]>([]);
@@ -143,12 +160,16 @@ export function HandwritingBlock({
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [displayHeight, setDisplayHeight] = useState(CANVAS_HEIGHT_MIN);
+  const [strokeCount, setStrokeCount] = useState(0);
+  const [canUndo, setCanUndo] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [debugDot, setDebugDot] = useState<{ x: number; y: number } | null>(null);
-  const [, bump] = useState(0);
 
   toolRef.current = tool;
 
   const inkColor = tokens.textPrimary ?? '#1c1917';
+  const atMaxHeight = displayHeight >= CANVAS_HEIGHT_MAX;
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
@@ -230,30 +251,30 @@ export function HandwritingBlock({
     (next: HandwritingBlockData, pushUndo: boolean) => {
       if (pushUndo && dataRef.current) {
         undoRef.current = [...undoRef.current.slice(-(UNDO_CAP - 1)), dataRef.current.strokes];
+        setCanUndo(true);
       }
       dataRef.current = { ...next, updatedAt: Date.now() };
+      setStrokeCount(next.strokes.length);
       setMissing(false);
-      bump(n => n + 1);
       schedulePaint();
       queueSave(dataRef.current);
     },
     [queueSave, schedulePaint],
   );
 
-  const resizeCanvas = useCallback(() => {
+  const syncCanvasWidth = useCallback(() => {
     if (drawingRef.current) return;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !dataRef.current) return;
     const synced = syncCanvasFromRect(canvas);
     if (!synced) return;
     const { w, h } = synced;
     layoutRef.current = { w, h };
-    if (dataRef.current) {
-      dataRef.current = {
-        ...dataRef.current,
-        canvas: { width: w, height: h },
-      };
-    }
+    const preservedHeight = dataRef.current.canvas.height;
+    dataRef.current = {
+      ...dataRef.current,
+      canvas: { width: w, height: preservedHeight },
+    };
     schedulePaint();
   }, [schedulePaint]);
 
@@ -270,26 +291,33 @@ export function HandwritingBlock({
       const canvas = canvasRef.current;
       const rect = canvas?.getBoundingClientRect();
       const w = rect && rect.width >= 1 ? rect.width : 600;
-      const h = rect && rect.height >= 1 ? rect.height : DEFAULT_CANVAS_MIN_HEIGHT;
+      const h = clampCanvasHeight(
+        existing?.canvas.height ?? (rect && rect.height >= 1 ? rect.height : CANVAS_HEIGHT_MIN),
+      );
       if (existing) {
-        dataRef.current = existing;
+        dataRef.current = { ...existing, canvas: { ...existing.canvas, height: h } };
+        setDisplayHeight(h);
+        setStrokeCount(existing.strokes.length);
         setMissing(false);
       } else {
         dataRef.current = emptyHandwritingData(w, h);
+        setDisplayHeight(h);
+        setStrokeCount(0);
         setMissing(true);
       }
       undoRef.current = [];
+      setCanUndo(false);
       setLoaded(true);
-      resizeCanvas();
+      syncCanvasWidth();
     })();
     return () => {
       cancelled = true;
     };
-  }, [objectId, blockKey, resizeCanvas]);
+  }, [objectId, blockKey, syncCanvasWidth]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
-    resizeCanvas();
+    syncCanvasWidth();
     const wrap = wrapRef.current;
     if (!wrap || typeof ResizeObserver === 'undefined') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -297,7 +325,7 @@ export function HandwritingBlock({
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        resizeCanvas();
+        syncCanvasWidth();
       }, 100);
     });
     ro.observe(wrap);
@@ -305,14 +333,14 @@ export function HandwritingBlock({
       ro.disconnect();
       if (timer) clearTimeout(timer);
     };
-  }, [loaded, resizeCanvas]);
+  }, [loaded, syncCanvasWidth, displayHeight]);
 
   useEffect(() => {
     if (!loaded) return;
     const vv = window.visualViewport;
     if (!vv) return;
     const onVvChange = () => {
-      if (!drawingRef.current) resizeCanvas();
+      if (!drawingRef.current) syncCanvasWidth();
     };
     vv.addEventListener('resize', onVvChange);
     vv.addEventListener('scroll', onVvChange);
@@ -320,7 +348,7 @@ export function HandwritingBlock({
       vv.removeEventListener('resize', onVvChange);
       vv.removeEventListener('scroll', onVvChange);
     };
-  }, [loaded, resizeCanvas]);
+  }, [loaded, syncCanvasWidth]);
 
   useEffect(() => {
     const onVis = () => {
@@ -348,6 +376,16 @@ export function HandwritingBlock({
       canvas.removeEventListener('touchmove', suppressTouch);
     };
   }, [readOnly, loaded]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocPointer = (e: PointerEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDocPointer, true);
+    return () => document.removeEventListener('pointerdown', onDocPointer, true);
+  }, [menuOpen]);
 
   const finishStroke = useCallback(() => {
     const draft = draftRef.current;
@@ -377,7 +415,6 @@ export function HandwritingBlock({
       const rect = canvas.getBoundingClientRect();
       const pt = pointerToNormalized(canvas, sample);
       if (!pt) return;
-      const clientOffsetY = sample.clientY - rect.top;
       const expectedDrawY = pt.y * rect.height;
       if (hwDebugEnabled()) {
         setDebugDot({ x: pt.x * rect.width, y: expectedDrawY });
@@ -389,8 +426,6 @@ export function HandwritingBlock({
         rectTop: rect.top,
         rectW: rect.width,
         rectH: rect.height,
-        clientOffsetY,
-        expectedDrawY,
         normX: pt.x,
         normY: pt.y,
         canvasW: canvas.width,
@@ -418,6 +453,8 @@ export function HandwritingBlock({
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (readOnly || e.button !== 0) return;
+    if (!isInkPointer(e.nativeEvent)) return;
+
     const hadTextFocus =
       document.activeElement instanceof HTMLElement &&
       (document.activeElement.isContentEditable ||
@@ -470,6 +507,7 @@ export function HandwritingBlock({
   };
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
     e.stopPropagation();
     draftRef.current = null;
     drawingRef.current = false;
@@ -486,6 +524,7 @@ export function HandwritingBlock({
   const handleUndo = () => {
     const prev = undoRef.current.pop();
     if (!dataRef.current || prev === undefined) return;
+    setCanUndo(undoRef.current.length > 0);
     commitData({ ...dataRef.current, strokes: prev }, false);
     void flushSave();
   };
@@ -493,23 +532,67 @@ export function HandwritingBlock({
   const handleClear = () => {
     if (!dataRef.current || dataRef.current.strokes.length === 0) return;
     undoRef.current = [...undoRef.current.slice(-(UNDO_CAP - 1)), dataRef.current.strokes];
+    setCanUndo(true);
     commitData({ ...dataRef.current, strokes: [] }, false);
     void flushSave();
   };
 
-  const btnStyle = (active: boolean): CSSProperties => ({
+  const handleAddSpace = () => {
+    if (!dataRef.current || atMaxHeight) return;
+    const nextHeight = clampCanvasHeight(displayHeight + CANVAS_HEIGHT_STEP);
+    setDisplayHeight(nextHeight);
+    const next = {
+      ...dataRef.current,
+      canvas: { width: dataRef.current.canvas.width, height: nextHeight },
+    };
+    dataRef.current = next;
+    commitData(next, false);
+    void flushSave();
+  };
+
+  const handleDeleteBlock = async () => {
+    setMenuOpen(false);
+    if (!onDelete) return;
+    if (
+      !window.confirm(
+        'Delete this handwriting block? All writing in this block will be permanently removed.',
+      )
+    ) {
+      return;
+    }
+    if (drawingRef.current) {
+      finishStroke();
+    }
+    await flushSave();
+    onDelete();
+  };
+
+  const toolbarBtnStyle = (active: boolean, disabled: boolean): CSSProperties => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     fontSize: 12,
-    minHeight: 36,
+    minHeight: 44,
     minWidth: 44,
-    padding: '6px 12px',
+    padding: '8px 10px',
     borderRadius: 8,
     border: `1px solid ${active ? tokens.accent : 'rgba(255,255,255,0.14)'}`,
     background: active ? `${tokens.accent}24` : 'rgba(0,0,0,0.24)',
     color: active ? tokens.accent : tokens.textMuted,
-    cursor: 'pointer',
+    cursor: disabled ? 'default' : 'pointer',
     fontWeight: 600,
     touchAction: 'manipulation',
+    opacity: disabled ? 0.38 : 1,
+    pointerEvents: disabled ? 'none' : 'auto',
   });
+
+  const onToolbarPointer = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDismissTextEditing?.();
+    dismissEditableFocus();
+  };
 
   return (
     <div
@@ -518,9 +601,11 @@ export function HandwritingBlock({
       style={{
         margin: '10px 0',
         userSelect: 'none',
+        touchAction: 'pan-y',
         ...surfaceChrome,
       }}
       onPointerDown={e => {
+        if ((e.target as HTMLElement).closest('.hw-toolbar')) return;
         e.stopPropagation();
         onDismissTextEditing?.();
         dismissEditableFocus();
@@ -528,26 +613,135 @@ export function HandwritingBlock({
     >
       {!readOnly ? (
         <div
+          className="hw-toolbar"
           style={{
             display: 'flex',
-            gap: 4,
-            marginBottom: 4,
+            gap: 6,
+            marginBottom: 6,
             flexWrap: 'wrap',
             alignItems: 'center',
           }}
         >
-          <button type="button" style={btnStyle(tool === 'pen')} onClick={() => setTool('pen')}>
-            Pen
+          <span
+            style={{
+              fontSize: 11,
+              color: tokens.textMuted,
+              letterSpacing: '0.04em',
+              marginRight: 2,
+              opacity: 0.7,
+            }}
+          >
+            Handwriting
+          </span>
+          <button
+            type="button"
+            aria-label="Pen"
+            title="Pen"
+            style={toolbarBtnStyle(tool === 'pen', false)}
+            onPointerDown={onToolbarPointer}
+            onClick={() => setTool('pen')}
+          >
+            <Pencil size={16} aria-hidden />
           </button>
-          <button type="button" style={btnStyle(tool === 'eraser')} onClick={() => setTool('eraser')}>
-            Eraser
+          <button
+            type="button"
+            aria-label="Eraser"
+            title="Eraser"
+            style={toolbarBtnStyle(tool === 'eraser', false)}
+            onPointerDown={onToolbarPointer}
+            onClick={() => setTool('eraser')}
+          >
+            <Eraser size={16} aria-hidden />
           </button>
-          <button type="button" style={btnStyle(false)} onClick={handleUndo}>
-            Undo
+          <span style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
+          <button
+            type="button"
+            aria-label="Undo"
+            title="Undo"
+            style={toolbarBtnStyle(false, !canUndo)}
+            onPointerDown={onToolbarPointer}
+            onClick={handleUndo}
+          >
+            <RotateCcw size={16} aria-hidden />
           </button>
-          <button type="button" style={btnStyle(false)} onClick={handleClear}>
-            Clear
+          <button
+            type="button"
+            aria-label="Clear"
+            title="Clear all strokes"
+            style={toolbarBtnStyle(false, strokeCount === 0)}
+            onPointerDown={onToolbarPointer}
+            onClick={handleClear}
+          >
+            <Trash2 size={16} aria-hidden />
           </button>
+          <span style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
+          <button
+            type="button"
+            aria-label="Add writing space"
+            title="Add writing space"
+            style={toolbarBtnStyle(false, atMaxHeight)}
+            onPointerDown={onToolbarPointer}
+            onClick={handleAddSpace}
+          >
+            <Plus size={16} aria-hidden />
+            <span style={{ fontSize: 11 }}>Space</span>
+          </button>
+          {onDelete ? (
+            <div ref={menuRef} style={{ position: 'relative', marginLeft: 'auto' }}>
+              <button
+                type="button"
+                aria-label="More actions"
+                aria-expanded={menuOpen}
+                title="More actions"
+                style={toolbarBtnStyle(false, false)}
+                onPointerDown={onToolbarPointer}
+                onClick={() => setMenuOpen(o => !o)}
+              >
+                <MoreHorizontal size={16} aria-hidden />
+              </button>
+              {menuOpen ? (
+                <div
+                  role="menu"
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 4,
+                    minWidth: 168,
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'rgba(18,16,14,0.96)',
+                    boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+                    zIndex: 20,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '12px 14px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#f87171',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      touchAction: 'manipulation',
+                      minHeight: 44,
+                    }}
+                    onPointerDown={onToolbarPointer}
+                    onClick={() => void handleDeleteBlock()}
+                  >
+                    Delete block…
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <div
@@ -555,13 +749,13 @@ export function HandwritingBlock({
         style={{
           position: 'relative',
           width: '100%',
-          height: DEFAULT_CANVAS_MIN_HEIGHT,
+          height: displayHeight,
           borderRadius: 8,
           border: '1px solid rgba(255,255,255,0.1)',
           background: 'rgba(0,0,0,0.18)',
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
           overflow: 'hidden',
-          touchAction: 'none',
+          touchAction: 'pan-y',
         }}
       >
         <canvas
@@ -571,7 +765,7 @@ export function HandwritingBlock({
             display: 'block',
             width: '100%',
             height: '100%',
-            touchAction: 'none',
+            touchAction: 'pan-y',
             cursor: readOnly ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair',
           }}
           onPointerDown={onPointerDown}
@@ -579,7 +773,7 @@ export function HandwritingBlock({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
         />
-        {loaded && missing && dataRef.current?.strokes.length === 0 ? (
+        {loaded && missing && strokeCount === 0 ? (
           <div
             style={{
               position: 'absolute',
@@ -593,7 +787,7 @@ export function HandwritingBlock({
               letterSpacing: '0.03em',
             }}
           >
-            {readOnly ? 'Handwriting' : 'Write here…'}
+            {readOnly ? 'Handwriting' : 'Write with Apple Pencil…'}
           </div>
         ) : null}
         {hwDebugEnabled() && debugDot ? (

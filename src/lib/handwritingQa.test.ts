@@ -5,6 +5,9 @@ import {
   referencedHandwritingKeys,
   sanitizeHandwritingData,
   emptyHandwritingData,
+  clampCanvasHeight,
+  CANVAS_HEIGHT_MAX,
+  CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
 import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
 import { makeHandwritingStorageKey } from './notebookHandwritingStore';
@@ -54,6 +57,11 @@ const pt = clientToNormalized(150, 100, {
   height: 200,
 } as DOMRect);
 assert(pt && Math.abs(pt.x - 0.5) < 0.01 && Math.abs(pt.y - 0.5) < 0.01, 'clientToNormalized');
+
+// canvas height clamp
+assert(clampCanvasHeight(200) === CANVAS_HEIGHT_MIN, 'height min clamp');
+assert(clampCanvasHeight(9999) === CANVAS_HEIGHT_MAX, 'height max clamp');
+assert(clampCanvasHeight(540) === 540, 'height mid preserved');
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;
