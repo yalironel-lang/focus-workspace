@@ -2214,6 +2214,20 @@ export function ProjectNotebookBlock({
     syncUnfreezeRichEditables();
   }, [syncUnfreezeRichEditables]);
 
+  const dismissNotebookTextEditing = useCallback(() => {
+    dismissSelectionToolbar();
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return;
+    if (
+      active.isContentEditable ||
+      active.tagName === 'INPUT' ||
+      active.tagName === 'TEXTAREA' ||
+      active.tagName === 'SELECT'
+    ) {
+      active.blur();
+    }
+  }, [dismissSelectionToolbar]);
+
   const restoreRichSelection = useCallback(
     (blockId: string, start: number, end: number) => {
       const root = getEditorRoot();
@@ -5122,7 +5136,9 @@ export function ProjectNotebookBlock({
                   tokens={tokens}
                   surfaceChrome={blockSurfaceChrome(block.id)}
                   onFocus={() => setSurfaceFocusBlockId(block.id)}
+                  onDismissTextEditing={dismissNotebookTextEditing}
                   onDrawingChange={drawing => {
+                    if (drawing) dismissNotebookTextEditing();
                     if (context === 'free-space') onEditingChange?.(drawing);
                   }}
                 />

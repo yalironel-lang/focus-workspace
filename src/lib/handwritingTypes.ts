@@ -21,7 +21,7 @@ export type HandwritingBlockData = {
 };
 
 export const MAX_STROKES_PER_BLOCK = 2000;
-export const DEFAULT_CANVAS_MIN_HEIGHT = 420;
+export const DEFAULT_CANVAS_MIN_HEIGHT = 360;
 
 export function newHandwritingKey(): string {
   return `hw-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;

@@ -11,9 +11,11 @@ import toast from 'react-hot-toast';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   appendPoint,
-  clientToNormalized,
+  canvasHasVisualScale,
   collectPointerSamples,
   drawStrokes,
+  pointerToNormalized,
+  readVisualViewportMetrics,
   strokesAfterEraser,
 } from '../../lib/handwritingGeometry';
 import { hwGet, hwSet } from '../../lib/notebookHandwritingStore';
@@ -36,7 +38,19 @@ type Props = {
   blockId: string;
   onFocus?: () => void;
   onDrawingChange?: (drawing: boolean) => void;
+  /** Blur notebook text fields so the iPad software keyboard dismisses. */
+  onDismissTextEditing?: () => void;
 };
+
+declare global {
+  interface Window {
+    __fwHwDebug?: boolean;
+  }
+}
+
+function hwDebugEnabled(): boolean {
+  return import.meta.env.DEV && window.__fwHwDebug === true;
+}
 
 const UNDO_CAP = 50;
 const ERASER_WIDTH = 16;
@@ -44,19 +58,35 @@ const PEN_WIDTH = 2.5;
 const ERASER_RADIUS_NORM = 0.02;
 
 /** Size bitmap from painted geometry; draw in CSS pixel coordinates (DPR via transform). */
-function syncCanvasFromRect(canvas: HTMLCanvasElement): { w: number; h: number; dpr: number } | null {
+function syncCanvasFromRect(
+  canvas: HTMLCanvasElement,
+  opts?: { allowResize?: boolean },
+): { w: number; h: number; dpr: number } | null {
   const rect = canvas.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) return null;
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const bw = Math.round(rect.width * dpr);
   const bh = Math.round(rect.height * dpr);
-  if (canvas.width !== bw || canvas.height !== bh) {
+  if (opts?.allowResize !== false && (canvas.width !== bw || canvas.height !== bh)) {
     canvas.width = bw;
     canvas.height = bh;
   }
   const ctx = canvas.getContext('2d');
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { w: rect.width, h: rect.height, dpr };
+}
+
+function dismissEditableFocus(): void {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  if (
+    active.isContentEditable ||
+    active.tagName === 'INPUT' ||
+    active.tagName === 'TEXTAREA' ||
+    active.tagName === 'SELECT'
+  ) {
+    active.blur();
+  }
 }
 
 export function HandwritingBlock({
@@ -68,6 +98,7 @@ export function HandwritingBlock({
   blockId,
   onFocus,
   onDrawingChange,
+  onDismissTextEditing,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,6 +115,7 @@ export function HandwritingBlock({
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [debugDot, setDebugDot] = useState<{ x: number; y: number } | null>(null);
   const [, bump] = useState(0);
 
   toolRef.current = tool;
@@ -94,7 +126,7 @@ export function HandwritingBlock({
     const canvas = canvasRef.current;
     const data = dataRef.current;
     if (!canvas || !data) return;
-    const synced = syncCanvasFromRect(canvas);
+    const synced = syncCanvasFromRect(canvas, { allowResize: !drawingRef.current });
     if (!synced) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -105,7 +137,7 @@ export function HandwritingBlock({
     const draft = draftRef.current;
     const draftDrawY = draft?.points[0] ? draft.points[0].y * h : null;
     // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:paint',message:'paint dims',data:{paintW:w,paintH:h,rectW:rect.width,rectH:rect.height,rectTop:rect.top,canvasW:canvas.width,canvasH:canvas.height,dpr,transformA:ctx.getTransform().a,strokeCount:data.strokes.length,refW,draftDrawY,runId:'post-fix'},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:paint',message:'paint dims',data:{paintW:w,paintH:h,rectW:rect.width,rectH:rect.height,rectTop:rect.top,canvasW:canvas.width,canvasH:canvas.height,dpr,transformA:ctx.getTransform().a,strokeCount:data.strokes.length,refW,draftDrawY,visualViewport:readVisualViewportMetrics(),visualScale:canvasHasVisualScale(canvas),runId:'ipad-fix'},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
     // #endregion
     drawStrokes(ctx, data.strokes, w, h, refW, draft);
   }, []);
@@ -223,6 +255,21 @@ export function HandwritingBlock({
   }, [loaded, resizeCanvas]);
 
   useEffect(() => {
+    if (!loaded) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onVvChange = () => {
+      if (!drawingRef.current) resizeCanvas();
+    };
+    vv.addEventListener('resize', onVvChange);
+    vv.addEventListener('scroll', onVvChange);
+    return () => {
+      vv.removeEventListener('resize', onVvChange);
+      vv.removeEventListener('scroll', onVvChange);
+    };
+  }, [loaded, resizeCanvas]);
+
+  useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'hidden') void flushSave();
     };
@@ -271,18 +318,27 @@ export function HandwritingBlock({
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (readOnly || e.button !== 0) return;
+    onDismissTextEditing?.();
+    dismissEditableFocus();
     onFocus?.();
     e.stopPropagation();
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas || !dataRef.current) return;
     const rect = canvas.getBoundingClientRect();
-    const pt = clientToNormalized(e.clientX, e.clientY, rect);
+    const pt = pointerToNormalized(canvas, e.nativeEvent);
     if (!pt) return;
-    const offsetY = e.clientY - rect.top;
+    const offsetX = e.nativeEvent.offsetX;
+    const offsetY = e.nativeEvent.offsetY;
+    const clientOffsetY = e.clientY - rect.top;
     const expectedDrawY = pt.y * rect.height;
+    const renderedX = pt.x * rect.width;
+    const renderedY = pt.y * rect.height;
+    if (hwDebugEnabled()) {
+      setDebugDot({ x: renderedX, y: renderedY });
+    }
     // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:onPointerDown',message:'pointer vs paint',data:{clientX:e.clientX,clientY:e.clientY,rectLeft:rect.left,rectTop:rect.top,rectW:rect.width,rectH:rect.height,offsetY,expectedDrawY,normX:pt.x,normY:pt.y,canvasW:canvas.width,canvasH:canvas.height,dpr:window.devicePixelRatio,runId:'post-fix'},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:onPointerDown',message:'pointer vs paint',data:{clientX:e.clientX,clientY:e.clientY,offsetX,offsetY,rectLeft:rect.left,rectTop:rect.top,rectW:rect.width,rectH:rect.height,clientOffsetY,expectedDrawY,renderedX,renderedY,normX:pt.x,normY:pt.y,canvasW:canvas.width,canvasH:canvas.height,dpr:window.devicePixelRatio,visualViewport:readVisualViewportMetrics(),visualScale:canvasHasVisualScale(canvas),pointerType:e.pointerType,runId:'ipad-fix'},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
     // #endregion
     if (e.pressure > 0) pt.pressure = e.pressure;
     try {
@@ -355,14 +411,17 @@ export function HandwritingBlock({
   };
 
   const btnStyle = (active: boolean): CSSProperties => ({
-    fontSize: 11,
-    padding: '4px 10px',
-    borderRadius: 6,
-    border: `1px solid ${active ? tokens.accent : 'rgba(255,255,255,0.12)'}`,
-    background: active ? `${tokens.accent}22` : 'rgba(0,0,0,0.2)',
+    fontSize: 12,
+    minHeight: 36,
+    minWidth: 44,
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: `1px solid ${active ? tokens.accent : 'rgba(255,255,255,0.14)'}`,
+    background: active ? `${tokens.accent}24` : 'rgba(0,0,0,0.24)',
     color: active ? tokens.accent : tokens.textMuted,
     cursor: 'pointer',
-    fontWeight: 500,
+    fontWeight: 600,
+    touchAction: 'manipulation',
   });
 
   return (
@@ -370,18 +429,22 @@ export function HandwritingBlock({
       data-nb-surface-block
       data-block-id={blockId}
       style={{
-        margin: '16px 0',
+        margin: '10px 0',
         userSelect: 'none',
         ...surfaceChrome,
       }}
-      onPointerDown={e => e.stopPropagation()}
+      onPointerDown={e => {
+        e.stopPropagation();
+        onDismissTextEditing?.();
+        dismissEditableFocus();
+      }}
     >
       {!readOnly ? (
         <div
           style={{
             display: 'flex',
-            gap: 6,
-            marginBottom: 8,
+            gap: 4,
+            marginBottom: 4,
             flexWrap: 'wrap',
             alignItems: 'center',
           }}
@@ -406,9 +469,10 @@ export function HandwritingBlock({
           position: 'relative',
           width: '100%',
           height: DEFAULT_CANVAS_MIN_HEIGHT,
-          borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.08)',
-          background: 'rgba(0,0,0,0.12)',
+          borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'rgba(0,0,0,0.18)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
           overflow: 'hidden',
           touchAction: 'none',
         }}
@@ -438,12 +502,29 @@ export function HandwritingBlock({
               justifyContent: 'center',
               pointerEvents: 'none',
               fontSize: 11,
-              color: 'rgba(255,255,255,0.22)',
-              letterSpacing: '0.04em',
+              color: 'rgba(255,255,255,0.2)',
+              letterSpacing: '0.03em',
             }}
           >
             {readOnly ? 'Handwriting' : 'Write here…'}
           </div>
+        ) : null}
+        {hwDebugEnabled() && debugDot ? (
+          <div
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: debugDot.x - 5,
+              top: debugDot.y - 5,
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              border: '2px solid #f43f5e',
+              background: 'rgba(244,63,94,0.35)',
+              pointerEvents: 'none',
+              zIndex: 2,
+            }}
+          />
         ) : null}
       </div>
     </div>

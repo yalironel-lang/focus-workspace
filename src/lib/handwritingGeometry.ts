@@ -14,6 +14,69 @@ export function clientToNormalized(
   };
 }
 
+/** True when ancestor CSS transforms scale the canvas vs its layout box (e.g. free-space zoom). */
+export function canvasHasVisualScale(canvas: HTMLCanvasElement): boolean {
+  const rect = canvas.getBoundingClientRect();
+  return (
+    Math.abs(canvas.offsetWidth - rect.width) > 1 ||
+    Math.abs(canvas.offsetHeight - rect.height) > 1
+  );
+}
+
+/**
+ * Map a pointer sample to normalized canvas coordinates.
+ * Uses getBoundingClientRect() as the source of truth for size/position.
+ * On iOS without ancestor scale, offsetX/offsetY are more reliable for Apple Pencil.
+ */
+export function pointerToNormalized(
+  canvas: HTMLCanvasElement,
+  e: Pick<PointerEvent, 'clientX' | 'clientY' | 'offsetX' | 'offsetY'>,
+): HandwritingPoint | null {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const scaled = canvasHasVisualScale(canvas);
+  let localX: number;
+  let localY: number;
+
+  if (
+    !scaled &&
+    isIosLike() &&
+    Number.isFinite(e.offsetX) &&
+    Number.isFinite(e.offsetY)
+  ) {
+    localX = e.offsetX;
+    localY = e.offsetY;
+  } else {
+    localX = e.clientX - rect.left;
+    localY = e.clientY - rect.top;
+  }
+
+  return {
+    x: Math.max(0, Math.min(1, localX / rect.width)),
+    y: Math.max(0, Math.min(1, localY / rect.height)),
+  };
+}
+
+export function readVisualViewportMetrics(): {
+  offsetLeft: number;
+  offsetTop: number;
+  scale: number;
+  width: number;
+  height: number;
+} | null {
+  if (typeof window === 'undefined') return null;
+  const vv = window.visualViewport;
+  if (!vv) return null;
+  return {
+    offsetLeft: vv.offsetLeft,
+    offsetTop: vv.offsetTop,
+    scale: vv.scale,
+    width: vv.width,
+    height: vv.height,
+  };
+}
+
 export function appendPoint(
   points: HandwritingPoint[],
   next: HandwritingPoint,
@@ -160,14 +223,14 @@ export function isIosLike(): boolean {
 }
 
 export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const canvas = e.currentTarget as HTMLCanvasElement;
   const useCoalesced =
     !isIosLike() &&
     typeof e.getCoalescedEvents === 'function';
   const events = useCoalesced ? e.getCoalescedEvents() : [e];
   const out: HandwritingPoint[] = [];
   for (const ev of events) {
-    const pt = clientToNormalized(ev.clientX, ev.clientY, rect);
+    const pt = pointerToNormalized(canvas, ev);
     if (!pt) continue;
     if (ev.pressure > 0) pt.pressure = ev.pressure;
     out.push(pt);
