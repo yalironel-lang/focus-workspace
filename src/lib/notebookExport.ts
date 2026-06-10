@@ -24,6 +24,7 @@ function plainTextFromLine(raw: string): string {
   if (callout) return (callout[2] ?? '').trimEnd();
   if (trimmed.startsWith('$$')) return trimmed.replace(/^\$\$\s*/, '').trimEnd();
   if (trimmed.startsWith('::img::')) return '';
+  if (trimmed.startsWith('::hw::')) return '[handwriting]';
   if (trimmed.startsWith('\u00b6\u00b6')) return trimmed.slice(2).trimStart().trimEnd();
   if (trimmed.startsWith('\u00b6')) return trimmed.slice(1).trimStart().trimEnd();
   return normalized.trimEnd();

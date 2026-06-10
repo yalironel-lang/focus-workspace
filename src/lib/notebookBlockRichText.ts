@@ -102,6 +102,10 @@ export function serializeBlockSnapshot(block: NotebookBlockSnapshot): string {
       const alt = typeof block.alt === 'string' ? block.alt : '';
       return `::img::${key}::${alt}::`;
     }
+    case 'handwriting': {
+      const key = typeof block.key === 'string' ? block.key : '';
+      return `::hw::${key}::`;
+    }
     case 'divider': return '---';
     case 'paragraph': {
       if (block.variant === 'muted') return `\u00b6 ${payload}`;
