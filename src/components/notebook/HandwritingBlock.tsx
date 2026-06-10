@@ -110,6 +110,7 @@ export function HandwritingBlock({
   const rafRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<HandwritingBlockData | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveChainRef = useRef(Promise.resolve(true));
   const layoutRef = useRef({ w: 1, h: DEFAULT_CANVAS_MIN_HEIGHT });
 
   const [tool, setTool] = useState<HandwritingTool>('pen');
@@ -150,15 +151,26 @@ export function HandwritingBlock({
     });
   }, [paint]);
 
-  const flushSave = useCallback(async () => {
+  const flushSave = useCallback((): Promise<boolean> => {
     const payload = pendingSaveRef.current;
-    if (!payload || !objectId || !blockKey) return;
+    if (!payload || !objectId || !blockKey) {
+      // #region agent log
+      fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:flushSave',message:'flush skipped',data:{hasPayload:!!payload,objectId,blockKey,failureStage:'missing_params'},timestamp:Date.now(),hypothesisId:'B',runId:'idb-fix'})}).catch(()=>{});
+      // #endregion
+      return Promise.resolve(false);
+    }
     pendingSaveRef.current = null;
-    const ok = await hwSet(objectId, blockKey, payload);
-    // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:flushSave',message:'idb save',data:{objectId,blockKey,ok,strokeCount:payload.strokes.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    if (!ok) toast.error('Could not save handwriting — storage may be full.');
+    const captured = payload;
+    saveChainRef.current = saveChainRef.current
+      .then(() => hwSet(objectId, blockKey, captured))
+      .then(ok => {
+        // #region agent log
+        fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7fb648'},body:JSON.stringify({sessionId:'7fb648',location:'HandwritingBlock.tsx:flushSave',message:'idb save result',data:{objectId,blockKey,storageKey:`${objectId}:${blockKey}`,ok,strokeCount:captured.strokes.length,canvas:captured.canvas},timestamp:Date.now(),hypothesisId:'B',runId:'idb-fix'})}).catch(()=>{});
+        // #endregion
+        if (!ok) toast.error('Could not save handwriting — storage may be full.');
+        return ok;
+      });
+    return saveChainRef.current;
   }, [objectId, blockKey]);
 
   const queueSave = useCallback(

@@ -39,6 +39,7 @@ import {
 } from '../../lib/notebookImageStore';
 import {
   gcOrphanHandwriting,
+  gcOrphanHandwritingKeys,
   hydrateHandwritingBlocks,
   hwDelete,
 } from '../../lib/notebookHandwritingStore';
@@ -1167,8 +1168,11 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!objectId) return;
-    void gcOrphanHandwriting(objectId, content.body ?? '');
-  }, [objectId, content.body]);
+    const hwKeys = blocks
+      .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
+      .map(b => b.key);
+    void gcOrphanHandwritingKeys(objectId, hwKeys);
+  }, [objectId, blocks]);
 
   useEffect(() => {
     if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
