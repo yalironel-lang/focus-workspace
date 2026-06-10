@@ -22,6 +22,7 @@
     "katex": "^0.16.22",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^5.7.284",
+    "perfect-freehand": "^1.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.5.0",

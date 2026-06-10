@@ -10,6 +10,7 @@ import {
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
 import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
+import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { makeHandwritingStorageKey } from './notebookHandwritingStore';
 
 function assert(cond: unknown, msg: string): void {
@@ -62,6 +63,30 @@ assert(pt && Math.abs(pt.x - 0.5) < 0.01 && Math.abs(pt.y - 0.5) < 0.01, 'client
 assert(clampCanvasHeight(200) === CANVAS_HEIGHT_MIN, 'height min clamp');
 assert(clampCanvasHeight(9999) === CANVAS_HEIGHT_MAX, 'height max clamp');
 assert(clampCanvasHeight(540) === 540, 'height mid preserved');
+
+// coalesced batch safety (synthetic PointerEvent-like objects)
+const parent = {
+  clientX: 100,
+  clientY: 100,
+  timeStamp: 10,
+} as PointerEvent;
+const safeBatch = [
+  { clientX: 100, clientY: 100, timeStamp: 10 },
+  { clientX: 102, clientY: 101, timeStamp: 11 },
+  { clientX: 104, clientY: 102, timeStamp: 12 },
+] as PointerEvent[];
+assert(isCoalescedBatchSafe(safeBatch, parent), 'coalesced safe batch');
+
+const unsafeBatch = [
+  { clientX: 100, clientY: 100, timeStamp: 12 },
+  { clientX: 100, clientY: 100, timeStamp: 10 },
+] as PointerEvent[];
+assert(!isCoalescedBatchSafe(unsafeBatch, parent), 'coalesced rejects non-monotonic time');
+
+const farBatch = [
+  { clientX: 500, clientY: 100, timeStamp: 10 },
+] as PointerEvent[];
+assert(!isCoalescedBatchSafe(farBatch, parent), 'coalesced rejects far sample');
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;

@@ -17,7 +17,11 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import { hwDiagLog } from '../../lib/handwritingDiagnostics';
+import {
+  hwDiagLog,
+  hwDiagPressureSummary,
+  hwDiagRecordPressure,
+} from '../../lib/handwritingDiagnostics';
 import {
   appendPoint,
   canvasHasVisualScale,
@@ -25,9 +29,12 @@ import {
   drawStrokes,
   isInkPointer,
   pointerToNormalized,
+  preloadInkDevRenderer,
   readVisualViewportMetrics,
   strokesAfterEraser,
 } from '../../lib/handwritingGeometry';
+import { hwPointerSamplingStats } from '../../lib/handwritingPointerSamples';
+import { getHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
   CANVAS_HEIGHT_MAX,
@@ -165,6 +172,9 @@ export function HandwritingBlock({
   const [canUndo, setCanUndo] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [debugDot, setDebugDot] = useState<{ x: number; y: number } | null>(null);
+  const [devRenderMode, setDevRenderMode] = useState<HwRenderMode>(() =>
+    import.meta.env.DEV ? getHwRenderMode() : 'polyline',
+  );
 
   toolRef.current = tool;
 
@@ -378,6 +388,24 @@ export function HandwritingBlock({
   }, [readOnly, loaded]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (getHwRenderMode() === 'ink') {
+      void preloadInkDevRenderer().then(() => schedulePaint());
+    }
+    const onMode = () => {
+      const mode = getHwRenderMode();
+      setDevRenderMode(mode);
+      if (mode === 'ink') {
+        void preloadInkDevRenderer().then(() => schedulePaint());
+      } else {
+        schedulePaint();
+      }
+    };
+    window.addEventListener('fw-hw-render-mode', onMode);
+    return () => window.removeEventListener('fw-hw-render-mode', onMode);
+  }, [schedulePaint]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     const onDocPointer = (e: PointerEvent) => {
       if (menuRef.current?.contains(e.target as Node)) return;
@@ -404,6 +432,17 @@ export function HandwritingBlock({
     } else if (draft.tool === 'eraser' && draft.points.length > 0) {
       strokes = strokesAfterEraser(strokes, draft.points, ERASER_RADIUS_NORM);
     }
+    const strokePressures = draft.points
+      .map(p => p.pressure)
+      .filter((v): v is number => v !== undefined && v > 0);
+    hwDiagLog('HandwritingBlock.tsx:finishStroke', 'stroke committed', {
+      tool: draft.tool,
+      pointCount: draft.points.length,
+      strokePressureMin: strokePressures.length ? Math.min(...strokePressures) : null,
+      strokePressureMax: strokePressures.length ? Math.max(...strokePressures) : null,
+      sessionPressure: hwDiagPressureSummary(),
+      sampling: hwPointerSamplingStats(),
+    });
     commitData({ ...base, strokes }, true);
     void flushSave();
   }, [commitData, onDrawingChange, schedulePaint, flushSave]);
@@ -435,7 +474,10 @@ export function HandwritingBlock({
         visualScale: canvasHasVisualScale(canvas),
         pointerType: sample.pointerType,
       });
-      if (sample.pressure > 0) pt.pressure = sample.pressure;
+      if (sample.pressure > 0) {
+        pt.pressure = sample.pressure;
+        hwDiagRecordPressure(sample.pressure, sample.pointerType);
+      }
       drawingRef.current = true;
       onDrawingChange?.(true);
       const activeTool = toolRef.current;
@@ -633,6 +675,21 @@ export function HandwritingBlock({
           >
             Handwriting
           </span>
+          {import.meta.env.DEV ? (
+            <span
+              title="Dev render A/B — console: __fwHwSetRenderMode('polyline'|'ink')"
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'rgba(255,255,255,0.08)',
+                color: devRenderMode === 'ink' ? tokens.accent : tokens.textMuted,
+                letterSpacing: '0.03em',
+              }}
+            >
+              render:{devRenderMode}
+            </span>
+          ) : null}
           <button
             type="button"
             aria-label="Pen"

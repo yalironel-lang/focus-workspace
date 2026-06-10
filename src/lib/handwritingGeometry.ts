@@ -1,6 +1,104 @@
 import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
+import { hwDiagRecordPressure } from './handwritingDiagnostics';
+import {
+  pickPointerEventsForSample,
+  recordPointerSamplePick,
+} from './handwritingPointerSamples';
+import { getHwRenderMode } from './handwritingRenderMode';
 
 const MIN_POINT_DIST_NORM = 0.002;
+
+let inkDevModule: typeof import('./handwritingInkDev') | null = null;
+let inkDevLoad: Promise<typeof import('./handwritingInkDev')> | null = null;
+
+/** Preload dev ink renderer when toggling A/B mode (dev only). */
+export function preloadInkDevRenderer(): Promise<void> {
+  if (!import.meta.env.DEV) return Promise.resolve();
+  if (inkDevModule) return Promise.resolve();
+  if (!inkDevLoad) {
+    inkDevLoad = import('./handwritingInkDev').then(m => {
+      inkDevModule = m;
+      return m;
+    });
+  }
+  return inkDevLoad.then(() => undefined);
+}
+
+function drawPenStrokePolyline(
+  ctx: CanvasRenderingContext2D,
+  stroke: HandwritingStroke,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+): void {
+  if (stroke.points.length < 2) {
+    if (stroke.points.length === 1) {
+      const p = stroke.points[0]!;
+      const x = p.x * canvasW;
+      const y = p.y * canvasH;
+      ctx.beginPath();
+      ctx.fillStyle = stroke.color;
+      ctx.arc(x, y, strokeWidthPx(stroke, canvasW, refWidth, p) / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return;
+  }
+  ctx.beginPath();
+  const first = stroke.points[0]!;
+  ctx.moveTo(first.x * canvasW, first.y * canvasH);
+  for (let i = 1; i < stroke.points.length; i++) {
+    const p = stroke.points[i]!;
+    ctx.lineTo(p.x * canvasW, p.y * canvasH);
+  }
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = strokeWidthPx(
+    stroke,
+    canvasW,
+    refWidth,
+    stroke.points[stroke.points.length - 1],
+  );
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+function drawStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: HandwritingStroke,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+  opts?: { isDraft?: boolean },
+): void {
+  if (stroke.tool === 'eraser') {
+    if (stroke.points.length < 2) return;
+    ctx.beginPath();
+    const first = stroke.points[0]!;
+    ctx.moveTo(first.x * canvasW, first.y * canvasH);
+    for (let i = 1; i < stroke.points.length; i++) {
+      const p = stroke.points[i]!;
+      ctx.lineTo(p.x * canvasW, p.y * canvasH);
+    }
+    ctx.strokeStyle = 'rgba(248,113,113,0.5)';
+    ctx.lineWidth = strokeWidthPx(
+      stroke,
+      canvasW,
+      refWidth,
+      stroke.points[stroke.points.length - 1],
+    );
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    return;
+  }
+
+  if (import.meta.env.DEV && getHwRenderMode() === 'ink' && inkDevModule) {
+    inkDevModule.drawPenStrokeInkDev(ctx, stroke, canvasW, canvasH, refWidth, opts);
+    return;
+  }
+
+  drawPenStrokePolyline(ctx, stroke, canvasW, canvasH, refWidth);
+}
 
 export function clientToNormalized(
   clientX: number,
@@ -174,31 +272,10 @@ export function drawStrokes(
 ): void {
   ctx.clearRect(0, 0, canvasW, canvasH);
   const all = draftStroke ? [...strokes, draftStroke] : strokes;
-  for (const stroke of all) {
-    if (stroke.points.length < 2) {
-      if (stroke.points.length === 1) {
-        const p = stroke.points[0]!;
-        const x = p.x * canvasW;
-        const y = p.y * canvasH;
-        ctx.beginPath();
-        ctx.fillStyle = stroke.color;
-        ctx.arc(x, y, strokeWidthPx(stroke, canvasW, refWidth, p) / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      continue;
-    }
-    ctx.beginPath();
-    const first = stroke.points[0]!;
-    ctx.moveTo(first.x * canvasW, first.y * canvasH);
-    for (let i = 1; i < stroke.points.length; i++) {
-      const p = stroke.points[i]!;
-      ctx.lineTo(p.x * canvasW, p.y * canvasH);
-    }
-    ctx.strokeStyle = stroke.tool === 'eraser' ? 'rgba(248,113,113,0.5)' : stroke.color;
-    ctx.lineWidth = strokeWidthPx(stroke, canvasW, refWidth, stroke.points[stroke.points.length - 1]);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
+  for (let i = 0; i < all.length; i++) {
+    const stroke = all[i]!;
+    const isDraft = draftStroke != null && i === all.length - 1;
+    drawStroke(ctx, stroke, canvasW, canvasH, refWidth, { isDraft });
   }
 }
 
@@ -215,15 +292,17 @@ export function isIosLike(): boolean {
 
 export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
   const canvas = e.currentTarget as HTMLCanvasElement;
-  const useCoalesced =
-    !isIosLike() &&
-    typeof e.getCoalescedEvents === 'function';
-  const events = useCoalesced ? e.getCoalescedEvents() : [e];
+  const pick = pickPointerEventsForSample(e);
+  recordPointerSamplePick(pick);
+
   const out: HandwritingPoint[] = [];
-  for (const ev of events) {
+  for (const ev of pick.events) {
     const pt = pointerToNormalized(canvas, ev);
     if (!pt) continue;
-    if (ev.pressure > 0) pt.pressure = ev.pressure;
+    if (ev.pressure > 0) {
+      pt.pressure = ev.pressure;
+      hwDiagRecordPressure(ev.pressure, ev.pointerType);
+    }
     out.push(pt);
   }
   return out;
