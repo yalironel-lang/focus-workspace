@@ -162,6 +162,11 @@ import {
   readImageDimensions,
   saveImageBlob,
 } from '../lib/freeSpaceImageIdb';
+import {
+  dropPlacementDebugEnabled,
+  logDropSpawn,
+  scheduleDropRenderCheck,
+} from '../lib/dropPlacementDebug';
 import { extractPdfSpatialData } from '../lib/pdfIngestion';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
@@ -1334,7 +1339,7 @@ export function SectionPage() {
           convertNoteToMistake,
           clearConnectionsForObject,
           removeObject: removeSpaceObject } = sectionObjects;
-  const { initPos, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
+  const { initPos, setPos: setSpacePos, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
   const spacePositionsRef = useRef(spacePositions);
   spacePositionsRef.current = spacePositions;
 
@@ -1653,9 +1658,21 @@ export function SectionPage() {
       }
 
       const obj = addSpaceObject('pdf');
-      const x = Math.max(20, Math.round(worldX - 260));
-      const y = Math.max(20, Math.round(worldY - 230));
-      initPos(obj.id, { x, y, w: 520, h: 460 });
+      const w = 520;
+      const h = 460;
+      const x = Math.max(20, Math.round(worldX - w / 2));
+      const y = Math.max(20, Math.round(worldY - h / 2));
+      const stored = { x, y, w, h };
+      setSpacePos(obj.id, stored);
+      if (dropPlacementDebugEnabled()) {
+        logDropSpawn({
+          objectId: obj.id,
+          kind: 'pdf',
+          stored,
+          expectedCenterWorld: { x: worldX, y: worldY },
+        });
+        scheduleDropRenderCheck(obj.id, 'pdf', stored);
+      }
       setSpaceSelectedId(obj.id);
 
       // Materialise immediately with filename — workspace makes room, object arrives.
@@ -1716,7 +1733,7 @@ export function SectionPage() {
 
       applyStudyLinksForObject(obj.id, 'pdf');
     },
-    [sectionId, addSpaceObject, initPos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
+    [sectionId, addSpaceObject, setSpacePos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
   );
 
   const handleImageDroppedOnCanvas = useCallback(
@@ -1726,12 +1743,23 @@ export function SectionPage() {
         return;
       }
 
-      const obj = addSpaceObject('image');
       const dims = await readImageDimensions(file);
       const frame = fitImageFrame(dims.w, dims.h);
       const x = Math.max(20, Math.round(worldX - frame.w / 2));
       const y = Math.max(20, Math.round(worldY - frame.h / 2));
-      initPos(obj.id, { x, y, w: frame.w, h: frame.h });
+
+      const obj = addSpaceObject('image');
+      const stored = { x, y, w: frame.w, h: frame.h };
+      setSpacePos(obj.id, stored);
+      if (dropPlacementDebugEnabled()) {
+        logDropSpawn({
+          objectId: obj.id,
+          kind: 'image',
+          stored,
+          expectedCenterWorld: { x: worldX, y: worldY },
+        });
+        scheduleDropRenderCheck(obj.id, 'image', stored);
+      }
       setSpaceSelectedId(obj.id);
 
       const safeTitle = file.name.length > 64 ? `${file.name.slice(0, 62)}…` : file.name;
@@ -1759,7 +1787,7 @@ export function SectionPage() {
     [
       sectionId,
       addSpaceObject,
-      initPos,
+      setSpacePos,
       updateSpaceObjectFields,
       removeSpaceObject,
       removePos,

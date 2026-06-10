@@ -80,6 +80,12 @@ import { FreeSpaceMiniMap } from './FreeSpaceMiniMap';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
+import { clientToWorld, readDisplayedViewport } from '../../lib/canvasCoordinates';
+import {
+  dropPlacementDebugEnabled,
+  logDropConversion,
+  prepareDropRenderCheck,
+} from '../../lib/dropPlacementDebug';
 import type { FocusMode } from '../../focusMode/focusModeTypes';
 import { focusCanvasAtmosphere } from '../../focusMode/canvasAtmosphere';
 import type { FocusStrength, WorkspaceClarity } from '../../lib/workspaceClarity';
@@ -589,8 +595,11 @@ export function FreeformCanvas({
   const followPanActiveRef = useRef(false);
   // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
-  if (!followPanActiveRef.current) {
-    liveViewRef.current = { panX, panY, zoom };
+  const panDragActive = dragRef.current?.type === 'canvas' && dragRef.current.panStarted;
+  if (!followPanActiveRef.current && !panDragActive) {
+    liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
+  } else if (!followPanActiveRef.current) {
+    liveViewRef.current.zoom = safeZoom;
   } else {
     liveViewRef.current.zoom = safeZoom;
   }
@@ -1480,11 +1489,19 @@ export function FreeformCanvas({
       if ((e.metaKey || e.ctrlKey) && e.key === '0') { e.preventDefault(); resetView(); }
       if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
-        setViewport(Math.min(ZOOM_MAX, zoom + ZOOM_STEP), panX, panY);
+        const nz = Math.min(ZOOM_MAX, zoom + ZOOM_STEP);
+        cancelAnimationFrame(zoomRafRef.current);
+        zoomRafRef.current = 0;
+        targetViewRef.current = { zoom: nz, panX, panY };
+        setViewport(nz, panX, panY);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === '-') {
         e.preventDefault();
-        setViewport(Math.max(ZOOM_MIN, zoom - ZOOM_STEP), panX, panY);
+        const nz = Math.max(ZOOM_MIN, zoom - ZOOM_STEP);
+        cancelAnimationFrame(zoomRafRef.current);
+        zoomRafRef.current = 0;
+        targetViewRef.current = { zoom: nz, panX, panY };
+        setViewport(nz, panX, panY);
       }
       // Space+drag or just check for space to change cursor (cosmetic)
     };
@@ -1538,12 +1555,39 @@ export function FreeformCanvas({
               e.preventDefault();
               const f = e.dataTransfer.files?.[0];
               if (!f) return;
-              const rect = viewportRef.current?.getBoundingClientRect();
-              if (!rect) return;
-              const lx = e.clientX - rect.left;
-              const ly = e.clientY - rect.top;
-              const worldX = (lx - safePanX) / safeZoom;
-              const worldY = (ly - safePanY) / safeZoom;
+              const viewportEl = viewportRef.current;
+              if (!viewportEl) return;
+              const reactFallback = { panX: safePanX, panY: safePanY, zoom: safeZoom };
+              const rect = viewportEl.getBoundingClientRect();
+              const viewportUsed = readDisplayedViewport(
+                viewportEl,
+                worldRef.current,
+                reactFallback,
+              );
+              const { worldX, worldY } = clientToWorld(
+                e.clientX,
+                e.clientY,
+                rect,
+                viewportUsed,
+              );
+              if (dropPlacementDebugEnabled()) {
+                logDropConversion({
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  viewportEl,
+                  worldEl: worldRef.current,
+                  reactFallback,
+                  viewportUsed,
+                  worldX,
+                  worldY,
+                });
+                prepareDropRenderCheck({
+                  cursor: { x: e.clientX, y: e.clientY },
+                  viewportEl,
+                  worldEl: worldRef.current,
+                  reactFallback,
+                });
+              }
               if (isAcceptablePdfFile(f)) {
                 onPdfDroppedOnCanvas?.(f, worldX, worldY);
               } else if (isAcceptableImageFile(f)) {
@@ -2316,8 +2360,20 @@ export function FreeformCanvas({
         snapToGrid={snapToGrid}
         visible={controlsNear || draggingId !== null}
         chromeQuiet={deepFocusAtmosphere}
-        onZoomIn={() => setViewport(Math.min(ZOOM_MAX, zoom + ZOOM_STEP), panX, panY)}
-        onZoomOut={() => setViewport(Math.max(ZOOM_MIN, zoom - ZOOM_STEP), panX, panY)}
+        onZoomIn={() => {
+          const nz = Math.min(ZOOM_MAX, zoom + ZOOM_STEP);
+          cancelAnimationFrame(zoomRafRef.current);
+          zoomRafRef.current = 0;
+          targetViewRef.current = { zoom: nz, panX, panY };
+          setViewport(nz, panX, panY);
+        }}
+        onZoomOut={() => {
+          const nz = Math.max(ZOOM_MIN, zoom - ZOOM_STEP);
+          cancelAnimationFrame(zoomRafRef.current);
+          zoomRafRef.current = 0;
+          targetViewRef.current = { zoom: nz, panX, panY };
+          setViewport(nz, panX, panY);
+        }}
         onReset={resetView}
         onCenter={handleCenterView}
         onToggleSnap={toggleSnap}

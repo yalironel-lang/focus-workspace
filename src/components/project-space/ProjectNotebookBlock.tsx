@@ -30,7 +30,12 @@ import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
 import { renderInlineFormatted } from '../../lib/mathZoneInlineFormat';
 import { parseRichLine } from '../../lib/notebookInlineMarks';
-import { nbImageGet, nbImageSet } from '../../lib/notebookImageStore';
+import {
+  hydrateNotebookImages,
+  nbImageGet,
+  nbImageSet,
+  subscribeNotebookImages,
+} from '../../lib/notebookImageStore';
 import {
   getMathTemplate,
   isLikelyMathLine,
@@ -1106,6 +1111,7 @@ export function ProjectNotebookBlock({
   const sessionRestoreAppliedRef = useRef(false);
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
+  const [, bumpNotebookImageCache] = useState(0);
   const [slashMenu, setSlashMenu] = useState<{
     blockId: string;
     query: string;
@@ -1119,6 +1125,15 @@ export function ProjectNotebookBlock({
   useEffect(() => {
     sessionRestoreAppliedRef.current = false;
   }, [sessionRestoreBlockId]);
+
+  useEffect(() => subscribeNotebookImages(() => bumpNotebookImageCache(n => n + 1)), []);
+
+  useEffect(() => {
+    const keys = blocks
+      .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
+      .map(b => b.key);
+    void hydrateNotebookImages(keys);
+  }, [blocks]);
 
   useEffect(() => {
     if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
@@ -1486,10 +1501,16 @@ export function ProjectNotebookBlock({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      nbImageSet(key, dataUrl);
-      insertImageBlock(key, '');
+      void (async () => {
+        const dataUrl = reader.result as string;
+        const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const saved = await nbImageSet(key, dataUrl);
+        if (!saved) {
+          toast.error('Could not save image — storage may be full.');
+          return;
+        }
+        insertImageBlock(key, '');
+      })();
     };
     reader.readAsDataURL(file);
   }, [insertImageBlock]);
@@ -1501,11 +1522,17 @@ export function ProjectNotebookBlock({
     e.stopPropagation();
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      nbImageSet(key, dataUrl);
-      const cleanName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
-      insertImageBlock(key, cleanName);
+      void (async () => {
+        const dataUrl = reader.result as string;
+        const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const saved = await nbImageSet(key, dataUrl);
+        if (!saved) {
+          toast.error('Could not save image — storage may be full.');
+          return;
+        }
+        const cleanName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+        insertImageBlock(key, cleanName);
+      })();
     };
     reader.readAsDataURL(file);
   }, [insertImageBlock]);
