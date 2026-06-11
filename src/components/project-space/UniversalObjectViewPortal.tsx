@@ -1,9 +1,14 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Minimize2, X } from 'lucide-react';
+import { Minimize2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { UniversalObjectSplitSide, UniversalObjectViewMode } from '../../hooks/useSectionFreeSpaceObjects';
 import { acquireBodyScrollLock, pushEscapeHandler } from '../../lib/ui/overlayStack';
+import {
+  Z_UNIVERSAL_VIEW_BACKDROP,
+  Z_UNIVERSAL_VIEW_PANEL,
+} from '../../lib/ui/zIndexLayers';
+import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
 interface Props {
   title: string;
@@ -13,9 +18,6 @@ interface Props {
   onSetMode: (mode: UniversalObjectViewMode) => void;
   children: ReactNode;
 }
-
-const Z_UNIVERSAL_VIEW_BACKDROP = 596;
-const Z_UNIVERSAL_VIEW_PANEL = 597;
 
 export function UniversalObjectViewPortal({
   title,
@@ -75,7 +77,10 @@ export function UniversalObjectViewPortal({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            padding: '8px 12px',
+            paddingTop: 'max(8px, env(safe-area-inset-top))',
+            paddingRight: 'max(12px, env(safe-area-inset-right))',
+            paddingBottom: 8,
+            paddingLeft: 'max(12px, env(safe-area-inset-left))',
             borderBottom: `1px solid ${tokens.cardBorder}`,
             background: tokens.cardBg,
           }}
@@ -83,14 +88,53 @@ export function UniversalObjectViewPortal({
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600, color: tokens.textPrimary }}>
             {title || 'Object'}
           </div>
-          <button
-            type="button"
-            title="Return to floating"
-            onClick={() => onSetMode('floating')}
-            style={{ border: `1px solid ${tokens.cardBorder}`, background: 'transparent', color: tokens.textMuted, borderRadius: 6, width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          >
-            {isFullscreen ? <X size={14} /> : <Minimize2 size={14} />}
-          </button>
+          {isFullscreen ? (
+            <button
+              type="button"
+              title="Done"
+              aria-label="Done"
+              onClick={() => onSetMode('floating')}
+              style={{
+                minWidth: TOUCH_TARGET_MIN_PX,
+                minHeight: TOUCH_TARGET_MIN_PX,
+                padding: '0 14px',
+                border: `1px solid ${tokens.cardBorder}`,
+                background: `${tokens.accent}18`,
+                color: tokens.accent,
+                borderRadius: 8,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+                touchAction: 'manipulation',
+              }}
+            >
+              Done
+            </button>
+          ) : (
+            <button
+              type="button"
+              title="Return to floating"
+              onClick={() => onSetMode('floating')}
+              style={{
+                border: `1px solid ${tokens.cardBorder}`,
+                background: 'transparent',
+                color: tokens.textMuted,
+                borderRadius: 6,
+                width: 28,
+                height: 28,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <Minimize2 size={14} />
+            </button>
+          )}
         </header>
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{children}</div>
       </div>

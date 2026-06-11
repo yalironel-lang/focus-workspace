@@ -44,6 +44,7 @@ import {
   type HwSpikeSettings,
 } from '../../lib/handwritingSpikeDebug';
 import { setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
+import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
   CANVAS_HEIGHT_MAX,
@@ -253,6 +254,13 @@ export function HandwritingBlock({
   );
 
   const flushSave = useCallback((): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (dataRef.current) {
+      pendingSaveRef.current = dataRef.current;
+    }
     const payload = pendingSaveRef.current;
     if (!payload) {
       return Promise.resolve(true);
@@ -308,6 +316,11 @@ export function HandwritingBlock({
 
   useEffect(() => {
     let cancelled = false;
+    dataRef.current = null;
+    draftRef.current = null;
+    pendingSaveRef.current = null;
+    undoRef.current = [];
+    setLoaded(false);
     void (async () => {
       if (!objectId || !blockKey) {
         setLoaded(true);
@@ -340,8 +353,9 @@ export function HandwritingBlock({
     })();
     return () => {
       cancelled = true;
+      void flushSave();
     };
-  }, [objectId, blockKey, syncCanvasWidth]);
+  }, [objectId, blockKey, syncCanvasWidth, flushSave]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -379,12 +393,22 @@ export function HandwritingBlock({
   }, [loaded, syncCanvasWidth]);
 
   useEffect(() => {
+    if (!objectId || !blockKey) return;
+    return registerHandwritingFlush(objectId, blockKey, flushSave);
+  }, [objectId, blockKey, flushSave]);
+
+  useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'hidden') void flushSave();
     };
+    const onPageHide = () => {
+      void flushSave();
+    };
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', onPageHide);
     return () => {
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', onPageHide);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       void flushSave();
     };
@@ -488,6 +512,7 @@ export function HandwritingBlock({
     (
       sample: Pick<PointerEvent, 'clientX' | 'clientY' | 'pressure' | 'pointerType' | 'offsetX' | 'offsetY'>,
     ) => {
+      if (!objectId || !blockKey) return;
       const canvas = canvasRef.current;
       if (!canvas || !dataRef.current) return;
       resetStrokeSampleStats();
@@ -532,11 +557,13 @@ export function HandwritingBlock({
       };
       schedulePaint();
     },
-    [inkColor, onDrawingChange, schedulePaint],
+    [inkColor, objectId, blockKey, onDrawingChange, schedulePaint],
   );
 
+  const saveNotReady = !objectId || !blockKey;
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || e.button !== 0) return;
+    if (readOnly || saveNotReady || e.button !== 0) return;
     if (!isInkPointer(e.nativeEvent)) return;
 
     const hadTextFocus =
@@ -874,7 +901,26 @@ export function HandwritingBlock({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
         />
-        {loaded && missing && strokeCount === 0 ? (
+        {loaded && saveNotReady ? (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.28)',
+              letterSpacing: '0.03em',
+              textAlign: 'center',
+              padding: '0 12px',
+            }}
+          >
+            Handwriting not ready — notebook is still loading.
+          </div>
+        ) : null}
+        {loaded && !saveNotReady && missing && strokeCount === 0 ? (
           <div
             style={{
               position: 'absolute',

@@ -13,6 +13,10 @@ import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { makeHandwritingStorageKey } from './notebookHandwritingStore';
+import {
+  flushAllHandwritingForObject,
+  registerHandwritingFlush,
+} from './handwritingFlushRegistry';
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(`FAIL: ${msg}`);
@@ -120,6 +124,33 @@ assert(
     points: [{ x: 0, y: 0 }],
   }),
   'strokeHasRealPressure false without pressure',
+);
+
+// flush registry — parent can await all block saves before transitions
+let flushCallCount = 0;
+const unregisterFlush = registerHandwritingFlush('obj-flush', 'hw-a', async () => {
+  flushCallCount += 1;
+  return true;
+});
+assert(
+  (await flushAllHandwritingForObject('obj-flush')) === true,
+  'flushAllHandwritingForObject awaits registered flush',
+);
+assert(flushCallCount === 1, 'flush registry invokes registered handler');
+unregisterFlush();
+assert(
+  (await flushAllHandwritingForObject('obj-flush')) === true,
+  'flush after unregister is noop success',
+);
+assert(flushCallCount === 1, 'flush count unchanged after unregister');
+
+// GC key union — body refs must be preserved even if blocks parse lags
+const gcBody = '::hw::hw-body-only::';
+const gcBlockKeys = ['hw-block-a'];
+const gcMerged = [...new Set([...referencedHandwritingKeys(gcBody), ...gcBlockKeys])];
+assert(
+  gcMerged.includes('hw-body-only') && gcMerged.includes('hw-block-a'),
+  'GC merges body refs with block keys',
 );
 
 console.log('handwritingQa.test.ts: all checks passed');

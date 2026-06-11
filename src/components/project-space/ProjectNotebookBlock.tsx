@@ -43,7 +43,9 @@ import {
   hydrateHandwritingBlocks,
   hwDelete,
 } from '../../lib/notebookHandwritingStore';
-import { newHandwritingKey } from '../../lib/handwritingTypes';
+import { newHandwritingKey, referencedHandwritingKeys } from '../../lib/handwritingTypes';
+import { flushAllHandwritingForObject } from '../../lib/handwritingFlushRegistry';
+import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
   getMathTemplate,
   isLikelyMathLine,
@@ -1168,14 +1170,16 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!objectId) return;
-    const hwKeys = blocks
+    const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
+    const fromBody = referencedHandwritingKeys(content.body ?? '');
+    const hwKeys = [...new Set([...fromBlocks, ...fromBody])];
     const timer = window.setTimeout(() => {
       void gcOrphanHandwritingKeys(objectId, hwKeys);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [objectId, blocks]);
+  }, [objectId, blocks, content.body]);
 
   useEffect(() => {
     if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
@@ -1221,6 +1225,16 @@ export function ProjectNotebookBlock({
   const [selectionToolbar, setSelectionToolbar] = useState<NotebookSelectionState | null>(null);
   const [paperPopoverOpen, setPaperPopoverOpen] = useState(false);
   const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
+
+  const flushHandwritingBeforeTransition = useCallback(async () => {
+    if (!objectId) return;
+    await flushAllHandwritingForObject(objectId);
+  }, [objectId]);
+
+  const closeFocusMode = useCallback(async () => {
+    await flushHandwritingBeforeTransition();
+    setIsFocusModeOpen(false);
+  }, [flushHandwritingBeforeTransition]);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
@@ -1673,13 +1687,15 @@ export function ProjectNotebookBlock({
     // Show announcement for 1.8s
     setFocusAnnouncement(true);
     const t = setTimeout(() => setFocusAnnouncement(false), 1800);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFocusModeOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') void closeFocusMode();
+    };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
       clearTimeout(t);
     };
-  }, [isFocusModeOpen]);
+  }, [isFocusModeOpen, closeFocusMode]);
 
   const paperStyle = content.paperStyle ?? 'ruled';
   const notebookSurface = content.notebookSurface ?? 'spatial';
@@ -4151,7 +4167,12 @@ export function ProjectNotebookBlock({
             <button
               type="button"
               title="Focus mode"
-              onClick={() => setIsFocusModeOpen(true)}
+              onClick={() => {
+                void (async () => {
+                  await flushHandwritingBeforeTransition();
+                  setIsFocusModeOpen(true);
+                })();
+              }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.65)'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.28)'; }}
               style={{
@@ -4249,7 +4270,14 @@ export function ProjectNotebookBlock({
           {notebookMode !== 'math-workspace' && (
             <button
               type="button"
-              onClick={() => setEditorMode(editorMode === 'edit' ? 'preview' : 'edit')}
+              onClick={() => {
+                void (async () => {
+                  if (editorMode === 'edit') {
+                    await flushHandwritingBeforeTransition();
+                  }
+                  setEditorMode(editorMode === 'edit' ? 'preview' : 'edit');
+                })();
+              }}
               title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
@@ -5854,7 +5882,7 @@ export function ProjectNotebookBlock({
     {isFocusModeOpen && typeof document !== 'undefined' ? createPortal(
       <>
         <div
-          onClick={() => setIsFocusModeOpen(false)}
+          onClick={() => void closeFocusMode()}
           style={{
             position:'fixed', inset:0, zIndex:9990,
             background: isPaperSurface ? 'rgba(214,208,196,0.92)' : 'rgba(14,10,6,0.88)',
@@ -5992,16 +6020,30 @@ export function ProjectNotebookBlock({
                 }}
               >{paperStyle}</button>
 
-              {/* Close */}
               <button
                 type="button"
-                title="Close (Esc)"
-                onClick={() => setIsFocusModeOpen(false)}
+                title="Done (Esc)"
+                aria-label="Done"
+                onClick={() => void closeFocusMode()}
                 style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-                  color: 'rgba(255,248,235,0.80)', fontSize: 18, lineHeight: 1,
+                  minWidth: TOUCH_TARGET_MIN_PX,
+                  minHeight: TOUCH_TARGET_MIN_PX,
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  border: isPaperSurface
+                    ? '1px solid rgba(28,25,23,0.12)'
+                    : '1px solid rgba(255,255,255,0.14)',
+                  background: isPaperSurface ? 'rgba(28,25,23,0.05)' : 'rgba(255,255,255,0.08)',
+                  cursor: 'pointer',
+                  color: isPaperSurface ? ink.primary : 'rgba(255,248,235,0.92)',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: '0.02em',
+                  touchAction: 'manipulation',
                 }}
-              >×</button>
+              >
+                Done
+              </button>
             </div>
             {/* Title: hidden in derivation fullscreen — mode badge carries identity */}
             {!isPaperSurface && notebookMode !== 'math-workspace' ? (

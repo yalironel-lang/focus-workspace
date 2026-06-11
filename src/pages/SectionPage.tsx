@@ -50,6 +50,7 @@ import {
   type PendingNotebookFocus,
 } from '../lib/notebookSearchIndex';
 import { panViewportToBlock } from '../lib/notebookCanvasFocus';
+import { flushAllHandwritingForObject } from '../lib/handwritingFlushRegistry';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -3197,9 +3198,14 @@ export function SectionPage() {
     mode: UniversalObjectViewMode,
     splitSide?: UniversalObjectSplitSide,
   ) => {
+    void (async () => {
     const store = sectionObjectsRef.current;
     const target = store.getObject(objectId);
     if (!target || !supportsUniversalPresentation(target) || isStudySessionObject(objectId)) return;
+
+    if (target.type === 'notebook') {
+      await flushAllHandwritingForObject(objectId);
+    }
 
     if (mode === 'split') {
       const side = splitSide ?? target.splitSide ?? 'right';
@@ -3223,6 +3229,7 @@ export function SectionPage() {
       store.updateObjectFields(objectId, { viewMode: 'floating' });
     }
     setSpaceSelectedId(objectId);
+    })();
   }, [supportsUniversalPresentation, isStudySessionObject]);
 
   const handleStudyLayoutChange = useCallback((objectId: string, mode: StudyLayoutMode) => {

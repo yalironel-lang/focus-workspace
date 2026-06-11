@@ -8,7 +8,7 @@
  * Resize: minimal corner affordance, visible on selection / hover / active resize.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GripHorizontal, X, Copy, Link2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
@@ -17,6 +17,7 @@ import {
   freeSpaceMaterialStyle,
   type FreeSpaceMaterialTier,
 } from '../../lib/freeSpaceMaterials';
+import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
 export type BlockActiveGesture = 'move' | 'resize' | null;
 
@@ -91,6 +92,16 @@ export function FreeformBlock({
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
   const [presentationMenuOpen, setPresentationMenuOpen] = useState(false);
+  const [coarsePointer, setCoarsePointer] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const sync = () => setCoarsePointer(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
   const material = freeSpaceMaterialStyle(materialTier);
 
   const w = pos.w > 0 ? pos.w : undefined;
@@ -336,7 +347,9 @@ export function FreeformBlock({
                   }}
                   title="Object view mode"
                   style={{
-                    height: '24px',
+                    minHeight: coarsePointer ? TOUCH_TARGET_MIN_PX : 24,
+                    height: coarsePointer ? TOUCH_TARGET_MIN_PX : 24,
+                    minWidth: coarsePointer ? TOUCH_TARGET_MIN_PX : undefined,
                     borderRadius: '7px',
                     border: '1px solid rgba(255,255,255,0.12)',
                     background: 'rgba(255,255,255,0.04)',
@@ -345,11 +358,12 @@ export function FreeformBlock({
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    padding: '0 8px',
-                    fontSize: 10,
+                    padding: coarsePointer ? '0 12px' : '0 8px',
+                    fontSize: coarsePointer ? 11 : 10,
                     fontWeight: 700,
                     letterSpacing: '0.05em',
                     textTransform: 'uppercase',
+                    touchAction: 'manipulation',
                   }}
                 >
                   View
@@ -406,8 +420,10 @@ export function FreeformBlock({
                               color: selectedMode ? tokens.accent : tokens.textSecondary,
                               fontSize: 12,
                               fontWeight: selectedMode ? 700 : 600,
-                              padding: '8px 10px',
+                              minHeight: coarsePointer ? TOUCH_TARGET_MIN_PX : undefined,
+                              padding: coarsePointer ? '12px 14px' : '8px 10px',
                               cursor: 'pointer',
+                              touchAction: 'manipulation',
                             }}
                           >
                             {option.label}
