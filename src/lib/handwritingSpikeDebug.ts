@@ -33,8 +33,10 @@ const DEFAULTS: HwSpikeSettings = {
   render: 'polyline',
 };
 
+import { isHandwritingDevBuild } from './handwritingRenderMode';
+
 function isDevBuild(): boolean {
-  return typeof import.meta !== 'undefined' && !!import.meta.env?.DEV;
+  return isHandwritingDevBuild();
 }
 
 declare global {
@@ -118,7 +120,7 @@ export function hwSpikeLog(
     }),
   }).catch(() => {});
   // #endregion
-  if (import.meta.env.DEV) {
+  if (isDevBuild()) {
     console.debug(`[hw-spike ${hypothesisId}] ${message}`, data ?? '');
   }
 }
@@ -215,10 +217,61 @@ Suggested A/B on iPad:
 `);
 }
 
-if (isDevBuild() && typeof window !== 'undefined') {
-  window.__fwHwSpikeSet = setHwSpikeSettings;
-  window.__fwHwSpikeGet = getHwSpikeSettings;
-  window.__fwHwSpikeDump = hwSpikeDump;
-  window.__fwHwSpikeClear = hwSpikeClear;
-  window.__fwHwSpikeHelp = printSpikeHelp;
+function prodSpikeDevOnly(): void {
+  console.info(
+    '[handwriting] Spike debug commands are dev-only (npm run dev). Production uses stable polyline rendering.',
+  );
+}
+
+if (typeof window !== 'undefined') {
+  if (isDevBuild()) {
+    window.__fwHwSpikeSet = setHwSpikeSettings;
+    window.__fwHwSpikeGet = getHwSpikeSettings;
+    window.__fwHwSpikeDump = hwSpikeDump;
+    window.__fwHwSpikeClear = hwSpikeClear;
+    window.__fwHwSpikeHelp = printSpikeHelp;
+    // #region agent log
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7fb648' },
+      body: JSON.stringify({
+        sessionId: '7fb648',
+        hypothesisId: 'H-globals',
+        location: 'handwritingSpikeDebug.ts:init',
+        message: 'spike globals registered (dev)',
+        data: { dev: true },
+        timestamp: Date.now(),
+        runId: 'post-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+  } else {
+    const prodDefaults = (): HwSpikeSettings => ({ ...DEFAULTS });
+    window.__fwHwSpikeSet = () => {
+      prodSpikeDevOnly();
+      return prodDefaults();
+    };
+    window.__fwHwSpikeGet = prodDefaults;
+    window.__fwHwSpikeDump = () => {
+      prodSpikeDevOnly();
+      return [];
+    };
+    window.__fwHwSpikeClear = prodSpikeDevOnly;
+    window.__fwHwSpikeHelp = prodSpikeDevOnly;
+    // #region agent log
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7fb648' },
+      body: JSON.stringify({
+        sessionId: '7fb648',
+        hypothesisId: 'H-globals',
+        location: 'handwritingSpikeDebug.ts:init',
+        message: 'spike globals registered (prod noop)',
+        data: { dev: false },
+        timestamp: Date.now(),
+        runId: 'post-fix',
+      }),
+    }).catch(() => {});
+    // #endregion
+  }
 }

@@ -15,8 +15,12 @@ declare global {
   }
 }
 
-function isDevBuild(): boolean {
+export function isHandwritingDevBuild(): boolean {
   return typeof import.meta !== 'undefined' && !!import.meta.env?.DEV;
+}
+
+function isDevBuild(): boolean {
+  return isHandwritingDevBuild();
 }
 
 export function getHwRenderMode(): HwRenderMode {
@@ -32,8 +36,16 @@ export function setHwRenderMode(mode: HwRenderMode): void {
   }
 }
 
-if (isDevBuild() && typeof window !== 'undefined') {
-  window.__fwHwSetRenderMode = setHwRenderMode;
+if (typeof window !== 'undefined') {
+  if (isDevBuild()) {
+    window.__fwHwSetRenderMode = setHwRenderMode;
+  } else {
+    window.__fwHwSetRenderMode = () => {
+      console.info(
+        '[handwriting] Render mode toggle is dev-only. Production always uses polyline.',
+      );
+    };
+  }
 }
 
 declare global {

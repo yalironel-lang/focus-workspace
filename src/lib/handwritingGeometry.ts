@@ -4,7 +4,7 @@ import {
   pickPointerEventsForSample,
   recordPointerSamplePick,
 } from './handwritingPointerSamples';
-import { getHwRenderMode } from './handwritingRenderMode';
+import { getHwRenderMode, isHandwritingDevBuild } from './handwritingRenderMode';
 import {
   getMinPointDistNorm,
   getHwSpikeSettings,
@@ -19,15 +19,21 @@ let inkDevLoad: Promise<typeof import('./handwritingInkDev')> | null = null;
 
 /** Preload dev ink renderer when toggling A/B mode (dev only). */
 export function preloadInkDevRenderer(): Promise<void> {
-  if (!import.meta.env.DEV) return Promise.resolve();
+  if (!isHandwritingDevBuild()) return Promise.resolve();
   if (inkDevModule) return Promise.resolve();
   if (!inkDevLoad) {
-    inkDevLoad = import('./handwritingInkDev').then(m => {
-      inkDevModule = m;
-      return m;
-    });
+    inkDevLoad = import('./handwritingInkDev')
+      .then(m => {
+        inkDevModule = m;
+        return m;
+      })
+      .catch(err => {
+        inkDevLoad = null;
+        console.warn('[handwriting] perfect-freehand load failed; using polyline.', err);
+        throw err;
+      });
   }
-  return inkDevLoad.then(() => undefined);
+  return inkDevLoad.then(() => undefined).catch(() => undefined);
 }
 
 function drawPenStrokePolyline(
@@ -98,11 +104,17 @@ function drawStroke(
     return;
   }
 
-  const renderMode =
-    import.meta.env.DEV && getHwSpikeSettings().render === 'ink' ? 'ink' : getHwRenderMode();
-  if (import.meta.env.DEV && renderMode === 'ink' && inkDevModule) {
-    inkDevModule.drawPenStrokeInkDev(ctx, stroke, canvasW, canvasH, refWidth, opts);
-    return;
+  if (isHandwritingDevBuild()) {
+    const renderMode =
+      getHwSpikeSettings().render === 'ink' ? 'ink' : getHwRenderMode();
+    if (renderMode === 'ink' && inkDevModule) {
+      try {
+        inkDevModule.drawPenStrokeInkDev(ctx, stroke, canvasW, canvasH, refWidth, opts);
+        return;
+      } catch (err) {
+        console.warn('[handwriting] ink render failed; falling back to polyline.', err);
+      }
+    }
   }
 
   drawPenStrokePolyline(ctx, stroke, canvasW, canvasH, refWidth);
@@ -184,11 +196,11 @@ export function appendPoint(
     const dy = p.y - last.y;
     const minDist = getMinPointDistNorm();
     if (dx * dx + dy * dy < minDist * minDist) {
-      if (import.meta.env.DEV) recordPointDropped();
+      if (isHandwritingDevBuild()) recordPointDropped();
       return points;
     }
   }
-  if (import.meta.env.DEV) recordPointAppended();
+  if (isHandwritingDevBuild()) recordPointAppended();
   return [...points, p];
 }
 
@@ -258,7 +270,7 @@ export function strokesAfterEraser(
 }
 
 function effectivePressure(p: HandwritingPoint | undefined, fallback = 0.5): number {
-  if (import.meta.env.DEV && useFixedPressure()) return 0.5;
+  if (isHandwritingDevBuild() && useFixedPressure()) return 0.5;
   if (p?.pressure !== undefined && p.pressure > 0) return p.pressure;
   return fallback;
 }
@@ -312,7 +324,7 @@ export function logPointerCoordinateSample(
   },
   phase: 'down' | 'move',
 ): void {
-  if (!import.meta.env.DEV) return;
+  if (!isHandwritingDevBuild()) return;
   if (phase === 'move') {
     moveLogCounter += 1;
     if (moveLogCounter % 12 !== 0) return;
@@ -347,7 +359,10 @@ export function logPointerCoordinateSample(
 export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
   const canvas = e.currentTarget as HTMLCanvasElement;
   logPointerCoordinateSample(canvas, e, 'move');
-  const pick = pickPointerEventsForSample(e);
+  const allowCoalesced = isHandwritingDevBuild()
+    ? getHwSpikeSettings().coalesced !== 'off'
+    : !isIosLike();
+  const pick = pickPointerEventsForSample(e, { allowCoalesced });
   recordPointerSamplePick(pick);
 
   const out: HandwritingPoint[] = [];

@@ -3,7 +3,7 @@
  */
 
 import { hwDiagLog } from './handwritingDiagnostics';
-import { getHwSpikeSettings, hwSpikeLog, recordMovePick } from './handwritingSpikeDebug';
+import { hwSpikeLog, recordMovePick } from './handwritingSpikeDebug';
 
 const MAX_COALESCED_BATCH = 64;
 /** Reject coalesced samples farther than this from the parent pointermove (px). */
@@ -47,11 +47,19 @@ export type PointerSamplePickResult = {
   fallbackReason?: string;
 };
 
+export type PointerSamplePickOptions = {
+  /** When false, always use the parent pointermove only (stable production / dev A/B off). */
+  allowCoalesced?: boolean;
+};
+
 /**
  * Pick pointer events for one move sample: coalesced when safe, else parent only.
  */
-export function pickPointerEventsForSample(e: PointerEvent): PointerSamplePickResult {
-  if (getHwSpikeSettings().coalesced === 'off') {
+export function pickPointerEventsForSample(
+  e: PointerEvent,
+  opts?: PointerSamplePickOptions,
+): PointerSamplePickResult {
+  if (opts?.allowCoalesced === false) {
     const off: PointerSamplePickResult = {
       events: [e],
       usedCoalesced: false,
@@ -75,7 +83,13 @@ export function pickPointerEventsForSample(e: PointerEvent): PointerSamplePickRe
   try {
     batch = e.getCoalescedEvents();
   } catch {
-    return { events: [e], usedCoalesced: false, fallbackReason: 'getCoalescedEvents threw' };
+    const threw: PointerSamplePickResult = {
+      events: [e],
+      usedCoalesced: false,
+      fallbackReason: 'getCoalescedEvents threw',
+    };
+    recordMovePick(1, false, 'getCoalescedEvents threw');
+    return threw;
   }
 
   if (!batch.length) {
