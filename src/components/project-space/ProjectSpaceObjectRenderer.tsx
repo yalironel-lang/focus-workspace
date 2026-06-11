@@ -293,6 +293,7 @@ function FreeSpaceMathNotebookRenderer({
               ? (editing) => onNotebookEditingChange(object.id, editing)
               : undefined
           }
+          compositionChromeSuppressed={studyDeskQuiet}
         />
       </div>
     </div>

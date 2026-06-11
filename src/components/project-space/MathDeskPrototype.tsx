@@ -411,6 +411,7 @@ export function MathDeskPrototype({
               studyFocusQuestionNumber={studyFocusQuestionNumber}
               studyFocusQuestionToken={studyFocusQuestionToken}
               onActiveQuestionNumber={onStudySessionActiveQuestionNumber}
+              compositionChromeSuppressed={studyDeskQuiet}
             />
           </div>
 

@@ -23,7 +23,13 @@ import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookCon
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
 import { StepBlockRenderer } from '../notebook/StepBlockRenderer';
-import { MathInputToolbar } from '../notebook/MathInputToolbar';
+import {
+  CompositionCoachSlot,
+  CompositionGutter,
+  CompositionOverlays,
+  useCompositionChromeState,
+} from '../notebook/composition/CompositionChrome';
+import { isMathCapableBlockKind } from '../../lib/compositionStructureCatalog';
 import { MathRichText } from '../notebook/MathRichText';
 import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
 import { MathStudyInsight } from '../notebook/MathStudyInsight';
@@ -875,15 +881,23 @@ function EditableLine({
 function NotebookBodyScroll({
   enabled,
   scrollRef,
+  hostRef,
+  onHostReady,
   children,
 }: {
   enabled: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
+  hostRef?: RefObject<HTMLDivElement | null>;
+  onHostReady?: (el: HTMLDivElement | null) => void;
   children: React.ReactNode;
 }) {
   if (!enabled) return <Fragment>{children}</Fragment>;
   return (
     <div
+      ref={el => {
+        if (hostRef) hostRef.current = el;
+        onHostReady?.(el);
+      }}
       style={{
         flex: 1,
         minHeight: 0,
@@ -985,33 +999,6 @@ function MathNotebookQuickRefStrip({ prominent }: { prominent?: boolean }) {
   );
 }
 
-function MathNotebookStartGuide() {
-  return (
-    <div
-      style={{
-        margin: '0 0 18px',
-        padding: '14px 16px',
-        borderRadius: 12,
-        border: '1px solid rgba(129,140,248,0.22)',
-        background: 'linear-gradient(135deg, rgba(129,140,248,0.08), rgba(99,102,241,0.04))',
-      }}
-    >
-      <p style={{
-        margin: '0 0 8px', fontSize: 11, fontWeight: 650, letterSpacing: '0.1em',
-        textTransform: 'uppercase', color: 'rgba(129,140,248,0.75)',
-      }}>
-        Math in this notebook
-      </p>
-      <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'rgba(255,248,235,0.62)' }}>
-        Use the symbol bar above, or type <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>/</kbd> for
-        slash commands. Start a derivation with <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>=&gt;</kbd>,
-        add a formula with <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>/math</kbd>, and press Tab
-        after <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>int</kbd> or <kbd style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>lim</kbd> for templates.
-      </p>
-    </div>
-  );
-}
-
 function NotebookModeSelect({
   mode,
   paperStyle,
@@ -1089,6 +1076,8 @@ interface Props {
   studyFocusQuestionToken?: number;
   /** Study session: report which question owns the focused block. */
   onActiveQuestionNumber?: (questionNumber: number | null) => void;
+  /** Exam / reading focus: hide composition chrome (chip, bubble, gutter). */
+  compositionChromeSuppressed?: boolean;
 }
 
 function blocksToExamRefs(blocks: Block[]): ExamQuestionBlockRef[] {
@@ -1129,6 +1118,7 @@ export function ProjectNotebookBlock({
   studyFocusQuestionNumber = null,
   studyFocusQuestionToken = 0,
   onActiveQuestionNumber,
+  compositionChromeSuppressed = false,
 }: Props) {
   const isDeskPresentation = presentation === 'desk';
   const deskFormattingV1 = useDeskFormattingV1();
@@ -1239,7 +1229,6 @@ export function ProjectNotebookBlock({
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
-  const [mathToolbarHovered, setMathToolbarHovered] = useState(false);
   const [deskChecks, setDeskChecks] = useState<Record<string, DeskCheckRowState>>({});
   const deskChecksRef = useRef(deskChecks);
   deskChecksRef.current = deskChecks;
@@ -1247,6 +1236,13 @@ export function ProjectNotebookBlock({
   const shellRef = useRef<HTMLDivElement>(null);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const focusEditorRootRef = useRef<HTMLDivElement>(null);
+  const writingColumnRef = useRef<HTMLDivElement>(null);
+  const focusWritingColumnRef = useRef<HTMLDivElement>(null);
+  const notebookBodyHostRef = useRef<HTMLDivElement>(null);
+  const [writingColumnEl, setWritingColumnEl] = useState<HTMLElement | null>(null);
+  const [focusWritingColumnEl, setFocusWritingColumnEl] = useState<HTMLElement | null>(null);
+  const [notebookBodyHostEl, setNotebookBodyHostEl] = useState<HTMLElement | null>(null);
+  const lastFocusedMathBlockIdRef = useRef<string | null>(null);
   const notebookBodyScrollRef = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   blocksRef.current = blocks;
@@ -1702,6 +1698,15 @@ export function ProjectNotebookBlock({
   const isPaperSurface = notebookSurface === 'paper';
   const notebookMode = content.notebookMode ?? 'normal';
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
+  const compositionActive =
+    isMathNotebook && editorMode === 'edit' && !compositionChromeSuppressed;
+  const compositionUiVisible = useMemo(() => {
+    if (!compositionActive) return false;
+    if (!surfaceFocusBlockId) return true;
+    const kind = blocks.find(b => b.id === surfaceFocusBlockId)?.kind;
+    return kind !== 'handwriting';
+  }, [compositionActive, surfaceFocusBlockId, blocks]);
+  const compositionChrome = useCompositionChromeState(notebookMode);
   const mathDiscoverabilityLabel = getMathNotebookDiscoverabilityLabel(notebookMode);
   const showMathStartGuide =
     !isDeskPresentation &&
@@ -1726,10 +1731,6 @@ export function ProjectNotebookBlock({
     );
     return p?.id ?? null;
   }, [displayBlocks, isDeskPresentation]);
-
-  useEffect(() => {
-    if (isDeskPresentation && editorMode !== 'edit') setEditorMode('edit');
-  }, [isDeskPresentation, editorMode]);
 
   const runDeskCheckForBlockId = useCallback((blockId: string) => {
     const blk = blocksRef.current.find(b => b.id === blockId);
@@ -1911,9 +1912,14 @@ export function ProjectNotebookBlock({
       return;
     }
     const wrap = t?.closest?.('[data-nb-surface-block]') as HTMLElement | null;
-    const bid = wrap?.dataset?.blockId;
+    const editable = t?.closest?.('[data-editable-id]') as HTMLElement | null;
+    const bid = wrap?.dataset?.blockId ?? editable?.getAttribute('data-editable-id');
     if (bid) {
       setSurfaceFocusBlockId(bid);
+      const blk = blocksRef.current.find(b => b.id === bid);
+      if (blk && isMathCapableBlockKind(blk.kind)) {
+        lastFocusedMathBlockIdRef.current = bid;
+      }
     }
   }, []);
 
@@ -1926,6 +1932,12 @@ export function ProjectNotebookBlock({
         if (rt.closest('[data-nb-typo-rail]')) return;
         if (rt.closest('[data-math-input-toolbar]')) return;
         if (rt.closest('.desk-math-palette')) return;
+        if (rt.closest('[data-composition-bubble]')) return;
+        if (rt.closest('[data-composition-more]')) return;
+        if (rt.closest('[data-composition-gutter]')) return;
+        if (rt.closest('[data-composition-gutter-menu]')) return;
+        if (rt.closest('[data-composition-sheet]')) return;
+        if (rt.closest('[data-composition-chip]')) return;
       }
       // Keep pendingCaretRef — popover unmount / toolbar focus can race caret restore after insert.
       if (context === 'free-space') {
@@ -3111,8 +3123,8 @@ export function ProjectNotebookBlock({
   );
 
   const insertMathSnippet = useCallback(
-    (snippet: string) => {
-      const blockId = surfaceFocusBlockId;
+    (snippet: string, blockIdOverride?: string | null) => {
+      const blockId = blockIdOverride ?? surfaceFocusBlockId ?? lastFocusedMathBlockIdRef.current;
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
       if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') return;
@@ -3134,10 +3146,10 @@ export function ProjectNotebookBlock({
   );
 
   const applyMathTemplate = useCallback(
-    (templateId: MathTemplateId, values: Record<string, string>) => {
+    (templateId: MathTemplateId, values: Record<string, string>, blockIdOverride?: string | null) => {
       const template = getMathTemplate(templateId);
       if (!template) return;
-      const blockId = surfaceFocusBlockId;
+      const blockId = blockIdOverride ?? surfaceFocusBlockId ?? lastFocusedMathBlockIdRef.current;
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
       if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') return;
@@ -3147,10 +3159,91 @@ export function ProjectNotebookBlock({
         scheduleMathLineFocus(blockId, latex.length);
         return;
       }
-      insertMathSnippet(template.buildSimple(values));
+      insertMathSnippet(template.buildSimple(values), blockId);
     },
     [insertMathSnippet, surfaceFocusBlockId, updateBlockText, scheduleMathLineFocus],
   );
+
+  const insertBlockAfter = useCallback(
+    (afterIndex: number, newBlock: Block) => {
+      const b = blocksRef.current;
+      const next = [...b.slice(0, afterIndex + 1), newBlock, ...b.slice(afterIndex + 1)];
+      persist(next);
+      if (newBlock.kind !== 'handwriting' && 'text' in newBlock) {
+        pendingCaretRef.current = { id: newBlock.id, offset: 0, scroll: 'force' };
+        setSurfaceFocusBlockId(newBlock.id);
+        lastFocusedMathBlockIdRef.current = newBlock.id;
+      }
+      if (newBlock.kind === 'handwriting' && objectId) {
+        void hydrateHandwritingBlocks(objectId, [newBlock.key]);
+      }
+    },
+    [persist, objectId],
+  );
+
+  const handleGutterStep = useCallback(
+    (afterIndex: number) => {
+      const fresh: Block = { id: newBlockId(), kind: 'step', text: '' };
+      insertBlockAfter(afterIndex, fresh);
+      compositionChrome.markCompositionSuccess();
+    },
+    [insertBlockAfter, compositionChrome],
+  );
+
+  const handleGutterEquation = useCallback(
+    (afterIndex: number) => {
+      const fresh: Block = { id: newBlockId(), kind: 'math', text: '' };
+      insertBlockAfter(afterIndex, fresh);
+      compositionChrome.markCompositionSuccess();
+    },
+    [insertBlockAfter, compositionChrome],
+  );
+
+  const handleGutterHandwriting = useCallback(
+    (afterIndex: number) => {
+      const hwKey = newHandwritingKey();
+      const fresh: Block = { id: newBlockId(), kind: 'handwriting', key: hwKey };
+      insertBlockAfter(afterIndex, fresh);
+      compositionChrome.markCompositionSuccess();
+    },
+    [insertBlockAfter, compositionChrome],
+  );
+
+  const handleCompositionEquationBlock = useCallback(
+    (afterIndex: number) => {
+      handleGutterEquation(afterIndex);
+    },
+    [handleGutterEquation],
+  );
+
+  const findFirstEditableBlockId = useCallback((): string | null => {
+    const b = blocksRef.current;
+    const hit = b.find(blk => isMathCapableBlockKind(blk.kind));
+    return hit?.id ?? null;
+  }, []);
+
+  const handleCompositionFocusBlock = useCallback(
+    (blockId: string) => {
+      const blk = blocksRef.current.find(b => b.id === blockId);
+      if (!blk || !isMathCapableBlockKind(blk.kind)) return;
+      setSurfaceFocusBlockId(blockId);
+      lastFocusedMathBlockIdRef.current = blockId;
+      pendingCaretRef.current = { id: blockId, offset: 0, scroll: 'ifNeeded' };
+      requestAnimationFrame(() => {
+        const root = getEditorRoot();
+        const el = root?.querySelector<HTMLElement>(`[data-editable-id="${blockId}"]`);
+        el?.focus({ preventScroll: true });
+      });
+    },
+    [getEditorRoot],
+  );
+
+  const blockIndexById = useCallback((id: string) => blocksRef.current.findIndex(b => b.id === id), []);
+
+  const focusedBlockKind = useMemo(() => {
+    if (!surfaceFocusBlockId) return null;
+    return blocks.find(b => b.id === surfaceFocusBlockId)?.kind ?? null;
+  }, [blocks, surfaceFocusBlockId]);
 
   const copyNotebook = useCallback(
     async (format: 'markdown' | 'plain') => {
@@ -4490,7 +4583,74 @@ export function ProjectNotebookBlock({
         <MathNotebookQuickRefStrip prominent={showMathStartGuide} />
       ) : null}
 
-      <NotebookBodyScroll enabled={context === 'free-space'} scrollRef={notebookBodyScrollRef}>
+      <NotebookBodyScroll
+        enabled={context === 'free-space'}
+        scrollRef={notebookBodyScrollRef}
+        hostRef={notebookBodyHostRef}
+        onHostReady={setNotebookBodyHostEl}
+      >
+      {isDeskPresentation && !isFocusModeOpen ? (
+        <div
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 6,
+            padding: '2px 8px 4px',
+            borderBottom: '1px solid rgba(255,255,255,0.04)',
+          }}
+        >
+          {editorMode === 'edit' ? (
+            <button
+              type="button"
+              title="Focus mode"
+              onClick={() => {
+                void (async () => {
+                  await flushHandwritingBeforeTransition();
+                  setIsFocusModeOpen(true);
+                })();
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 4,
+                borderRadius: 4,
+                color: 'rgba(255,248,235,0.45)',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
+                <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                if (editorMode === 'edit') {
+                  await flushHandwritingBeforeTransition();
+                }
+                setEditorMode(editorMode === 'edit' ? 'preview' : 'edit');
+              })();
+            }}
+            title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '3px 5px',
+              borderRadius: 4,
+              color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+              fontSize: 12,
+              fontWeight: 500,
+            }}
+          >
+            {editorMode === 'edit' ? 'Preview' : 'Edit'}
+          </button>
+        </div>
+      ) : null}
       {deskFormattingActive &&
       selectionToolbar &&
       context === 'free-space' &&
@@ -4549,62 +4709,47 @@ export function ProjectNotebookBlock({
               : {}),
           }}
         >
-          <div style={writingColumnStyle}>
-          {isMathNotebook ? (
-            <>
-              {!isDeskPresentation ? <MathStudyInsight body={content.body ?? ''} tokens={tokens} /> : null}
-              <div
-                className={
-                  isDeskPresentation
-                    ? `desk-math-toolbar-zone${
-                        surfaceFocusBlockId ? ' desk-math-toolbar-zone--visible desk-math-toolbar-zone--pinned' : ''
-                      }`
-                    : undefined
-                }
-                style={{
-                  opacity: isDeskPresentation
-                    ? surfaceFocusBlockId
-                      ? 1
-                      : 0
-                    : notebookMode === 'math-workspace'
-                      ? mathToolbarHovered
-                        ? 1
-                        : showMathStartGuide
-                          ? 0.92
-                          : 0.15
-                      : 1,
-                  maxHeight: isDeskPresentation ? (surfaceFocusBlockId ? 36 : 0) : 120,
-                  overflow: 'hidden',
-                  pointerEvents: isDeskPresentation && !surfaceFocusBlockId ? 'none' : 'auto',
-                  transition: isDeskPresentation
-                    ? 'opacity 0.18s ease, max-height 0.2s ease, margin 0.18s ease'
-                    : 'opacity 0.2s ease, max-height 0.2s ease',
-                  ...(isDeskPresentation ? { marginBottom: surfaceFocusBlockId ? 1 : 0 } : {}),
-                }}
-                onMouseEnter={() => {
-                  if (!isDeskPresentation) setMathToolbarHovered(true);
-                }}
-                onMouseLeave={() => {
-                  if (!isDeskPresentation) setMathToolbarHovered(false);
-                }}
-              >
-                <MathInputToolbar
-                  variant={isDeskPresentation ? 'desk-paper' : 'spatial'}
-                  tokens={tokens}
-                  textColor={ink.headline}
-                  onInsertSymbol={insertMathSnippet}
-                  onApplyTemplate={applyMathTemplate}
-                />
-              </div>
-              {showMathStartGuide ? <MathNotebookStartGuide /> : null}
-            </>
+          <div
+            ref={el => {
+              writingColumnRef.current = el;
+              setWritingColumnEl(el);
+            }}
+            style={{ ...writingColumnStyle, position: 'relative' }}
+          >
+          {isMathNotebook && !isDeskPresentation ? (
+            <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
+          ) : null}
+          {compositionUiVisible ? (
+            <CompositionCoachSlot
+              tokens={tokens}
+              showStarterCoach={showMathStartGuide}
+              coachDismissed={compositionChrome.coachState.coachDismissed}
+              onDismiss={compositionChrome.dismissCoach}
+            />
           ) : null}
           {displayBlocks.map((block, displayIndex) => {
             const index = blocks.findIndex(b => b.id === block.id);
             const listKey = blockListKey(block, index >= 0 ? index : displayIndex);
             const prevKind = index > 0 ? blocks[index - 1]!.kind : undefined;
+            const gutterBefore =
+              compositionUiVisible && index > 0 ? (
+                <CompositionGutter
+                  key={`gutter-${listKey}`}
+                  tokens={tokens}
+                  afterIndex={index - 1}
+                  onGutterStep={handleGutterStep}
+                  onGutterEquation={handleGutterEquation}
+                  onGutterHandwriting={handleGutterHandwriting}
+                />
+              ) : null;
+            const row = (el: React.ReactNode) => (
+              <Fragment key={`row-${listKey}`}>
+                {gutterBefore}
+                {el}
+              </Fragment>
+            );
             if (block.kind === 'divider') {
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4666,7 +4811,7 @@ export function ProjectNotebookBlock({
 
             if (block.kind === 'title') {
               const titleMarginTop = index === 0 ? 0 : typeScale.s1;
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4708,7 +4853,7 @@ export function ProjectNotebookBlock({
               const secTop = isDeskPresentation
                 ? (index === 0 ? 6 : prevKind === 'section' ? 8 : 10)
                 : (index === 0 ? typeScale.s5 : prevKind === 'title' ? typeScale.s3 : prevKind === 'section' ? typeScale.s4 : typeScale.s2 + 4);
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4756,7 +4901,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'ordered') {
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4820,7 +4965,7 @@ export function ProjectNotebookBlock({
               const bulletIndentPx = block.depth * 20;
               const bulletGlyph = block.depth === 0 ? '•' : block.depth === 1 ? '◦' : '▸';
               const prevIsBullet = prevKind === 'bullet';
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4882,7 +5027,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'task') {
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -4985,7 +5130,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'quote') {
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -5040,7 +5185,7 @@ export function ProjectNotebookBlock({
               }
               const isFirstStep = stepIndex === 1;
               const isLastStep = index >= blocks.length - 1 || blocks[index + 1]?.kind !== 'step';
-              return wrapDeskCheck(
+              return row(wrapDeskCheck(
                 block,
                 <StepBlockRenderer
                   key={listKey}
@@ -5060,12 +5205,12 @@ export function ProjectNotebookBlock({
                   onAfterInput={(el) => onEditableAfterInput(block.id, el)}
                   onSelectionChange={handleRichSelectionChange}
                 />,
-              );
+              ));
             }
 
             if (block.kind === 'callout') {
               const ct = calloutToneTokens(block.tone);
-              return (
+              return row(
                 <div
                   key={listKey}
                   data-nb-surface-block
@@ -5138,7 +5283,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'math') {
-              return (
+              return row(
                 <EquationBlockEditor
                   key={listKey}
                   blockId={block.id}
@@ -5162,7 +5307,7 @@ export function ProjectNotebookBlock({
             }
 
             if (block.kind === 'handwriting') {
-              return (
+              return row(
                 <HandwritingBlock
                   key={listKey}
                   blockId={block.id}
@@ -5183,7 +5328,7 @@ export function ProjectNotebookBlock({
 
             if (block.kind === 'image-ref') {
               const src = nbImageGet(block.key);
-              return (
+              return row(
                 <div key={listKey} style={{ margin: '20px 0', userSelect: 'none' }}>
                   {src ? (
                     <div
@@ -5253,7 +5398,7 @@ export function ProjectNotebookBlock({
                     : paraMuted
                       ? 'Softer emphasis…'
                       : 'Write…';
-            return wrapDeskCheck(
+            return row(wrapDeskCheck(
               block,
               <div
                 key={listKey}
@@ -5337,7 +5482,7 @@ export function ProjectNotebookBlock({
                   />
                 )}
               </div>,
-            );
+            ));
           })}
           {isDeskPresentation ? (
             <div aria-hidden style={{ flex: 1, minHeight: 'min(48vh, 420px)' }} />
@@ -5914,6 +6059,8 @@ export function ProjectNotebookBlock({
             className="nb-document-page"
             data-nb-surface={notebookSurface}
             onKeyDownCapture={handleEditorKeyCapture}
+            onFocusCapture={handleSurfaceFocusIn}
+            onBlur={handleSurfaceBlur}
             style={
               isPaperSurface
                 ? {
@@ -6070,7 +6217,15 @@ export function ProjectNotebookBlock({
                 marginBottom: 20,
               }}>{mathDiscoverabilityLabel}</p>
             ) : null}
-            {renderFocusModeBlocks()}
+            <div
+              ref={el => {
+                focusWritingColumnRef.current = el;
+                setFocusWritingColumnEl(el);
+              }}
+              style={{ position: 'relative' }}
+            >
+              {renderFocusModeBlocks()}
+            </div>
             <div style={{
               marginTop: 48, paddingTop: 16,
               borderTop: `1px solid ${isPaperSurface ? 'rgba(28,25,23,0.08)' : 'rgba(255,255,255,0.05)'}`,
@@ -6089,6 +6244,40 @@ export function ProjectNotebookBlock({
         </div>
       </>,
       document.body,
+    ) : null}
+    {compositionUiVisible && editorMode === 'edit' ? (
+      <CompositionOverlays
+        props={{
+          tokens,
+          notebookMode,
+          active: compositionUiVisible,
+          editorMode,
+          editorRoot: getEditorRoot(),
+          writingColumnEl: isFocusModeOpen ? focusWritingColumnEl : writingColumnEl,
+          chipAnchorEl: isFocusModeOpen ? null : notebookBodyHostEl,
+          surfaceFocusBlockId,
+          lastFocusedMathBlockId: lastFocusedMathBlockIdRef.current,
+          focusedBlockKind,
+          showStarterCoach: showMathStartGuide,
+          onInsertSnippet: insertMathSnippet,
+          onApplyTemplate: applyMathTemplate,
+          onInsertEquationBlock: handleCompositionEquationBlock,
+          onGutterStep: handleGutterStep,
+          onGutterEquation: handleGutterEquation,
+          onGutterHandwriting: handleGutterHandwriting,
+          onFocusBlock: handleCompositionFocusBlock,
+          onFindFirstEditableBlock: findFirstEditableBlockId,
+          blockIndexById,
+          onCompositionSuccess: compositionChrome.markCompositionSuccess,
+        }}
+        favoriteId={compositionChrome.favoriteId}
+        pinFavorite={compositionChrome.pinFavorite}
+        recents={compositionChrome.recents}
+        recordInsert={compositionChrome.recordInsert}
+        chipOpacity={compositionChrome.chipOpacity}
+        sheetOpen={compositionChrome.sheetOpen}
+        setSheetOpen={compositionChrome.setSheetOpen}
+      />
     ) : null}
     {expandedImage !== null && typeof document !== 'undefined' && createPortal(
       <div

@@ -8,3 +8,5 @@ export const Z_UNIVERSAL_VIEW_PANEL = 611;
 export const Z_FAB = 30;
 export const Z_ADD_PALETTE = 70;
 export const Z_MODAL = 100;
+/** Study composition chip, bubble, gutter menus — above study shell, below universal view. */
+export const Z_COMPOSITION_CHROME = 605;
