@@ -30,7 +30,6 @@ import {
   isInkPointer,
   logPointerCoordinateSample,
   pointerToNormalized,
-  preloadInkDevRenderer,
   readVisualViewportMetrics,
   strokeCornerSharpness,
   strokesAfterEraser,
@@ -413,11 +412,7 @@ export function HandwritingBlock({
       setSpikeSettings(s);
       setDevRenderMode(s.render);
       setHwRenderMode(s.render);
-      if (s.render === 'ink') {
-        void preloadInkDevRenderer().then(() => schedulePaint());
-      } else {
-        schedulePaint();
-      }
+      schedulePaint();
     };
     syncFromSpike();
     const onSpike = () => syncFromSpike();

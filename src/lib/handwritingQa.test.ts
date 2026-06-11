@@ -10,6 +10,7 @@ import {
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
 import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
+import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { makeHandwritingStorageKey } from './notebookHandwritingStore';
 
@@ -94,5 +95,31 @@ const cssW = 400;
 const canvasWidth = cssW * dpr;
 const logicalW = canvasWidth / dpr;
 assert(logicalW === cssW, 'DPR logical width equals CSS width');
+
+// mathInk production preset
+assert(MATH_INK_PRESET.smoothing === 0.1, 'mathInk smoothing');
+assert(MATH_INK_PRESET.streamline === 0.08, 'mathInk streamline');
+assert(MATH_INK_PRESET.thinning === 0.48, 'mathInk thinning');
+assert(MATH_INK_PRESET.sizeMultiplier === 1.08, 'mathInk size multiplier');
+assert(
+  strokeHasRealPressure({
+    id: 'st-p',
+    tool: 'pen',
+    color: '#000',
+    width: 2,
+    points: [{ x: 0, y: 0, pressure: 0.4 }],
+  }),
+  'strokeHasRealPressure detects pencil',
+);
+assert(
+  !strokeHasRealPressure({
+    id: 'st-m',
+    tool: 'pen',
+    color: '#000',
+    width: 2,
+    points: [{ x: 0, y: 0 }],
+  }),
+  'strokeHasRealPressure false without pressure',
+);
 
 console.log('handwritingQa.test.ts: all checks passed');

@@ -4,7 +4,8 @@ import {
   pickPointerEventsForSample,
   recordPointerSamplePick,
 } from './handwritingPointerSamples';
-import { getHwRenderMode, isHandwritingDevBuild } from './handwritingRenderMode';
+import { drawPenStrokeMathInk } from './handwritingInk';
+import { isHandwritingDevBuild } from './handwritingRenderMode';
 import {
   getMinPointDistNorm,
   getHwSpikeSettings,
@@ -14,26 +15,11 @@ import {
   useFixedPressure,
 } from './handwritingSpikeDebug';
 
-let inkDevModule: typeof import('./handwritingInkDev') | null = null;
-let inkDevLoad: Promise<typeof import('./handwritingInkDev')> | null = null;
+let inkModuleFailed = false;
 
-/** Preload dev ink renderer when toggling A/B mode (dev only). */
-export function preloadInkDevRenderer(): Promise<void> {
-  if (!isHandwritingDevBuild()) return Promise.resolve();
-  if (inkDevModule) return Promise.resolve();
-  if (!inkDevLoad) {
-    inkDevLoad = import('./handwritingInkDev')
-      .then(m => {
-        inkDevModule = m;
-        return m;
-      })
-      .catch(err => {
-        inkDevLoad = null;
-        console.warn('[handwriting] perfect-freehand load failed; using polyline.', err);
-        throw err;
-      });
-  }
-  return inkDevLoad.then(() => undefined).catch(() => undefined);
+/** Optional preload for tests / dev; production uses static mathInk import. */
+export function preloadInkRenderer(): Promise<void> {
+  return Promise.resolve();
 }
 
 function drawPenStrokePolyline(
@@ -104,16 +90,16 @@ function drawStroke(
     return;
   }
 
-  if (isHandwritingDevBuild()) {
-    const renderMode =
-      getHwSpikeSettings().render === 'ink' ? 'ink' : getHwRenderMode();
-    if (renderMode === 'ink' && inkDevModule) {
-      try {
-        inkDevModule.drawPenStrokeInkDev(ctx, stroke, canvasW, canvasH, refWidth, opts);
-        return;
-      } catch (err) {
-        console.warn('[handwriting] ink render failed; falling back to polyline.', err);
-      }
+  const devForcePolyline =
+    isHandwritingDevBuild() && getHwSpikeSettings().render === 'polyline';
+
+  if (!devForcePolyline && !inkModuleFailed) {
+    try {
+      drawPenStrokeMathInk(ctx, stroke, canvasW, canvasH, refWidth, opts);
+      return;
+    } catch (err) {
+      console.warn('[handwriting] mathInk render failed; falling back to polyline.', err);
+      inkModuleFailed = true;
     }
   }
 

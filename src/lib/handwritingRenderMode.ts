@@ -1,10 +1,10 @@
 /**
- * Dev-only A/B toggle for handwriting renderers.
- * Production always uses polyline.
+ * Dev-only A/B toggle to compare polyline vs mathInk.
+ * Production always uses mathInk (perfect-freehand) for pen strokes.
  *
  * Safari console (dev build):
- *   window.__fwHwRenderMode = 'polyline'  // default
- *   window.__fwHwRenderMode = 'ink'       // perfect-freehand (dev spike)
+ *   window.__fwHwRenderMode = 'polyline'  // force legacy polyline
+ *   window.__fwHwRenderMode = 'ink'       // mathInk (production default)
  */
 
 export type HwRenderMode = 'polyline' | 'ink';
@@ -24,8 +24,8 @@ function isDevBuild(): boolean {
 }
 
 export function getHwRenderMode(): HwRenderMode {
-  if (!isDevBuild()) return 'polyline';
-  return window.__fwHwRenderMode === 'ink' ? 'ink' : 'polyline';
+  if (!isDevBuild()) return 'ink';
+  return window.__fwHwRenderMode === 'polyline' ? 'polyline' : 'ink';
 }
 
 export function setHwRenderMode(mode: HwRenderMode): void {
@@ -42,7 +42,7 @@ if (typeof window !== 'undefined') {
   } else {
     window.__fwHwSetRenderMode = () => {
       console.info(
-        '[handwriting] Render mode toggle is dev-only. Production always uses polyline.',
+        '[handwriting] Render mode toggle is dev-only. Production uses mathInk.',
       );
     };
   }

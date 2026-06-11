@@ -30,7 +30,7 @@ const DEFAULTS: HwSpikeSettings = {
   pressure: 'real',
   smoothing: 'low',
   minDist: 'normal',
-  render: 'polyline',
+  render: 'ink',
 };
 
 import { isHandwritingDevBuild } from './handwritingRenderMode';
