@@ -749,7 +749,10 @@ export function FreeSpacePdfCard({
         )}
 
         {iframeSrc && !suspendViewer && useTransformZoom ? (
-          <div className="absolute inset-0 overflow-auto" style={{ backgroundColor: tokens.wellBg }}>
+          <div
+            className="absolute inset-0 overflow-auto"
+            style={{ backgroundColor: tokens.wellBg, touchAction: 'pan-y' }}
+          >
             <div
               style={{
                 position: 'relative',

@@ -363,6 +363,7 @@ function FreeSpaceMiniMapInner({
   return (
     <div
       ref={rootRef}
+      data-fw-minimap
       style={{
         position: 'absolute',
         right: RIGHT,

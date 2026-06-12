@@ -82,3 +82,19 @@ export function clientToWorld(
     worldY: (ly - viewport.panY) / z,
   };
 }
+
+/** Zoom toward a viewport-local focal point while keeping that world point fixed on screen. */
+export function zoomViewportTowardPoint(
+  viewport: CanvasViewport,
+  focalX: number,
+  focalY: number,
+  newZoom: number,
+): CanvasViewport {
+  const prevZ = viewport.zoom > 0 ? viewport.zoom : 1;
+  const nz = newZoom;
+  return {
+    zoom: nz,
+    panX: focalX - (focalX - viewport.panX) * (nz / prevZ),
+    panY: focalY - (focalY - viewport.panY) * (nz / prevZ),
+  };
+}

@@ -211,6 +211,7 @@ export function FreeformBlock({
         maxWidth: '720px',
         borderRadius: '16px',
         isolation: 'isolate',
+        touchAction: 'manipulation',
         zIndex: z,
         cursor: isDragging ? (activeGesture === 'resize' ? 'nwse-resize' : 'grabbing') : 'default',
         userSelect: isDragging ? 'none' : undefined,

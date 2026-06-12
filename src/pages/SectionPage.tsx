@@ -3734,6 +3734,7 @@ export function SectionPage() {
             <FreeformCanvas
               tokens={freeSpaceTokens}
               fillParent
+              touchNavigation
               canvasBackgroundStyle={canvasBackgroundStyle}
               livingEnvironment={livingEnvironment}
               modules={[]}

@@ -80,7 +80,8 @@ import { FreeSpaceMiniMap } from './FreeSpaceMiniMap';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
-import { clientToWorld, readDisplayedViewport } from '../../lib/canvasCoordinates';
+import { clientToWorld, readDisplayedViewport, zoomViewportTowardPoint } from '../../lib/canvasCoordinates';
+import { useFreeSpaceTouchNavigation } from '../../hooks/useFreeSpaceTouchNavigation';
 import {
   dropPlacementDebugEnabled,
   logDropConversion,
@@ -208,6 +209,8 @@ interface Props {
   onCancelConnectMode?: () => void;
   /** Premium spatial minimap (Section Free Space only by default). */
   spatialMinimapEnabled?: boolean;
+  /** Section Free Space: iPad touch pan + pinch zoom (mouse path unchanged). */
+  touchNavigation?: boolean;
   /** Section Free Space: drop a PDF onto empty canvas → new PDF window at world coordinates. */
   onPdfDroppedOnCanvas?: (file: File, worldX: number, worldY: number) => void;
   /** Section Free Space: drop an image onto canvas → spatial memory object at world coordinates. */
@@ -418,6 +421,7 @@ export function FreeformCanvas({
   onConnectPairComplete,
   onCancelConnectMode,
   spatialMinimapEnabled = false,
+  touchNavigation = false,
   onPdfDroppedOnCanvas,
   onImageDroppedOnCanvas,
   focusMode = null,
@@ -641,6 +645,13 @@ export function FreeformCanvas({
     syncDotGridVars(px, py, z);
   }, [setPan, applyWorldTransform, syncDotGridVars]);
 
+  const cancelViewportAnimations = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(zoomRafRef.current);
+    zoomRafRef.current = 0;
+    velRef.current = { vx: 0, vy: 0 };
+  }, []);
+
   const stopFollowPan = useCallback(() => {
     if (!followPanActiveRef.current) return;
     followPanActiveRef.current = false;
@@ -681,6 +692,27 @@ export function FreeformCanvas({
     document.body.setAttribute('data-fw-follow-pan', 'true');
     document.body.style.cursor = 'none';
   }, [stopFollowPan, safePanX, safePanY, safeZoom, tokens.accent]);
+
+  const handleTouchNavigationStart = useCallback(() => {
+    if (followPanActiveRef.current) stopFollowPan();
+    cancelViewportAnimations();
+  }, [stopFollowPan, cancelViewportAnimations]);
+
+  useFreeSpaceTouchNavigation({
+    enabled: touchNavigation,
+    viewportRef,
+    liveViewRef,
+    targetViewRef,
+    zoomMin: ZOOM_MIN,
+    zoomMax: ZOOM_MAX,
+    applyWorldTransform,
+    syncDotGridVars,
+    setViewport,
+    setPan,
+    onNavigationStart: handleTouchNavigationStart,
+    onDeselect: () => onSelect(null),
+    momentumRafRef: rafRef,
+  });
 
   // Persistent follow-pan loop (always mounted) — avoids start/stop RAF churn.
   const handleMinimapZoneChange = useCallback((zone: FollowPanZone | null) => {
@@ -1432,12 +1464,13 @@ export function FreeformCanvas({
       const prevZ  = targetViewRef.current.zoom;
       const newZ   = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prevZ * factor));
 
-      // Adjust target pan to keep cursor point fixed in world space
-      const prevPX = targetViewRef.current.panX;
-      const prevPY = targetViewRef.current.panY;
-      const newPX  = curX - (curX - prevPX) * (newZ / prevZ);
-      const newPY  = curY - (curY - prevPY) * (newZ / prevZ);
-      targetViewRef.current = { zoom: newZ, panX: newPX, panY: newPY };
+      const zoomed = zoomViewportTowardPoint(
+        { panX: targetViewRef.current.panX, panY: targetViewRef.current.panY, zoom: prevZ },
+        curX,
+        curY,
+        newZ,
+      );
+      targetViewRef.current = zoomed;
 
       // Kick off lerp loop if not already running
       if (!zoomRafRef.current) {
@@ -1522,6 +1555,7 @@ export function FreeformCanvas({
   return (
     <div
       ref={viewportRef}
+      data-fw-canvas-viewport
       style={{
         ['--fw-dot-x' as string]: `${dotOffX}px`,
         ['--fw-dot-y' as string]: `${dotOffY}px`,
@@ -1531,6 +1565,7 @@ export function FreeformCanvas({
         right:      0,
         bottom:     0,
         overflow:   'hidden',
+        touchAction: touchNavigation ? 'none' : undefined,
         cursor:     connectModeSourceId
           ? 'crosshair'
           : draggingId || dragRef.current?.type === 'canvas'
@@ -1660,6 +1695,7 @@ export function FreeformCanvas({
       {/* ── World transform ─────────────────────────────────────── */}
       <div
         ref={worldRef}
+        data-fw-canvas-world
         style={{
           position:       'absolute',
           inset:          0,
