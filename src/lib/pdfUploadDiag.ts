@@ -43,6 +43,8 @@ export function pdfUploadDiagClear(): void {
   }
 }
 
+import { probeIndexedDbEnvironment } from './indexedDbEnvironment';
+
 declare global {
   interface Window {
     __fwPdfDiag?: () => PdfUploadDiagEntry[];
@@ -53,4 +55,9 @@ declare global {
 if (typeof window !== 'undefined') {
   window.__fwPdfDiag = pdfUploadDiagDump;
   window.__fwPdfDiagClear = pdfUploadDiagClear;
+  try {
+    pdfUploadDiag('idb:bootProbe', probeIndexedDbEnvironment() as unknown as Record<string, unknown>);
+  } catch {
+    /* ignore */
+  }
 }

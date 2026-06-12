@@ -3,6 +3,7 @@
  * Keys are scoped by section + object id. No network.
  */
 
+import { getIndexedDB, probeIndexedDbEnvironment } from './indexedDbEnvironment';
 import { pdfUploadDiag } from './pdfUploadDiag';
 
 const DB_NAME = 'fw_free_space_pdf_v1';
@@ -48,6 +49,14 @@ export async function savePdfBlobFromFile(
   if (!objectId?.trim()) {
     throw new Error('Missing object id for PDF storage');
   }
+  const idbEnv = probeIndexedDbEnvironment();
+  pdfUploadDiag('idb:environment', idbEnv as unknown as Record<string, unknown>);
+  const idb = getIndexedDB();
+  if (!idb) {
+    throw new Error(
+      'IndexedDB is not available in this browser session (often Safari Private Browsing or restricted storage).',
+    );
+  }
   const blob = await fileToPersistedPdfBlob(file);
   const key = storeKey(sectionId, objectId);
   pdfUploadDiag('savePdfBlobFromFile:start', { sectionId, objectId, key, blobSize: blob.size });
@@ -77,8 +86,14 @@ export async function savePdfBlobFromFile(
 }
 
 function openDb(): Promise<IDBDatabase> {
+  const idb = getIndexedDB();
+  if (!idb) {
+    return Promise.reject(
+      new Error('IndexedDB is not available in this browser session'),
+    );
+  }
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = idb.open(DB_NAME, DB_VERSION);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
     req.onupgradeneeded = () => {
       const db = req.result;
