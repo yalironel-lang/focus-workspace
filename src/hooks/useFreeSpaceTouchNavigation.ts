@@ -3,9 +3,10 @@ import type { CanvasViewport } from '../lib/canvasCoordinates';
 import { zoomViewportTowardPoint } from '../lib/canvasCoordinates';
 
 const PAN_THRESHOLD_PX = 4;
-const PAN_SMOOTHING = 0.28;
+/** Touch pan is direct 1:1 — no mouse-style smoothing (feels laggy on iPad). */
 const PAN_VELOCITY_CLAMP = 2.8;
 const PAN_FRICTION = 8.0;
+const TOUCH_MOMENTUM_MIN_V = 0.35; // px/ms — ignore tiny release drift
 
 interface TouchPointer {
   id: number;
@@ -160,7 +161,7 @@ export function useFreeSpaceTouchNavigation({
     const launchPanMomentum = (vx: number, vy: number) => {
       const cvx = Math.sign(vx) * Math.min(Math.abs(vx), PAN_VELOCITY_CLAMP);
       const cvy = Math.sign(vy) * Math.min(Math.abs(vy), PAN_VELOCITY_CLAMP);
-      if (Math.abs(cvx) < 0.12 && Math.abs(cvy) < 0.12) return;
+      if (Math.abs(cvx) < TOUCH_MOMENTUM_MIN_V && Math.abs(cvy) < TOUCH_MOMENTUM_MIN_V) return;
 
       let px = liveViewRef.current.panX;
       let py = liveViewRef.current.panY;
@@ -310,19 +311,16 @@ export function useFreeSpaceTouchNavigation({
 
         const targetPanX = panState.startPanX + dx;
         const targetPanY = panState.startPanY + dy;
-        const cur = liveViewRef.current;
-        const newPanX = cur.panX + (targetPanX - cur.panX) * PAN_SMOOTHING;
-        const newPanY = cur.panY + (targetPanY - cur.panY) * PAN_SMOOTHING;
-        writeView({ panX: newPanX, panY: newPanY, zoom: cur.zoom });
+        // Direct 1:1 finger tracking — DOM only; React commits on pointerup.
+        writeView({ panX: targetPanX, panY: targetPanY, zoom: liveViewRef.current.zoom });
 
         const now = performance.now();
         const dt = now - panState.lastT;
         if (dt > 0 && dt < 50) {
           const rawVx = (e.clientX - panState.lastX) / dt;
           const rawVy = (e.clientY - panState.lastY) / dt;
-          const alpha = 0.55;
-          panState.vx = panState.vx * (1 - alpha) + rawVx * alpha;
-          panState.vy = panState.vy * (1 - alpha) + rawVy * alpha;
+          panState.vx = rawVx;
+          panState.vy = rawVy;
         }
         panState.lastX = e.clientX;
         panState.lastY = e.clientY;
