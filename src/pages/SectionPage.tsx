@@ -1698,8 +1698,10 @@ export function SectionPage() {
 
       let storageFailed = false;
       let spatial: Awaited<ReturnType<typeof extractPdfSpatialData>> | null = null;
+      let persistedBlobSize = 0;
       try {
         const persistedBlob = await fileToPersistedPdfBlob(file);
+        persistedBlobSize = persistedBlob.size;
         const fileForExtract = new File([persistedBlob], file.name, {
           type: file.type || 'application/pdf',
         });
@@ -1726,7 +1728,7 @@ export function SectionPage() {
         type: 'pdf' as const,
         fileName: file.name,
         fileType: file.type || 'application/pdf',
-        fileSize: file.size,
+        fileSize: persistedBlobSize || file.size,
         lastOpenedAt: Date.now(),
         page: 1,
         zoom: 1,

@@ -16,6 +16,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlobFromFile } from '../../lib/freeSpacePdfIdb';
+import { pdfUploadDiag, pdfUploadDiagDump } from '../../lib/pdfUploadDiag';
 import { flickerDebugLog } from '../../lib/flickerDebug';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
@@ -114,7 +115,9 @@ export function FreeSpacePdfCard({
     let url: string | null = null;
 
     const run = async () => {
-      if (!content.fileName || content.fileSize <= 0) {
+      const key = `${sectionId}::${objectId}`;
+      if (!content.fileName) {
+        pdfUploadDiag('loadEffect:idle', { sectionId, objectId, key, reason: 'no fileName' });
         setLoadState('idle');
         setObjectUrl(prev => {
           revokeIf(prev);
@@ -122,11 +125,20 @@ export function FreeSpacePdfCard({
         });
         return;
       }
+      pdfUploadDiag('loadEffect:start', {
+        sectionId,
+        objectId,
+        key,
+        fileName: content.fileName,
+        fileSize: content.fileSize,
+        metaFileSizeZero: content.fileSize <= 0,
+      });
       setLoadState('loading');
       try {
         const blob = await loadPdfBlob(sectionId, objectId);
         if (cancelled || !mounted.current) return;
         if (!blob) {
+          pdfUploadDiag('loadEffect:recover', { sectionId, objectId, key, fileName: content.fileName });
           setLoadState('recover');
           setObjectUrl(prev => {
             revokeIf(prev);
@@ -135,6 +147,13 @@ export function FreeSpacePdfCard({
           return;
         }
         url = URL.createObjectURL(blob);
+        pdfUploadDiag('loadEffect:ready', {
+          sectionId,
+          objectId,
+          key,
+          blobSize: blob.size,
+          objectUrlPrefix: url.slice(0, 24),
+        });
         setObjectUrl(prev => {
           revokeIf(prev);
           return url;
@@ -142,6 +161,12 @@ export function FreeSpacePdfCard({
         setLoadState('ready');
       } catch (err) {
         if (!cancelled && mounted.current) {
+          pdfUploadDiag('loadEffect:exception', {
+            sectionId,
+            objectId,
+            key,
+            error: err instanceof Error ? err.message : String(err),
+          });
           setLoadState('recover');
           setObjectUrl(prev => {
             revokeIf(prev);
@@ -156,7 +181,7 @@ export function FreeSpacePdfCard({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [sectionId, objectId, content.fileName, content.fileSize, revokeIf]);
+  }, [sectionId, objectId, content.fileName, revokeIf]);
 
   const viewerReadyFiredRef = useRef(false);
   useEffect(() => {
@@ -179,33 +204,65 @@ export function FreeSpacePdfCard({
         toast.error('Workspace context missing — reload and try again.');
         return;
       }
-      const next: ProjectObjectContent = {
-        type: 'pdf',
-        fileName: file.name,
-        fileType: file.type || 'application/pdf',
-        fileSize: file.size,
-        lastOpenedAt: Date.now(),
-        page: 1,
-        zoom: 1,
-        ingestionPhase: 'ready',
-      };
       const title = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
+      const key = `${sectionId}::${objectId}`;
+      pdfUploadDiag('applyFile:start', {
+        sectionId,
+        objectId,
+        key,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+      });
       setLoadState('loading');
       try {
-        // Materialize bytes + verify IDB read before onChange triggers the load effect.
-        await savePdfBlobFromFile(sectionId, objectId, file);
+        const { blobSize } = await savePdfBlobFromFile(sectionId, objectId, file);
+        const next: ProjectObjectContent = {
+          type: 'pdf',
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: blobSize,
+          lastOpenedAt: Date.now(),
+          page: 1,
+          zoom: 1,
+          ingestionPhase: 'ready',
+        };
         onChange(next);
         onTitleChange?.(title);
-        // Reconnect can reuse the same fileName/fileSize — load effect deps may not change.
         const blob = await loadPdfBlob(sectionId, objectId);
         if (blob) {
+          const objectUrl = URL.createObjectURL(blob);
+          pdfUploadDiag('applyFile:primeReady', {
+            sectionId,
+            objectId,
+            key,
+            blobSize: blob.size,
+            objectUrlPrefix: objectUrl.slice(0, 24),
+          });
           setObjectUrl(prev => {
             revokeIf(prev);
-            return URL.createObjectURL(blob);
+            return objectUrl;
           });
           setLoadState('ready');
         }
-      } catch {
+      } catch (err) {
+        const next: ProjectObjectContent = {
+          type: 'pdf',
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: file.size,
+          lastOpenedAt: Date.now(),
+          page: 1,
+          zoom: 1,
+          ingestionPhase: 'ready',
+        };
+        pdfUploadDiag('applyFile:failed', {
+          sectionId,
+          objectId,
+          key,
+          error: err instanceof Error ? err.message : String(err),
+          diagTail: pdfUploadDiagDump().slice(-8),
+        });
         onChange(next);
         onTitleChange?.(title);
         toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
@@ -231,14 +288,59 @@ export function FreeSpacePdfCard({
       : '';
 
   const handleIframeError = useCallback(() => {
+    pdfUploadDiag('iframe:onError', { objectId, sectionId, fileName: content.fileName });
     setObjectUrl(prev => {
       revokeIf(prev);
       return null;
     });
     setLoadState('error');
-  }, [revokeIf]);
+  }, [revokeIf, objectId, sectionId, content.fileName]);
 
-  const handleIframeLoad = useCallback(() => {}, []);
+  const handleIframeLoad = useCallback(() => {
+    const el = iframeRef.current;
+    pdfUploadDiag('iframe:onLoad', {
+      objectId,
+      sectionId,
+      w: el?.offsetWidth ?? 0,
+      h: el?.offsetHeight ?? 0,
+    });
+  }, [objectId, sectionId]);
+
+  useEffect(() => {
+    if (loadState !== 'ready' || !objectUrl) return;
+    pdfUploadDiag('viewer:ready', {
+      objectId,
+      sectionId,
+      suspendViewer,
+      coarsePointer,
+      useTransformZoom,
+      hasIframeSrc: !!iframeSrc,
+      iframeSrcPrefix: iframeSrc ? iframeSrc.slice(0, 32) : '',
+      studyEnabled: !!onStartStudySession,
+    });
+    const t = window.setTimeout(() => {
+      const el = iframeRef.current;
+      pdfUploadDiag('iframe:dimensions', {
+        objectId,
+        mounted: !!el,
+        w: el?.offsetWidth ?? 0,
+        h: el?.offsetHeight ?? 0,
+        clientW: el?.clientWidth ?? 0,
+        clientH: el?.clientHeight ?? 0,
+      });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [
+    loadState,
+    objectUrl,
+    iframeSrc,
+    objectId,
+    sectionId,
+    suspendViewer,
+    coarsePointer,
+    useTransformZoom,
+    onStartStudySession,
+  ]);
 
   const iframeRemountKey = forceIframeRemount
     ? `${objectId}-p${content.page}`
@@ -584,6 +686,15 @@ export function FreeSpacePdfCard({
                 >
                   Reconnect file
                 </button>
+                <p
+                  className="text-[9px] leading-snug max-w-[260px] font-mono text-left opacity-70"
+                  style={{ color: tokens.textGhost }}
+                >
+                  {pdfUploadDiagDump()
+                    .slice(-4)
+                    .map(e => `${e.phase}${e.data?.error ? `: ${String(e.data.error)}` : ''}`)
+                    .join(' | ') || `key ${sectionId}::${objectId}`}
+                </p>
               </>
             ) : (
               <>

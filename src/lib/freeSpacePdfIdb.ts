@@ -3,6 +3,8 @@
  * Keys are scoped by section + object id. No network.
  */
 
+import { pdfUploadDiag } from './pdfUploadDiag';
+
 const DB_NAME = 'fw_free_space_pdf_v1';
 const STORE = 'blobs';
 const DB_VERSION = 1;
@@ -18,6 +20,13 @@ function storeKey(sectionId: string, objectId: string): string {
 export async function fileToPersistedPdfBlob(file: File): Promise<Blob> {
   const reportedSize = file.size;
   const buf = await file.arrayBuffer();
+  pdfUploadDiag('fileToPersistedPdfBlob', {
+    fileName: file.name,
+    fileType: file.type,
+    reportedSize,
+    byteLength: buf.byteLength,
+    sizeMismatch: reportedSize !== buf.byteLength,
+  });
   if (buf.byteLength === 0) {
     if (reportedSize > 0) {
       throw new Error('Could not read PDF bytes from the file picker');
@@ -32,7 +41,7 @@ export async function savePdfBlobFromFile(
   sectionId: string,
   objectId: string,
   file: File,
-): Promise<void> {
+): Promise<{ key: string; blobSize: number }> {
   if (!sectionId?.trim()) {
     throw new Error('Missing section id for PDF storage');
   }
@@ -41,13 +50,30 @@ export async function savePdfBlobFromFile(
   }
   const blob = await fileToPersistedPdfBlob(file);
   const key = storeKey(sectionId, objectId);
-  await savePdfBlob(sectionId, objectId, blob);
+  pdfUploadDiag('savePdfBlobFromFile:start', { sectionId, objectId, key, blobSize: blob.size });
+  try {
+    await savePdfBlob(sectionId, objectId, blob);
+    pdfUploadDiag('savePdfBlobFromFile:putComplete', { key, blobSize: blob.size });
+  } catch (err) {
+    pdfUploadDiag('savePdfBlobFromFile:putFailed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
   const loaded = await loadPdfBlob(sectionId, objectId);
   if (!loaded || loaded.size <= 0) {
+    pdfUploadDiag('savePdfBlobFromFile:verifyFailed', {
+      key,
+      wrote: blob.size,
+      read: loaded?.size ?? 0,
+    });
     throw new Error(
       `PDF storage verification failed (key=${key}, wrote=${blob.size}, read=${loaded?.size ?? 0})`,
     );
   }
+  pdfUploadDiag('savePdfBlobFromFile:verifyOk', { key, blobSize: loaded.size });
+  return { key, blobSize: loaded.size };
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -65,30 +91,55 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 export async function savePdfBlob(sectionId: string, objectId: string, blob: Blob): Promise<void> {
-  const db = await openDb();
+  const key = storeKey(sectionId, objectId);
+  let db: IDBDatabase;
+  try {
+    db = await openDb();
+    pdfUploadDiag('savePdfBlob:dbOpen', { key });
+  } catch (err) {
+    pdfUploadDiag('savePdfBlob:dbOpenFailed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
     tx.oncomplete = () => {
       db.close();
+      pdfUploadDiag('savePdfBlob:txComplete', { key, blobSize: blob.size });
       resolve();
     };
     tx.onerror = () => {
       db.close();
+      pdfUploadDiag('savePdfBlob:txError', {
+        key,
+        error: tx.error?.message ?? 'transaction error',
+      });
       reject(tx.error);
     };
-    tx.objectStore(STORE).put(blob, storeKey(sectionId, objectId));
+    tx.objectStore(STORE).put(blob, key);
   });
 }
 
 export async function loadPdfBlob(sectionId: string, objectId: string): Promise<Blob | undefined> {
+  const key = storeKey(sectionId, objectId);
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(storeKey(sectionId, objectId));
+    const req = tx.objectStore(STORE).get(key);
     req.onsuccess = () => {
       db.close();
       const result = req.result instanceof Blob ? req.result : undefined;
-      resolve(result && result.size > 0 ? result : undefined);
+      const ok = result && result.size > 0 ? result : undefined;
+      pdfUploadDiag('loadPdfBlob', {
+        sectionId,
+        objectId,
+        key,
+        found: !!ok,
+        size: ok?.size ?? 0,
+      });
+      resolve(ok);
     };
     req.onerror = () => {
       db.close();
