@@ -156,7 +156,12 @@ import {
   type LearningAttemptTarget,
   type MistakeLearningBody,
 } from '../lib/learningLoop';
-import { isAcceptablePdfFile, savePdfBlob } from '../lib/freeSpacePdfIdb';
+import {
+  fileToPersistedPdfBlob,
+  isAcceptablePdfFile,
+  loadPdfBlob,
+  savePdfBlob,
+} from '../lib/freeSpacePdfIdb';
 import {
   fitImageFrame,
   isAcceptableImageFile,
@@ -1676,16 +1681,14 @@ export function SectionPage() {
       }
       setSpaceSelectedId(obj.id);
 
-      // Materialise immediately with filename — workspace makes room, object arrives.
-      // ingestionPhase:'materializing' signals the card to show a shimmer.
       const safeTitle = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
       updateSpaceObjectFields(obj.id, {
         title: safeTitle,
         content: {
           type: 'pdf',
-          fileName: file.name,
-          fileType: file.type || 'application/pdf',
-          fileSize: file.size,
+          fileName: '',
+          fileType: '',
+          fileSize: 0,
           lastOpenedAt: Date.now(),
           page: 1,
           zoom: 1,
@@ -1693,18 +1696,32 @@ export function SectionPage() {
         },
       });
 
-      // Run storage and client-side extraction in parallel.
-      // Neither blocks the other — object is already visible.
       let storageFailed = false;
-      const [, spatialData] = await Promise.allSettled([
-        savePdfBlob(sectionId, obj.id, file).catch(() => {
+      let spatial: Awaited<ReturnType<typeof extractPdfSpatialData>> | null = null;
+      try {
+        const persistedBlob = await fileToPersistedPdfBlob(file);
+        const fileForExtract = new File([persistedBlob], file.name, {
+          type: file.type || 'application/pdf',
+        });
+        const [saveResult, spatialResult] = await Promise.allSettled([
+          (async () => {
+            await savePdfBlob(sectionId, obj.id, persistedBlob);
+            const loaded = await loadPdfBlob(sectionId, obj.id);
+            if (!loaded || loaded.size <= 0) {
+              throw new Error('PDF storage verification failed');
+            }
+          })(),
+          extractPdfSpatialData(fileForExtract),
+        ]);
+        if (saveResult.status === 'rejected') {
           storageFailed = true;
           toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
-        }),
-        extractPdfSpatialData(file),
-      ]);
-
-      const spatial = spatialData.status === 'fulfilled' ? spatialData.value : null;
+        }
+        spatial = spatialResult.status === 'fulfilled' ? spatialResult.value : null;
+      } catch {
+        storageFailed = true;
+        toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
+      }
       const readyContent = {
         type: 'pdf' as const,
         fileName: file.name,

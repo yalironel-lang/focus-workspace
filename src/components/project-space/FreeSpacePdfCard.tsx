@@ -15,14 +15,12 @@ import {
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
-import { isAcceptablePdfFile, loadPdfBlob, savePdfBlob } from '../../lib/freeSpacePdfIdb';
+import { isAcceptablePdfFile, loadPdfBlob, savePdfBlobFromFile } from '../../lib/freeSpacePdfIdb';
 import { flickerDebugLog } from '../../lib/flickerDebug';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { PdfStudyMarksOverlay } from './PdfStudyMarksOverlay';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
-
-const IFRAME_LOAD_TIMEOUT_MS = 8000;
 
 function useCoarsePointer(): boolean {
   const [coarsePointer, setCoarsePointer] = useState(false);
@@ -98,8 +96,7 @@ export function FreeSpacePdfCard({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'recover' | 'error'>('idle');
   const [dragOver, setDragOver] = useState(false);
   const mounted = useRef(true);
-  const iframeLoadTimerRef = useRef<number | null>(null);
-  const iframeLoadedRef = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -143,7 +140,7 @@ export function FreeSpacePdfCard({
           return url;
         });
         setLoadState('ready');
-      } catch {
+      } catch (err) {
         if (!cancelled && mounted.current) {
           setLoadState('recover');
           setObjectUrl(prev => {
@@ -178,6 +175,10 @@ export function FreeSpacePdfCard({
         toast.error('Only PDF files are supported for now.');
         return;
       }
+      if (!sectionId?.trim()) {
+        toast.error('Workspace context missing — reload and try again.');
+        return;
+      }
       const next: ProjectObjectContent = {
         type: 'pdf',
         fileName: file.name,
@@ -188,17 +189,30 @@ export function FreeSpacePdfCard({
         zoom: 1,
         ingestionPhase: 'ready',
       };
-      onChange(next);
-      onTitleChange?.(file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name);
+      const title = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
       setLoadState('loading');
       try {
-        await savePdfBlob(sectionId, objectId, file);
+        // Materialize bytes + verify IDB read before onChange triggers the load effect.
+        await savePdfBlobFromFile(sectionId, objectId, file);
+        onChange(next);
+        onTitleChange?.(title);
+        // Reconnect can reuse the same fileName/fileSize — load effect deps may not change.
+        const blob = await loadPdfBlob(sectionId, objectId);
+        if (blob) {
+          setObjectUrl(prev => {
+            revokeIf(prev);
+            return URL.createObjectURL(blob);
+          });
+          setLoadState('ready');
+        }
       } catch {
+        onChange(next);
+        onTitleChange?.(title);
         toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
         setLoadState('recover');
       }
     },
-    [sectionId, objectId, onChange, onTitleChange],
+    [sectionId, objectId, onChange, onTitleChange, revokeIf],
   );
 
   const [displayPage, setDisplayPage] = useState(content.page);
@@ -216,45 +230,15 @@ export function FreeSpacePdfCard({
       ? `${objectUrl}#page=${Math.max(1, displayPage)}&toolbar=0&navpanes=0`
       : '';
 
-  const clearIframeLoadTimer = useCallback(() => {
-    if (iframeLoadTimerRef.current != null) {
-      window.clearTimeout(iframeLoadTimerRef.current);
-      iframeLoadTimerRef.current = null;
-    }
-  }, []);
-
   const handleIframeError = useCallback(() => {
-    clearIframeLoadTimer();
     setObjectUrl(prev => {
       revokeIf(prev);
       return null;
     });
     setLoadState('error');
-  }, [clearIframeLoadTimer, revokeIf]);
+  }, [revokeIf]);
 
-  const handleIframeLoad = useCallback(() => {
-    iframeLoadedRef.current = true;
-    clearIframeLoadTimer();
-  }, [clearIframeLoadTimer]);
-
-  useEffect(() => {
-    if (!iframeSrc || suspendViewer) {
-      clearIframeLoadTimer();
-      return;
-    }
-    iframeLoadedRef.current = false;
-    clearIframeLoadTimer();
-    iframeLoadTimerRef.current = window.setTimeout(() => {
-      if (!iframeLoadedRef.current && mounted.current) {
-        setObjectUrl(prev => {
-          revokeIf(prev);
-          return null;
-        });
-        setLoadState('error');
-      }
-    }, IFRAME_LOAD_TIMEOUT_MS);
-    return clearIframeLoadTimer;
-  }, [iframeSrc, suspendViewer, content.page, displayPage, clearIframeLoadTimer, revokeIf]);
+  const handleIframeLoad = useCallback(() => {}, []);
 
   const iframeRemountKey = forceIframeRemount
     ? `${objectId}-p${content.page}`
@@ -527,6 +511,24 @@ export function FreeSpacePdfCard({
         className={`flex-1 min-h-0 relative${inStudySession ? ' overflow-hidden' : ''}`}
         style={{ backgroundColor: tokens.wellBg }}
       >
+        {coarsePointer && objectUrl && loadState === 'ready' ? (
+          <a
+            href={objectUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute top-2 right-2 z-20 flex items-center gap-1 font-semibold rounded-lg"
+            style={{
+              color: tokens.accent,
+              backgroundColor: `${tokens.pageBg}ee`,
+              border: `1px solid ${tokens.accent}55`,
+              fontSize: 11,
+              ...touchBtnStyle,
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Open in new tab
+          </a>
+        ) : null}
         {/* Shimmer — shown while ingestion is in progress (brief, resolves to thumbnail) */}
         {content.ingestionPhase === 'materializing' && (
           <div
@@ -647,6 +649,7 @@ export function FreeSpacePdfCard({
               }}
             >
               <iframe
+                ref={iframeRef}
                 key={iframeRemountKey}
                 title={content.fileName || 'PDF'}
                 src={iframeSrc}
@@ -674,6 +677,7 @@ export function FreeSpacePdfCard({
         ) : null}
         {iframeSrc && !suspendViewer && !useTransformZoom ? (
           <iframe
+            ref={iframeRef}
             key={iframeRemountKey}
             title={content.fileName || 'PDF'}
             src={iframeSrc}

@@ -11,6 +11,45 @@ function storeKey(sectionId: string, objectId: string): string {
   return `${sectionId}::${objectId}`;
 }
 
+/**
+ * iOS Safari can invalidate File handles from <input type="file"> after the first await.
+ * Read bytes immediately into a plain Blob before IndexedDB work.
+ */
+export async function fileToPersistedPdfBlob(file: File): Promise<Blob> {
+  const reportedSize = file.size;
+  const buf = await file.arrayBuffer();
+  if (buf.byteLength === 0) {
+    if (reportedSize > 0) {
+      throw new Error('Could not read PDF bytes from the file picker');
+    }
+    throw new Error('PDF file is empty');
+  }
+  return new Blob([buf], { type: file.type || 'application/pdf' });
+}
+
+/** Save then immediately read back with the same storage key (catches iOS IDB / key issues). */
+export async function savePdfBlobFromFile(
+  sectionId: string,
+  objectId: string,
+  file: File,
+): Promise<void> {
+  if (!sectionId?.trim()) {
+    throw new Error('Missing section id for PDF storage');
+  }
+  if (!objectId?.trim()) {
+    throw new Error('Missing object id for PDF storage');
+  }
+  const blob = await fileToPersistedPdfBlob(file);
+  const key = storeKey(sectionId, objectId);
+  await savePdfBlob(sectionId, objectId, blob);
+  const loaded = await loadPdfBlob(sectionId, objectId);
+  if (!loaded || loaded.size <= 0) {
+    throw new Error(
+      `PDF storage verification failed (key=${key}, wrote=${blob.size}, read=${loaded?.size ?? 0})`,
+    );
+  }
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -48,7 +87,8 @@ export async function loadPdfBlob(sectionId: string, objectId: string): Promise<
     const req = tx.objectStore(STORE).get(storeKey(sectionId, objectId));
     req.onsuccess = () => {
       db.close();
-      resolve(req.result instanceof Blob ? req.result : undefined);
+      const result = req.result instanceof Blob ? req.result : undefined;
+      resolve(result && result.size > 0 ? result : undefined);
     };
     req.onerror = () => {
       db.close();
