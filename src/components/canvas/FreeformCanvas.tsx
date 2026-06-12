@@ -597,10 +597,12 @@ export function FreeformCanvas({
     !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(panX) || !Number.isFinite(panY);
 
   const followPanActiveRef = useRef(false);
+  const touchPanActiveRef = useRef(false);
   // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
   const panDragActive = dragRef.current?.type === 'canvas' && dragRef.current.panStarted;
-  if (!followPanActiveRef.current && !panDragActive) {
+  const touchPanActive = touchPanActiveRef.current;
+  if (!followPanActiveRef.current && !panDragActive && !touchPanActive) {
     liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
   } else if (!followPanActiveRef.current) {
     liveViewRef.current.zoom = safeZoom;
@@ -703,6 +705,7 @@ export function FreeformCanvas({
     viewportRef,
     liveViewRef,
     targetViewRef,
+    touchPanActiveRef,
     zoomMin: ZOOM_MIN,
     zoomMax: ZOOM_MAX,
     applyWorldTransform,
@@ -1544,8 +1547,8 @@ export function FreeformCanvas({
 
   // ── Dot grid background ───────────────────────────────────────────────────
 
-  const displayPanX = followPanActive ? liveViewRef.current.panX : safePanX;
-  const displayPanY = followPanActive ? liveViewRef.current.panY : safePanY;
+  const displayPanX = followPanActive || touchPanActive ? liveViewRef.current.panX : safePanX;
+  const displayPanY = followPanActive || touchPanActive ? liveViewRef.current.panY : safePanY;
   const dotSpacing = safeGridSize * safeZoom;
   const dotOffX    = ((displayPanX % dotSpacing) + dotSpacing) % dotSpacing;
   const dotOffY    = ((displayPanY % dotSpacing) + dotSpacing) % dotSpacing;

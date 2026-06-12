@@ -35,6 +35,7 @@ export interface FreeSpaceTouchNavigationOptions {
   viewportRef: RefObject<HTMLElement | null>;
   liveViewRef: MutableRefObject<CanvasViewport>;
   targetViewRef: MutableRefObject<CanvasViewport>;
+  touchPanActiveRef: MutableRefObject<boolean>;
   zoomMin: number;
   zoomMax: number;
   applyWorldTransform: (panX: number, panY: number, zoom: number) => void;
@@ -46,8 +47,16 @@ export interface FreeSpaceTouchNavigationOptions {
   momentumRafRef: MutableRefObject<number>;
 }
 
+function touchNavDbg(event: string, data: Record<string, unknown>): void {
+  if (!import.meta.env.DEV) return;
+  const w = window as Window & { __fwTouchNavDbg?: Array<Record<string, unknown>> };
+  w.__fwTouchNavDbg ??= [];
+  w.__fwTouchNavDbg.push({ t: Date.now(), event, ...data });
+  if (w.__fwTouchNavDbg.length > 200) w.__fwTouchNavDbg.shift();
+}
+
 function isNavigationExcludedTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return true;
+  if (!(target instanceof Element)) return true;
   return !!target.closest(
     [
       '[data-freeform-block]',
@@ -58,9 +67,16 @@ function isNavigationExcludedTarget(target: EventTarget | null): boolean {
       'textarea',
       '[contenteditable="true"]',
       '[contenteditable=""]',
-      '[contenteditable]',
     ].join(', '),
   );
+}
+
+/** True when the touch landed on empty canvas (viewport/world), not chrome or blocks. */
+function isEmptyCanvasPanTarget(target: EventTarget | null, viewport: HTMLElement): boolean {
+  if (!(target instanceof Element)) return false;
+  if (isNavigationExcludedTarget(target)) return false;
+  const world = viewport.querySelector('[data-fw-canvas-world]');
+  return target === viewport || target === world || !!world?.contains(target);
 }
 
 function touchPointers(map: Map<number, TouchPointer>): TouchPointer[] {
@@ -101,6 +117,7 @@ export function useFreeSpaceTouchNavigation({
   viewportRef,
   liveViewRef,
   targetViewRef,
+  touchPanActiveRef,
   zoomMin,
   zoomMax,
   applyWorldTransform,
@@ -176,7 +193,12 @@ export function useFreeSpaceTouchNavigation({
       momentumRafRef.current = requestAnimationFrame(step);
     };
 
+    const clearTouchPanActive = () => {
+      touchPanActiveRef.current = false;
+    };
+
     const endPan = () => {
+      clearTouchPanActive();
       if (!panState?.started) {
         panState = null;
         return;
@@ -184,6 +206,7 @@ export function useFreeSpaceTouchNavigation({
       const final = liveViewRef.current;
       setPan(final.panX, final.panY);
       targetViewRef.current = { zoom: final.zoom, panX: final.panX, panY: final.panY };
+      touchNavDbg('panCommit', { panX: final.panX, panY: final.panY, zoom: final.zoom });
       launchPanMomentum(panState.vx, panState.vy);
       panState = null;
     };
@@ -195,10 +218,20 @@ export function useFreeSpaceTouchNavigation({
 
       const touchCount = pointers.size;
       if (touchCount === 1) {
-        panAnchorExcluded = isNavigationExcludedTarget(e.target);
+        panAnchorExcluded = !isEmptyCanvasPanTarget(e.target, viewport);
+        touchNavDbg('pointerdown', {
+          excluded: panAnchorExcluded,
+          tag: e.target instanceof Element ? e.target.tagName : null,
+          id: e.target instanceof Element ? e.target.id : null,
+        });
         if (!panAnchorExcluded) {
+          // iPad Safari needs early preventDefault + capture or pointermove never arrives.
+          e.preventDefault();
+          try {
+            viewport.setPointerCapture(e.pointerId);
+          } catch { /* ignore */ }
+          touchPanActiveRef.current = true;
           onNavigationStart?.();
-          onDeselect?.();
           panState = {
             startX: e.clientX,
             startY: e.clientY,
@@ -220,6 +253,7 @@ export function useFreeSpaceTouchNavigation({
         onNavigationStart?.();
         cancelMomentum();
         panState = null;
+        clearTouchPanActive();
         const rect = viewport.getBoundingClientRect();
         const metrics = pinchMidpointAndDist(touchPointers(pointers), rect);
         if (!metrics || metrics.dist < 8) return;
@@ -267,10 +301,9 @@ export function useFreeSpaceTouchNavigation({
         if (!panState.started) {
           if (Math.hypot(dx, dy) < PAN_THRESHOLD_PX) return;
           panState.started = true;
+          onDeselect?.();
+          touchNavDbg('panStart', { dx, dy });
           e.preventDefault();
-          try {
-            viewport.setPointerCapture(e.pointerId);
-          } catch { /* ignore */ }
         } else {
           e.preventDefault();
         }
@@ -308,12 +341,16 @@ export function useFreeSpaceTouchNavigation({
       }
 
       if (pointers.size === 0) {
+        if (panState && !panState.started && !panAnchorExcluded) {
+          onDeselect?.();
+        }
         endPan();
         panAnchorExcluded = false;
       } else if (pointers.size === 1 && pinchState === null) {
         // Transition pinch → single finger: do not continue pan from stale anchor.
         panState = null;
         panAnchorExcluded = true;
+        clearTouchPanActive();
       }
 
       try {
@@ -337,6 +374,7 @@ export function useFreeSpaceTouchNavigation({
       viewport.removeEventListener('pointercancel', onPointerUp, captureOpts);
       cancelMomentum();
       pointers.clear();
+      clearTouchPanActive();
       panState = null;
       pinchState = null;
     };
@@ -354,5 +392,6 @@ export function useFreeSpaceTouchNavigation({
     onNavigationStart,
     onDeselect,
     momentumRafRef,
+    touchPanActiveRef,
   ]);
 }
