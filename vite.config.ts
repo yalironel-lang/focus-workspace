@@ -3,8 +3,15 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
 
 const buildId = new Date().toISOString()
+let gitCommit = 'unknown'
+try {
+  gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
+} catch {
+  /* not a git checkout */
+}
 
 function debugLogIngestPlugin(): Plugin {
   const logPath = path.join(process.cwd(), '.cursor/debug-3f83e8.log')
@@ -38,6 +45,7 @@ function debugLogIngestPlugin(): Plugin {
 export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(buildId),
+    __GIT_COMMIT__: JSON.stringify(gitCommit),
   },
   plugins: [
     react(),

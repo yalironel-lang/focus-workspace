@@ -34,7 +34,7 @@ interface Props {
   /** Free Space: notebook is in deep edit — subtle anchor lift and calmer chrome on this card only. */
   deepFocusAnchor?: boolean;
   children: React.ReactNode;
-  onBlockMouseDown: (id: string, e: React.MouseEvent, type: 'move' | 'resize') => void;
+  onBlockMouseDown: (id: string, e: React.MouseEvent | React.PointerEvent, type: 'move' | 'resize') => void;
   onSelect: (id: string, opts?: { toggle?: boolean }) => void;
   onRemove?: (id: string) => void;
   onDuplicate?: (id: string) => void;
@@ -240,6 +240,12 @@ export function FreeformBlock({
         {/* Drag handle — calm chrome */}
         <div
           onMouseDown={e => {
+            e.stopPropagation();
+            onBlockMouseDown(id, e, 'move');
+          }}
+          onPointerDown={e => {
+            if (e.pointerType === 'pen') return;
+            if (e.pointerType !== 'touch') return;
             e.stopPropagation();
             onBlockMouseDown(id, e, 'move');
           }}
@@ -538,6 +544,12 @@ export function FreeformBlock({
         <div
           role="presentation"
           onMouseDown={e => {
+            e.stopPropagation();
+            onBlockMouseDown(id, e, 'resize');
+          }}
+          onPointerDown={e => {
+            if (e.pointerType === 'pen') return;
+            if (e.pointerType !== 'touch') return;
             e.stopPropagation();
             onBlockMouseDown(id, e, 'resize');
           }}

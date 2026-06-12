@@ -1,12 +1,16 @@
 import { useEffect, type MutableRefObject, type RefObject } from 'react';
 import type { CanvasViewport } from '../lib/canvasCoordinates';
 import { zoomViewportTowardPoint } from '../lib/canvasCoordinates';
+import { getGitCommit } from '../lib/appBuildInfo';
 
 const PAN_THRESHOLD_PX = 4;
 /** Touch pan is direct 1:1 — no mouse-style smoothing (feels laggy on iPad). */
 const PAN_VELOCITY_CLAMP = 2.8;
 const PAN_FRICTION = 8.0;
 const TOUCH_MOMENTUM_MIN_V = 0.35; // px/ms — ignore tiny release drift
+
+const DEBUG_INGEST =
+  'http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517';
 
 interface TouchPointer {
   id: number;
@@ -31,29 +35,55 @@ interface PanState {
   vy: number;
 }
 
-export interface FreeSpaceTouchNavigationOptions {
-  enabled: boolean;
-  viewportRef: RefObject<HTMLElement | null>;
-  liveViewRef: MutableRefObject<CanvasViewport>;
-  targetViewRef: MutableRefObject<CanvasViewport>;
-  touchPanActiveRef: MutableRefObject<boolean>;
-  zoomMin: number;
-  zoomMax: number;
-  applyWorldTransform: (panX: number, panY: number, zoom: number) => void;
-  syncDotGridVars: (panX: number, panY: number, zoom: number) => void;
-  setViewport: (zoom: number, panX: number, panY: number) => void;
-  setPan: (panX: number, panY: number) => void;
-  onNavigationStart?: () => void;
-  onDeselect?: () => void;
-  momentumRafRef: MutableRefObject<number>;
-}
+type TouchNavDbgWindow = Window & {
+  __fwTouchNavDbg?: Array<Record<string, unknown>>;
+  __fwTouchNavBuild?: string;
+  __fwTouchNavStats?: {
+    pointerMoveCount: number;
+    lastCaptureOk: boolean | null;
+    lastHandler: string | null;
+    lastDx: number | null;
+    lastDy: number | null;
+    lastWrittenPanX: number | null;
+    lastWrittenPanY: number | null;
+    lastCommittedPanX: number | null;
+    lastCommittedPanY: number | null;
+  };
+};
 
-function touchNavDbg(event: string, data: Record<string, unknown>): void {
-  if (!import.meta.env.DEV) return;
-  const w = window as Window & { __fwTouchNavDbg?: Array<Record<string, unknown>> };
+function touchNavDbg(
+  event: string,
+  data: Record<string, unknown>,
+  hypothesisId?: string,
+): void {
+  const w = window as TouchNavDbgWindow;
   w.__fwTouchNavDbg ??= [];
-  w.__fwTouchNavDbg.push({ t: Date.now(), event, ...data });
-  if (w.__fwTouchNavDbg.length > 200) w.__fwTouchNavDbg.shift();
+  const entry = {
+    t: Date.now(),
+    event,
+    hypothesisId,
+    ...data,
+  };
+  w.__fwTouchNavDbg.push(entry);
+  if (w.__fwTouchNavDbg.length > 300) w.__fwTouchNavDbg.shift();
+
+  // #region agent log
+  fetch(DEBUG_INGEST, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': 'a618f3',
+    },
+    body: JSON.stringify({
+      sessionId: 'a618f3',
+      location: 'useFreeSpaceTouchNavigation.ts',
+      message: event,
+      data,
+      hypothesisId,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 }
 
 function isNavigationExcludedTarget(target: EventTarget | null): boolean {
@@ -109,6 +139,24 @@ function clampPan(px: number, py: number): { panX: number; panY: number } {
   };
 }
 
+export interface FreeSpaceTouchNavigationOptions {
+  enabled: boolean;
+  viewportRef: RefObject<HTMLElement | null>;
+  liveViewRef: MutableRefObject<CanvasViewport>;
+  targetViewRef: MutableRefObject<CanvasViewport>;
+  touchPanActiveRef: MutableRefObject<boolean>;
+  setTouchPanActive: (active: boolean) => void;
+  zoomMin: number;
+  zoomMax: number;
+  applyWorldTransform: (panX: number, panY: number, zoom: number) => void;
+  syncDotGridVars: (panX: number, panY: number, zoom: number) => void;
+  setViewport: (zoom: number, panX: number, panY: number) => void;
+  setPan: (panX: number, panY: number) => void;
+  onNavigationStart?: () => void;
+  onDeselect?: () => void;
+  momentumRafRef: MutableRefObject<number>;
+}
+
 /**
  * iPad touch pan + pinch zoom for Section Free Space.
  * Mouse and pen pointers are ignored — desktop mouse path stays unchanged.
@@ -119,6 +167,7 @@ export function useFreeSpaceTouchNavigation({
   liveViewRef,
   targetViewRef,
   touchPanActiveRef,
+  setTouchPanActive,
   zoomMin,
   zoomMax,
   applyWorldTransform,
@@ -133,6 +182,20 @@ export function useFreeSpaceTouchNavigation({
     if (!enabled) return;
     const viewport = viewportRef.current;
     if (!viewport) return;
+
+    const w = window as TouchNavDbgWindow;
+    w.__fwTouchNavBuild = getGitCommit();
+    w.__fwTouchNavStats = {
+      pointerMoveCount: 0,
+      lastCaptureOk: null,
+      lastHandler: 'viewport-capture-pointerdown',
+      lastDx: null,
+      lastDy: null,
+      lastWrittenPanX: null,
+      lastWrittenPanY: null,
+      lastCommittedPanX: null,
+      lastCommittedPanY: null,
+    };
 
     const pointers = new Map<number, TouchPointer>();
     let panState: PanState | null = null;
@@ -150,6 +213,10 @@ export function useFreeSpaceTouchNavigation({
       liveViewRef.current = { panX: clamped.panX, panY: clamped.panY, zoom: z };
       applyWorldTransform(clamped.panX, clamped.panY, z);
       syncDotGridVars(clamped.panX, clamped.panY, z);
+      if (w.__fwTouchNavStats) {
+        w.__fwTouchNavStats.lastWrittenPanX = clamped.panX;
+        w.__fwTouchNavStats.lastWrittenPanY = clamped.panY;
+      }
     };
 
     const commitViewport = () => {
@@ -196,19 +263,30 @@ export function useFreeSpaceTouchNavigation({
 
     const clearTouchPanActive = () => {
       touchPanActiveRef.current = false;
+      setTouchPanActive(false);
     };
 
     const endPan = () => {
+      const hadPan = panState?.started ?? false;
       clearTouchPanActive();
-      if (!panState?.started) {
+      if (!hadPan) {
         panState = null;
         return;
       }
+      onDeselect?.();
       const final = liveViewRef.current;
       setPan(final.panX, final.panY);
       targetViewRef.current = { zoom: final.zoom, panX: final.panX, panY: final.panY };
-      touchNavDbg('panCommit', { panX: final.panX, panY: final.panY, zoom: final.zoom });
-      launchPanMomentum(panState.vx, panState.vy);
+      if (w.__fwTouchNavStats) {
+        w.__fwTouchNavStats.lastCommittedPanX = final.panX;
+        w.__fwTouchNavStats.lastCommittedPanY = final.panY;
+      }
+      touchNavDbg(
+        'panCommit',
+        { panX: final.panX, panY: final.panY, zoom: final.zoom },
+        'H4',
+      );
+      launchPanMomentum(panState!.vx, panState!.vy);
       panState = null;
     };
 
@@ -220,18 +298,29 @@ export function useFreeSpaceTouchNavigation({
       const touchCount = pointers.size;
       if (touchCount === 1) {
         panAnchorExcluded = !isEmptyCanvasPanTarget(e.target, viewport);
-        touchNavDbg('pointerdown', {
-          excluded: panAnchorExcluded,
-          tag: e.target instanceof Element ? e.target.tagName : null,
-          id: e.target instanceof Element ? e.target.id : null,
-        });
+        let captureOk = false;
+        touchNavDbg(
+          'pointerdown',
+          {
+            handler: 'viewport-capture-pointerdown',
+            excluded: panAnchorExcluded,
+            tag: e.target instanceof Element ? e.target.tagName : null,
+            id: e.target instanceof Element ? e.target.id : null,
+          },
+          'H1',
+        );
         if (!panAnchorExcluded) {
           // iPad Safari needs early preventDefault + capture or pointermove never arrives.
           e.preventDefault();
           try {
             viewport.setPointerCapture(e.pointerId);
-          } catch { /* ignore */ }
+            captureOk = viewport.hasPointerCapture(e.pointerId);
+          } catch {
+            captureOk = false;
+          }
+          if (w.__fwTouchNavStats) w.__fwTouchNavStats.lastCaptureOk = captureOk;
           touchPanActiveRef.current = true;
+          setTouchPanActive(true);
           onNavigationStart?.();
           panState = {
             startX: e.clientX,
@@ -245,6 +334,7 @@ export function useFreeSpaceTouchNavigation({
             vx: 0,
             vy: 0,
           };
+          touchNavDbg('panAnchor', { captureOk, startPanX: panState.startPanX, startPanY: panState.startPanY }, 'H1');
         }
         return;
       }
@@ -271,6 +361,8 @@ export function useFreeSpaceTouchNavigation({
       if (!existing) return;
       existing.x = e.clientX;
       existing.y = e.clientY;
+
+      if (w.__fwTouchNavStats) w.__fwTouchNavStats.pointerMoveCount += 1;
 
       const touchCount = pointers.size;
       const rect = viewport.getBoundingClientRect();
@@ -302,8 +394,8 @@ export function useFreeSpaceTouchNavigation({
         if (!panState.started) {
           if (Math.hypot(dx, dy) < PAN_THRESHOLD_PX) return;
           panState.started = true;
-          onDeselect?.();
-          touchNavDbg('panStart', { dx, dy });
+          // Defer onDeselect until pointerup — avoids mid-drag React re-render jank (H2).
+          touchNavDbg('panStart', { dx, dy, smoothing: 'none' }, 'H2');
           e.preventDefault();
         } else {
           e.preventDefault();
@@ -313,6 +405,24 @@ export function useFreeSpaceTouchNavigation({
         const targetPanY = panState.startPanY + dy;
         // Direct 1:1 finger tracking — DOM only; React commits on pointerup.
         writeView({ panX: targetPanX, panY: targetPanY, zoom: liveViewRef.current.zoom });
+
+        if (w.__fwTouchNavStats) {
+          w.__fwTouchNavStats.lastDx = dx;
+          w.__fwTouchNavStats.lastDy = dy;
+        }
+        if (w.__fwTouchNavStats && w.__fwTouchNavStats.pointerMoveCount % 8 === 0) {
+          touchNavDbg(
+            'panMoveSample',
+            {
+              moveCount: w.__fwTouchNavStats.pointerMoveCount,
+              dx,
+              dy,
+              panX: liveViewRef.current.panX,
+              panY: liveViewRef.current.panY,
+            },
+            'H3',
+          );
+        }
 
         const now = performance.now();
         const dt = now - panState.lastT;
@@ -391,5 +501,6 @@ export function useFreeSpaceTouchNavigation({
     onDeselect,
     momentumRafRef,
     touchPanActiveRef,
+    setTouchPanActive,
   ]);
 }

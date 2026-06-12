@@ -138,6 +138,8 @@ interface DragState {
   lastX?:     number;
   lastY?:     number;
   lastT?:     number;
+  /** Touch block drag — only track the initiating pointer. */
+  pointerId?: number;
   // last applied pan (written directly to DOM during drag, committed to state on up)
   currentPanX?: number;
   currentPanY?: number;
@@ -598,10 +600,10 @@ export function FreeformCanvas({
 
   const followPanActiveRef = useRef(false);
   const touchPanActiveRef = useRef(false);
+  const [touchPanActive, setTouchPanActive] = useState(false);
   // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
   const panDragActive = dragRef.current?.type === 'canvas' && dragRef.current.panStarted;
-  const touchPanActive = touchPanActiveRef.current;
   if (!followPanActiveRef.current && !panDragActive && !touchPanActive) {
     liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
   } else if (!followPanActiveRef.current) {
@@ -706,6 +708,7 @@ export function FreeformCanvas({
     liveViewRef,
     targetViewRef,
     touchPanActiveRef,
+    setTouchPanActive,
     zoomMin: ZOOM_MIN,
     zoomMax: ZOOM_MAX,
     applyWorldTransform,
@@ -811,7 +814,7 @@ export function FreeformCanvas({
   }, []);
 
   useLayoutEffect(() => {
-    if (!followPanActiveRef.current) return;
+    if (!followPanActiveRef.current && !touchPanActiveRef.current) return;
     const { panX: px, panY: py, zoom: z } = liveViewRef.current;
     applyWorldTransform(px, py, z);
     syncDotGridVars(px, py, z);
@@ -1061,7 +1064,12 @@ export function FreeformCanvas({
 
   // ── Mouse event handlers ──────────────────────────────────────────────────
 
-  const onBlockMouseDown = useCallback((blockId: string, e: React.MouseEvent, type: 'move' | 'resize') => {
+  const onBlockMouseDown = useCallback((
+    blockId: string,
+    e: React.MouseEvent | React.PointerEvent,
+    type: 'move' | 'resize',
+  ) => {
+    if ('pointerType' in e && e.pointerType === 'pen') return;
     if (followPanActiveRef.current) stopFollowPan();
     if (spaceHeldRef.current || e.button === 1) {
       e.preventDefault();
@@ -1104,6 +1112,7 @@ export function FreeformCanvas({
     try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
     handleBlockSelect(blockId);
     const pos = positions[blockId] ?? { x: 0, y: 0, w: 340, h: 0 };
+    const pointerId = 'pointerId' in e ? e.pointerId : undefined;
     dragRef.current = {
       type:        type === 'move' ? 'block-move' : 'block-resize',
       blockId,
@@ -1115,7 +1124,13 @@ export function FreeformCanvas({
       startBlockH: pos.h || 200,
       moveStarted: false,
       resizeStarted: false,
+      pointerId,
     };
+    if (pointerId != null && e.currentTarget instanceof HTMLElement) {
+      try {
+        e.currentTarget.setPointerCapture(pointerId);
+      } catch { /* ignore */ }
+    }
     setDraggingId(blockId);
     setActiveDragKind(type === 'resize' ? 'resize' : 'move');
   }, [
@@ -1192,12 +1207,12 @@ export function FreeformCanvas({
 
   // Attach global mousemove/mouseup on mount (avoids losing drag on fast moves)
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    const applyDragMove = (clientX: number, clientY: number) => {
       const drag = dragRef.current;
       if (!drag) return;
 
-      const dx = e.clientX - drag.startMouseX;
-      const dy = e.clientY - drag.startMouseY;
+      const dx = clientX - drag.startMouseX;
+      const dy = clientY - drag.startMouseY;
 
       if (drag.type === 'canvas') {
         // ── Pan threshold: 4px before committing ──────────────────────
@@ -1231,15 +1246,15 @@ export function FreeformCanvas({
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
           if (dt > 0 && dt < 50) {
-            const rawVx = (e.clientX - drag.lastX) / dt;
-            const rawVy = (e.clientY - drag.lastY) / dt;
+            const rawVx = (clientX - drag.lastX) / dt;
+            const rawVy = (clientY - drag.lastY) / dt;
             const α = 0.55; // 55% weight to new sample
             velRef.current.vx = velRef.current.vx * (1 - α) + rawVx * α;
             velRef.current.vy = velRef.current.vy * (1 - α) + rawVy * α;
           }
         }
-        drag.lastX = e.clientX;
-        drag.lastY = e.clientY;
+        drag.lastX = clientX;
+        drag.lastY = clientY;
         drag.lastT = now;
 
       } else if (drag.type === 'block-move' && drag.blockId != null) {
@@ -1270,15 +1285,15 @@ export function FreeformCanvas({
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
           if (dt > 0 && dt < 50) {
-            const rawVx = (e.clientX - drag.lastX) / dt;
-            const rawVy = (e.clientY - drag.lastY) / dt;
+            const rawVx = (clientX - drag.lastX) / dt;
+            const rawVy = (clientY - drag.lastY) / dt;
             const α = 0.55;
             velRef.current.vx = velRef.current.vx * (1 - α) + rawVx * α;
             velRef.current.vy = velRef.current.vy * (1 - α) + rawVy * α;
           }
         }
-        drag.lastX = e.clientX;
-        drag.lastY = e.clientY;
+        drag.lastX = clientX;
+        drag.lastY = clientY;
         drag.lastT = now;
         drag.currentBlockX = newX;
         drag.currentBlockY = newY;
@@ -1307,6 +1322,20 @@ export function FreeformCanvas({
         drag.currentBlockW = newW;
         drag.currentBlockH = newH;
       }
+    };
+
+    const onMove = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId != null) return;
+      applyDragMove(e.clientX, e.clientY);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId == null || e.pointerId !== drag.pointerId) return;
+      if (e.pointerType === 'pen') return;
+      e.preventDefault();
+      applyDragMove(e.clientX, e.clientY);
     };
 
     const onUp = () => {
@@ -1411,11 +1440,23 @@ export function FreeformCanvas({
       }
     };
 
+    const onPointerUpEnd = (e: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId == null || e.pointerId !== drag.pointerId) return;
+      onUp();
+    };
+
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup',   onUp);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUpEnd);
+    window.addEventListener('pointercancel', onPointerUpEnd);
     return () => {
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup',   onUp);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUpEnd);
+      window.removeEventListener('pointercancel', onPointerUpEnd);
     };
   }, [zoom, snap, setPan, onSetPos]);
 
