@@ -262,6 +262,20 @@ export function buildBlockRenderPolicies(
   return map;
 }
 
+/**
+ * PDF viewer suspension — on coarse pointer (iPad), never pause the live viewer for
+ * objects that are on-canvas and visible; always show iframe in study session.
+ */
+export function shouldSuspendPdfViewer(
+  policy: Pick<BlockRenderPolicy, 'suspendHeavyContent' | 'fidelity' | 'chromeOnly'>,
+  opts: { coarsePointer: boolean; inStudySession: boolean },
+): boolean {
+  if (!policy.suspendHeavyContent) return false;
+  if (opts.inStudySession) return false;
+  if (opts.coarsePointer && policy.fidelity !== 'distant') return false;
+  return true;
+}
+
 export function shouldRenderConnection(
   ctx: CanvasScaleContext,
   fromId: string,

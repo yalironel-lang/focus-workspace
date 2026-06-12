@@ -20,6 +20,28 @@ import { flickerDebugLog } from '../../lib/flickerDebug';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { PdfStudyMarksOverlay } from './PdfStudyMarksOverlay';
+import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
+
+const IFRAME_LOAD_TIMEOUT_MS = 8000;
+
+function useCoarsePointer(): boolean {
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setCoarsePointer(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  return coarsePointer;
+}
+
+const touchBtnStyle = {
+  minHeight: TOUCH_TARGET_MIN_PX,
+  minWidth: TOUCH_TARGET_MIN_PX,
+  padding: '0 14px',
+  touchAction: 'manipulation' as const,
+};
 
 interface FreeSpacePdfCardProps {
   objectId: string;
@@ -67,12 +89,17 @@ export function FreeSpacePdfCard({
   if (content.type !== 'pdf') return null;
 
   const inStudySession = presentation === 'study-session';
+  const coarsePointer = useCoarsePointer();
+  const useTransformZoom = coarsePointer || inStudySession;
+  const forceIframeRemount = coarsePointer || inStudySession;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'recover' | 'error'>('idle');
   const [dragOver, setDragOver] = useState(false);
   const mounted = useRef(true);
+  const iframeLoadTimerRef = useRef<number | null>(null);
+  const iframeLoadedRef = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -151,22 +178,24 @@ export function FreeSpacePdfCard({
         toast.error('Only PDF files are supported for now.');
         return;
       }
+      const next: ProjectObjectContent = {
+        type: 'pdf',
+        fileName: file.name,
+        fileType: file.type || 'application/pdf',
+        fileSize: file.size,
+        lastOpenedAt: Date.now(),
+        page: 1,
+        zoom: 1,
+        ingestionPhase: 'ready',
+      };
+      onChange(next);
+      onTitleChange?.(file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name);
+      setLoadState('loading');
       try {
         await savePdfBlob(sectionId, objectId, file);
-        const next: ProjectObjectContent = {
-          type: 'pdf',
-          fileName: file.name,
-          fileType: file.type || 'application/pdf',
-          fileSize: file.size,
-          lastOpenedAt: Date.now(),
-          page: 1,
-          zoom: 1,
-        };
-        onChange(next);
-        onTitleChange?.(file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name);
-        setLoadState('loading');
       } catch {
-        toast.error('Could not store this PDF on this device.');
+        toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
+        setLoadState('recover');
       }
     },
     [sectionId, objectId, onChange, onTitleChange],
@@ -174,18 +203,62 @@ export function FreeSpacePdfCard({
 
   const [displayPage, setDisplayPage] = useState(content.page);
   useEffect(() => {
-    if (inStudySession) {
+    if (forceIframeRemount) {
       setDisplayPage(content.page);
       return;
     }
     const timer = window.setTimeout(() => setDisplayPage(content.page), 280);
     return () => window.clearTimeout(timer);
-  }, [content.page, inStudySession]);
+  }, [content.page, forceIframeRemount]);
 
   const iframeSrc =
     objectUrl && loadState === 'ready'
       ? `${objectUrl}#page=${Math.max(1, displayPage)}&toolbar=0&navpanes=0`
       : '';
+
+  const clearIframeLoadTimer = useCallback(() => {
+    if (iframeLoadTimerRef.current != null) {
+      window.clearTimeout(iframeLoadTimerRef.current);
+      iframeLoadTimerRef.current = null;
+    }
+  }, []);
+
+  const handleIframeError = useCallback(() => {
+    clearIframeLoadTimer();
+    setObjectUrl(prev => {
+      revokeIf(prev);
+      return null;
+    });
+    setLoadState('error');
+  }, [clearIframeLoadTimer, revokeIf]);
+
+  const handleIframeLoad = useCallback(() => {
+    iframeLoadedRef.current = true;
+    clearIframeLoadTimer();
+  }, [clearIframeLoadTimer]);
+
+  useEffect(() => {
+    if (!iframeSrc || suspendViewer) {
+      clearIframeLoadTimer();
+      return;
+    }
+    iframeLoadedRef.current = false;
+    clearIframeLoadTimer();
+    iframeLoadTimerRef.current = window.setTimeout(() => {
+      if (!iframeLoadedRef.current && mounted.current) {
+        setObjectUrl(prev => {
+          revokeIf(prev);
+          return null;
+        });
+        setLoadState('error');
+      }
+    }, IFRAME_LOAD_TIMEOUT_MS);
+    return clearIframeLoadTimer;
+  }, [iframeSrc, suspendViewer, content.page, displayPage, clearIframeLoadTimer, revokeIf]);
+
+  const iframeRemountKey = forceIframeRemount
+    ? `${objectId}-p${content.page}`
+    : objectId;
 
   useEffect(() => {
     if (iframeSrc) flickerDebugLog('pdf-iframe-src', `${objectId} p${displayPage}`);
@@ -351,8 +424,12 @@ export function FreeSpacePdfCard({
           </span>
           <button
             type="button"
-            className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
-            style={{ color: tokens.textMuted, border: `1px solid ${border}` }}
+            className="text-[11px] font-semibold rounded-lg shrink-0 inline-flex items-center justify-center"
+            style={{
+              color: tokens.textMuted,
+              border: `1px solid ${border}`,
+              ...(coarsePointer ? touchBtnStyle : { padding: '4px 8px', fontSize: 10 }),
+            }}
             onClick={() => fileInputRef.current?.click()}
           >
             {loadState === 'recover' ? 'Reconnect' : content.fileName ? 'Replace' : 'Choose'}
@@ -362,11 +439,16 @@ export function FreeSpacePdfCard({
               href={objectUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
-              style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+              className="flex items-center gap-1 font-semibold rounded-lg shrink-0"
+              style={{
+                color: tokens.accent,
+                border: `1px solid ${tokens.accent}44`,
+                fontSize: coarsePointer ? 11 : 10,
+                ...(coarsePointer ? touchBtnStyle : { padding: '4px 8px' }),
+              }}
             >
-              <ExternalLink className="w-3 h-3" />
-              Tab
+              <ExternalLink className="w-3.5 h-3.5" />
+              {coarsePointer ? 'Open in new tab' : 'Tab'}
             </a>
           )}
           {onStartStudySession && loadState === 'ready' && content.fileName ? (
@@ -489,8 +571,13 @@ export function FreeSpacePdfCard({
                 </p>
                 <button
                   type="button"
-                  className="text-[11px] font-semibold px-3 py-2 rounded-xl"
-                  style={{ backgroundColor: `${tokens.accent}22`, color: tokens.accent, border: `1px solid ${tokens.accent}55` }}
+                  className="text-[12px] font-semibold rounded-xl inline-flex items-center justify-center"
+                  style={{
+                    backgroundColor: `${tokens.accent}22`,
+                    color: tokens.accent,
+                    border: `1px solid ${tokens.accent}55`,
+                    ...touchBtnStyle,
+                  }}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   Reconnect file
@@ -503,8 +590,13 @@ export function FreeSpacePdfCard({
                 </p>
                 <button
                   type="button"
-                  className="text-[11px] font-semibold px-3 py-2 rounded-xl"
-                  style={{ backgroundColor: tokens.wellBg, color: tokens.textPrimary, border: `1px solid ${border}` }}
+                  className="text-[12px] font-semibold rounded-xl inline-flex items-center justify-center"
+                  style={{
+                    backgroundColor: tokens.wellBg,
+                    color: tokens.textPrimary,
+                    border: `1px solid ${border}`,
+                    ...touchBtnStyle,
+                  }}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   Choose PDF…
@@ -543,7 +635,7 @@ export function FreeSpacePdfCard({
           </div>
         )}
 
-        {iframeSrc && !suspendViewer && inStudySession ? (
+        {iframeSrc && !suspendViewer && useTransformZoom ? (
           <div className="absolute inset-0 overflow-auto" style={{ backgroundColor: tokens.wellBg }}>
             <div
               style={{
@@ -555,24 +647,20 @@ export function FreeSpacePdfCard({
               }}
             >
               <iframe
+                key={iframeRemountKey}
                 title={content.fileName || 'PDF'}
                 src={iframeSrc}
                 className="border-0 block"
                 style={{
                   width: '100%',
                   height: '100%',
-                  minHeight: '720px',
+                  minHeight: inStudySession ? '720px' : '420px',
                   backgroundColor: tokens.wellBg,
                 }}
-                onError={() => {
-                  setObjectUrl(prev => {
-                    revokeIf(prev);
-                    return null;
-                  });
-                  setLoadState('error');
-                }}
+                onLoad={handleIframeLoad}
+                onError={handleIframeError}
               />
-              {studyMarks.loaded ? (
+              {inStudySession && studyMarks.loaded ? (
                 <PdfStudyMarksOverlay
                   tokens={tokens}
                   regions={studyMarks.currentRegions}
@@ -584,8 +672,9 @@ export function FreeSpacePdfCard({
             </div>
           </div>
         ) : null}
-        {iframeSrc && !suspendViewer && !inStudySession ? (
+        {iframeSrc && !suspendViewer && !useTransformZoom ? (
           <iframe
+            key={iframeRemountKey}
             title={content.fileName || 'PDF'}
             src={iframeSrc}
             className="border-0"
@@ -596,13 +685,8 @@ export function FreeSpacePdfCard({
               minHeight: '420px',
               backgroundColor: tokens.wellBg,
             }}
-            onError={() => {
-              setObjectUrl(prev => {
-                revokeIf(prev);
-                return null;
-              });
-              setLoadState('error');
-            }}
+            onLoad={handleIframeLoad}
+            onError={handleIframeError}
           />
         ) : null}
       </div>

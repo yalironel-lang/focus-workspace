@@ -1699,37 +1699,42 @@ export function SectionPage() {
       const [, spatialData] = await Promise.allSettled([
         savePdfBlob(sectionId, obj.id, file).catch(() => {
           storageFailed = true;
-          toast.error('Could not store this PDF on this device.');
-          removeSpaceObject(obj.id);
-          removePos(obj.id);
+          toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
         }),
         extractPdfSpatialData(file),
       ]);
 
-      // If storage failed, the object was already removed — nothing more to do.
-      if (storageFailed) return;
-
-      // Apply spatial data quietly — no toast, no signal, just the object knowing more.
-      // If extraction failed or timed out, spatialData.value holds zeros/nulls; still 'ready'.
       const spatial = spatialData.status === 'fulfilled' ? spatialData.value : null;
+      const readyContent = {
+        type: 'pdf' as const,
+        fileName: file.name,
+        fileType: file.type || 'application/pdf',
+        fileSize: file.size,
+        lastOpenedAt: Date.now(),
+        page: 1,
+        zoom: 1,
+        ingestionPhase: 'ready' as const,
+        ...(spatial?.pageCount ? { pageCount: spatial.pageCount } : {}),
+        ...(spatial?.documentTitle ? { documentTitle: spatial.documentTitle } : {}),
+        ...(spatial?.thumbnailDataUrl ? { thumbnailDataUrl: spatial.thumbnailDataUrl } : {}),
+      };
+
+      if (storageFailed) {
+        // Keep object + position; card shows recover/reconnect when blob is missing.
+        updateSpaceObjectFields(obj.id, {
+          ...(spatial?.documentTitle && spatial.documentTitle !== file.name
+            ? { title: spatial.documentTitle.length > 80 ? `${spatial.documentTitle.slice(0, 78)}…` : spatial.documentTitle }
+            : {}),
+          content: readyContent,
+        });
+        return;
+      }
+
       updateSpaceObjectFields(obj.id, {
-        // Only override the title if the PDF has a richer document title than the filename
         ...(spatial?.documentTitle && spatial.documentTitle !== file.name
           ? { title: spatial.documentTitle.length > 80 ? `${spatial.documentTitle.slice(0, 78)}…` : spatial.documentTitle }
           : {}),
-        content: {
-          type: 'pdf',
-          fileName: file.name,
-          fileType: file.type || 'application/pdf',
-          fileSize: file.size,
-          lastOpenedAt: Date.now(),
-          page: 1,
-          zoom: 1,
-          ingestionPhase: 'ready',
-          ...(spatial?.pageCount        ? { pageCount:       spatial.pageCount }        : {}),
-          ...(spatial?.documentTitle    ? { documentTitle:   spatial.documentTitle }    : {}),
-          ...(spatial?.thumbnailDataUrl ? { thumbnailDataUrl: spatial.thumbnailDataUrl } : {}),
-        },
+        content: readyContent,
       });
 
       applyStudyLinksForObject(obj.id, 'pdf');

@@ -27,6 +27,7 @@ import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
 import { useFreeSpaceRenderPolicy } from '../canvas/FreeSpaceRenderPolicyContext';
+import { shouldSuspendPdfViewer } from '../../lib/freeSpaceScalePolicy';
 import { FreeSpaceObjectShell } from './FreeSpaceObjectShell';
 import { StudyLayoutDockedPlaceholder } from './StudyLayoutDockedPlaceholder';
 import { StudySessionCardChip } from './StudySessionCardChip';
@@ -333,6 +334,14 @@ function ProjectSpaceObjectRendererInner({
 
   const renderPolicy = useFreeSpaceRenderPolicy(object.id);
   const content = ensureProjectObjectContent(object.type, object.content);
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setCoarsePointer(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
   const [copied, setCopied] = useState(false);
   const [copyHovered, setCopyHovered] = useState(false);
   const [touchSeen, setTouchSeen] = useState(false);
@@ -605,6 +614,11 @@ function ProjectSpaceObjectRendererInner({
           />
         );
       }
+      const pdfInStudySession = contentHost === 'study-session';
+      const suspendPdfViewer = shouldSuspendPdfViewer(renderPolicy, {
+        coarsePointer,
+        inStudySession: pdfInStudySession,
+      });
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="PDF">
           <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -616,7 +630,7 @@ function ProjectSpaceObjectRendererInner({
               sectionId={freeSpaceSectionId}
               onChange={c => onChange(c)}
               onTitleChange={onTitleChange}
-            suspendViewer={renderPolicy.suspendHeavyContent}
+            suspendViewer={suspendPdfViewer}
             linkedNotebookTitle={notebook?.title ?? null}
             relatedMistakeCount={mistakeCount}
             pdfTitle={object.title}
