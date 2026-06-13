@@ -114,6 +114,9 @@ const ERASER_RADIUS_NORM = 0.02;
 const SAVE_DEBOUNCE_MS = 120;
 const SAVE_RETRY_DELAY_MS = 250;
 
+/** TEMP(iPad QA): remove after confirming dual-layer deploy — see 82dc04c */
+const SHOW_DUAL_LAYER_PROOF_BADGE = true;
+
 function saveErrorMessage(result: HwSetResult): string {
   if (result.failureStage === 'missing_params') {
     return 'Could not save handwriting — notebook not ready.';
@@ -1322,6 +1325,31 @@ export function HandwritingBlock({
               zIndex: 2,
             }}
           />
+        ) : null}
+        {SHOW_DUAL_LAYER_PROOF_BADGE && pageLayout ? (
+          <div
+            aria-hidden
+            data-fw-dual-layer-proof="82dc04c"
+            style={{
+              position: 'absolute',
+              right: 8,
+              bottom: 8,
+              zIndex: 3,
+              pointerEvents: 'none',
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              lineHeight: 1.2,
+              padding: '4px 8px',
+              borderRadius: 6,
+              color: '#1c1917',
+              background: 'rgba(255,251,245,0.92)',
+              border: '1px solid rgba(28,25,23,0.18)',
+              boxShadow: '0 1px 4px rgba(28,25,23,0.12)',
+            }}
+          >
+            Dual Layer Active
+          </div>
         ) : null}
       </div>
     </div>
