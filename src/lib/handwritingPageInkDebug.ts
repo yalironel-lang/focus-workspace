@@ -22,6 +22,12 @@ export type PageInkDebugSnapshot = {
   lastHwGetSource: string | null;
   lastHwGetAt: number | null;
   persistBackend: string;
+  hydratedStrokeCount: number | null;
+  dataRefStrokeCountAfterHydrate: number | null;
+  redrawCalledAfterHydrate: boolean;
+  canvasSizeAtHydrate: string | null;
+  canvasSizeAtRedraw: string | null;
+  lastPaintStatus: string | null;
   lastSaveStatus: string;
   lastHydrateStatus: string;
   lastHydrateStrokeCount: number | null;
@@ -56,6 +62,12 @@ const state: PageInkDebugSnapshot = {
   lastHwGetSource: null,
   lastHwGetAt: null,
   persistBackend: 'unknown',
+  hydratedStrokeCount: null,
+  dataRefStrokeCountAfterHydrate: null,
+  redrawCalledAfterHydrate: false,
+  canvasSizeAtHydrate: null,
+  canvasSizeAtRedraw: null,
+  lastPaintStatus: null,
   lastSaveStatus: '—',
   lastHydrateStatus: '—',
   lastHydrateStrokeCount: null,
@@ -205,6 +217,27 @@ export function recordPageInkDbState(dbState: string, env: IndexedDbEnvironmentR
 
 export function recordPageInkPersistBackend(backend: string): void {
   state.persistBackend = backend;
+  notify();
+}
+
+export function recordPageInkRenderState(patch: {
+  hydratedStrokeCount?: number | null;
+  dataRefStrokeCountAfterHydrate?: number | null;
+  redrawCalledAfterHydrate?: boolean;
+  canvasSizeAtHydrate?: string | null;
+  canvasSizeAtRedraw?: string | null;
+  lastPaintStatus?: string | null;
+}): void {
+  if (patch.hydratedStrokeCount !== undefined) state.hydratedStrokeCount = patch.hydratedStrokeCount;
+  if (patch.dataRefStrokeCountAfterHydrate !== undefined) {
+    state.dataRefStrokeCountAfterHydrate = patch.dataRefStrokeCountAfterHydrate;
+  }
+  if (patch.redrawCalledAfterHydrate !== undefined) {
+    state.redrawCalledAfterHydrate = patch.redrawCalledAfterHydrate;
+  }
+  if (patch.canvasSizeAtHydrate !== undefined) state.canvasSizeAtHydrate = patch.canvasSizeAtHydrate;
+  if (patch.canvasSizeAtRedraw !== undefined) state.canvasSizeAtRedraw = patch.canvasSizeAtRedraw;
+  if (patch.lastPaintStatus !== undefined) state.lastPaintStatus = patch.lastPaintStatus;
   notify();
 }
 

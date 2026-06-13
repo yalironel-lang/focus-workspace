@@ -51,6 +51,7 @@ import {
   recordPageInkHydrate,
   recordPageInkMemory,
   recordPageInkPersist,
+  recordPageInkRenderState,
   subscribePageInkDebug,
   type PageInkDebugSnapshot,
 } from '../../lib/handwritingPageInkDebug';
@@ -173,6 +174,12 @@ function PageInkDebugPanel({
     ['blockKey', snapshot.blockKey],
     ['storageKey', snapshot.storageKey ?? '—'],
     ['memory strokes', String(strokeCount)],
+    ['dataRef', snapshot.dataRefStrokeCountAfterHydrate != null ? String(snapshot.dataRefStrokeCountAfterHydrate) : '—'],
+    ['hydrated', snapshot.hydratedStrokeCount != null ? String(snapshot.hydratedStrokeCount) : '—'],
+    ['redraw', snapshot.redrawCalledAfterHydrate ? 'yes' : 'no'],
+    ['canvas hydrate', snapshot.canvasSizeAtHydrate ?? '—'],
+    ['canvas redraw', snapshot.canvasSizeAtRedraw ?? '—'],
+    ['paint', snapshot.lastPaintStatus ?? '—'],
     ['last hwSet', `${snapshot.lastHwSetStrokeCount ?? '—'} ${snapshot.lastHwSetOk === true ? 'ok' : snapshot.lastHwSetOk === false ? 'FAIL' : '—'}`],
     ['idb verify', snapshot.lastPostSaveVerifyStrokeCount != null ? String(snapshot.lastPostSaveVerifyStrokeCount) : '—'],
     ['last hwGet', `${snapshot.lastHwGetStrokeCount ?? '—'} (${snapshot.lastHwGetSource ?? '—'})`],
@@ -232,6 +239,7 @@ export function HandwritingBlock({
   onDelete,
   pageLayout = false,
 }: Props) {
+  const isPageInkBlock = blockKey === PAGE_INK_BLOCK_KEY;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -251,6 +259,59 @@ export function HandwritingBlock({
     (reason?: 'registry' | 'unmount' | 'stroke' | 'debounce' | 'visibility') => Promise<boolean>
   >(() => Promise.resolve(true));
   const syncCanvasWidthRef = useRef<() => void>(() => undefined);
+  const schedulePaintRef = useRef<() => void>(() => undefined);
+
+  const formatCanvasSize = (canvas: HTMLCanvasElement | null): string => {
+    if (!canvas) return 'no-canvas';
+    const rect = canvas.getBoundingClientRect();
+    return `${Math.round(rect.width)}x${Math.round(rect.height)} bmp=${canvas.width}x${canvas.height}`;
+  };
+
+  const MAX_HYDRATE_REDRAW_FRAMES = 24;
+
+  const redrawAfterHydrate = useCallback(
+    (reason: 'mount' | 'layout', attempt = 0): void => {
+      const canvas = canvasRef.current;
+      const data = dataRef.current;
+      if (!canvas || !data) {
+        if (isPageInkBlock) {
+          recordPageInkRenderState({
+            lastPaintStatus: `skip ${reason} a=${attempt} no-canvas-or-data`,
+          });
+        }
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) {
+        if (attempt === 0 && isPageInkBlock) {
+          recordPageInkRenderState({
+            canvasSizeAtHydrate: formatCanvasSize(canvas),
+            lastPaintStatus: `wait-layout ${reason}`,
+          });
+        }
+        if (attempt < MAX_HYDRATE_REDRAW_FRAMES) {
+          requestAnimationFrame(() => redrawAfterHydrate(reason, attempt + 1));
+        } else if (isPageInkBlock) {
+          recordPageInkRenderState({
+            lastPaintStatus: `give-up ${reason} after ${attempt} frames`,
+          });
+        }
+        return;
+      }
+      syncCanvasWidthRef.current();
+      schedulePaintRef.current();
+      if (isPageInkBlock) {
+        recordPageInkRenderState({
+          redrawCalledAfterHydrate: true,
+          canvasSizeAtRedraw: formatCanvasSize(canvas),
+          dataRefStrokeCountAfterHydrate: data.strokes.length,
+          lastPaintStatus: `paint-scheduled ${reason} a=${attempt}`,
+        });
+        recordPageInkMemory(objectId, data.strokes.length);
+      }
+    },
+    [isPageInkBlock, objectId],
+  );
 
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
@@ -272,7 +333,6 @@ export function HandwritingBlock({
       render: 'polyline',
     },
   );
-  const isPageInkBlock = blockKey === PAGE_INK_BLOCK_KEY;
   const [pageInkDebug, setPageInkDebug] = useState<PageInkDebugSnapshot>(() =>
     getPageInkDebugSnapshot(),
   );
@@ -290,17 +350,40 @@ export function HandwritingBlock({
   const paint = useCallback(() => {
     const canvas = canvasRef.current;
     const data = dataRef.current;
-    if (!canvas || !data) return;
+    if (!canvas || !data) {
+      if (isPageInkBlock) {
+        recordPageInkRenderState({ lastPaintStatus: 'paint-skip no-canvas-or-data' });
+      }
+      return;
+    }
     const synced = syncCanvasFromRect(canvas, { allowResize: !drawingRef.current });
-    if (!synced) return;
+    if (!synced) {
+      if (isPageInkBlock) {
+        recordPageInkRenderState({
+          lastPaintStatus: `paint-skip bad-rect ${formatCanvasSize(canvas)}`,
+        });
+      }
+      return;
+    }
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      if (isPageInkBlock) {
+        recordPageInkRenderState({ lastPaintStatus: 'paint-skip no-ctx' });
+      }
+      return;
+    }
     const { w, h } = synced;
     layoutRef.current = { w, h };
     const refW = data.canvas.width;
     const draft = draftRef.current;
     drawStrokes(ctx, data.strokes, w, h, refW, draft);
-  }, []);
+    if (isPageInkBlock) {
+      recordPageInkRenderState({
+        lastPaintStatus: `drew ${data.strokes.length} strokes ${formatCanvasSize(canvas)}`,
+        canvasSizeAtRedraw: formatCanvasSize(canvas),
+      });
+    }
+  }, [isPageInkBlock]);
 
   const schedulePaint = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -309,6 +392,8 @@ export function HandwritingBlock({
       paint();
     });
   }, [paint]);
+
+  schedulePaintRef.current = schedulePaint;
 
   const mergeDraftIntoData = useCallback((base: HandwritingBlockData): HandwritingBlockData => {
     const draft = draftRef.current;
@@ -506,6 +591,14 @@ export function HandwritingBlock({
         setDisplayHeight(h);
         setStrokeCount(existing.strokes.length);
         setMissing(false);
+        if (isPageInk) {
+          recordPageInkMemory(objectId, existing.strokes.length);
+          recordPageInkRenderState({
+            hydratedStrokeCount: existing.strokes.length,
+            dataRefStrokeCountAfterHydrate: existing.strokes.length,
+            canvasSizeAtHydrate: formatCanvasSize(canvas),
+          });
+        }
       } else {
         dataRef.current = emptyHandwritingData(w, h);
         setDisplayHeight(h);
@@ -515,17 +608,20 @@ export function HandwritingBlock({
       undoRef.current = [];
       setCanUndo(false);
       setLoaded(true);
-      syncCanvasWidthRef.current();
+      afterLayoutSettle(() => {
+        if (cancelled) return;
+        redrawAfterHydrate('mount');
+      });
     })();
     return () => {
       cancelled = true;
       void flushSaveRef.current('unmount');
     };
-  }, [objectId, blockKey, pageLayout]);
+  }, [objectId, blockKey, pageLayout, redrawAfterHydrate]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
-    syncCanvasWidth();
+    redrawAfterHydrate('layout');
     const wrap = wrapRef.current;
     if (!wrap || typeof ResizeObserver === 'undefined') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -533,7 +629,7 @@ export function HandwritingBlock({
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        syncCanvasWidth();
+        redrawAfterHydrate('layout');
       }, 100);
     });
     ro.observe(wrap);
@@ -541,7 +637,7 @@ export function HandwritingBlock({
       ro.disconnect();
       if (timer) clearTimeout(timer);
     };
-  }, [loaded, syncCanvasWidth, displayHeight]);
+  }, [loaded, displayHeight, redrawAfterHydrate]);
 
   useEffect(() => {
     if (!loaded) return;
