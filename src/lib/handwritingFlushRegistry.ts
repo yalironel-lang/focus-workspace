@@ -24,8 +24,10 @@ export async function flushAllHandwritingForObject(objectId: string): Promise<bo
   if (!objectId) return true;
   const set = byObject.get(objectId);
   if (!set || set.size === 0) return true;
-  const results = await Promise.all(
-    [...set].map(fn => fn().catch(() => false)),
-  );
-  return results.every(Boolean);
+  let allOk = true;
+  for (const fn of set) {
+    const ok = await fn().catch(() => false);
+    if (!ok) allOk = false;
+  }
+  return allOk;
 }

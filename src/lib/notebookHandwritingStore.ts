@@ -7,6 +7,7 @@
 import { hwDiagLog } from './handwritingDiagnostics';
 import { fwPersistWarn } from './freeSpacePersistence';
 import {
+  PAGE_INK_BLOCK_KEY,
   referencedHandwritingKeys,
   sanitizeHandwritingData,
   type HandwritingBlockData,
@@ -406,6 +407,12 @@ export async function gcOrphanHandwritingKeys(
       });
       continue;
     }
+    if (blockKey === PAGE_INK_BLOCK_KEY) {
+      hwDiagLog('notebookHandwritingStore.ts:gc', 'deleting page-ink orphan', {
+        storageKey,
+        referencedKeys: [...referenced],
+      });
+    }
     cache.delete(storageKey);
     recentWrites.delete(storageKey);
     await idbDelete(storageKey).catch(() => undefined);
@@ -413,5 +420,6 @@ export async function gcOrphanHandwritingKeys(
 }
 
 export async function gcOrphanHandwriting(objectId: string, body: string): Promise<void> {
-  return gcOrphanHandwritingKeys(objectId, referencedHandwritingKeys(body));
+  const referenced = [...new Set([...referencedHandwritingKeys(body), PAGE_INK_BLOCK_KEY])];
+  return gcOrphanHandwritingKeys(objectId, referenced);
 }
