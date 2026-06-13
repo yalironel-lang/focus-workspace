@@ -50,6 +50,8 @@ export type NotebookPaperStyle = 'blank' | 'ruled' | 'grid';
 /** Document page vs dark spatial writing surface. */
 export type NotebookSurface = 'spatial' | 'paper';
 export type NotebookMode = 'normal' | 'math' | 'math-workspace' | 'scratch';
+/** Text = typed lines (default). Ink = page ink surface (Apple Pencil). */
+export type NotebookWritingMode = 'text' | 'ink';
 
 export type ProjectObjectContent =
   | {
@@ -58,6 +60,8 @@ export type ProjectObjectContent =
       paperStyle: NotebookPaperStyle;
       notebookSurface?: NotebookSurface;
       notebookMode?: NotebookMode;
+      /** Absent = text. Ink mode uses PAGE_INK_BLOCK_KEY in IDB. */
+      writingMode?: NotebookWritingMode;
       icon?: string;
       accentColor?: string;
       subtitle?: string;
@@ -356,6 +360,9 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const deskGraphExpression = sanitizeDeskGraphExpression(r.deskGraphExpression);
       const deskComputeHistory = sanitizeDeskComputeHistory(r.deskComputeHistory);
       const studyLayout = sanitizeStudyLayout(r.studyLayout);
+      const wm = r.writingMode;
+      const writingMode: NotebookWritingMode | undefined =
+        wm === 'ink' ? 'ink' : wm === 'text' ? 'text' : undefined;
       return {
         type: 'notebook', body, paperStyle, notebookMode, notebookSurface,
         ...(icon !== undefined ? { icon } : {}),
@@ -367,6 +374,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ...(deskGraphExpression !== undefined ? { deskGraphExpression } : {}),
         ...(deskComputeHistory !== undefined ? { deskComputeHistory } : {}),
         ...(studyLayout !== 'canvas' ? { studyLayout } : {}),
+        ...(writingMode !== undefined ? { writingMode } : {}),
       };
     }
     case 'note':

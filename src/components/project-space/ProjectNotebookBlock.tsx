@@ -18,7 +18,7 @@ import type {
 import { createPortal } from 'react-dom';
 import { flushSync } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
+import type { ProjectObjectContent, ProjectSpaceObject, NotebookWritingMode } from '../../hooks/useSectionFreeSpaceObjects';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
@@ -49,7 +49,7 @@ import {
   hydrateHandwritingBlocks,
   hwDelete,
 } from '../../lib/notebookHandwritingStore';
-import { newHandwritingKey, referencedHandwritingKeys } from '../../lib/handwritingTypes';
+import { newHandwritingKey, referencedHandwritingKeys, PAGE_INK_BLOCK_KEY, PAGE_INK_INITIAL_HEIGHT } from '../../lib/handwritingTypes';
 import { flushAllHandwritingForObject } from '../../lib/handwritingFlushRegistry';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
@@ -1045,6 +1045,59 @@ function NotebookModeSelect({
   );
 }
 
+function NotebookWritingModeToggle({
+  mode,
+  onChange,
+  tokens,
+}: {
+  mode: NotebookWritingMode;
+  onChange: (mode: NotebookWritingMode) => void;
+  tokens: AtmosphereTokens;
+}) {
+  const segment = (value: NotebookWritingMode, label: string) => (
+    <button
+      type="button"
+      aria-pressed={mode === value}
+      onClick={() => {
+        if (mode !== value) onChange(value);
+      }}
+      style={{
+        padding: '4px 10px',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        border: 'none',
+        cursor: 'pointer',
+        borderRadius: 5,
+        background: mode === value ? `${tokens.accent}24` : 'transparent',
+        color: mode === value ? tokens.accent : 'rgba(255,248,235,0.45)',
+        transition: 'background 0.15s ease, color 0.15s ease',
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="Notebook writing mode"
+      title="Text: type notes. Ink: write on the page with Apple Pencil."
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: 2,
+        borderRadius: 7,
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(255,255,255,0.03)',
+      }}
+    >
+      {segment('text', 'Text')}
+      {segment('ink', 'Ink')}
+    </div>
+  );
+}
+
 interface Props {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -1164,7 +1217,7 @@ export function ProjectNotebookBlock({
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
     const fromBody = referencedHandwritingKeys(content.body ?? '');
-    const hwKeys = [...new Set([...fromBlocks, ...fromBody])];
+    const hwKeys = [...new Set([...fromBlocks, ...fromBody, PAGE_INK_BLOCK_KEY])];
     const timer = window.setTimeout(() => {
       void gcOrphanHandwritingKeys(objectId, hwKeys);
     }, 600);
@@ -1697,6 +1750,8 @@ export function ProjectNotebookBlock({
   const notebookSurface = content.notebookSurface ?? 'spatial';
   const isPaperSurface = notebookSurface === 'paper';
   const notebookMode = content.notebookMode ?? 'normal';
+  const writingMode: NotebookWritingMode = content.writingMode ?? 'text';
+  const showInkMode = writingMode === 'ink' && !isFocusModeOpen && editorMode === 'edit';
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
   const compositionActive =
     isMathNotebook && editorMode === 'edit' && !compositionChromeSuppressed;
@@ -2262,6 +2317,23 @@ export function ProjectNotebookBlock({
       active.blur();
     }
   }, [dismissSelectionToolbar]);
+
+  const handleWritingModeChange = useCallback(
+    (next: NotebookWritingMode) => {
+      if (next === writingMode) return;
+      void (async () => {
+        await flushHandwritingBeforeTransition();
+        dismissNotebookTextEditing();
+        onChange({ ...content, writingMode: next });
+      })();
+    },
+    [writingMode, flushHandwritingBeforeTransition, dismissNotebookTextEditing, onChange, content],
+  );
+
+  useEffect(() => {
+    if (!showInkMode || !objectId) return;
+    void hydrateHandwritingBlocks(objectId, [PAGE_INK_BLOCK_KEY]);
+  }, [showInkMode, objectId]);
 
   const restoreRichSelection = useCallback(
     (blockId: string, start: number, end: number) => {
@@ -4360,6 +4432,13 @@ export function ProjectNotebookBlock({
               fontSize: 10, fontWeight: 500, letterSpacing: '0.04em', transition: 'color 0.15s',
             }}
           >Plain</button>
+          {editorMode === 'edit' && !isFocusModeOpen ? (
+            <NotebookWritingModeToggle
+              mode={writingMode}
+              onChange={handleWritingModeChange}
+              tokens={tokens}
+            />
+          ) : null}
           {notebookMode !== 'math-workspace' && (
             <button
               type="button"
@@ -4625,6 +4704,13 @@ export function ProjectNotebookBlock({
               </svg>
             </button>
           ) : null}
+          {editorMode === 'edit' && !isFocusModeOpen ? (
+            <NotebookWritingModeToggle
+              mode={writingMode}
+              onChange={handleWritingModeChange}
+              tokens={tokens}
+            />
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -4716,6 +4802,57 @@ export function ProjectNotebookBlock({
             }}
             style={{ ...writingColumnStyle, position: 'relative' }}
           >
+          {showInkMode ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                width: '100%',
+                minHeight: isDeskPresentation ? 480 : PAGE_INK_INITIAL_HEIGHT,
+              }}
+            >
+              {objectId ? (
+                <HandwritingBlock
+                  blockId="__page-ink__"
+                  objectId={objectId}
+                  blockKey={PAGE_INK_BLOCK_KEY}
+                  tokens={tokens}
+                  pageLayout
+                  surfaceChrome={{
+                    margin: 0,
+                    flex: 1,
+                    width: '100%',
+                    minHeight: PAGE_INK_INITIAL_HEIGHT,
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                  onDismissTextEditing={dismissNotebookTextEditing}
+                  onDrawingChange={drawing => {
+                    if (drawing) dismissNotebookTextEditing();
+                    if (context === 'free-space') onEditingChange?.(drawing);
+                  }}
+                />
+              ) : (
+                <p style={{ fontSize: 12, color: tokens.textMuted, padding: 16 }}>
+                  Ink mode unavailable — notebook is still loading.
+                </p>
+              )}
+              <p
+                style={{
+                  margin: '10px 0 4px',
+                  fontSize: 10,
+                  color: tokens.textGhost,
+                  letterSpacing: '0.03em',
+                  textAlign: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                Switch to Text mode to edit typed notes.
+              </p>
+            </div>
+          ) : (
+          <>
           {isMathNotebook && !isDeskPresentation ? (
             <MathStudyInsight body={content.body ?? ''} tokens={tokens} />
           ) : null}
@@ -5487,6 +5624,8 @@ export function ProjectNotebookBlock({
           {isDeskPresentation ? (
             <div aria-hidden style={{ flex: 1, minHeight: 'min(48vh, 420px)' }} />
           ) : null}
+          </>
+          )}
           </div>
         </div>
       ) : (

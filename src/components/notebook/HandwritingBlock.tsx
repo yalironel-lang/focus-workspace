@@ -50,6 +50,7 @@ import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
   CANVAS_HEIGHT_STEP,
+  PAGE_INK_INITIAL_HEIGHT,
   clampCanvasHeight,
   DEFAULT_CANVAS_MIN_HEIGHT,
   emptyHandwritingData,
@@ -73,6 +74,8 @@ type Props = {
   onDismissTextEditing?: () => void;
   /** Remove this handwriting block from the notebook (parent handles IDB + body). */
   onDelete?: () => void;
+  /** Notebook page ink — full-width surface, no delete block. */
+  pageLayout?: boolean;
 };
 
 declare global {
@@ -158,6 +161,7 @@ export function HandwritingBlock({
   onDrawingChange,
   onDismissTextEditing,
   onDelete,
+  pageLayout = false,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -332,8 +336,9 @@ export function HandwritingBlock({
       const canvas = canvasRef.current;
       const rect = canvas?.getBoundingClientRect();
       const w = rect && rect.width >= 1 ? rect.width : 600;
+      const defaultMinH = pageLayout ? PAGE_INK_INITIAL_HEIGHT : CANVAS_HEIGHT_MIN;
       const h = clampCanvasHeight(
-        existing?.canvas.height ?? (rect && rect.height >= 1 ? rect.height : CANVAS_HEIGHT_MIN),
+        existing?.canvas.height ?? (rect && rect.height >= 1 ? rect.height : defaultMinH),
       );
       if (existing) {
         dataRef.current = { ...existing, canvas: { ...existing.canvas, height: h } };
@@ -355,7 +360,7 @@ export function HandwritingBlock({
       cancelled = true;
       void flushSave();
     };
-  }, [objectId, blockKey, syncCanvasWidth, flushSave]);
+  }, [objectId, blockKey, pageLayout, syncCanvasWidth, flushSave]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -710,7 +715,7 @@ export function HandwritingBlock({
       data-nb-surface-block
       data-block-id={blockId}
       style={{
-        margin: '10px 0',
+        margin: pageLayout ? 0 : '10px 0',
         userSelect: 'none',
         touchAction: 'pan-y',
         ...surfaceChrome,
@@ -733,17 +738,19 @@ export function HandwritingBlock({
             alignItems: 'center',
           }}
         >
-          <span
-            style={{
-              fontSize: 11,
-              color: tokens.textMuted,
-              letterSpacing: '0.04em',
-              marginRight: 2,
-              opacity: 0.7,
-            }}
-          >
-            Handwriting
-          </span>
+          {!pageLayout ? (
+            <span
+              style={{
+                fontSize: 11,
+                color: tokens.textMuted,
+                letterSpacing: '0.04em',
+                marginRight: 2,
+                opacity: 0.7,
+              }}
+            >
+              Handwriting
+            </span>
+          ) : null}
           {import.meta.env.DEV ? (
             <span
               title="Spike debug — console: __fwHwSpikeHelp()"
@@ -878,10 +885,16 @@ export function HandwritingBlock({
           position: 'relative',
           width: '100%',
           height: displayHeight,
-          borderRadius: 8,
-          border: '1px solid rgba(255,255,255,0.1)',
-          background: 'rgba(0,0,0,0.18)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+          flex: pageLayout ? 1 : undefined,
+          minHeight: pageLayout ? PAGE_INK_INITIAL_HEIGHT : undefined,
+          borderRadius: pageLayout ? 2 : 8,
+          border: pageLayout
+            ? '1px solid rgba(28,25,23,0.1)'
+            : '1px solid rgba(255,255,255,0.1)',
+          background: pageLayout ? 'rgba(255,251,245,0.98)' : 'rgba(0,0,0,0.18)',
+          boxShadow: pageLayout
+            ? '0 1px 3px rgba(28,25,23,0.06), inset 0 0 0 1px rgba(255,255,255,0.65)'
+            : 'inset 0 1px 0 rgba(255,255,255,0.04)',
           overflow: 'hidden',
           touchAction: 'pan-y',
         }}
@@ -934,7 +947,13 @@ export function HandwritingBlock({
               letterSpacing: '0.03em',
             }}
           >
-            {readOnly ? 'Handwriting' : 'Write with Apple Pencil…'}
+            {readOnly
+              ? pageLayout
+                ? 'Page ink'
+                : 'Handwriting'
+              : pageLayout
+                ? 'Write on this page with Apple Pencil…'
+                : 'Write with Apple Pencil…'}
           </div>
         ) : null}
         {hwDebugEnabled() && debugDot ? (

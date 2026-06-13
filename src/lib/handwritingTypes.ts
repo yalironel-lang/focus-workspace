@@ -25,6 +25,10 @@ export const DEFAULT_CANVAS_MIN_HEIGHT = 360;
 export const CANVAS_HEIGHT_MIN = DEFAULT_CANVAS_MIN_HEIGHT;
 export const CANVAS_HEIGHT_STEP = 180;
 export const CANVAS_HEIGHT_MAX = 1080;
+/** Fixed IDB block key for notebook page ink (not serialized in body). */
+export const PAGE_INK_BLOCK_KEY = 'page-ink';
+/** Initial page ink canvas height (manual Add space still applies). */
+export const PAGE_INK_INITIAL_HEIGHT = 480;
 
 export function clampCanvasHeight(h: number): number {
   if (!Number.isFinite(h)) return CANVAS_HEIGHT_MIN;
