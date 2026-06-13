@@ -1,4 +1,5 @@
 import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
+import { draftPenLineWidthPx } from './handwritingInk';
 import {
   hwDiagRecordPressure,
   hwDiagRecordSamplingPick,
@@ -296,9 +297,16 @@ function strokeWidthPx(
   refWidth: number,
   p?: HandwritingPoint,
 ): number {
+  if (stroke.tool === 'pen') {
+    return draftPenLineWidthPx(
+      stroke.width,
+      canvasW,
+      refWidth,
+      effectivePressure(p),
+    );
+  }
   const base = stroke.width * (canvasW / Math.max(refWidth, 1));
-  const pressure = stroke.tool === 'pen' ? effectivePressure(p) : 1;
-  return Math.max(1, base * (0.35 + pressure * 0.85));
+  return Math.max(1, base);
 }
 
 /** Legacy full-canvas redraw — dev spike only. Production uses handwritingLayers dual path. */

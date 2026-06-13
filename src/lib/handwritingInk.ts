@@ -32,6 +32,28 @@ export function strokeHasRealPressure(stroke: HandwritingStroke): boolean {
   return stroke.points.some(p => p.pressure !== undefined && p.pressure > 0);
 }
 
+/** Shared scale for commit mesh and draft polyline (no perfect-freehand on draft). */
+export function commitStrokeSizePx(
+  strokeWidth: number,
+  canvasW: number,
+  refWidth: number,
+): number {
+  const baseSize = strokeWidth * (canvasW / Math.max(refWidth, 1));
+  return Math.max(2, baseSize * MATH_INK_PRESET.sizeMultiplier);
+}
+
+/** Draft polyline width — tuned to match committed mathInk footprint while drawing. */
+export function draftPenLineWidthPx(
+  strokeWidth: number,
+  canvasW: number,
+  refWidth: number,
+  pressure?: number,
+): number {
+  const size = commitStrokeSizePx(strokeWidth, canvasW, refWidth);
+  const p = pressure !== undefined && pressure > 0 ? pressure : 0.5;
+  return Math.max(1.5, size * (0.62 + p * 0.46));
+}
+
 function inkPathFromOutline(outline: number[][]): Path2D {
   const path = new Path2D();
   if (outline.length < 2) return path;
@@ -56,11 +78,11 @@ export function drawPenStrokeMathInk(
   if (stroke.tool !== 'pen' || stroke.points.length === 0) return;
 
   const inkPoints = strokeToInkPoints(stroke, canvasW, canvasH);
-  const baseSize = stroke.width * (canvasW / Math.max(refWidth, 1));
+  const size = commitStrokeSizePx(stroke.width, canvasW, refWidth);
 
   if (inkPoints.length === 1) {
     const p = inkPoints[0]!;
-    const r = Math.max(1.5, baseSize * 0.5);
+    const r = Math.max(1.5, size * 0.45);
     ctx.beginPath();
     ctx.fillStyle = stroke.color;
     ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
@@ -68,7 +90,6 @@ export function drawPenStrokeMathInk(
     return;
   }
 
-  const size = Math.max(2, baseSize * MATH_INK_PRESET.sizeMultiplier);
   const outline = getStroke(inkPoints, {
     size,
     thinning: MATH_INK_PRESET.thinning,

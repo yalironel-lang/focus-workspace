@@ -426,6 +426,15 @@ export function HandwritingBlock({
     paintIdle();
   }, [paintDraft, paintIdle]);
 
+  /** Immediate draft paint while pen is down — avoids RAF wait on pointermove. */
+  const paintDraftNow = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    paintDraft();
+  }, [paintDraft]);
+
   const schedulePaint = useCallback(() => {
     if (rafRef.current !== null) return;
     rafRef.current = requestAnimationFrame(() => {
@@ -912,9 +921,9 @@ export function HandwritingBlock({
         points: [pt],
       };
       draftPaintedCountRef.current = 0;
-      schedulePaint();
+      paintDraftNow();
     },
-    [inkColor, objectId, blockKey, onDrawingChange, schedulePaint],
+    [inkColor, objectId, blockKey, onDrawingChange, paintDraftNow],
   );
 
   const saveNotReady = !objectId || !blockKey;
@@ -960,7 +969,7 @@ export function HandwritingBlock({
       points = appendPoint(points, pt, pt.pressure);
     }
     draftRef.current = { ...draftRef.current, points };
-    schedulePaint();
+    paintDraftNow();
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {

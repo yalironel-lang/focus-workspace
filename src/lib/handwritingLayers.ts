@@ -9,7 +9,7 @@ import {
   drawEraserStrokePolyline,
   drawPenStrokePolyline,
 } from './handwritingGeometry';
-import { drawPenStrokeMathInk } from './handwritingInk';
+import { drawPenStrokeMathInk, draftPenLineWidthPx } from './handwritingInk';
 
 export type LayerCanvasMetrics = {
   w: number;
@@ -132,11 +132,13 @@ export function appendDraftStrokeSegment(
     visibleCtx.lineTo(p.x * canvasW, p.y * canvasH);
   }
   const last = points[points.length - 1]!;
-  const base = stroke.width * (canvasW / Math.max(refWidth, 1));
-  const pressure =
-    last.pressure !== undefined && last.pressure > 0 ? last.pressure : 0.5;
   visibleCtx.strokeStyle = stroke.color;
-  visibleCtx.lineWidth = Math.max(1, base * (0.35 + pressure * 0.85));
+  visibleCtx.lineWidth = draftPenLineWidthPx(
+    stroke.width,
+    canvasW,
+    refWidth,
+    last.pressure,
+  );
   visibleCtx.lineCap = 'round';
   visibleCtx.lineJoin = 'round';
   visibleCtx.stroke();
