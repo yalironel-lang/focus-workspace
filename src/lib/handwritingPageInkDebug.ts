@@ -4,6 +4,7 @@
  */
 
 import { getGitCommit } from './appBuildInfo';
+import type { IndexedDbEnvironmentReport } from './indexedDbEnvironment';
 import { PAGE_INK_BLOCK_KEY } from './handwritingTypes';
 
 export type PageInkDebugSnapshot = {
@@ -27,6 +28,14 @@ export type PageInkDebugSnapshot = {
   lastFlushPayloadStrokes: number | null;
   lastFlushOk: boolean | null;
   objectIdHistory: string[];
+  lastIdbErrorName: string | null;
+  lastIdbErrorMessage: string | null;
+  lastIdbErrorOp: string | null;
+  lastIdbTxState: string | null;
+  dbState: string;
+  idbResolved: boolean;
+  idbPrivateHint: string;
+  idbDisplayMode: string;
 };
 
 const listeners = new Set<() => void>();
@@ -52,6 +61,14 @@ const state: PageInkDebugSnapshot = {
   lastFlushPayloadStrokes: null,
   lastFlushOk: null,
   objectIdHistory: [],
+  lastIdbErrorName: null,
+  lastIdbErrorMessage: null,
+  lastIdbErrorOp: null,
+  lastIdbTxState: null,
+  dbState: 'unknown',
+  idbResolved: false,
+  idbPrivateHint: 'unknown',
+  idbDisplayMode: 'unknown',
 };
 
 function notify(): void {
@@ -87,15 +104,22 @@ export function recordPageInkHwSet(
   strokeCount: number,
   ok: boolean,
   stage: string | null,
+  errorName?: string | null,
+  errorMessage?: string | null,
 ): void {
   trackObjectId(objectId);
   state.lastHwSetStrokeCount = strokeCount;
   state.lastHwSetOk = ok;
   state.lastHwSetStage = stage;
   state.lastHwSetAt = Date.now();
+  if (!ok && errorName) {
+    state.lastIdbErrorName = errorName;
+    state.lastIdbErrorMessage = errorMessage ?? null;
+    state.lastIdbErrorOp = stage ?? 'set';
+  }
   state.lastSaveStatus = ok
     ? `ok (${strokeCount} strokes)`
-    : `FAIL ${stage ?? 'unknown'} (${strokeCount} sent)`;
+    : `FAIL ${stage ?? 'unknown'} (${strokeCount} sent)${errorName ? `: ${errorName}` : ''}`;
   notify();
 }
 
@@ -152,6 +176,28 @@ export function recordPageInkFlush(
   state.lastFlushReason = reason;
   state.lastFlushPayloadStrokes = payloadStrokes;
   state.lastFlushOk = ok;
+  notify();
+}
+
+export function recordPageInkIdbFailure(
+  op: string,
+  error: { name: string; message: string },
+  dbState: string,
+  txState?: string | null,
+): void {
+  state.lastIdbErrorOp = op;
+  state.lastIdbErrorName = error.name;
+  state.lastIdbErrorMessage = error.message;
+  state.dbState = dbState;
+  state.lastIdbTxState = txState ?? null;
+  notify();
+}
+
+export function recordPageInkDbState(dbState: string, env: IndexedDbEnvironmentReport): void {
+  state.dbState = dbState;
+  state.idbResolved = env.resolved;
+  state.idbPrivateHint = env.privateModeHint;
+  state.idbDisplayMode = env.displayMode;
   notify();
 }
 

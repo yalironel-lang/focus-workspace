@@ -5,10 +5,13 @@
  */
 
 import { hwDiagLog } from './handwritingDiagnostics';
+import { getIndexedDB, probeIndexedDbEnvironment } from './indexedDbEnvironment';
 import { fwPersistWarn } from './freeSpacePersistence';
 import {
+  recordPageInkDbState,
   recordPageInkHwGet,
   recordPageInkHwSet,
+  recordPageInkIdbFailure,
   recordPageInkPostSaveVerify,
 } from './handwritingPageInkDebug';
 import {
@@ -33,6 +36,38 @@ const recentWrites = new Map<string, number>();
 let idbChain: Promise<unknown> = Promise.resolve();
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let activeDb: IDBDatabase | null = null;
+let lastIdbFailureTxState: string | null = null;
+
+function getDbDebugState(): string {
+  if (!getIndexedDB()) return 'idb-unavailable';
+  if (activeDb) return `open v${activeDb.version}`;
+  if (dbPromise) return 'connecting';
+  return 'no-connection';
+}
+
+function getTxDebugState(db: IDBDatabase, tx: IDBTransaction | null): string {
+  const storeNames = Array.from(db.objectStoreNames).join(',') || 'none';
+  if (!tx) return `db=v${db.version} stores=[${storeNames}] tx=null`;
+  const txErr = tx.error;
+  return `db=v${db.version} stores=[${storeNames}] tx.mode=${tx.mode} tx.error=${txErr ? `${txErr.name}:${txErr.message}` : 'none'}`;
+}
+
+function probePageInkIdbOnce(isPageInk: boolean): void {
+  if (!isPageInk) return;
+  recordPageInkDbState(getDbDebugState(), probeIndexedDbEnvironment());
+}
+
+function attachDbLifecycle(db: IDBDatabase): void {
+  activeDb = db;
+  db.onclose = () => {
+    if (activeDb === db) activeDb = null;
+    dbPromise = null;
+  };
+  db.onversionchange = () => {
+    db.close();
+  };
+}
 
 export type HwSaveFailureStage =
   | 'missing_params'
@@ -109,11 +144,16 @@ export function makeHandwritingStorageKey(objectId: string, blockKey: string): s
 }
 
 function openDbFresh(): Promise<IDBDatabase> {
-  if (typeof indexedDB === 'undefined') {
-    return Promise.reject(new Error('IndexedDB unavailable (indexedDB is undefined)'));
+  const idb = getIndexedDB();
+  if (!idb) {
+    return Promise.reject(
+      new Error(
+        'IndexedDB is not available in this browser session (often Safari Private Browsing or restricted storage).',
+      ),
+    );
   }
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = idb.open(DB_NAME, DB_VERSION);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
     req.onblocked = () => reject(new Error('IndexedDB open blocked (upgrade in progress)'));
     req.onupgradeneeded = () => {
@@ -122,7 +162,11 @@ function openDbFresh(): Promise<IDBDatabase> {
         db.createObjectStore(STORE);
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      attachDbLifecycle(db);
+      resolve(db);
+    };
   });
 }
 
@@ -138,20 +182,35 @@ function getDb(): Promise<IDBDatabase> {
 
 function resetDbConnection(): void {
   dbPromise = null;
+  activeDb = null;
 }
 
 async function idbGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
   return runSerializedIdb(async () => {
     const db = await getDb();
     return new Promise<HandwritingBlockData | undefined>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
+      let tx: IDBTransaction | null = null;
+      try {
+        tx = db.transaction(STORE, 'readonly');
+      } catch (e) {
+        lastIdbFailureTxState = getTxDebugState(db, null);
+        reject(e);
+        return;
+      }
       const req = tx.objectStore(STORE).get(storageKey);
       tx.oncomplete = () => {
         const raw = req.result;
         resolve(sanitizeHandwritingData(raw) ?? undefined);
       };
-      tx.onerror = () => reject(tx.error ?? req.error);
-      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB read aborted'));
+      tx.onerror = () => {
+        const err = tx!.error ?? req.error;
+        lastIdbFailureTxState = getTxDebugState(db, tx);
+        reject(err ?? new Error('IndexedDB read failed'));
+      };
+      tx.onabort = () => {
+        lastIdbFailureTxState = getTxDebugState(db, tx);
+        reject(tx!.error ?? new Error('IndexedDB read aborted'));
+      };
     });
   });
 }
@@ -159,11 +218,30 @@ async function idbGet(storageKey: string): Promise<HandwritingBlockData | undefi
 async function idbPutOnce(storageKey: string, data: HandwritingBlockData): Promise<void> {
   const db = await getDb();
   return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
+    let tx: IDBTransaction | null = null;
+    try {
+      tx = db.transaction(STORE, 'readwrite');
+    } catch (e) {
+      lastIdbFailureTxState = getTxDebugState(db, null);
+      reject(e);
+      return;
+    }
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction error'));
-    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'));
-    tx.objectStore(STORE).put(data, storageKey);
+    tx.onerror = () => {
+      const err = tx!.error ?? new Error('IndexedDB transaction error');
+      lastIdbFailureTxState = getTxDebugState(db, tx);
+      reject(err);
+    };
+    tx.onabort = () => {
+      lastIdbFailureTxState = getTxDebugState(db, tx);
+      reject(tx!.error ?? new Error('IndexedDB write aborted'));
+    };
+    try {
+      tx.objectStore(STORE).put(data, storageKey);
+    } catch (e) {
+      lastIdbFailureTxState = getTxDebugState(db, tx);
+      reject(e);
+    }
   });
 }
 
@@ -229,6 +307,7 @@ export function hwGetCached(objectId: string, blockKey: string): HandwritingBloc
 export async function hwGet(objectId: string, blockKey: string): Promise<HandwritingBlockData | null> {
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+  probePageInkIdbOnce(isPageInk);
   if (cache.has(storageKey)) {
     const cached = cache.get(storageKey)!;
     if (isPageInk) {
@@ -260,12 +339,17 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
     if (data) cache.set(storageKey, data);
     return data ?? null;
   } catch (e) {
+    const err = serializeIdbError(e);
     fwPersistWarn(`Could not load handwriting ${storageKey}: ${String(e)}`);
     hwDiagLog('notebookHandwritingStore.ts:hwGet', 'load failed', {
       storageKey,
-      error: serializeIdbError(e),
+      error: err,
     });
-    if (isPageInk) recordPageInkHwGet(objectId, 0, 'error');
+    if (isPageInk) {
+      recordPageInkHwGet(objectId, 0, 'error');
+      recordPageInkIdbFailure('get', err, getDbDebugState(), lastIdbFailureTxState);
+      lastIdbFailureTxState = null;
+    }
     return null;
   }
 }
@@ -286,13 +370,14 @@ export async function hwSet(
 
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+  probePageInkIdbOnce(isPageInk);
   const payloadSummary = {
     objectId,
     blockKey,
     storageKey,
     strokeCount: Array.isArray(data.strokes) ? data.strokes.length : null,
     canvasHeight: data.canvas?.height ?? null,
-    hasIndexedDb: typeof indexedDB !== 'undefined',
+    hasIndexedDb: getIndexedDB() !== null,
     isPageInk,
   };
 
@@ -379,7 +464,9 @@ export async function hwSet(
     });
     fwPersistWarn(`Could not save handwriting ${storageKey}: ${err.string}`);
     if (isPageInk) {
-      recordPageInkHwSet(objectId, sanitized.strokes.length, false, 'idb');
+      recordPageInkHwSet(objectId, sanitized.strokes.length, false, 'idb', err.name, err.message);
+      recordPageInkIdbFailure('set', err, getDbDebugState(), lastIdbFailureTxState);
+      lastIdbFailureTxState = null;
     }
     return {
       ok: false,
