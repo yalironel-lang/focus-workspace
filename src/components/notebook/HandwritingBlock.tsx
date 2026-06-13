@@ -20,7 +20,9 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
   hwDiagLog,
   hwDiagPressureSummary,
+  hwDiagFinishStrokeSampling,
   hwDiagRecordPressure,
+  hwDiagResetStrokeSampling,
 } from '../../lib/handwritingDiagnostics';
 import {
   appendPoint,
@@ -33,6 +35,7 @@ import {
   readVisualViewportMetrics,
   strokeCornerSharpness,
   strokesAfterEraser,
+  isHandwritingCoalescedEnabled,
 } from '../../lib/handwritingGeometry';
 import { hwPointerSamplingStats } from '../../lib/handwritingPointerSamples';
 import {
@@ -675,6 +678,10 @@ export function HandwritingBlock({
       strokePressureMax: strokePressures.length ? Math.max(...strokePressures) : null,
       sessionPressure: hwDiagPressureSummary(),
       sampling: hwPointerSamplingStats(),
+      strokeSampling: hwDiagFinishStrokeSampling(
+        draft.points.length,
+        isHandwritingCoalescedEnabled(),
+      ),
     });
     hwSpikeLog('H-C', 'HandwritingBlock:finishStroke', 'stroke summary', {
       tool: draft.tool,
@@ -700,6 +707,7 @@ export function HandwritingBlock({
       if (!objectId || !blockKey) return;
       const canvas = canvasRef.current;
       if (!canvas || !dataRef.current) return;
+      hwDiagResetStrokeSampling();
       resetStrokeSampleStats();
       recordPointAppended();
       const rect = canvas.getBoundingClientRect();

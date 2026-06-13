@@ -85,10 +85,132 @@ declare global {
   interface Window {
     __fwHwDiagDump?: () => HwDiagEntry[];
     __fwHwPressureSummary?: () => ReturnType<typeof hwDiagPressureSummary>;
+    __fwHwSamplingDump?: () => HwSamplingStrokeSummary[];
+    __fwHwSamplingLast?: () => HwSamplingStrokeSummary | null;
   }
+}
+
+/** Per-stroke pointer sampling counters (production-safe, iPad console). */
+export type HwSamplingStrokeSummary = {
+  t: number;
+  moveEvents: number;
+  rawSamples: number;
+  appendedPoints: number;
+  droppedByMinDist: number;
+  coalescedBatches: number;
+  coalescedFallbacks: number;
+  committedPoints: number;
+  samplesPerMove: number;
+  coalescedEnabled: boolean;
+  lastPick?: {
+    batchSize: number;
+    usedCoalesced: boolean;
+    fallbackReason?: string;
+  };
+};
+
+const SAMPLING_LOG_KEY = 'fw_hw_sampling_diag_v1';
+const SAMPLING_LOG_MAX = 20;
+
+let strokeSampling: Omit<
+  HwSamplingStrokeSummary,
+  't' | 'committedPoints' | 'samplesPerMove' | 'coalescedEnabled'
+> = emptyStrokeSampling();
+
+function emptyStrokeSampling(): Omit<
+  HwSamplingStrokeSummary,
+  't' | 'committedPoints' | 'samplesPerMove' | 'coalescedEnabled'
+> {
+  return {
+    moveEvents: 0,
+    rawSamples: 0,
+    appendedPoints: 0,
+    droppedByMinDist: 0,
+    coalescedBatches: 0,
+    coalescedFallbacks: 0,
+  };
+}
+
+function readSamplingLog(): HwSamplingStrokeSummary[] {
+  if (typeof sessionStorage === 'undefined') return [];
+  try {
+    return JSON.parse(sessionStorage.getItem(SAMPLING_LOG_KEY) ?? '[]') as HwSamplingStrokeSummary[];
+  } catch {
+    return [];
+  }
+}
+
+function writeSamplingLog(entries: HwSamplingStrokeSummary[]): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(SAMPLING_LOG_KEY, JSON.stringify(entries.slice(-SAMPLING_LOG_MAX)));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function hwDiagResetStrokeSampling(): void {
+  strokeSampling = emptyStrokeSampling();
+}
+
+export function hwDiagRecordSamplingPick(
+  batchSize: number,
+  usedCoalesced: boolean,
+  fallbackReason?: string,
+): void {
+  strokeSampling.moveEvents += 1;
+  strokeSampling.rawSamples += batchSize;
+  strokeSampling.lastPick = { batchSize, usedCoalesced, fallbackReason };
+  if (usedCoalesced) {
+    strokeSampling.coalescedBatches += 1;
+  } else if (fallbackReason && fallbackReason !== 'no_api' && fallbackReason !== 'dev_off') {
+    strokeSampling.coalescedFallbacks += 1;
+  }
+}
+
+export function hwDiagRecordSamplingPointAppended(): void {
+  strokeSampling.appendedPoints += 1;
+}
+
+export function hwDiagRecordSamplingPointDropped(): void {
+  strokeSampling.droppedByMinDist += 1;
+}
+
+export function hwDiagFinishStrokeSampling(
+  committedPoints: number,
+  coalescedEnabled: boolean,
+): HwSamplingStrokeSummary {
+  const summary: HwSamplingStrokeSummary = {
+    t: Date.now(),
+    ...strokeSampling,
+    committedPoints,
+    coalescedEnabled,
+    samplesPerMove:
+      strokeSampling.moveEvents > 0
+        ? Math.round((strokeSampling.rawSamples / strokeSampling.moveEvents) * 100) / 100
+        : 0,
+  };
+  const log = readSamplingLog();
+  log.push(summary);
+  writeSamplingLog(log);
+  hwDiagLog('handwritingDiagnostics:strokeSampling', 'stroke sampling summary', {
+    ...summary,
+  });
+  return summary;
+}
+
+export function hwSamplingDump(): HwSamplingStrokeSummary[] {
+  return readSamplingLog();
+}
+
+export function hwSamplingLast(): HwSamplingStrokeSummary | null {
+  const log = readSamplingLog();
+  return log.length ? log[log.length - 1]! : null;
 }
 
 if (typeof window !== 'undefined') {
   window.__fwHwDiagDump = hwDiagDump;
   window.__fwHwPressureSummary = hwDiagPressureSummary;
+  window.__fwHwSamplingDump = hwSamplingDump;
+  window.__fwHwSamplingLast = hwSamplingLast;
 }

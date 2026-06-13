@@ -1,5 +1,10 @@
 import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
-import { hwDiagRecordPressure } from './handwritingDiagnostics';
+import {
+  hwDiagRecordPressure,
+  hwDiagRecordSamplingPick,
+  hwDiagRecordSamplingPointAppended,
+  hwDiagRecordSamplingPointDropped,
+} from './handwritingDiagnostics';
 import {
   pickPointerEventsForSample,
   recordPointerSamplePick,
@@ -142,10 +147,12 @@ export function pointerToNormalized(
   const localX = e.clientX - rect.left;
   const localY = e.clientY - rect.top;
 
-  return {
-    x: Math.max(0, Math.min(1, localX / rect.width)),
-    y: Math.max(0, Math.min(1, localY / rect.height)),
-  };
+  return { x: Math.max(0, Math.min(1, localX / rect.width)), y: Math.max(0, Math.min(1, localY / rect.height)) };
+}
+
+/** Production uses guarded coalesced batches; dev respects spike coalesced toggle. */
+export function isHandwritingCoalescedEnabled(): boolean {
+  return isHandwritingDevBuild() ? getHwSpikeSettings().coalesced !== 'off' : true;
 }
 
 export function readVisualViewportMetrics(): {
@@ -183,10 +190,12 @@ export function appendPoint(
     const minDist = getMinPointDistNorm();
     if (dx * dx + dy * dy < minDist * minDist) {
       if (isHandwritingDevBuild()) recordPointDropped();
+      hwDiagRecordSamplingPointDropped();
       return points;
     }
   }
   if (isHandwritingDevBuild()) recordPointAppended();
+  hwDiagRecordSamplingPointAppended();
   return [...points, p];
 }
 
@@ -345,11 +354,14 @@ export function logPointerCoordinateSample(
 export function collectPointerSamples(e: PointerEvent): HandwritingPoint[] {
   const canvas = e.currentTarget as HTMLCanvasElement;
   logPointerCoordinateSample(canvas, e, 'move');
-  const allowCoalesced = isHandwritingDevBuild()
-    ? getHwSpikeSettings().coalesced !== 'off'
-    : !isIosLike();
+  const allowCoalesced = isHandwritingCoalescedEnabled();
   const pick = pickPointerEventsForSample(e, { allowCoalesced });
   recordPointerSamplePick(pick);
+  hwDiagRecordSamplingPick(
+    pick.events.length,
+    pick.usedCoalesced,
+    pick.fallbackReason,
+  );
 
   const out: HandwritingPoint[] = [];
   for (const ev of pick.events) {
