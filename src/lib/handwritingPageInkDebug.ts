@@ -21,6 +21,7 @@ export type PageInkDebugSnapshot = {
   lastHwGetStrokeCount: number | null;
   lastHwGetSource: string | null;
   lastHwGetAt: number | null;
+  persistBackend: string;
   lastSaveStatus: string;
   lastHydrateStatus: string;
   lastHydrateStrokeCount: number | null;
@@ -54,6 +55,7 @@ const state: PageInkDebugSnapshot = {
   lastHwGetStrokeCount: null,
   lastHwGetSource: null,
   lastHwGetAt: null,
+  persistBackend: 'unknown',
   lastSaveStatus: '—',
   lastHydrateStatus: '—',
   lastHydrateStrokeCount: null,
@@ -132,7 +134,7 @@ export function recordPageInkPostSaveVerify(idbStrokeCount: number, writtenStrok
 export function recordPageInkHwGet(
   objectId: string,
   strokeCount: number,
-  source: 'cache' | 'idb' | 'miss' | 'error',
+  source: 'cache' | 'idb' | 'localStorage' | 'miss' | 'error',
 ): void {
   trackObjectId(objectId);
   state.lastHwGetStrokeCount = strokeCount;
@@ -198,6 +200,11 @@ export function recordPageInkDbState(dbState: string, env: IndexedDbEnvironmentR
   state.idbResolved = env.resolved;
   state.idbPrivateHint = env.privateModeHint;
   state.idbDisplayMode = env.displayMode;
+  notify();
+}
+
+export function recordPageInkPersistBackend(backend: string): void {
+  state.persistBackend = backend;
   notify();
 }
 

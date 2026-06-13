@@ -1,5 +1,5 @@
 /**
- * Notebook handwriting stroke payloads — IndexedDB (not localStorage).
+ * Notebook handwriting stroke payloads — IndexedDB with localStorage fallback.
  * Keys are referenced from notebook ::hw::{blockKey}:: lines.
  * Storage key: {notebookObjectId}:{blockKey}
  */
@@ -12,6 +12,7 @@ import {
   recordPageInkHwGet,
   recordPageInkHwSet,
   recordPageInkIdbFailure,
+  recordPageInkPersistBackend,
   recordPageInkPostSaveVerify,
 } from './handwritingPageInkDebug';
 import {
@@ -24,6 +25,9 @@ import {
 const DB_NAME = 'fw_notebook_handwriting_v1';
 const STORE = 'payloads';
 const DB_VERSION = 1;
+const LS_KEY_PREFIX = 'fw_notebook_handwriting_ls:';
+
+export type HandwritingPersistBackend = 'idb' | 'localStorage' | 'none';
 
 /** Skip GC deletes for keys written recently (avoids races with active drawing). */
 const GC_WRITE_GRACE_MS = 120_000;
@@ -38,6 +42,84 @@ let idbChain: Promise<unknown> = Promise.resolve();
 let dbPromise: Promise<IDBDatabase> | null = null;
 let activeDb: IDBDatabase | null = null;
 let lastIdbFailureTxState: string | null = null;
+let activePersistBackend: HandwritingPersistBackend = 'none';
+
+export function getHandwritingPersistBackend(): HandwritingPersistBackend {
+  return activePersistBackend;
+}
+
+function isLocalStorageAvailable(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    const k = '__fw_hw_ls_probe__';
+    localStorage.setItem(k, '1');
+    localStorage.removeItem(k);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolvePersistBackend(): HandwritingPersistBackend {
+  if (getIndexedDB()) return 'idb';
+  if (isLocalStorageAvailable()) return 'localStorage';
+  return 'none';
+}
+
+function lsFullKey(storageKey: string): string {
+  return `${LS_KEY_PREFIX}${storageKey}`;
+}
+
+function lsGet(storageKey: string): HandwritingBlockData | undefined {
+  try {
+    const raw = localStorage.getItem(lsFullKey(storageKey));
+    if (!raw) return undefined;
+    return sanitizeHandwritingData(JSON.parse(raw)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function lsPut(storageKey: string, data: HandwritingBlockData): void {
+  localStorage.setItem(lsFullKey(storageKey), JSON.stringify(data));
+}
+
+function lsDelete(storageKey: string): void {
+  try {
+    localStorage.removeItem(lsFullKey(storageKey));
+  } catch {
+    /* best-effort */
+  }
+}
+
+function lsListKeysForObject(objectId: string): string[] {
+  const prefix = lsFullKey(`${objectId}:`);
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const fullKey = localStorage.key(i);
+      if (fullKey?.startsWith(prefix)) {
+        keys.push(fullKey.slice(LS_KEY_PREFIX.length));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return keys;
+}
+
+function storageUnavailableError(): Error {
+  return new Error(
+    'Handwriting storage is not available in this browser session (IndexedDB and localStorage are both unavailable).',
+  );
+}
+
+function probePageInkPersistOnce(isPageInk: boolean): void {
+  if (!isPageInk) return;
+  activePersistBackend = resolvePersistBackend();
+  recordPageInkPersistBackend(activePersistBackend);
+  recordPageInkDbState(getDbDebugState(), probeIndexedDbEnvironment());
+}
 
 function getDbDebugState(): string {
   if (!getIndexedDB()) return 'idb-unavailable';
@@ -51,11 +133,6 @@ function getTxDebugState(db: IDBDatabase, tx: IDBTransaction | null): string {
   if (!tx) return `db=v${db.version} stores=[${storeNames}] tx=null`;
   const txErr = tx.error;
   return `db=v${db.version} stores=[${storeNames}] tx.mode=${tx.mode} tx.error=${txErr ? `${txErr.name}:${txErr.message}` : 'none'}`;
-}
-
-function probePageInkIdbOnce(isPageInk: boolean): void {
-  if (!isPageInk) return;
-  recordPageInkDbState(getDbDebugState(), probeIndexedDbEnvironment());
 }
 
 function attachDbLifecycle(db: IDBDatabase): void {
@@ -185,6 +262,54 @@ function resetDbConnection(): void {
   activeDb = null;
 }
 
+async function persistGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
+  const backend = resolvePersistBackend();
+  activePersistBackend = backend;
+  if (backend === 'idb') return idbGet(storageKey);
+  if (backend === 'localStorage') return lsGet(storageKey);
+  throw storageUnavailableError();
+}
+
+async function persistPut(storageKey: string, data: HandwritingBlockData): Promise<void> {
+  const backend = resolvePersistBackend();
+  activePersistBackend = backend;
+  if (backend === 'idb') {
+    await idbPut(storageKey, data);
+    return;
+  }
+  if (backend === 'localStorage') {
+    try {
+      lsPut(storageKey, data);
+      return;
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  throw storageUnavailableError();
+}
+
+async function persistDelete(storageKey: string): Promise<void> {
+  const backend = resolvePersistBackend();
+  activePersistBackend = backend;
+  if (backend === 'idb') {
+    await idbDelete(storageKey);
+    return;
+  }
+  if (backend === 'localStorage') {
+    lsDelete(storageKey);
+    return;
+  }
+  throw storageUnavailableError();
+}
+
+async function persistListKeysForObject(objectId: string): Promise<string[]> {
+  const backend = resolvePersistBackend();
+  activePersistBackend = backend;
+  if (backend === 'idb') return listKeysForObjectIdb(objectId);
+  if (backend === 'localStorage') return lsListKeysForObject(objectId);
+  throw storageUnavailableError();
+}
+
 async function idbGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
   return runSerializedIdb(async () => {
     const db = await getDb();
@@ -275,10 +400,14 @@ async function idbDelete(storageKey: string): Promise<void> {
 }
 
 export async function hwListKeysForObject(objectId: string): Promise<string[]> {
-  return listKeysForObject(objectId);
+  try {
+    return await persistListKeysForObject(objectId);
+  } catch {
+    return [];
+  }
 }
 
-async function listKeysForObject(objectId: string): Promise<string[]> {
+async function listKeysForObjectIdb(objectId: string): Promise<string[]> {
   return runSerializedIdb(async () => {
     const db = await getDb();
     return new Promise<string[]>((resolve, reject) => {
@@ -307,7 +436,7 @@ export function hwGetCached(objectId: string, blockKey: string): HandwritingBloc
 export async function hwGet(objectId: string, blockKey: string): Promise<HandwritingBlockData | null> {
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
-  probePageInkIdbOnce(isPageInk);
+  probePageInkPersistOnce(isPageInk);
   if (cache.has(storageKey)) {
     const cached = cache.get(storageKey)!;
     if (isPageInk) {
@@ -324,17 +453,25 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
     return cached;
   }
   try {
-    const data = await idbGet(storageKey);
+    const data = await persistGet(storageKey);
+    const backend = activePersistBackend;
     if (isPageInk) {
-      hwDiagLog('notebookHandwritingStore.ts:hwGet', data ? 'page-ink idb hit' : 'page-ink idb miss', {
+      const source = data
+        ? backend === 'localStorage'
+          ? 'localStorage'
+          : 'idb'
+        : 'miss';
+      hwDiagLog('notebookHandwritingStore.ts:hwGet', data ? 'page-ink persist hit' : 'page-ink persist miss', {
         objectId,
         blockKey,
         storageKey,
         strokeCount: data?.strokes.length ?? 0,
         height: data?.canvas.height ?? null,
-        source: 'idb',
+        source,
+        backend,
       });
-      recordPageInkHwGet(objectId, data?.strokes.length ?? 0, data ? 'idb' : 'miss');
+      recordPageInkHwGet(objectId, data?.strokes.length ?? 0, source);
+      recordPageInkPersistBackend(backend);
     }
     if (data) cache.set(storageKey, data);
     return data ?? null;
@@ -347,6 +484,7 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
     });
     if (isPageInk) {
       recordPageInkHwGet(objectId, 0, 'error');
+      recordPageInkPersistBackend(activePersistBackend);
       recordPageInkIdbFailure('get', err, getDbDebugState(), lastIdbFailureTxState);
       lastIdbFailureTxState = null;
     }
@@ -370,7 +508,7 @@ export async function hwSet(
 
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
-  probePageInkIdbOnce(isPageInk);
+  probePageInkPersistOnce(isPageInk);
   const payloadSummary = {
     objectId,
     blockKey,
@@ -378,6 +516,8 @@ export async function hwSet(
     strokeCount: Array.isArray(data.strokes) ? data.strokes.length : null,
     canvasHeight: data.canvas?.height ?? null,
     hasIndexedDb: getIndexedDB() !== null,
+    hasLocalStorage: isLocalStorageAvailable(),
+    persistBackend: resolvePersistBackend(),
     isPageInk,
   };
 
@@ -417,7 +557,7 @@ export async function hwSet(
     };
   }
 
-  hwDiagLog('notebookHandwritingStore.ts:hwSet', 'idb put starting', {
+  hwDiagLog('notebookHandwritingStore.ts:hwSet', 'persist put starting', {
     ...payloadSummary,
     payloadBytes,
     sanitizedStrokeCount: sanitized.strokes.length,
@@ -425,21 +565,24 @@ export async function hwSet(
   });
 
   try {
-    await idbPut(storageKey, toStore);
+    await persistPut(storageKey, toStore);
+    const backend = activePersistBackend;
     recentWrites.set(storageKey, Date.now());
     cache.set(storageKey, toStore);
     notify();
-    hwDiagLog('notebookHandwritingStore.ts:hwSet', 'idb put complete', {
+    hwDiagLog('notebookHandwritingStore.ts:hwSet', 'persist put complete', {
       ...payloadSummary,
       payloadBytes,
-      reachedIdb: true,
+      reachedIdb: backend === 'idb',
+      backend,
       success: true,
     });
     if (isPageInk) {
-      recordPageInkHwSet(objectId, sanitized.strokes.length, true, null);
+      recordPageInkPersistBackend(backend);
+      recordPageInkHwSet(objectId, sanitized.strokes.length, true, backend);
       cache.delete(storageKey);
       try {
-        const verify = await idbGet(storageKey);
+        const verify = await persistGet(storageKey);
         recordPageInkPostSaveVerify(verify?.strokes.length ?? 0, sanitized.strokes.length);
         if (verify) cache.set(storageKey, verify);
         else cache.set(storageKey, toStore);
@@ -447,13 +590,15 @@ export async function hwSet(
         cache.set(storageKey, toStore);
       }
     }
-    return { ok: true, reachedIdb: true };
+    return { ok: true, reachedIdb: backend === 'idb' };
   } catch (e) {
     const err = serializeIdbError(e);
-    hwDiagLog('notebookHandwritingStore.ts:hwSet', 'idb put failed', {
+    const backend = activePersistBackend;
+    hwDiagLog('notebookHandwritingStore.ts:hwSet', 'persist put failed', {
       ...payloadSummary,
       payloadBytes,
       failureStage: 'idb',
+      backend,
       reachedIdb: false,
       error: err,
       errorName: err.name,
@@ -464,7 +609,8 @@ export async function hwSet(
     });
     fwPersistWarn(`Could not save handwriting ${storageKey}: ${err.string}`);
     if (isPageInk) {
-      recordPageInkHwSet(objectId, sanitized.strokes.length, false, 'idb', err.name, err.message);
+      recordPageInkPersistBackend(backend);
+      recordPageInkHwSet(objectId, sanitized.strokes.length, false, backend, err.name, err.message);
       recordPageInkIdbFailure('set', err, getDbDebugState(), lastIdbFailureTxState);
       lastIdbFailureTxState = null;
     }
@@ -494,7 +640,7 @@ export async function hwDelete(objectId: string, blockKey: string): Promise<void
   cache.delete(storageKey);
   recentWrites.delete(storageKey);
   try {
-    await idbDelete(storageKey);
+    await persistDelete(storageKey);
     notify();
   } catch (e) {
     fwPersistWarn(`Could not delete handwriting ${storageKey}: ${String(e)}`);
@@ -502,11 +648,16 @@ export async function hwDelete(objectId: string, blockKey: string): Promise<void
 }
 
 export async function hwDeleteAllForObject(objectId: string): Promise<void> {
-  const keys = await listKeysForObject(objectId);
+  let keys: string[] = [];
+  try {
+    keys = await persistListKeysForObject(objectId);
+  } catch {
+    return;
+  }
   for (const storageKey of keys) {
     cache.delete(storageKey);
     recentWrites.delete(storageKey);
-    await idbDelete(storageKey).catch(() => undefined);
+    await persistDelete(storageKey).catch(() => undefined);
   }
   if (keys.length) notify();
 }
@@ -522,7 +673,7 @@ export async function hydrateHandwritingBlocks(
     const storageKey = makeHandwritingStorageKey(objectId, blockKey);
     if (cache.has(storageKey)) continue;
     try {
-      const data = await idbGet(storageKey);
+      const data = await persistGet(storageKey);
       if (!data) continue;
       cache.set(storageKey, data);
       changed = true;
@@ -539,7 +690,12 @@ export async function gcOrphanHandwritingKeys(
 ): Promise<void> {
   if (!objectId) return;
   const referenced = new Set(referencedKeys.filter(Boolean));
-  const existing = await listKeysForObject(objectId);
+  let existing: string[] = [];
+  try {
+    existing = await persistListKeysForObject(objectId);
+  } catch {
+    return;
+  }
   const now = Date.now();
   for (const storageKey of existing) {
     const blockKey = storageKey.slice(objectId.length + 1);
@@ -560,7 +716,7 @@ export async function gcOrphanHandwritingKeys(
     }
     cache.delete(storageKey);
     recentWrites.delete(storageKey);
-    await idbDelete(storageKey).catch(() => undefined);
+    await persistDelete(storageKey).catch(() => undefined);
   }
 }
 

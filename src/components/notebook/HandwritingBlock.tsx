@@ -180,6 +180,7 @@ function PageInkDebugPanel({
     ['IDB op', snapshot.lastIdbErrorOp ?? '—'],
     ['tx state', snapshot.lastIdbTxState ?? '—'],
     ['db state', snapshot.dbState ?? '—'],
+    ['backend', snapshot.persistBackend ?? '—'],
     ['IDB env', snapshot.idbResolved ? `resolved ok=${snapshot.idbResolved} private=${snapshot.idbPrivateHint ?? '?'} mode=${snapshot.idbDisplayMode ?? '?'}` : '—'],
     ['save', snapshot.lastSaveStatus],
     ['hydrate', snapshot.lastHydrateStatus],
