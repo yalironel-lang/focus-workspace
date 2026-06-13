@@ -46,14 +46,11 @@ import {
 import { setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
 import {
-  getPageInkDebugSnapshot,
   recordPageInkFlush,
   recordPageInkHydrate,
   recordPageInkMemory,
   recordPageInkPersist,
   recordPageInkRenderState,
-  subscribePageInkDebug,
-  type PageInkDebugSnapshot,
 } from '../../lib/handwritingPageInkDebug';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
@@ -159,71 +156,6 @@ function afterLayoutSettle(run: () => void): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(run);
   });
-}
-
-function PageInkDebugPanel({
-  snapshot,
-  strokeCount,
-}: {
-  snapshot: PageInkDebugSnapshot;
-  strokeCount: number;
-}) {
-  const rows: [string, string][] = [
-    ['commit', snapshot.gitCommit],
-    ['objectId', snapshot.objectId ?? '—'],
-    ['blockKey', snapshot.blockKey],
-    ['storageKey', snapshot.storageKey ?? '—'],
-    ['memory strokes', String(strokeCount)],
-    ['dataRef', snapshot.dataRefStrokeCountAfterHydrate != null ? String(snapshot.dataRefStrokeCountAfterHydrate) : '—'],
-    ['hydrated', snapshot.hydratedStrokeCount != null ? String(snapshot.hydratedStrokeCount) : '—'],
-    ['redraw', snapshot.redrawCalledAfterHydrate ? 'yes' : 'no'],
-    ['canvas hydrate', snapshot.canvasSizeAtHydrate ?? '—'],
-    ['canvas redraw', snapshot.canvasSizeAtRedraw ?? '—'],
-    ['paint', snapshot.lastPaintStatus ?? '—'],
-    ['last hwSet', `${snapshot.lastHwSetStrokeCount ?? '—'} ${snapshot.lastHwSetOk === true ? 'ok' : snapshot.lastHwSetOk === false ? 'FAIL' : '—'}`],
-    ['idb verify', snapshot.lastPostSaveVerifyStrokeCount != null ? String(snapshot.lastPostSaveVerifyStrokeCount) : '—'],
-    ['last hwGet', `${snapshot.lastHwGetStrokeCount ?? '—'} (${snapshot.lastHwGetSource ?? '—'})`],
-    ['IDB error', snapshot.lastIdbErrorName ? `${snapshot.lastIdbErrorName}: ${snapshot.lastIdbErrorMessage ?? ''}` : '—'],
-    ['IDB op', snapshot.lastIdbErrorOp ?? '—'],
-    ['tx state', snapshot.lastIdbTxState ?? '—'],
-    ['db state', snapshot.dbState ?? '—'],
-    ['backend', snapshot.persistBackend ?? '—'],
-    ['IDB env', snapshot.idbResolved ? `resolved ok=${snapshot.idbResolved} private=${snapshot.idbPrivateHint ?? '?'} mode=${snapshot.idbDisplayMode ?? '?'}` : '—'],
-    ['save', snapshot.lastSaveStatus],
-    ['hydrate', snapshot.lastHydrateStatus],
-    ['flush', `${snapshot.lastFlushReason ?? '—'} payload=${snapshot.lastFlushPayloadStrokes ?? '—'} ok=${snapshot.lastFlushOk ?? '—'}`],
-    ['objectId hist', snapshot.objectIdHistory.join(' → ') || '—'],
-  ];
-  return (
-    <div
-      aria-label="Page ink debug"
-      style={{
-        position: 'absolute',
-        top: 4,
-        right: 4,
-        zIndex: 30,
-        maxWidth: '92%',
-        fontSize: 9,
-        lineHeight: 1.35,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: '#1c1917',
-        background: 'rgba(255,235,200,0.94)',
-        border: '1px solid rgba(180,83,9,0.35)',
-        borderRadius: 6,
-        padding: '6px 8px',
-        pointerEvents: 'none',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-      }}
-    >
-      <div style={{ fontWeight: 700, marginBottom: 4, letterSpacing: '0.04em' }}>PAGE INK DEBUG</div>
-      {rows.map(([k, v]) => (
-        <div key={k}>
-          <span style={{ opacity: 0.65 }}>{k}: </span>
-          <span style={{ wordBreak: 'break-all' }}>{v}</span>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 export function HandwritingBlock({
@@ -333,15 +265,6 @@ export function HandwritingBlock({
       render: 'polyline',
     },
   );
-  const [pageInkDebug, setPageInkDebug] = useState<PageInkDebugSnapshot>(() =>
-    getPageInkDebugSnapshot(),
-  );
-
-  useEffect(() => {
-    if (!isPageInkBlock) return;
-    return subscribePageInkDebug(() => setPageInkDebug(getPageInkDebugSnapshot()));
-  }, [isPageInkBlock]);
-
   toolRef.current = tool;
 
   const inkColor = tokens.textPrimary ?? '#1c1917';
@@ -1156,9 +1079,6 @@ export function HandwritingBlock({
           touchAction: 'pan-y',
         }}
       >
-        {isPageInkBlock && pageLayout ? (
-          <PageInkDebugPanel snapshot={pageInkDebug} strokeCount={strokeCount} />
-        ) : null}
         <canvas
           ref={canvasRef}
           aria-label="Handwriting canvas"

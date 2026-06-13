@@ -1,6 +1,5 @@
 /**
- * Temporary page-ink persistence diagnostics (iPad-visible panel + window API).
- * Remove after root cause is confirmed.
+ * Internal page-ink persistence diagnostics (window.__fwPageInkDebug()).
  */
 
 import { getGitCommit } from './appBuildInfo';
@@ -45,8 +44,6 @@ export type PageInkDebugSnapshot = {
   idbDisplayMode: string;
 };
 
-const listeners = new Set<() => void>();
-
 const state: PageInkDebugSnapshot = {
   gitCommit: getGitCommit(),
   objectId: null,
@@ -85,9 +82,8 @@ const state: PageInkDebugSnapshot = {
   idbDisplayMode: 'unknown',
 };
 
-function notify(): void {
+function touchState(): void {
   state.gitCommit = getGitCommit();
-  listeners.forEach(fn => fn());
 }
 
 function trackObjectId(objectId: string): void {
@@ -102,15 +98,10 @@ export function getPageInkDebugSnapshot(): PageInkDebugSnapshot {
   return { ...state, objectIdHistory: [...state.objectIdHistory] };
 }
 
-export function subscribePageInkDebug(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
 export function recordPageInkMemory(objectId: string, strokeCount: number): void {
   trackObjectId(objectId);
   state.memoryStrokeCount = strokeCount;
-  notify();
+  touchState();
 }
 
 export function recordPageInkHwSet(
@@ -134,13 +125,13 @@ export function recordPageInkHwSet(
   state.lastSaveStatus = ok
     ? `ok (${strokeCount} strokes)`
     : `FAIL ${stage ?? 'unknown'} (${strokeCount} sent)${errorName ? `: ${errorName}` : ''}`;
-  notify();
+  touchState();
 }
 
 export function recordPageInkPostSaveVerify(idbStrokeCount: number, writtenStrokeCount: number): void {
   state.lastPostSaveVerifyStrokeCount = idbStrokeCount;
   state.lastSaveStatus += ` | idb verify=${idbStrokeCount}/${writtenStrokeCount}`;
-  notify();
+  touchState();
 }
 
 export function recordPageInkHwGet(
@@ -152,7 +143,7 @@ export function recordPageInkHwGet(
   state.lastHwGetStrokeCount = strokeCount;
   state.lastHwGetSource = source;
   state.lastHwGetAt = Date.now();
-  notify();
+  touchState();
 }
 
 export function recordPageInkHydrate(
@@ -163,7 +154,7 @@ export function recordPageInkHydrate(
   trackObjectId(objectId);
   state.lastHydrateStrokeCount = strokeCount;
   state.lastHydrateStatus = found ? `found ${strokeCount} strokes` : 'miss (empty new)';
-  notify();
+  touchState();
 }
 
 export function recordPageInkPersist(
@@ -177,7 +168,7 @@ export function recordPageInkPersist(
   state.lastSaveStatus = ok
     ? `persist ok (${strokeCount}, ${reason})`
     : `persist FAIL ${stage ?? '?'} (${strokeCount}, ${reason})`;
-  notify();
+  touchState();
 }
 
 export function recordPageInkFlush(
@@ -190,7 +181,7 @@ export function recordPageInkFlush(
   state.lastFlushReason = reason;
   state.lastFlushPayloadStrokes = payloadStrokes;
   state.lastFlushOk = ok;
-  notify();
+  touchState();
 }
 
 export function recordPageInkIdbFailure(
@@ -204,7 +195,7 @@ export function recordPageInkIdbFailure(
   state.lastIdbErrorMessage = error.message;
   state.dbState = dbState;
   state.lastIdbTxState = txState ?? null;
-  notify();
+  touchState();
 }
 
 export function recordPageInkDbState(dbState: string, env: IndexedDbEnvironmentReport): void {
@@ -212,12 +203,12 @@ export function recordPageInkDbState(dbState: string, env: IndexedDbEnvironmentR
   state.idbResolved = env.resolved;
   state.idbPrivateHint = env.privateModeHint;
   state.idbDisplayMode = env.displayMode;
-  notify();
+  touchState();
 }
 
 export function recordPageInkPersistBackend(backend: string): void {
   state.persistBackend = backend;
-  notify();
+  touchState();
 }
 
 export function recordPageInkRenderState(patch: {
@@ -238,7 +229,7 @@ export function recordPageInkRenderState(patch: {
   if (patch.canvasSizeAtHydrate !== undefined) state.canvasSizeAtHydrate = patch.canvasSizeAtHydrate;
   if (patch.canvasSizeAtRedraw !== undefined) state.canvasSizeAtRedraw = patch.canvasSizeAtRedraw;
   if (patch.lastPaintStatus !== undefined) state.lastPaintStatus = patch.lastPaintStatus;
-  notify();
+  touchState();
 }
 
 declare global {
