@@ -7,6 +7,11 @@
 import { hwDiagLog } from './handwritingDiagnostics';
 import { fwPersistWarn } from './freeSpacePersistence';
 import {
+  recordPageInkHwGet,
+  recordPageInkHwSet,
+  recordPageInkPostSaveVerify,
+} from './handwritingPageInkDebug';
+import {
   PAGE_INK_BLOCK_KEY,
   referencedHandwritingKeys,
   sanitizeHandwritingData,
@@ -235,6 +240,7 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
         height: cached.canvas.height,
         source: 'cache',
       });
+      recordPageInkHwGet(objectId, cached.strokes.length, 'cache');
     }
     return cached;
   }
@@ -249,6 +255,7 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
         height: data?.canvas.height ?? null,
         source: 'idb',
       });
+      recordPageInkHwGet(objectId, data?.strokes.length ?? 0, data ? 'idb' : 'miss');
     }
     if (data) cache.set(storageKey, data);
     return data ?? null;
@@ -258,6 +265,7 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
       storageKey,
       error: serializeIdbError(e),
     });
+    if (isPageInk) recordPageInkHwGet(objectId, 0, 'error');
     return null;
   }
 }
@@ -296,6 +304,9 @@ export async function hwSet(
       reachedIdb: false,
     });
     fwPersistWarn(`Could not save handwriting ${storageKey}: sanitize rejected payload`);
+    if (isPageInk) {
+      recordPageInkHwSet(objectId, payloadSummary.strokeCount ?? 0, false, 'sanitize');
+    }
     return { ok: false, failureStage: 'sanitize', reachedIdb: false };
   }
 
@@ -339,6 +350,18 @@ export async function hwSet(
       reachedIdb: true,
       success: true,
     });
+    if (isPageInk) {
+      recordPageInkHwSet(objectId, sanitized.strokes.length, true, null);
+      cache.delete(storageKey);
+      try {
+        const verify = await idbGet(storageKey);
+        recordPageInkPostSaveVerify(verify?.strokes.length ?? 0, sanitized.strokes.length);
+        if (verify) cache.set(storageKey, verify);
+        else cache.set(storageKey, toStore);
+      } catch {
+        cache.set(storageKey, toStore);
+      }
+    }
     return { ok: true, reachedIdb: true };
   } catch (e) {
     const err = serializeIdbError(e);
@@ -355,6 +378,9 @@ export async function hwSet(
       isOpenBlocked: err.message.includes('blocked'),
     });
     fwPersistWarn(`Could not save handwriting ${storageKey}: ${err.string}`);
+    if (isPageInk) {
+      recordPageInkHwSet(objectId, sanitized.strokes.length, false, 'idb');
+    }
     return {
       ok: false,
       failureStage: 'idb',

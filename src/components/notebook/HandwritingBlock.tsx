@@ -45,6 +45,15 @@ import {
 } from '../../lib/handwritingSpikeDebug';
 import { setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
+import {
+  getPageInkDebugSnapshot,
+  recordPageInkFlush,
+  recordPageInkHydrate,
+  recordPageInkMemory,
+  recordPageInkPersist,
+  subscribePageInkDebug,
+  type PageInkDebugSnapshot,
+} from '../../lib/handwritingPageInkDebug';
 import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
 import {
   CANVAS_HEIGHT_MAX,
@@ -151,6 +160,59 @@ function afterLayoutSettle(run: () => void): void {
   });
 }
 
+function PageInkDebugPanel({
+  snapshot,
+  strokeCount,
+}: {
+  snapshot: PageInkDebugSnapshot;
+  strokeCount: number;
+}) {
+  const rows: [string, string][] = [
+    ['commit', snapshot.gitCommit],
+    ['objectId', snapshot.objectId ?? '—'],
+    ['blockKey', snapshot.blockKey],
+    ['storageKey', snapshot.storageKey ?? '—'],
+    ['memory strokes', String(strokeCount)],
+    ['last hwSet', `${snapshot.lastHwSetStrokeCount ?? '—'} ${snapshot.lastHwSetOk === true ? 'ok' : snapshot.lastHwSetOk === false ? 'FAIL' : '—'}`],
+    ['idb verify', snapshot.lastPostSaveVerifyStrokeCount != null ? String(snapshot.lastPostSaveVerifyStrokeCount) : '—'],
+    ['last hwGet', `${snapshot.lastHwGetStrokeCount ?? '—'} (${snapshot.lastHwGetSource ?? '—'})`],
+    ['save', snapshot.lastSaveStatus],
+    ['hydrate', snapshot.lastHydrateStatus],
+    ['flush', `${snapshot.lastFlushReason ?? '—'} payload=${snapshot.lastFlushPayloadStrokes ?? '—'} ok=${snapshot.lastFlushOk ?? '—'}`],
+    ['objectId hist', snapshot.objectIdHistory.join(' → ') || '—'],
+  ];
+  return (
+    <div
+      aria-label="Page ink debug"
+      style={{
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        zIndex: 30,
+        maxWidth: '92%',
+        fontSize: 9,
+        lineHeight: 1.35,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        color: '#1c1917',
+        background: 'rgba(255,235,200,0.94)',
+        border: '1px solid rgba(180,83,9,0.35)',
+        borderRadius: 6,
+        padding: '6px 8px',
+        pointerEvents: 'none',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4, letterSpacing: '0.04em' }}>PAGE INK DEBUG</div>
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <span style={{ opacity: 0.65 }}>{k}: </span>
+          <span style={{ wordBreak: 'break-all' }}>{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function HandwritingBlock({
   objectId,
   blockKey,
@@ -204,6 +266,15 @@ export function HandwritingBlock({
       render: 'polyline',
     },
   );
+  const isPageInkBlock = blockKey === PAGE_INK_BLOCK_KEY;
+  const [pageInkDebug, setPageInkDebug] = useState<PageInkDebugSnapshot>(() =>
+    getPageInkDebugSnapshot(),
+  );
+
+  useEffect(() => {
+    if (!isPageInkBlock) return;
+    return subscribePageInkDebug(() => setPageInkDebug(getPageInkDebugSnapshot()));
+  }, [isPageInkBlock]);
 
   toolRef.current = tool;
 
@@ -262,6 +333,15 @@ export function HandwritingBlock({
         return false;
       }
       const result = await hwSet(objectId, blockKey, payload);
+      if (isPageInkBlock) {
+        recordPageInkPersist(
+          objectId,
+          payload.strokes.length,
+          result.ok,
+          reason,
+          result.failureStage,
+        );
+      }
       hwDiagLog('HandwritingBlock.tsx:persist', result.ok ? 'save ok' : 'save failed', {
         objectId,
         blockKey,
@@ -281,7 +361,7 @@ export function HandwritingBlock({
       toast.error(saveErrorMessage(result));
       return false;
     },
-    [objectId, blockKey],
+    [objectId, blockKey, isPageInkBlock],
   );
 
   const flushSave = useCallback(
@@ -313,16 +393,21 @@ export function HandwritingBlock({
             dataRefNull: dataRef.current === null,
             draftActive: draftRef.current !== null,
           });
+          if (isPageInkBlock) recordPageInkFlush(objectId, reason, null, false);
           return Promise.resolve(false);
         }
         return Promise.resolve(true);
       }
       pendingSaveRef.current = null;
       const captured = payload;
-      saveChainRef.current = saveChainRef.current.then(() => persistPayload(captured, 1, reason));
+      saveChainRef.current = saveChainRef.current.then(async () => {
+        const ok = await persistPayload(captured, 1, reason);
+        if (isPageInkBlock) recordPageInkFlush(objectId, reason, captured.strokes.length, ok);
+        return ok;
+      });
       return saveChainRef.current;
     },
-    [mergeDraftIntoData, onDrawingChange, objectId, blockKey, persistPayload],
+    [mergeDraftIntoData, onDrawingChange, objectId, blockKey, isPageInkBlock, persistPayload],
   );
 
   flushSaveRef.current = flushSave;
@@ -348,10 +433,11 @@ export function HandwritingBlock({
       dataRef.current = { ...next, updatedAt: Date.now() };
       setStrokeCount(next.strokes.length);
       setMissing(false);
+      if (isPageInkBlock && objectId) recordPageInkMemory(objectId, next.strokes.length);
       schedulePaint();
       queueSave(dataRef.current);
     },
-    [queueSave, schedulePaint],
+    [queueSave, schedulePaint, isPageInkBlock, objectId],
   );
 
   const syncCanvasWidth = useCallback(() => {
@@ -400,6 +486,7 @@ export function HandwritingBlock({
           pageLayout,
           readOnly,
         });
+        recordPageInkHydrate(objectId, Boolean(existing), existing?.strokes.length ?? 0);
       }
       const canvas = canvasRef.current;
       const rect = canvas?.getBoundingClientRect();
@@ -967,6 +1054,9 @@ export function HandwritingBlock({
           touchAction: 'pan-y',
         }}
       >
+        {isPageInkBlock && pageLayout ? (
+          <PageInkDebugPanel snapshot={pageInkDebug} strokeCount={strokeCount} />
+        ) : null}
         <canvas
           ref={canvasRef}
           aria-label="Handwriting canvas"
