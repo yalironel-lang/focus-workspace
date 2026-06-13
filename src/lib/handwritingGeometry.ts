@@ -27,7 +27,7 @@ export function preloadInkRenderer(): Promise<void> {
   return Promise.resolve();
 }
 
-function drawPenStrokePolyline(
+export function drawPenStrokePolyline(
   ctx: CanvasRenderingContext2D,
   stroke: HandwritingStroke,
   canvasW: number,
@@ -65,33 +65,53 @@ function drawPenStrokePolyline(
   ctx.stroke();
 }
 
+export function drawEraserStrokePolyline(
+  ctx: CanvasRenderingContext2D,
+  stroke: HandwritingStroke,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+): void {
+  if (stroke.points.length === 0) return;
+  if (stroke.points.length === 1) {
+    const p = stroke.points[0]!;
+    const x = p.x * canvasW;
+    const y = p.y * canvasH;
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(248,113,113,0.35)';
+    ctx.arc(x, y, strokeWidthPx(stroke, canvasW, refWidth, p) / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  const first = stroke.points[0]!;
+  ctx.moveTo(first.x * canvasW, first.y * canvasH);
+  for (let i = 1; i < stroke.points.length; i++) {
+    const p = stroke.points[i]!;
+    ctx.lineTo(p.x * canvasW, p.y * canvasH);
+  }
+  ctx.strokeStyle = 'rgba(248,113,113,0.5)';
+  ctx.lineWidth = strokeWidthPx(
+    stroke,
+    canvasW,
+    refWidth,
+    stroke.points[stroke.points.length - 1],
+  );
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+/** Legacy full-canvas redraw — dev spike A/B only; production uses dual-layer path. */
 function drawStroke(
   ctx: CanvasRenderingContext2D,
   stroke: HandwritingStroke,
   canvasW: number,
   canvasH: number,
   refWidth: number,
-  opts?: { isDraft?: boolean },
 ): void {
   if (stroke.tool === 'eraser') {
-    if (stroke.points.length < 2) return;
-    ctx.beginPath();
-    const first = stroke.points[0]!;
-    ctx.moveTo(first.x * canvasW, first.y * canvasH);
-    for (let i = 1; i < stroke.points.length; i++) {
-      const p = stroke.points[i]!;
-      ctx.lineTo(p.x * canvasW, p.y * canvasH);
-    }
-    ctx.strokeStyle = 'rgba(248,113,113,0.5)';
-    ctx.lineWidth = strokeWidthPx(
-      stroke,
-      canvasW,
-      refWidth,
-      stroke.points[stroke.points.length - 1],
-    );
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
+    drawEraserStrokePolyline(ctx, stroke, canvasW, canvasH, refWidth);
     return;
   }
 
@@ -100,7 +120,7 @@ function drawStroke(
 
   if (!devForcePolyline && !inkModuleFailed) {
     try {
-      drawPenStrokeMathInk(ctx, stroke, canvasW, canvasH, refWidth, opts);
+      drawPenStrokeMathInk(ctx, stroke, canvasW, canvasH, refWidth);
       return;
     } catch (err) {
       console.warn('[handwriting] mathInk render failed; falling back to polyline.', err);
@@ -281,6 +301,7 @@ function strokeWidthPx(
   return Math.max(1, base * (0.35 + pressure * 0.85));
 }
 
+/** Legacy full-canvas redraw — dev spike only. Production uses handwritingLayers dual path. */
 export function drawStrokes(
   ctx: CanvasRenderingContext2D,
   strokes: HandwritingStroke[],
@@ -291,10 +312,8 @@ export function drawStrokes(
 ): void {
   ctx.clearRect(0, 0, canvasW, canvasH);
   const all = draftStroke ? [...strokes, draftStroke] : strokes;
-  for (let i = 0; i < all.length; i++) {
-    const stroke = all[i]!;
-    const isDraft = draftStroke != null && i === all.length - 1;
-    drawStroke(ctx, stroke, canvasW, canvasH, refWidth, { isDraft });
+  for (const stroke of all) {
+    drawStroke(ctx, stroke, canvasW, canvasH, refWidth);
   }
 }
 

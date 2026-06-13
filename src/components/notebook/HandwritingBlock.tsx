@@ -37,6 +37,15 @@ import {
   strokesAfterEraser,
   isHandwritingCoalescedEnabled,
 } from '../../lib/handwritingGeometry';
+import {
+  appendCommittedStroke,
+  appendDraftStrokeSegment,
+  blitCommitLayer,
+  getCommitLayerContext,
+  rebuildCommitLayer,
+  syncCommitCanvasSize,
+} from '../../lib/handwritingLayers';
+import { getHwRenderMode, setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { hwPointerSamplingStats } from '../../lib/handwritingPointerSamples';
 import {
   getHwSpikeSettings,
@@ -46,7 +55,6 @@ import {
   hwSpikeLog,
   type HwSpikeSettings,
 } from '../../lib/handwritingSpikeDebug';
-import { setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
 import {
   recordPageInkFlush,
@@ -195,6 +203,22 @@ export function HandwritingBlock({
   >(() => Promise.resolve(true));
   const syncCanvasWidthRef = useRef<() => void>(() => undefined);
   const schedulePaintRef = useRef<() => void>(() => undefined);
+  const commitCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const draftPaintedCountRef = useRef(0);
+  const commitCacheValidRef = useRef(false);
+  const commitCacheStrokeCountRef = useRef(0);
+
+  const ensureCommitCanvas = useCallback((): HTMLCanvasElement => {
+    if (!commitCanvasRef.current) {
+      commitCanvasRef.current = document.createElement('canvas');
+    }
+    return commitCanvasRef.current;
+  }, []);
+
+  const invalidateCommitCache = useCallback(() => {
+    commitCacheValidRef.current = false;
+    commitCacheStrokeCountRef.current = -1;
+  }, []);
 
   const formatCanvasSize = (canvas: HTMLCanvasElement | null): string => {
     if (!canvas) return 'no-canvas';
@@ -273,7 +297,7 @@ export function HandwritingBlock({
   const inkColor = tokens.textPrimary ?? '#1c1917';
   const atMaxHeight = displayHeight >= CANVAS_HEIGHT_MAX;
 
-  const paint = useCallback(() => {
+  const paintIdle = useCallback(() => {
     const canvas = canvasRef.current;
     const data = dataRef.current;
     if (!canvas || !data) {
@@ -282,7 +306,7 @@ export function HandwritingBlock({
       }
       return;
     }
-    const synced = syncCanvasFromRect(canvas, { allowResize: !drawingRef.current });
+    const synced = syncCanvasFromRect(canvas, { allowResize: true });
     if (!synced) {
       if (isPageInkBlock) {
         recordPageInkRenderState({
@@ -291,25 +315,113 @@ export function HandwritingBlock({
       }
       return;
     }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
+    const visibleCtx = canvas.getContext('2d');
+    if (!visibleCtx) {
       if (isPageInkBlock) {
         recordPageInkRenderState({ lastPaintStatus: 'paint-skip no-ctx' });
       }
       return;
     }
-    const { w, h } = synced;
+    const { w, h, dpr } = synced;
     layoutRef.current = { w, h };
     const refW = data.canvas.width;
-    const draft = draftRef.current;
-    drawStrokes(ctx, data.strokes, w, h, refW, draft);
+
+    if (import.meta.env.DEV && getHwRenderMode() === 'polyline') {
+      drawStrokes(visibleCtx, data.strokes, w, h, refW);
+      if (isPageInkBlock) {
+        recordPageInkRenderState({
+          lastPaintStatus: `dev-polyline ${data.strokes.length} strokes`,
+          canvasSizeAtRedraw: formatCanvasSize(canvas),
+        });
+      }
+      return;
+    }
+
+    const commitCanvas = ensureCommitCanvas();
+    syncCommitCanvasSize(commitCanvas, { w, h, dpr });
+    const commitCtx = getCommitLayerContext(commitCanvas);
+    if (!commitCtx) {
+      if (isPageInkBlock) {
+        recordPageInkRenderState({ lastPaintStatus: 'paint-skip no-commit-ctx' });
+      }
+      return;
+    }
+
+    const needsRebuild =
+      !commitCacheValidRef.current ||
+      commitCacheStrokeCountRef.current !== data.strokes.length;
+    if (needsRebuild) {
+      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
+      commitCacheValidRef.current = true;
+      commitCacheStrokeCountRef.current = data.strokes.length;
+    }
+
+    blitCommitLayer(visibleCtx, commitCanvas, w, h);
+    draftPaintedCountRef.current = 0;
+
     if (isPageInkBlock) {
       recordPageInkRenderState({
-        lastPaintStatus: `drew ${data.strokes.length} strokes ${formatCanvasSize(canvas)}`,
+        lastPaintStatus: `commit-blit ${data.strokes.length} strokes ${needsRebuild ? 'rebuilt' : 'cached'}`,
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }
-  }, [isPageInkBlock]);
+  }, [ensureCommitCanvas, isPageInkBlock]);
+
+  const paintDraft = useCallback(() => {
+    const canvas = canvasRef.current;
+    const data = dataRef.current;
+    const draft = draftRef.current;
+    if (!canvas || !data || !draft) return;
+
+    const synced = syncCanvasFromRect(canvas, { allowResize: false });
+    if (!synced) return;
+    const visibleCtx = canvas.getContext('2d');
+    if (!visibleCtx) return;
+
+    const { w, h, dpr } = synced;
+    layoutRef.current = { w, h };
+    const refW = data.canvas.width;
+    const commitCanvas = ensureCommitCanvas();
+    syncCommitCanvasSize(commitCanvas, { w, h, dpr });
+
+    if (draftPaintedCountRef.current === 0) {
+      const commitCtx = getCommitLayerContext(commitCanvas);
+      if (!commitCtx) return;
+      const needsRebuild =
+        !commitCacheValidRef.current ||
+        commitCacheStrokeCountRef.current !== data.strokes.length;
+      if (needsRebuild) {
+        rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
+        commitCacheValidRef.current = true;
+        commitCacheStrokeCountRef.current = data.strokes.length;
+      }
+      blitCommitLayer(visibleCtx, commitCanvas, w, h);
+    }
+
+    draftPaintedCountRef.current = appendDraftStrokeSegment(
+      visibleCtx,
+      draft,
+      draftPaintedCountRef.current,
+      w,
+      h,
+      refW,
+    );
+
+    if (isPageInkBlock) {
+      recordPageInkRenderState({
+        lastPaintStatus: `draft-append pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
+        canvasSizeAtRedraw: formatCanvasSize(canvas),
+      });
+    }
+  }, [ensureCommitCanvas, isPageInkBlock]);
+
+  const paint = useCallback(() => {
+    if (drawingRef.current && draftRef.current) {
+      paintDraft();
+      return;
+    }
+    paintIdle();
+  }, [paintDraft, paintIdle]);
 
   const schedulePaint = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -442,10 +554,13 @@ export function HandwritingBlock({
   );
 
   const commitData = useCallback(
-    (next: HandwritingBlockData, pushUndo: boolean) => {
+    (next: HandwritingBlockData, pushUndo: boolean, opts?: { skipCacheInvalidate?: boolean }) => {
       if (pushUndo && dataRef.current) {
         undoRef.current = [...undoRef.current.slice(-(UNDO_CAP - 1)), dataRef.current.strokes];
         setCanUndo(true);
+      }
+      if (!opts?.skipCacheInvalidate) {
+        invalidateCommitCache();
       }
       dataRef.current = { ...next, updatedAt: Date.now() };
       setStrokeCount(next.strokes.length);
@@ -454,7 +569,7 @@ export function HandwritingBlock({
       schedulePaint();
       queueSave(dataRef.current);
     },
-    [queueSave, schedulePaint, isPageInkBlock, objectId],
+    [invalidateCommitCache, queueSave, schedulePaint, isPageInkBlock, objectId],
   );
 
   const syncCanvasWidth = useCallback(() => {
@@ -470,8 +585,9 @@ export function HandwritingBlock({
       ...dataRef.current,
       canvas: { width: w, height: preservedHeight },
     };
+    invalidateCommitCache();
     schedulePaint();
-  }, [schedulePaint]);
+  }, [invalidateCommitCache, schedulePaint]);
 
   syncCanvasWidthRef.current = syncCanvasWidth;
 
@@ -482,6 +598,9 @@ export function HandwritingBlock({
     draftRef.current = null;
     pendingSaveRef.current = null;
     undoRef.current = [];
+    commitCacheValidRef.current = false;
+    commitCacheStrokeCountRef.current = -1;
+    draftPaintedCountRef.current = 0;
     setLoaded(false);
     void (async () => {
       if (!objectId || !blockKey) {
@@ -624,6 +743,7 @@ export function HandwritingBlock({
       setSpikeSettings(s);
       setDevRenderMode(s.render);
       setHwRenderMode(s.render);
+      invalidateCommitCache();
       schedulePaint();
     };
     syncFromSpike();
@@ -635,7 +755,7 @@ export function HandwritingBlock({
       window.removeEventListener('fw-hw-spike-settings', onSpike);
       window.removeEventListener('fw-hw-render-mode', onMode);
     };
-  }, [schedulePaint]);
+  }, [invalidateCommitCache, schedulePaint]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -653,6 +773,7 @@ export function HandwritingBlock({
     drawingRef.current = false;
     pointerCaptureRef.current = null;
     onDrawingChange?.(false);
+    draftPaintedCountRef.current = 0;
     if (!draft || !dataRef.current) {
       schedulePaint();
       return;
@@ -664,13 +785,46 @@ export function HandwritingBlock({
     } else if (draft.tool === 'eraser' && draft.points.length > 0) {
       strokes = strokesAfterEraser(strokes, draft.points, ERASER_RADIUS_NORM);
     }
+
+    const canvas = canvasRef.current;
+    if (canvas && import.meta.env.DEV && getHwRenderMode() === 'polyline') {
+      /* dev legacy path — full redraw via commitData */
+    } else if (canvas) {
+      const synced = syncCanvasFromRect(canvas, { allowResize: false });
+      if (synced) {
+        const { w, h, dpr } = synced;
+        const refW = base.canvas.width;
+        const commitCanvas = ensureCommitCanvas();
+        syncCommitCanvasSize(commitCanvas, { w, h, dpr });
+        const commitCtx = getCommitLayerContext(commitCanvas);
+        const visibleCtx = canvas.getContext('2d');
+        if (commitCtx && visibleCtx) {
+          if (draft.tool === 'pen' && draft.points.length > 0) {
+            if (
+              !commitCacheValidRef.current ||
+              commitCacheStrokeCountRef.current !== base.strokes.length
+            ) {
+              rebuildCommitLayer(commitCtx, base.strokes, w, h, refW);
+            }
+            appendCommittedStroke(commitCtx, draft, w, h, refW);
+            commitCacheValidRef.current = true;
+            commitCacheStrokeCountRef.current = strokes.length;
+            blitCommitLayer(visibleCtx, commitCanvas, w, h);
+          } else if (draft.tool === 'eraser') {
+            rebuildCommitLayer(commitCtx, strokes, w, h, refW);
+            commitCacheValidRef.current = true;
+            commitCacheStrokeCountRef.current = strokes.length;
+            blitCommitLayer(visibleCtx, commitCanvas, w, h);
+          }
+        }
+      }
+    }
     const strokePressures = draft.points
       .map(p => p.pressure)
       .filter((v): v is number => v !== undefined && v > 0);
     const sampleStats = getStrokeSampleStats();
     const corners = draft.tool === 'pen' ? strokeCornerSharpness(draft) : null;
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
+    const rect = canvasRef.current?.getBoundingClientRect();
     hwDiagLog('HandwritingBlock.tsx:finishStroke', 'stroke committed', {
       tool: draft.tool,
       pointCount: draft.points.length,
@@ -692,13 +846,19 @@ export function HandwritingBlock({
       pressureMax: strokePressures.length ? Math.max(...strokePressures) : null,
       settings: getHwSpikeSettings(),
       canvasCss: rect ? { w: rect.width, h: rect.height } : null,
-      canvasBitmap: canvas ? { w: canvas.width, h: canvas.height } : null,
+      canvasBitmap: canvasRef.current
+        ? { w: canvasRef.current.width, h: canvasRef.current.height }
+        : null,
       displayHeight,
       dpr: window.devicePixelRatio,
     });
-    commitData({ ...base, strokes }, true);
+    const skipCacheInvalidate =
+      draft.tool === 'pen' &&
+      draft.points.length > 0 &&
+      !(import.meta.env.DEV && getHwRenderMode() === 'polyline');
+    commitData({ ...base, strokes }, true, { skipCacheInvalidate });
     void flushSave('stroke');
-  }, [commitData, onDrawingChange, schedulePaint, flushSave]);
+  }, [commitData, ensureCommitCanvas, onDrawingChange, schedulePaint, flushSave]);
 
   const beginStroke = useCallback(
     (
@@ -748,6 +908,7 @@ export function HandwritingBlock({
         width: activeTool === 'pen' ? PEN_WIDTH : ERASER_WIDTH,
         points: [pt],
       };
+      draftPaintedCountRef.current = 0;
       schedulePaint();
     },
     [inkColor, objectId, blockKey, onDrawingChange, schedulePaint],
@@ -817,6 +978,7 @@ export function HandwritingBlock({
     drawingRef.current = false;
     pointerCaptureRef.current = null;
     onDrawingChange?.(false);
+    draftPaintedCountRef.current = 0;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {

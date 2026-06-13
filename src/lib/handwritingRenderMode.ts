@@ -1,6 +1,7 @@
 /**
- * Dev-only A/B toggle to compare polyline vs mathInk.
- * Production always uses mathInk (perfect-freehand) for pen strokes.
+ * Dev-only A/B toggle to compare legacy full-redraw polyline vs mathInk.
+ * Production uses dual-layer rendering: draft polyline while drawing,
+ * perfect-freehand once on commit (see handwritingLayers.ts).
  *
  * Safari console (dev build):
  *   window.__fwHwRenderMode = 'polyline'  // force legacy polyline

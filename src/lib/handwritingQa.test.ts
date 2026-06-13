@@ -12,6 +12,7 @@ import {
 import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
+import { nextDraftPaintedCount } from './handwritingLayers';
 import { makeHandwritingStorageKey } from './notebookHandwritingStore';
 import {
   flushAllHandwritingForObject,
@@ -92,6 +93,12 @@ const farBatch = [
   { clientX: 500, clientY: 100, timeStamp: 10 },
 ] as PointerEvent[];
 assert(!isCoalescedBatchSafe(farBatch, parent), 'coalesced rejects far sample');
+
+// dual-layer draft paint cursor
+assert(nextDraftPaintedCount(0, 0) === 0, 'draft cursor empty stroke');
+assert(nextDraftPaintedCount(1, 0) === 1, 'draft cursor first point');
+assert(nextDraftPaintedCount(5, 1) === 5, 'draft cursor catches up to point count');
+assert(nextDraftPaintedCount(3, 3) === 3, 'draft cursor unchanged when caught up');
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;

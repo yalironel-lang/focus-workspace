@@ -45,14 +45,13 @@ function inkPathFromOutline(outline: number[][]): Path2D {
   return path;
 }
 
-/** Render one pen stroke with mathInk (production default). */
+/** Render one committed pen stroke with mathInk (commit layer only). */
 export function drawPenStrokeMathInk(
   ctx: CanvasRenderingContext2D,
   stroke: HandwritingStroke,
   canvasW: number,
   canvasH: number,
   refWidth: number,
-  opts?: { isDraft?: boolean },
 ): void {
   if (stroke.tool !== 'pen' || stroke.points.length === 0) return;
 
@@ -76,7 +75,7 @@ export function drawPenStrokeMathInk(
     smoothing: MATH_INK_PRESET.smoothing,
     streamline: MATH_INK_PRESET.streamline,
     simulatePressure: !strokeHasRealPressure(stroke),
-    last: opts?.isDraft !== true,
+    last: true,
     start: { taper: false, cap: true },
     end: { taper: false, cap: true },
   });
