@@ -191,6 +191,10 @@ async function idbDelete(storageKey: string): Promise<void> {
   });
 }
 
+export async function hwListKeysForObject(objectId: string): Promise<string[]> {
+  return listKeysForObject(objectId);
+}
+
 async function listKeysForObject(objectId: string): Promise<string[]> {
   return runSerializedIdb(async () => {
     const db = await getDb();
@@ -219,9 +223,33 @@ export function hwGetCached(objectId: string, blockKey: string): HandwritingBloc
 
 export async function hwGet(objectId: string, blockKey: string): Promise<HandwritingBlockData | null> {
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
-  if (cache.has(storageKey)) return cache.get(storageKey)!;
+  const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+  if (cache.has(storageKey)) {
+    const cached = cache.get(storageKey)!;
+    if (isPageInk) {
+      hwDiagLog('notebookHandwritingStore.ts:hwGet', 'page-ink cache hit', {
+        objectId,
+        blockKey,
+        storageKey,
+        strokeCount: cached.strokes.length,
+        height: cached.canvas.height,
+        source: 'cache',
+      });
+    }
+    return cached;
+  }
   try {
     const data = await idbGet(storageKey);
+    if (isPageInk) {
+      hwDiagLog('notebookHandwritingStore.ts:hwGet', data ? 'page-ink idb hit' : 'page-ink idb miss', {
+        objectId,
+        blockKey,
+        storageKey,
+        strokeCount: data?.strokes.length ?? 0,
+        height: data?.canvas.height ?? null,
+        source: 'idb',
+      });
+    }
     if (data) cache.set(storageKey, data);
     return data ?? null;
   } catch (e) {
@@ -249,12 +277,15 @@ export async function hwSet(
   }
 
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
+  const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
   const payloadSummary = {
     objectId,
     blockKey,
     storageKey,
     strokeCount: Array.isArray(data.strokes) ? data.strokes.length : null,
+    canvasHeight: data.canvas?.height ?? null,
     hasIndexedDb: typeof indexedDB !== 'undefined',
+    isPageInk,
   };
 
   const sanitized = sanitizeHandwritingData(data);
@@ -306,6 +337,7 @@ export async function hwSet(
       ...payloadSummary,
       payloadBytes,
       reachedIdb: true,
+      success: true,
     });
     return { ok: true, reachedIdb: true };
   } catch (e) {
@@ -422,4 +454,32 @@ export async function gcOrphanHandwritingKeys(
 export async function gcOrphanHandwriting(objectId: string, body: string): Promise<void> {
   const referenced = [...new Set([...referencedHandwritingKeys(body), PAGE_INK_BLOCK_KEY])];
   return gcOrphanHandwritingKeys(objectId, referenced);
+}
+
+declare global {
+  interface Window {
+    __fwHwGetPageInk?: (objectId: string) => Promise<{
+      storageKey: string;
+      strokeCount: number;
+      height: number | null;
+      updatedAt: number | null;
+      data: HandwritingBlockData | null;
+    }>;
+    __fwHwListKeysForObject?: (objectId: string) => Promise<string[]>;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__fwHwGetPageInk = async (objectId: string) => {
+    const storageKey = makeHandwritingStorageKey(objectId, PAGE_INK_BLOCK_KEY);
+    const data = await hwGet(objectId, PAGE_INK_BLOCK_KEY);
+    return {
+      storageKey,
+      strokeCount: data?.strokes.length ?? 0,
+      height: data?.canvas.height ?? null,
+      updatedAt: data?.updatedAt ?? null,
+      data,
+    };
+  };
+  window.__fwHwListKeysForObject = (objectId: string) => hwListKeysForObject(objectId);
 }

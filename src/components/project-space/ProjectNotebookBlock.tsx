@@ -2318,6 +2318,14 @@ export function ProjectNotebookBlock({
     }
   }, [dismissSelectionToolbar]);
 
+  const handlePageInkDrawingChange = useCallback(
+    (drawing: boolean) => {
+      if (drawing) dismissNotebookTextEditing();
+      if (context === 'free-space') onEditingChange?.(drawing);
+    },
+    [context, dismissNotebookTextEditing, onEditingChange],
+  );
+
   const handleWritingModeChange = useCallback(
     (next: NotebookWritingMode) => {
       if (next === writingMode) return;
@@ -4828,10 +4836,7 @@ export function ProjectNotebookBlock({
                     flexDirection: 'column',
                   }}
                   onDismissTextEditing={dismissNotebookTextEditing}
-                  onDrawingChange={drawing => {
-                    if (drawing) dismissNotebookTextEditing();
-                    if (context === 'free-space') onEditingChange?.(drawing);
-                  }}
+                  onDrawingChange={handlePageInkDrawingChange}
                 />
               ) : (
                 <p style={{ fontSize: 12, color: tokens.textMuted, padding: 16 }}>

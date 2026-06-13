@@ -50,6 +50,7 @@ import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
   CANVAS_HEIGHT_STEP,
+  PAGE_INK_BLOCK_KEY,
   PAGE_INK_INITIAL_HEIGHT,
   clampCanvasHeight,
   DEFAULT_CANVAS_MIN_HEIGHT,
@@ -177,10 +178,11 @@ export function HandwritingBlock({
   const saveChainRef = useRef(Promise.resolve(true));
   const layoutRef = useRef({ w: 1, h: DEFAULT_CANVAS_MIN_HEIGHT });
   const pointerCaptureRef = useRef<{ id: number; target: HTMLCanvasElement } | null>(null);
-  const lastPersistOkRef = useRef<{ storageKey: string; strokeCount: number; at: number } | null>(
-    null,
-  );
   const unmountFlushDoneRef = useRef(false);
+  const flushSaveRef = useRef<
+    (reason?: 'registry' | 'unmount' | 'stroke' | 'debounce' | 'visibility') => Promise<boolean>
+  >(() => Promise.resolve(true));
+  const syncCanvasWidthRef = useRef<() => void>(() => undefined);
 
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
@@ -270,30 +272,11 @@ export function HandwritingBlock({
         ...result,
       });
       if (result.ok) {
-        lastPersistOkRef.current = {
-          storageKey,
-          strokeCount: payload.strokes.length,
-          at: Date.now(),
-        };
         return true;
       }
       if (attempt < 2 && result.failureStage === 'idb') {
         await new Promise(r => setTimeout(r, SAVE_RETRY_DELAY_MS * attempt));
         return persistPayload(payload, attempt + 1, reason);
-      }
-      const prevOk = lastPersistOkRef.current;
-      const suppressUnmountToast =
-        reason === 'unmount' &&
-        prevOk?.storageKey === storageKey &&
-        prevOk.strokeCount === payload.strokes.length;
-      if (suppressUnmountToast) {
-        hwDiagLog('HandwritingBlock.tsx:persist', 'suppressed unmount toast — already saved', {
-          storageKey,
-          strokeCount: payload.strokes.length,
-          failureStage: result.failureStage,
-          errorName: result.errorName,
-        });
-        return true;
       }
       toast.error(saveErrorMessage(result));
       return false;
@@ -322,6 +305,16 @@ export function HandwritingBlock({
       }
       const payload = pendingSaveRef.current;
       if (!payload) {
+        if (reason === 'registry' || reason === 'unmount') {
+          hwDiagLog('HandwritingBlock.tsx:flushSave', 'no payload during explicit flush', {
+            objectId,
+            blockKey,
+            reason,
+            dataRefNull: dataRef.current === null,
+            draftActive: draftRef.current !== null,
+          });
+          return Promise.resolve(false);
+        }
         return Promise.resolve(true);
       }
       pendingSaveRef.current = null;
@@ -329,8 +322,10 @@ export function HandwritingBlock({
       saveChainRef.current = saveChainRef.current.then(() => persistPayload(captured, 1, reason));
       return saveChainRef.current;
     },
-    [mergeDraftIntoData, onDrawingChange, persistPayload],
+    [mergeDraftIntoData, onDrawingChange, objectId, blockKey, persistPayload],
   );
+
+  flushSaveRef.current = flushSave;
 
   const queueSave = useCallback(
     (data: HandwritingBlockData) => {
@@ -375,10 +370,11 @@ export function HandwritingBlock({
     schedulePaint();
   }, [schedulePaint]);
 
+  syncCanvasWidthRef.current = syncCanvasWidth;
+
   useEffect(() => {
     let cancelled = false;
     unmountFlushDoneRef.current = false;
-    lastPersistOkRef.current = null;
     dataRef.current = null;
     draftRef.current = null;
     pendingSaveRef.current = null;
@@ -392,6 +388,19 @@ export function HandwritingBlock({
       }
       const existing = await hwGet(objectId, blockKey);
       if (cancelled) return;
+      const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+      if (isPageInk) {
+        hwDiagLog('HandwritingBlock.tsx:mount', 'page-ink hydrate', {
+          objectId,
+          blockKey,
+          storageKey: `${objectId}:${blockKey}`,
+          found: Boolean(existing),
+          strokeCount: existing?.strokes.length ?? 0,
+          height: existing?.canvas.height ?? null,
+          pageLayout,
+          readOnly,
+        });
+      }
       const canvas = canvasRef.current;
       const rect = canvas?.getBoundingClientRect();
       const w = rect && rect.width >= 1 ? rect.width : 600;
@@ -413,13 +422,13 @@ export function HandwritingBlock({
       undoRef.current = [];
       setCanUndo(false);
       setLoaded(true);
-      syncCanvasWidth();
+      syncCanvasWidthRef.current();
     })();
     return () => {
       cancelled = true;
-      void flushSave('unmount');
+      void flushSaveRef.current('unmount');
     };
-  }, [objectId, blockKey, pageLayout, syncCanvasWidth, flushSave]);
+  }, [objectId, blockKey, pageLayout]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -458,15 +467,15 @@ export function HandwritingBlock({
 
   useEffect(() => {
     if (!objectId || !blockKey) return;
-    return registerHandwritingFlush(objectId, blockKey, () => flushSave('registry'));
-  }, [objectId, blockKey, flushSave]);
+    return registerHandwritingFlush(objectId, blockKey, () => flushSaveRef.current('registry'));
+  }, [objectId, blockKey]);
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'hidden') void flushSave('visibility');
+      if (document.visibilityState === 'hidden') void flushSaveRef.current('visibility');
     };
     const onPageHide = () => {
-      void flushSave('visibility');
+      void flushSaveRef.current('visibility');
     };
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', onPageHide);
@@ -474,9 +483,9 @@ export function HandwritingBlock({
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('pagehide', onPageHide);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      void flushSave('unmount');
+      void flushSaveRef.current('unmount');
     };
-  }, [flushSave]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
