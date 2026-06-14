@@ -21,3 +21,16 @@ export {
   dualWriteNotebookPages,
   applyNotebookPersist,
 } from './hydrate';
+export {
+  newNotebookSectionId,
+  newNotebookPageId,
+  pageDisplayTitle,
+  sectionDisplayTitle,
+  saveNotebookPageBody,
+  switchNotebookPage,
+  setActiveNotebookSection,
+  addNotebookSection,
+  addNotebookPage,
+  renameNotebookSection,
+  renameNotebookPage,
+} from './operations';

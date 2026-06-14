@@ -19,7 +19,18 @@ import { createPortal } from 'react-dom';
 import { flushSync } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject, NotebookWritingMode } from '../../hooks/useSectionFreeSpaceObjects';
-import { applyNotebookPersist } from '../../lib/notebookPages';
+import {
+  addNotebookPage,
+  addNotebookSection,
+  applyNotebookPersist,
+  isNotebookV1PagesEnabled,
+  renameNotebookPage,
+  renameNotebookSection,
+  saveNotebookPageBody,
+  setActiveNotebookSection,
+  switchNotebookPage,
+} from '../../lib/notebookPages';
+import { NotebookShellNavigator } from '../notebook/NotebookShellNavigator';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
@@ -1178,6 +1189,9 @@ export function ProjectNotebookBlock({
     (next: NotebookContent) => emitContentChange(applyNotebookPersist(next)),
     [emitContentChange],
   );
+  const v1PagesShell = isNotebookV1PagesEnabled();
+  const contentRef = useRef(content);
+  contentRef.current = content;
   const isDeskPresentation = presentation === 'desk';
   const deskFormattingV1 = useDeskFormattingV1();
   const deskFormattingActive = isDeskPresentation && deskFormattingV1;
@@ -1540,6 +1554,62 @@ export function ProjectNotebookBlock({
   useEffect(() => {
     return () => flushNotebookPersist();
   }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
+
+  const applyShellMutation = useCallback(
+    (mutate: (current: NotebookContent, body: string) => NotebookContent) => {
+      void (async () => {
+        await flushHandwritingBeforeTransition();
+        flushNotebookPersist();
+        const body = serializeBlocks(blocksRef.current);
+        persistNotebookContent(applyNotebookPersist(mutate(contentRef.current, body)));
+      })();
+    },
+    [flushHandwritingBeforeTransition, flushNotebookPersist, persistNotebookContent],
+  );
+
+  const handleShellSwitchPage = useCallback(
+    (pageId: string) => {
+      if (pageId === contentRef.current.activePageId) return;
+      applyShellMutation((current, body) => switchNotebookPage(current, pageId, body));
+    },
+    [applyShellMutation],
+  );
+
+  const handleShellSwitchSection = useCallback(
+    (sectionId: string) => {
+      if (sectionId === contentRef.current.activeSectionId) return;
+      applyShellMutation((current, body) => setActiveNotebookSection(current, sectionId, body));
+    },
+    [applyShellMutation],
+  );
+
+  const handleShellAddSection = useCallback(() => {
+    applyShellMutation((current, body) => addNotebookSection(current, body));
+  }, [applyShellMutation]);
+
+  const handleShellAddPage = useCallback(() => {
+    const sectionId = contentRef.current.activeSectionId;
+    if (!sectionId) return;
+    applyShellMutation((current, body) => addNotebookPage(current, sectionId, body));
+  }, [applyShellMutation]);
+
+  const handleShellRenameSection = useCallback(
+    (sectionId: string, title: string) => {
+      applyShellMutation((current, body) =>
+        renameNotebookSection(saveNotebookPageBody(current, body), sectionId, title),
+      );
+    },
+    [applyShellMutation],
+  );
+
+  const handleShellRenamePage = useCallback(
+    (pageId: string, title: string) => {
+      applyShellMutation((current, body) =>
+        renameNotebookPage(saveNotebookPageBody(current, body), pageId, title),
+      );
+    },
+    [applyShellMutation],
+  );
 
   const contextData = useMemo(
     () => deriveNotebookContextData(objectId, allObjects),
@@ -4539,6 +4609,19 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       </div>
+      ) : null}
+
+      {v1PagesShell && !isFocusModeOpen && (content.sections?.length ?? 0) > 0 ? (
+        <NotebookShellNavigator
+          content={content}
+          tokens={tokens}
+          onSwitchSection={handleShellSwitchSection}
+          onSwitchPage={handleShellSwitchPage}
+          onAddSection={handleShellAddSection}
+          onAddPage={handleShellAddPage}
+          onRenameSection={handleShellRenameSection}
+          onRenamePage={handleShellRenamePage}
+        />
       ) : null}
 
       {editorMode === 'edit' && selectionToolbar && !isDeskPresentation ? (
