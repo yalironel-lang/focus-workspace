@@ -70,13 +70,23 @@ function lsFullKey(storageKey: string): string {
   return `${LS_KEY_PREFIX}${storageKey}`;
 }
 
-function lsGet(storageKey: string): HandwritingBlockData | undefined {
+function lsRead(storageKey: string): PersistReadOutcome {
   try {
     const raw = localStorage.getItem(lsFullKey(storageKey));
-    if (!raw) return undefined;
-    return sanitizeHandwritingData(JSON.parse(raw)) ?? undefined;
-  } catch {
-    return undefined;
+    if (!raw) return { kind: 'miss' };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return { kind: 'corrupted', backend: 'localStorage' };
+    }
+    const data = sanitizeHandwritingData(parsed);
+    const classification = parseStoredHandwritingPayload(parsed);
+    if (classification === 'corrupted') return { kind: 'corrupted', backend: 'localStorage' };
+    if (!data) return { kind: 'corrupted', backend: 'localStorage' };
+    return { kind: 'hit', data };
+  } catch (e) {
+    return { kind: 'error', error: serializeIdbError(e) };
   }
 }
 
@@ -153,6 +163,26 @@ export type HwSaveFailureStage =
   | 'idb'
   | 'unknown';
 
+export type HwLoadFailureStage =
+  | 'storage_unavailable'
+  | 'read_failed'
+  | 'corrupted';
+
+export type HwGetResult =
+  | {
+      status: 'loaded';
+      data: HandwritingBlockData;
+      source: 'cache' | 'idb' | 'localStorage';
+    }
+  | { status: 'empty'; data: null }
+  | {
+      status: 'error';
+      data: null;
+      failureStage: HwLoadFailureStage;
+      errorName?: string;
+      errorMessage?: string;
+    };
+
 export type HwSetResult = {
   ok: boolean;
   failureStage?: HwSaveFailureStage;
@@ -160,7 +190,46 @@ export type HwSetResult = {
   errorName?: string;
   errorMessage?: string;
   isQuota?: boolean;
+  verifyMismatch?: boolean;
 };
+
+type PersistReadOutcome =
+  | { kind: 'hit'; data: HandwritingBlockData }
+  | { kind: 'miss' }
+  | { kind: 'corrupted'; backend: 'idb' | 'localStorage' }
+  | { kind: 'error'; error: ReturnType<typeof serializeIdbError> };
+
+/** Classify stored raw payload — exported for QA tests. */
+export function parseStoredHandwritingPayload(raw: unknown): 'hit' | 'miss' | 'corrupted' {
+  if (raw === undefined || raw === null) return 'miss';
+  if (typeof raw !== 'object') return 'corrupted';
+  const record = raw as Record<string, unknown>;
+  if (record.type !== undefined && record.type !== 'handwriting') return 'corrupted';
+  return sanitizeHandwritingData(raw) ? 'hit' : 'corrupted';
+}
+
+export function hwLoadErrorMessage(result: Extract<HwGetResult, { status: 'error' }>): string {
+  if (result.failureStage === 'storage_unavailable') {
+    return 'Handwriting storage is unavailable in this browser session.';
+  }
+  if (result.failureStage === 'corrupted') {
+    return 'Stored handwriting data could not be read (it may be damaged).';
+  }
+  if (result.errorName) {
+    return `Could not load handwriting — ${result.errorName}.`;
+  }
+  return 'Could not load handwriting.';
+}
+
+export function hwLoadRecoveryGuidance(stage: HwLoadFailureStage): string {
+  if (stage === 'storage_unavailable') {
+    return 'Try leaving Private Browsing, freeing browser storage, or restarting the app.';
+  }
+  if (stage === 'corrupted') {
+    return 'Tap Retry. If this persists, check Notebook Snapshots or contact support before writing new notes here.';
+  }
+  return 'Tap Retry. If this keeps happening, restart the app.';
+}
 
 function runSerializedIdb<T>(op: () => Promise<T>): Promise<T> {
   const run = idbChain.then(op, op);
@@ -262,12 +331,25 @@ function resetDbConnection(): void {
   activeDb = null;
 }
 
-async function persistGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
+async function persistGetDetailed(storageKey: string): Promise<PersistReadOutcome> {
   const backend = resolvePersistBackend();
   activePersistBackend = backend;
-  if (backend === 'idb') return idbGet(storageKey);
-  if (backend === 'localStorage') return lsGet(storageKey);
-  throw storageUnavailableError();
+  if (backend === 'none') {
+    return { kind: 'error', error: serializeIdbError(storageUnavailableError()) };
+  }
+  if (backend === 'idb') {
+    try {
+      return await idbRead(storageKey);
+    } catch (e) {
+      return { kind: 'error', error: serializeIdbError(e) };
+    }
+  }
+  return lsRead(storageKey);
+}
+
+async function persistGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
+  const outcome = await persistGetDetailed(storageKey);
+  return outcome.kind === 'hit' ? outcome.data : undefined;
 }
 
 async function persistPut(storageKey: string, data: HandwritingBlockData): Promise<void> {
@@ -310,10 +392,10 @@ async function persistListKeysForObject(objectId: string): Promise<string[]> {
   throw storageUnavailableError();
 }
 
-async function idbGet(storageKey: string): Promise<HandwritingBlockData | undefined> {
+async function idbRead(storageKey: string): Promise<PersistReadOutcome> {
   return runSerializedIdb(async () => {
     const db = await getDb();
-    return new Promise<HandwritingBlockData | undefined>((resolve, reject) => {
+    return new Promise<PersistReadOutcome>((resolve, reject) => {
       let tx: IDBTransaction | null = null;
       try {
         tx = db.transaction(STORE, 'readonly');
@@ -325,7 +407,21 @@ async function idbGet(storageKey: string): Promise<HandwritingBlockData | undefi
       const req = tx.objectStore(STORE).get(storageKey);
       tx.oncomplete = () => {
         const raw = req.result;
-        resolve(sanitizeHandwritingData(raw) ?? undefined);
+        const classification = parseStoredHandwritingPayload(raw);
+        if (classification === 'miss') {
+          resolve({ kind: 'miss' });
+          return;
+        }
+        if (classification === 'corrupted') {
+          resolve({ kind: 'corrupted', backend: 'idb' });
+          return;
+        }
+        const data = sanitizeHandwritingData(raw);
+        if (!data) {
+          resolve({ kind: 'corrupted', backend: 'idb' });
+          return;
+        }
+        resolve({ kind: 'hit', data });
       };
       tx.onerror = () => {
         const err = tx!.error ?? req.error;
@@ -433,14 +529,45 @@ export function hwGetCached(objectId: string, blockKey: string): HandwritingBloc
   return cache.get(key) ?? null;
 }
 
-export async function hwGet(objectId: string, blockKey: string): Promise<HandwritingBlockData | null> {
+function outcomeToHwGetResult(
+  outcome: PersistReadOutcome,
+  source: 'idb' | 'localStorage',
+): HwGetResult {
+  if (outcome.kind === 'hit') {
+    return { status: 'loaded', data: outcome.data, source };
+  }
+  if (outcome.kind === 'miss') {
+    return { status: 'empty', data: null };
+  }
+  if (outcome.kind === 'corrupted') {
+    return {
+      status: 'error',
+      data: null,
+      failureStage: 'corrupted',
+      errorName: 'CorruptedPayload',
+      errorMessage: 'Stored handwriting payload failed validation.',
+    };
+  }
+  const isStorageUnavailable =
+    outcome.error.name === 'Error' &&
+    outcome.error.message.includes('storage is not available');
+  return {
+    status: 'error',
+    data: null,
+    failureStage: isStorageUnavailable ? 'storage_unavailable' : 'read_failed',
+    errorName: outcome.error.name,
+    errorMessage: outcome.error.message,
+  };
+}
+
+export async function hwLoadBlock(objectId: string, blockKey: string): Promise<HwGetResult> {
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
   probePageInkPersistOnce(isPageInk);
   if (cache.has(storageKey)) {
     const cached = cache.get(storageKey)!;
     if (isPageInk) {
-      hwDiagLog('notebookHandwritingStore.ts:hwGet', 'page-ink cache hit', {
+      hwDiagLog('notebookHandwritingStore.ts:hwLoadBlock', 'page-ink cache hit', {
         objectId,
         blockKey,
         storageKey,
@@ -450,46 +577,72 @@ export async function hwGet(objectId: string, blockKey: string): Promise<Handwri
       });
       recordPageInkHwGet(objectId, cached.strokes.length, 'cache');
     }
-    return cached;
+    return { status: 'loaded', data: cached, source: 'cache' };
   }
-  try {
-    const data = await persistGet(storageKey);
-    const backend = activePersistBackend;
-    if (isPageInk) {
-      const source = data
+  const outcome = await persistGetDetailed(storageKey);
+  const backend = activePersistBackend;
+  if (isPageInk) {
+    const source =
+      outcome.kind === 'hit'
         ? backend === 'localStorage'
           ? 'localStorage'
           : 'idb'
-        : 'miss';
-      hwDiagLog('notebookHandwritingStore.ts:hwGet', data ? 'page-ink persist hit' : 'page-ink persist miss', {
+        : outcome.kind === 'miss'
+          ? 'miss'
+          : 'error';
+    hwDiagLog(
+      'notebookHandwritingStore.ts:hwLoadBlock',
+      outcome.kind === 'hit' ? 'page-ink persist hit' : outcome.kind === 'miss' ? 'page-ink persist miss' : 'page-ink load failed',
+      {
         objectId,
         blockKey,
         storageKey,
-        strokeCount: data?.strokes.length ?? 0,
-        height: data?.canvas.height ?? null,
+        strokeCount: outcome.kind === 'hit' ? outcome.data.strokes.length : 0,
+        height: outcome.kind === 'hit' ? outcome.data.canvas.height : null,
         source,
         backend,
-      });
-      recordPageInkHwGet(objectId, data?.strokes.length ?? 0, source);
-      recordPageInkPersistBackend(backend);
-    }
-    if (data) cache.set(storageKey, data);
-    return data ?? null;
-  } catch (e) {
-    const err = serializeIdbError(e);
-    fwPersistWarn(`Could not load handwriting ${storageKey}: ${String(e)}`);
-    hwDiagLog('notebookHandwritingStore.ts:hwGet', 'load failed', {
-      storageKey,
-      error: err,
-    });
-    if (isPageInk) {
-      recordPageInkHwGet(objectId, 0, 'error');
-      recordPageInkPersistBackend(activePersistBackend);
-      recordPageInkIdbFailure('get', err, getDbDebugState(), lastIdbFailureTxState);
+        outcomeKind: outcome.kind,
+      },
+    );
+    recordPageInkHwGet(
+      objectId,
+      outcome.kind === 'hit' ? outcome.data.strokes.length : 0,
+      source,
+    );
+    recordPageInkPersistBackend(backend);
+    if (outcome.kind === 'error') {
+      recordPageInkIdbFailure('get', outcome.error, getDbDebugState(), lastIdbFailureTxState);
       lastIdbFailureTxState = null;
     }
-    return null;
   }
+  if (outcome.kind === 'hit') {
+    cache.set(storageKey, outcome.data);
+    return {
+      status: 'loaded',
+      data: outcome.data,
+      source: backend === 'localStorage' ? 'localStorage' : 'idb',
+    };
+  }
+  if (outcome.kind === 'miss') {
+    return { status: 'empty', data: null };
+  }
+  if (outcome.kind === 'corrupted') {
+    fwPersistWarn(`Could not load handwriting ${storageKey}: corrupted payload`);
+    hwDiagLog('notebookHandwritingStore.ts:hwLoadBlock', 'corrupted payload', { storageKey });
+    return outcomeToHwGetResult(outcome, backend === 'localStorage' ? 'localStorage' : 'idb');
+  }
+  fwPersistWarn(`Could not load handwriting ${storageKey}: ${outcome.error.string}`);
+  hwDiagLog('notebookHandwritingStore.ts:hwLoadBlock', 'load failed', {
+    storageKey,
+    error: outcome.error,
+  });
+  return outcomeToHwGetResult(outcome, backend === 'localStorage' ? 'localStorage' : 'idb');
+}
+
+export async function hwGet(objectId: string, blockKey: string): Promise<HandwritingBlockData | null> {
+  const result = await hwLoadBlock(objectId, blockKey);
+  if (result.status === 'loaded') return result.data;
+  return null;
 }
 
 export async function hwSet(
@@ -577,20 +730,23 @@ export async function hwSet(
       backend,
       success: true,
     });
+    let verifyMismatch = false;
     if (isPageInk) {
       recordPageInkPersistBackend(backend);
       recordPageInkHwSet(objectId, sanitized.strokes.length, true, backend);
       cache.delete(storageKey);
       try {
         const verify = await persistGet(storageKey);
+        verifyMismatch = (verify?.strokes.length ?? 0) !== sanitized.strokes.length;
         recordPageInkPostSaveVerify(verify?.strokes.length ?? 0, sanitized.strokes.length);
         if (verify) cache.set(storageKey, verify);
         else cache.set(storageKey, toStore);
       } catch {
+        verifyMismatch = true;
         cache.set(storageKey, toStore);
       }
     }
-    return { ok: true, reachedIdb: backend === 'idb' };
+    return { ok: true, reachedIdb: backend === 'idb', verifyMismatch: verifyMismatch || undefined };
   } catch (e) {
     const err = serializeIdbError(e);
     const backend = activePersistBackend;
@@ -741,13 +897,16 @@ declare global {
 if (typeof window !== 'undefined') {
   window.__fwHwGetPageInk = async (objectId: string) => {
     const storageKey = makeHandwritingStorageKey(objectId, PAGE_INK_BLOCK_KEY);
-    const data = await hwGet(objectId, PAGE_INK_BLOCK_KEY);
+    const result = await hwLoadBlock(objectId, PAGE_INK_BLOCK_KEY);
+    const data = result.status === 'loaded' ? result.data : null;
     return {
       storageKey,
       strokeCount: data?.strokes.length ?? 0,
       height: data?.canvas.height ?? null,
       updatedAt: data?.updatedAt ?? null,
       data,
+      loadStatus: result.status,
+      loadFailureStage: result.status === 'error' ? result.failureStage : undefined,
     };
   };
   window.__fwHwListKeysForObject = (objectId: string) => hwListKeysForObject(objectId);

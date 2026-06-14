@@ -63,7 +63,14 @@ import {
   recordPageInkPersist,
   recordPageInkRenderState,
 } from '../../lib/handwritingPageInkDebug';
-import { hwGet, hwSet, type HwSetResult } from '../../lib/notebookHandwritingStore';
+import {
+  hwLoadBlock,
+  hwLoadErrorMessage,
+  hwLoadRecoveryGuidance,
+  hwSet,
+  type HwGetResult,
+  type HwSetResult,
+} from '../../lib/notebookHandwritingStore';
 import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
@@ -128,6 +135,10 @@ function saveErrorMessage(result: HwSetResult): string {
     return `Could not save handwriting — ${result.errorName ?? 'storage error'}.`;
   }
   return 'Could not save handwriting.';
+}
+
+function saveVerifyWarningMessage(): string {
+  return 'Save verification failed — your notes may not have persisted correctly.';
 }
 
 /** Size bitmap from painted geometry; draw in CSS pixel coordinates (DPR via transform). */
@@ -275,6 +286,11 @@ export function HandwritingBlock({
   const [tool, setTool] = useState<HandwritingTool>('pen');
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [loadError, setLoadError] = useState<Extract<HwGetResult, { status: 'error' }> | null>(
+    null,
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [displayHeight, setDisplayHeight] = useState(CANVAS_HEIGHT_MIN);
   const [strokeCount, setStrokeCount] = useState(0);
   const [canUndo, setCanUndo] = useState(false);
@@ -490,13 +506,16 @@ export function HandwritingBlock({
         ...result,
       });
       if (result.ok) {
+        setSaveError(result.verifyMismatch ? saveVerifyWarningMessage() : null);
         return true;
       }
+      const message = saveErrorMessage(result);
+      setSaveError(message);
       if (attempt < 2 && result.failureStage === 'idb') {
         await new Promise(r => setTimeout(r, SAVE_RETRY_DELAY_MS * attempt));
         return persistPayload(payload, attempt + 1, reason);
       }
-      toast.error(saveErrorMessage(result));
+      toast.error(message);
       return false;
     },
     [objectId, blockKey, isPageInkBlock],
@@ -611,15 +630,42 @@ export function HandwritingBlock({
     commitCacheStrokeCountRef.current = -1;
     draftPaintedCountRef.current = 0;
     setLoaded(false);
+    setLoadError(null);
     void (async () => {
       if (!objectId || !blockKey) {
         setLoaded(true);
         setMissing(true);
         return;
       }
-      const existing = await hwGet(objectId, blockKey);
+      const loadResult = await hwLoadBlock(objectId, blockKey);
       if (cancelled) return;
       const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+      if (loadResult.status === 'error') {
+        setLoadError(loadResult);
+        setMissing(false);
+        setStrokeCount(0);
+        const canvas = canvasRef.current;
+        const rect = canvas?.getBoundingClientRect();
+        const w = rect && rect.width >= 1 ? rect.width : 600;
+        const defaultMinH = pageLayout ? PAGE_INK_INITIAL_HEIGHT : CANVAS_HEIGHT_MIN;
+        const h = clampCanvasHeight(rect && rect.height >= 1 ? rect.height : defaultMinH);
+        dataRef.current = emptyHandwritingData(w, h);
+        setDisplayHeight(h);
+        if (isPageInk) {
+          hwDiagLog('HandwritingBlock.tsx:mount', 'page-ink load failed', {
+            objectId,
+            blockKey,
+            failureStage: loadResult.failureStage,
+            errorName: loadResult.errorName,
+          });
+          recordPageInkHydrate(objectId, false, 0);
+        }
+        undoRef.current = [];
+        setCanUndo(false);
+        setLoaded(true);
+        return;
+      }
+      const existing = loadResult.status === 'loaded' ? loadResult.data : null;
       if (isPageInk) {
         hwDiagLog('HandwritingBlock.tsx:mount', 'page-ink hydrate', {
           objectId,
@@ -630,6 +676,7 @@ export function HandwritingBlock({
           height: existing?.canvas.height ?? null,
           pageLayout,
           readOnly,
+          loadStatus: loadResult.status,
         });
         recordPageInkHydrate(objectId, Boolean(existing), existing?.strokes.length ?? 0);
       }
@@ -671,7 +718,15 @@ export function HandwritingBlock({
       cancelled = true;
       void flushSaveRef.current('unmount');
     };
-  }, [objectId, blockKey, pageLayout, redrawAfterHydrate]);
+  }, [objectId, blockKey, pageLayout, redrawAfterHydrate, reloadToken]);
+
+  const retryLoad = useCallback(() => {
+    setReloadToken(t => t + 1);
+  }, []);
+
+  const retrySave = useCallback(() => {
+    void flushSave('registry');
+  }, [flushSave]);
 
   useLayoutEffect(() => {
     if (!loaded) return;
@@ -924,9 +979,10 @@ export function HandwritingBlock({
   );
 
   const saveNotReady = !objectId || !blockKey;
+  const inkBlocked = saveNotReady || loadError !== null;
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || saveNotReady || e.button !== 0) return;
+    if (readOnly || inkBlocked || e.button !== 0) return;
     if (!isInkPointer(e.nativeEvent)) return;
 
     const hadTextFocus =
@@ -1294,7 +1350,96 @@ export function HandwritingBlock({
             Handwriting not ready — notebook is still loading.
           </div>
         ) : null}
-        {loaded && !saveNotReady && missing && strokeCount === 0 ? (
+        {loaded && loadError ? (
+          <div
+            role="alert"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              pointerEvents: 'auto',
+              background: 'rgba(0,0,0,0.62)',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.88)',
+              letterSpacing: '0.02em',
+              textAlign: 'center',
+              padding: '16px 20px',
+              zIndex: 4,
+            }}
+          >
+            <strong style={{ fontSize: 12, fontWeight: 600 }}>Couldn&apos;t load handwriting</strong>
+            <span style={{ color: 'rgba(255,255,255,0.72)' }}>
+              Your notes may still be saved on this device.
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.55)', maxWidth: 280 }}>
+              {hwLoadErrorMessage(loadError)}
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.45)', maxWidth: 300, lineHeight: 1.45 }}>
+              {hwLoadRecoveryGuidance(loadError.failureStage)}
+            </span>
+            <button
+              type="button"
+              onClick={retryLoad}
+              style={{
+                marginTop: 4,
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: 'rgba(255,255,255,0.12)',
+                color: 'rgba(255,255,255,0.92)',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {loaded && saveError && !loadError ? (
+          <div
+            role="alert"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              padding: '6px 10px',
+              background: 'rgba(127,29,29,0.88)',
+              color: 'rgba(255,255,255,0.92)',
+              fontSize: 10,
+              letterSpacing: '0.02em',
+              zIndex: 3,
+              pointerEvents: 'auto',
+            }}
+          >
+            <span style={{ textAlign: 'center', lineHeight: 1.35 }}>{saveError}</span>
+            <button
+              type="button"
+              onClick={retrySave}
+              style={{
+                flexShrink: 0,
+                padding: '3px 10px',
+                borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.3)',
+                background: 'rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.92)',
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              Retry save
+            </button>
+          </div>
+        ) : null}
+        {loaded && !saveNotReady && !loadError && missing && strokeCount === 0 ? (
           <div
             style={{
               position: 'absolute',

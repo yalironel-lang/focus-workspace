@@ -13,7 +13,7 @@ import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
-import { makeHandwritingStorageKey } from './notebookHandwritingStore';
+import { makeHandwritingStorageKey, hwLoadErrorMessage, hwLoadRecoveryGuidance, parseStoredHandwritingPayload } from './notebookHandwritingStore';
 import {
   flushAllHandwritingForObject,
   registerHandwritingFlush,
@@ -180,6 +180,37 @@ const partialCommitted = {
 assert(
   partialCommitted.strokes.length === 1 && partialCommitted.strokes[0]!.points.length === 3,
   'partial in-progress stroke preserved on commit (pointercancel policy)',
+);
+
+// P0-A2: load failures must not masquerade as empty canvas
+assert(parseStoredHandwritingPayload(undefined) === 'miss', 'undefined payload is miss');
+assert(parseStoredHandwritingPayload(null) === 'miss', 'null payload is miss');
+assert(parseStoredHandwritingPayload({ type: 'other-app' }) === 'corrupted', 'wrong type payload is corrupted');
+assert(parseStoredHandwritingPayload('garbage') === 'corrupted', 'non-object payload is corrupted');
+const validPayload = emptyHandwritingData(400, 420);
+assert(parseStoredHandwritingPayload(validPayload) === 'hit', 'valid payload is hit');
+
+const storageErr: Extract<import('./notebookHandwritingStore').HwGetResult, { status: 'error' }> = {
+  status: 'error',
+  data: null,
+  failureStage: 'storage_unavailable',
+};
+assert(
+  hwLoadErrorMessage(storageErr).includes('unavailable'),
+  'storage_unavailable load message mentions unavailable',
+);
+assert(
+  hwLoadRecoveryGuidance('storage_unavailable').includes('Private Browsing'),
+  'storage_unavailable recovery mentions Private Browsing',
+);
+const corruptErr: Extract<import('./notebookHandwritingStore').HwGetResult, { status: 'error' }> = {
+  status: 'error',
+  data: null,
+  failureStage: 'corrupted',
+};
+assert(
+  hwLoadErrorMessage(corruptErr).includes('damaged'),
+  'corrupted load message mentions damaged data',
 );
 
 console.log('handwritingQa.test.ts: all checks passed');
