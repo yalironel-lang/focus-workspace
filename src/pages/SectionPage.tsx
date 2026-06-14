@@ -95,6 +95,8 @@ import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanv
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import { StudyLayoutDockPortal } from '../components/project-space/StudyLayoutDockPortal';
 import { StudySessionShell } from '../components/project-space/StudySessionShell';
+import { RvStudySurface } from '../components/project-space/RvStudySurface';
+import { isRvStudySurfaceEnabled } from '../lib/rvStudySurface';
 import { StudySessionPickWork } from '../components/project-space/StudySessionPickWork';
 import { UniversalObjectViewPortal } from '../components/project-space/UniversalObjectViewPortal';
 import { StudyContinueBanner } from '../components/workspace-guidance/StudyContinueBanner';
@@ -836,6 +838,7 @@ export function SectionPage() {
     const n = raw ? Number(raw) : NaN;
     return Number.isFinite(n) ? Math.max(0.12, Math.min(0.88, n)) : 0.75;
   });
+  const [rvStudyPdfId, setRvStudyPdfId] = useState<string | null>(null);
   const studySessionWorkPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const studySessionPagePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
@@ -2893,6 +2896,18 @@ export function SectionPage() {
     toast.success('Study session saved — you can continue anytime.');
   }, [activeStudySession, sectionId, sectionBoards.activeBoardId]);
 
+  const openRvStudy = useCallback((pdfObjectId: string) => {
+    closeLearningAttempt();
+    setRvStudyPdfId(pdfObjectId);
+  }, [closeLearningAttempt]);
+
+  const closeRvStudy = useCallback(() => {
+    if (rvStudyPdfId) {
+      void flushAllHandwritingForObject(rvStudyPdfId);
+    }
+    setRvStudyPdfId(null);
+  }, [rvStudyPdfId]);
+
   const handleSelectStudyQuestion = useCallback((questionNumber: number) => {
     setActiveQuestionNumber(questionNumber);
     setStudyFocusQuestionNumber(questionNumber);
@@ -3362,6 +3377,11 @@ export function SectionPage() {
               ? () => enterStudySession(objectId)
               : undefined
           }
+          onStartRvStudy={
+            isRvStudySurfaceEnabled() && obj.type === 'pdf' && contentHost === 'canvas'
+              ? () => openRvStudy(objectId)
+              : undefined
+          }
           studySessionChip={studySessionChip}
           sessionRestoreBlockId={restoreBlockId}
           onStudySessionWorkFocus={
@@ -3403,6 +3423,7 @@ export function SectionPage() {
       studyFocusQuestionToken,
       studyPaneFocus,
       enterStudySession,
+      openRvStudy,
       handleStudySessionWorkFocus,
       getObjectPresentation,
       setObjectPresentationMode,
@@ -3913,6 +3934,29 @@ export function SectionPage() {
                   examPdfControls={studyExamPdfControls}
                   sourcePanel={renderSpaceObject(activeStudySession.sourceObjectId, 'study-session')}
                   workPanel={renderSpaceObject(activeStudySession.workObjectId, 'study-session')}
+                />
+              );
+            })()}
+
+          {freeSpaceSurfaceVisible &&
+            rvStudyPdfId &&
+            sectionId &&
+            (() => {
+              const rvPdf = sectionObjects.objects.find(o => o.id === rvStudyPdfId);
+              if (!rvPdf || rvPdf.type !== 'pdf') return null;
+              const rvContent = ensureProjectObjectContent('pdf', rvPdf.content);
+              if (rvContent.type !== 'pdf') return null;
+              return (
+                <RvStudySurface
+                  tokens={freeSpaceTokens}
+                  sectionId={sectionId}
+                  pdfObjectId={rvStudyPdfId}
+                  pdfContent={rvContent}
+                  pdfTitle={rvPdf.title}
+                  onPdfContentChange={content =>
+                    sectionObjects.updateObjectContent(rvStudyPdfId, content)
+                  }
+                  onClose={closeRvStudy}
                 />
               );
             })()}

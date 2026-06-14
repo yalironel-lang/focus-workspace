@@ -5,6 +5,9 @@ export const Z_STUDY_SESSION_SHELL = 599;
 /** Universal notebook fullscreen — above workspace shell chrome (600). */
 export const Z_UNIVERSAL_VIEW_BACKDROP = 610;
 export const Z_UNIVERSAL_VIEW_PANEL = 611;
+/** RV study surface — above universal view and study session. */
+export const Z_RV_STUDY_BACKDROP = 618;
+export const Z_RV_STUDY_SHELL = 619;
 export const Z_FAB = 30;
 export const Z_ADD_PALETTE = 70;
 export const Z_MODAL = 100;

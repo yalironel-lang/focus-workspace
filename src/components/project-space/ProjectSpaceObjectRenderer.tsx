@@ -72,6 +72,8 @@ interface Props {
   /** Apply study layout; host should dedupe single docked notebook. */
   onStudyLayoutChange?: (mode: StudyLayoutMode) => void;
   onStartStudySession?: () => void;
+  /** Opens RV validation surface from PDF card. */
+  onStartRvStudy?: () => void;
   /** When set, canvas card shows a studying chip instead of live content. */
   studySessionChip?: { subtitle: string; onOpen: () => void } | null;
   sessionRestoreBlockId?: string | null;
@@ -365,6 +367,7 @@ function ProjectSpaceObjectRendererInner({
   contentHost = 'canvas',
   onStudyLayoutChange,
   onStartStudySession,
+  onStartRvStudy,
   studySessionChip = null,
   sessionRestoreBlockId = null,
   onStudySessionWorkFocus,
@@ -688,6 +691,7 @@ function ProjectSpaceObjectRendererInner({
             pdfTitle={object.title}
             onPdfViewerReady={onPdfViewerReady}
             onStartStudySession={onStartStudySession}
+            onStartRvStudy={onStartRvStudy}
             presentation={contentHost === 'study-session' ? 'study-session' : 'canvas'}
             suppressStudyToolbar={suppressStudyToolbar}
             onStudyMarksChromeChange={onStudyMarksChromeChange}

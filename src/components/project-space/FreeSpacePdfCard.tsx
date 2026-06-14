@@ -58,7 +58,11 @@ interface FreeSpacePdfCardProps {
   pdfTitle?: string;
   /** Opens study session for this exam (Study Session V1). */
   onStartStudySession?: () => void;
-  presentation?: 'canvas' | 'study-session';
+  /** Opens RV validation surface (single-question split). */
+  onStartRvStudy?: () => void;
+  presentation?: 'canvas' | 'study-session' | 'rv-study';
+  /** Hide “open in new tab” on coarse pointers (RV surface). */
+  suppressExternalTabLink?: boolean;
   /** Focus exam: page/zoom live in StudySessionShell merged bar. */
   suppressStudyToolbar?: boolean;
   /** Lifts mark/highlight chrome into StudySessionShell header. */
@@ -80,14 +84,17 @@ export function FreeSpacePdfCard({
   onPdfViewerReady,
   pdfTitle = '',
   onStartStudySession,
+  onStartRvStudy,
   presentation = 'canvas',
   suppressStudyToolbar = false,
+  suppressExternalTabLink = false,
   onStudyMarksChromeChange,
 }: FreeSpacePdfCardProps) {
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
 
-  const inStudySession = presentation === 'study-session';
+  const inRvStudy = presentation === 'rv-study';
+  const inStudySession = presentation === 'study-session' || inRvStudy;
   const coarsePointer = useCoarsePointer();
   const useTransformZoom = coarsePointer || inStudySession;
   const forceIframeRemount = coarsePointer || inStudySession;
@@ -551,6 +558,20 @@ export function FreeSpacePdfCard({
               Study this exam
             </button>
           ) : null}
+          {onStartRvStudy && loadState === 'ready' && content.fileName ? (
+            <button
+              type="button"
+              className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
+              style={{
+                color: tokens.accent,
+                background: `${tokens.accent}18`,
+                border: `1px solid ${tokens.accent}66`,
+              }}
+              onClick={onStartRvStudy}
+            >
+              Work on this question
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -613,7 +634,7 @@ export function FreeSpacePdfCard({
         className={`flex-1 min-h-0 relative${inStudySession ? ' overflow-hidden' : ''}`}
         style={{ backgroundColor: tokens.wellBg }}
       >
-        {coarsePointer && objectUrl && loadState === 'ready' ? (
+        {coarsePointer && objectUrl && loadState === 'ready' && !suppressExternalTabLink ? (
           <a
             href={objectUrl}
             target="_blank"
