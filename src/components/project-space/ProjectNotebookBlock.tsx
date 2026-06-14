@@ -4818,6 +4818,8 @@ export function ProjectNotebookBlock({
                 flexDirection: 'column',
                 width: '100%',
                 minHeight: isDeskPresentation ? 480 : PAGE_INK_INITIAL_HEIGHT,
+                overflowY: 'auto',
+                WebkitOverflowScrolling: 'touch',
               }}
             >
               {objectId ? (
@@ -4829,11 +4831,10 @@ export function ProjectNotebookBlock({
                   pageLayout
                   surfaceChrome={{
                     margin: 0,
-                    flex: 1,
                     width: '100%',
-                    minHeight: PAGE_INK_INITIAL_HEIGHT,
                     display: 'flex',
                     flexDirection: 'column',
+                    flexShrink: 0,
                   }}
                   onDismissTextEditing={dismissNotebookTextEditing}
                   onDrawingChange={handlePageInkDrawingChange}

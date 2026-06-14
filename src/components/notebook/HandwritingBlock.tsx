@@ -22,24 +22,24 @@ import {
   hwDiagPressureSummary,
   hwDiagFinishStrokeSampling,
   hwDiagRecordPressure,
+  hwDiagRecordSamplingPick,
   hwDiagResetStrokeSampling,
 } from '../../lib/handwritingDiagnostics';
 import {
   appendPoint,
   canvasHasVisualScale,
-  collectPointerSamples,
   drawStrokes,
   findHandwritingScrollContainer,
   HW_INK_CANVAS_TOUCH_ACTION,
   HW_INK_CONTAINER_TOUCH_ACTION,
   isInkPointer,
+  isHandwritingCoalescedEnabled,
   logPointerCoordinateSample,
   pointerToNormalized,
   readVisualViewportMetrics,
   scrollHandwritingByFinger,
   strokeCornerSharpness,
   strokesAfterEraser,
-  isHandwritingCoalescedEnabled,
 } from '../../lib/handwritingGeometry';
 import {
   appendCommittedStroke,
@@ -50,7 +50,7 @@ import {
   syncCommitCanvasSize,
 } from '../../lib/handwritingLayers';
 import { getHwRenderMode, setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
-import { hwPointerSamplingStats } from '../../lib/handwritingPointerSamples';
+import { hwPointerSamplingStats, pickPointerEventsForSample, recordPointerSamplePick } from '../../lib/handwritingPointerSamples';
 import {
   getHwSpikeSettings,
   getStrokeSampleStats,
@@ -59,6 +59,14 @@ import {
   hwSpikeLog,
   type HwSpikeSettings,
 } from '../../lib/handwritingSpikeDebug';
+import {
+  finalizeHandwritingStrokeDiag,
+  pageInkCanvasWrapStyle,
+  recordHandwritingStrokePointerDown,
+  recordHandwritingStrokePointAppended,
+  recordHandwritingStrokePointDropped,
+  recordHandwritingStrokePointerMove,
+} from '../../lib/handwritingStrokeDiag';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
 import {
   recordPageInkFlush,
@@ -86,6 +94,7 @@ import {
   emptyHandwritingData,
   newStrokeId,
   type HandwritingBlockData,
+  type HandwritingPoint,
   type HandwritingStroke,
 } from '../../lib/handwritingTypes';
 
@@ -657,7 +666,7 @@ export function HandwritingBlock({
         const rect = canvas?.getBoundingClientRect();
         const w = rect && rect.width >= 1 ? rect.width : 600;
         const defaultMinH = pageLayout ? PAGE_INK_INITIAL_HEIGHT : CANVAS_HEIGHT_MIN;
-        const h = clampCanvasHeight(rect && rect.height >= 1 ? rect.height : defaultMinH);
+        const h = clampCanvasHeight(pageLayout ? PAGE_INK_INITIAL_HEIGHT : (rect && rect.height >= 1 ? rect.height : defaultMinH));
         dataRef.current = emptyHandwritingData(w, h);
         setDisplayHeight(h);
         if (isPageInk) {
@@ -693,9 +702,11 @@ export function HandwritingBlock({
       const rect = canvas?.getBoundingClientRect();
       const w = rect && rect.width >= 1 ? rect.width : 600;
       const defaultMinH = pageLayout ? PAGE_INK_INITIAL_HEIGHT : CANVAS_HEIGHT_MIN;
-      const h = clampCanvasHeight(
-        existing?.canvas.height ?? (rect && rect.height >= 1 ? rect.height : defaultMinH),
-      );
+      const h = pageLayout
+        ? clampCanvasHeight(existing?.canvas.height ?? PAGE_INK_INITIAL_HEIGHT)
+        : clampCanvasHeight(
+            existing?.canvas.height ?? (rect && rect.height >= 1 ? rect.height : defaultMinH),
+          );
       if (existing) {
         dataRef.current = { ...existing, canvas: { ...existing.canvas, height: h } };
         setDisplayHeight(h);
@@ -848,6 +859,7 @@ export function HandwritingBlock({
     onDrawingChange?.(false);
     draftPaintedCountRef.current = 0;
     if (!draft || !dataRef.current) {
+      finalizeHandwritingStrokeDiag(canvasRef.current, displayHeight);
       schedulePaint();
       return;
     }
@@ -925,6 +937,7 @@ export function HandwritingBlock({
       displayHeight,
       dpr: window.devicePixelRatio,
     });
+    finalizeHandwritingStrokeDiag(canvasRef.current, displayHeight);
     const skipCacheInvalidate =
       draft.tool === 'pen' &&
       draft.points.length > 0 &&
@@ -971,8 +984,13 @@ export function HandwritingBlock({
         pt.pressure = sample.pressure;
         hwDiagRecordPressure(sample.pressure, sample.pointerType);
       }
+      recordHandwritingStrokePointerDown(
+        canvas,
+        displayHeight,
+        sample.pointerType,
+        sample.pressure,
+      );
       drawingRef.current = true;
-      onDrawingChange?.(true);
       const activeTool = toolRef.current;
       draftRef.current = {
         id: newStrokeId(),
@@ -982,9 +1000,11 @@ export function HandwritingBlock({
         points: [pt],
       };
       draftPaintedCountRef.current = 0;
+      recordHandwritingStrokePointAppended(pt.pressure);
       paintDraftNow();
+      onDrawingChange?.(true);
     },
-    [inkColor, objectId, blockKey, onDrawingChange, paintDraftNow],
+    [inkColor, objectId, blockKey, onDrawingChange, paintDraftNow, displayHeight],
   );
 
   const saveNotReady = !objectId || !blockKey;
@@ -1050,10 +1070,43 @@ export function HandwritingBlock({
     if (!drawingRef.current || !draftRef.current) return;
     e.stopPropagation();
     e.preventDefault();
-    const samples = collectPointerSamples(e.nativeEvent);
+    const canvas = e.currentTarget;
+    logPointerCoordinateSample(canvas, e.nativeEvent, 'move');
+    const pick = pickPointerEventsForSample(e.nativeEvent, {
+      allowCoalesced: isHandwritingCoalescedEnabled(),
+    });
+    recordHandwritingStrokePointerMove(
+      canvas,
+      e.nativeEvent.pointerType,
+      pick.events.length,
+      pick.usedCoalesced,
+      pick.fallbackReason,
+    );
+    const samples: HandwritingPoint[] = [];
+    for (const ev of pick.events) {
+      const pt = pointerToNormalized(canvas, ev);
+      if (!pt) continue;
+      if (ev.pressure > 0) {
+        pt.pressure = ev.pressure;
+        hwDiagRecordPressure(ev.pressure, ev.pointerType);
+      }
+      samples.push(pt);
+    }
+    recordPointerSamplePick(pick);
+    hwDiagRecordSamplingPick(
+      pick.events.length,
+      pick.usedCoalesced,
+      pick.fallbackReason,
+    );
     let points = draftRef.current.points;
     for (const pt of samples) {
+      const prevLen = points.length;
       points = appendPoint(points, pt, pt.pressure);
+      if (points.length > prevLen) {
+        recordHandwritingStrokePointAppended(pt.pressure);
+      } else {
+        recordHandwritingStrokePointDropped();
+      }
     }
     draftRef.current = { ...draftRef.current, points };
     paintDraftNow();
@@ -1355,9 +1408,7 @@ export function HandwritingBlock({
         style={{
           position: 'relative',
           width: '100%',
-          height: displayHeight,
-          flex: pageLayout ? 1 : undefined,
-          minHeight: pageLayout ? PAGE_INK_INITIAL_HEIGHT : undefined,
+          ...(pageLayout ? pageInkCanvasWrapStyle(displayHeight) : { height: displayHeight }),
           borderRadius: pageLayout ? 2 : 8,
           border: pageLayout
             ? '1px solid rgba(28,25,23,0.1)'

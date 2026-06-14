@@ -13,7 +13,13 @@ import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOU
 import { MATH_INK_PRESET, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
-import { makeHandwritingStorageKey, hwLoadErrorMessage, hwLoadRecoveryGuidance, parseStoredHandwritingPayload } from './notebookHandwritingStore';
+import { pageInkCanvasWrapStyle } from './handwritingStrokeDiag';
+import {
+  hwLoadErrorMessage,
+  hwLoadRecoveryGuidance,
+  makeHandwritingStorageKey,
+  parseStoredHandwritingPayload,
+} from './notebookHandwritingStore';
 import {
   flushAllHandwritingForObject,
   registerHandwritingFlush,
@@ -247,5 +253,10 @@ const fastSeg = draftPenSegmentLineWidthPx(
   { x: 0.3, y: 0.3, pressure: 0.5 },
 );
 assert(fastSeg < slowSeg, 'fast draft segments render narrower (thinning proxy)');
+
+// P0 ink Step 1: page-ink wrap uses fixed height (no flex shrink)
+const wrap360 = pageInkCanvasWrapStyle(360);
+assert(wrap360.height === 360 && wrap360.minHeight === 360, 'page ink wrap height matches displayHeight');
+assert(wrap360.flexShrink === 0 && wrap360.flexGrow === 0, 'page ink wrap does not flex-shrink');
 
 console.log('handwritingQa.test.ts: all checks passed');
