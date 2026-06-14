@@ -9,7 +9,7 @@ import {
   drawEraserStrokePolyline,
   drawPenStrokePolyline,
 } from './handwritingGeometry';
-import { drawPenStrokeMathInk, draftPenLineWidthPx } from './handwritingInk';
+import { drawPenStrokeMathInk, draftPenSegmentLineWidthPx } from './handwritingInk';
 
 export type LayerCanvasMetrics = {
   w: number;
@@ -124,24 +124,25 @@ export function appendDraftStrokeSegment(
   if (points.length <= paintedPointCount) return paintedPointCount;
 
   const startIdx = Math.max(1, paintedPointCount);
-  const prev = points[startIdx - 1]!;
-  visibleCtx.beginPath();
-  visibleCtx.moveTo(prev.x * canvasW, prev.y * canvasH);
-  for (let i = startIdx; i < points.length; i++) {
-    const p = points[i]!;
-    visibleCtx.lineTo(p.x * canvasW, p.y * canvasH);
-  }
-  const last = points[points.length - 1]!;
-  visibleCtx.strokeStyle = stroke.color;
-  visibleCtx.lineWidth = draftPenLineWidthPx(
-    stroke.width,
-    canvasW,
-    refWidth,
-    last.pressure,
-  );
   visibleCtx.lineCap = 'round';
   visibleCtx.lineJoin = 'round';
-  visibleCtx.stroke();
+  visibleCtx.strokeStyle = stroke.color;
+  for (let i = startIdx; i < points.length; i++) {
+    const prev = points[i - 1]!;
+    const p = points[i]!;
+    visibleCtx.beginPath();
+    visibleCtx.moveTo(prev.x * canvasW, prev.y * canvasH);
+    visibleCtx.lineTo(p.x * canvasW, p.y * canvasH);
+    visibleCtx.lineWidth = draftPenSegmentLineWidthPx(
+      stroke.width,
+      canvasW,
+      canvasH,
+      refWidth,
+      prev,
+      p,
+    );
+    visibleCtx.stroke();
+  }
 
   return points.length;
 }

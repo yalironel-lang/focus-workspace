@@ -1,5 +1,5 @@
 import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
-import { draftPenLineWidthPx } from './handwritingInk';
+import { draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import {
   hwDiagRecordPressure,
   hwDiagRecordSamplingPick,
@@ -47,23 +47,25 @@ export function drawPenStrokePolyline(
     }
     return;
   }
-  ctx.beginPath();
-  const first = stroke.points[0]!;
-  ctx.moveTo(first.x * canvasW, first.y * canvasH);
-  for (let i = 1; i < stroke.points.length; i++) {
-    const p = stroke.points[i]!;
-    ctx.lineTo(p.x * canvasW, p.y * canvasH);
-  }
-  ctx.strokeStyle = stroke.color;
-  ctx.lineWidth = strokeWidthPx(
-    stroke,
-    canvasW,
-    refWidth,
-    stroke.points[stroke.points.length - 1],
-  );
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.stroke();
+  ctx.strokeStyle = stroke.color;
+  for (let i = 1; i < stroke.points.length; i++) {
+    const prev = stroke.points[i - 1]!;
+    const p = stroke.points[i]!;
+    ctx.beginPath();
+    ctx.moveTo(prev.x * canvasW, prev.y * canvasH);
+    ctx.lineTo(p.x * canvasW, p.y * canvasH);
+    ctx.lineWidth = draftPenSegmentLineWidthPx(
+      stroke.width,
+      canvasW,
+      canvasH,
+      refWidth,
+      prev,
+      p,
+    );
+    ctx.stroke();
+  }
 }
 
 export function drawEraserStrokePolyline(

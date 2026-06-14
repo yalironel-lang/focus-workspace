@@ -4,14 +4,15 @@
  */
 
 import { getStroke } from 'perfect-freehand';
-import type { HandwritingStroke } from './handwritingTypes';
+import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
 
 /** Approved math handwriting preset (corner-preserving, not sketch). */
 export const MATH_INK_PRESET = {
   sizeMultiplier: 1.08,
   thinning: 0.48,
-  smoothing: 0.1,
-  streamline: 0.08,
+  /** Slightly lower than spike defaults — closer to raw points, less draft→commit snap. */
+  smoothing: 0.08,
+  streamline: 0.06,
 } as const;
 
 type InkPoint = [number, number, number];
@@ -42,7 +43,12 @@ export function commitStrokeSizePx(
   return Math.max(2, baseSize * MATH_INK_PRESET.sizeMultiplier);
 }
 
-/** Draft polyline width — tuned to match committed mathInk footprint while drawing. */
+function effectivePressure(p: HandwritingPoint | undefined, fallback = 0.5): number {
+  if (p?.pressure !== undefined && p.pressure > 0) return p.pressure;
+  return fallback;
+}
+
+/** Median mesh footprint at a given pressure — tuned to match committed mathInk width. */
 export function draftPenLineWidthPx(
   strokeWidth: number,
   canvasW: number,
@@ -51,7 +57,35 @@ export function draftPenLineWidthPx(
 ): number {
   const size = commitStrokeSizePx(strokeWidth, canvasW, refWidth);
   const p = pressure !== undefined && pressure > 0 ? pressure : 0.5;
-  return Math.max(1.5, size * (0.62 + p * 0.46));
+  return Math.max(1.5, size * (0.78 + p * 0.44));
+}
+
+/**
+ * Per-segment draft width — averages endpoint pressure and approximates thinning
+ * from point spacing (fast segments slightly narrower, like perfect-freehand).
+ */
+export function draftPenSegmentLineWidthPx(
+  strokeWidth: number,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+  from: HandwritingPoint,
+  to: HandwritingPoint,
+): number {
+  const size = commitStrokeSizePx(strokeWidth, canvasW, refWidth);
+  const p = (effectivePressure(from) + effectivePressure(to)) / 2;
+  const dist = Math.hypot((to.x - from.x) * canvasW, (to.y - from.y) * canvasH);
+  const speedFactor = Math.max(0.82, Math.min(1.04, 1.0 - dist * 0.008));
+  return Math.max(1.5, size * (0.78 + p * 0.44) * speedFactor);
+}
+
+function draftDotRadiusPx(
+  strokeWidth: number,
+  canvasW: number,
+  refWidth: number,
+  pressure?: number,
+): number {
+  return draftPenLineWidthPx(strokeWidth, canvasW, refWidth, pressure) / 2;
 }
 
 function inkPathFromOutline(outline: number[][]): Path2D {
@@ -82,7 +116,7 @@ export function drawPenStrokeMathInk(
 
   if (inkPoints.length === 1) {
     const p = inkPoints[0]!;
-    const r = Math.max(1.5, size * 0.45);
+    const r = draftDotRadiusPx(stroke.width, canvasW, refWidth, p[2]);
     ctx.beginPath();
     ctx.fillStyle = stroke.color;
     ctx.arc(p[0], p[1], r, 0, Math.PI * 2);

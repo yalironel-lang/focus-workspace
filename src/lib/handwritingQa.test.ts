@@ -10,7 +10,7 @@ import {
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
 import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION } from './handwritingGeometry';
-import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
+import { MATH_INK_PRESET, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
 import { makeHandwritingStorageKey, hwLoadErrorMessage, hwLoadRecoveryGuidance, parseStoredHandwritingPayload } from './notebookHandwritingStore';
@@ -108,8 +108,8 @@ const logicalW = canvasWidth / dpr;
 assert(logicalW === cssW, 'DPR logical width equals CSS width');
 
 // mathInk production preset
-assert(MATH_INK_PRESET.smoothing === 0.1, 'mathInk smoothing');
-assert(MATH_INK_PRESET.streamline === 0.08, 'mathInk streamline');
+assert(MATH_INK_PRESET.smoothing === 0.08, 'mathInk smoothing');
+assert(MATH_INK_PRESET.streamline === 0.06, 'mathInk streamline');
 assert(MATH_INK_PRESET.thinning === 0.48, 'mathInk thinning');
 assert(MATH_INK_PRESET.sizeMultiplier === 1.08, 'mathInk size multiplier');
 assert(
@@ -219,5 +219,33 @@ assert(isInkPointer({ pointerType: 'mouse' } as PointerEvent), 'mouse pointer dr
 assert(!isInkPointer({ pointerType: 'touch' } as PointerEvent), 'finger touch does not draw ink');
 assert(HW_INK_CANVAS_TOUCH_ACTION === 'none', 'ink canvas uses touch-action none');
 assert(HW_INK_CONTAINER_TOUCH_ACTION === 'pan-y', 'ink block chrome keeps pan-y');
+
+// P0-A4: draft width tracks commit mesh footprint (reduces lift pop)
+const popRefW = 600;
+const popCssW = 600;
+const penW = 2.5;
+const commitSize = commitStrokeSizePx(penW, popCssW, popRefW);
+const draftMid = draftPenLineWidthPx(penW, popCssW, popRefW, 0.5);
+assert(
+  Math.abs(draftMid - commitSize) / commitSize < 0.06,
+  'draft width at median pressure matches commit size',
+);
+const slowSeg = draftPenSegmentLineWidthPx(
+  penW,
+  popCssW,
+  420,
+  popRefW,
+  { x: 0.1, y: 0.1, pressure: 0.5 },
+  { x: 0.11, y: 0.11, pressure: 0.5 },
+);
+const fastSeg = draftPenSegmentLineWidthPx(
+  penW,
+  popCssW,
+  420,
+  popRefW,
+  { x: 0.1, y: 0.1, pressure: 0.5 },
+  { x: 0.3, y: 0.3, pressure: 0.5 },
+);
+assert(fastSeg < slowSeg, 'fast draft segments render narrower (thinning proxy)');
 
 console.log('handwritingQa.test.ts: all checks passed');
