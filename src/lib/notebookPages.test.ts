@@ -8,6 +8,8 @@ import {
   LEGACY_DEFAULT_SECTION_TITLE,
   NOTEBOOK_SCHEMA_VERSION_V1,
   applyNotebookPersist,
+  getNotebookPreviewMeta,
+  getNotebookWorkspaceBreadcrumb,
   hydrateNotebookPages,
   migrateLegacyNotebook,
   sanitizeNotebookPagesFields,
@@ -99,5 +101,33 @@ assert(flagOff.body === 'plain', 'flag off: body unchanged');
 // Flag OFF hydrate is no-op
 const flagOffHydrate = hydrateNotebookPages(migrated as NotebookContentWithPages);
 assert(flagOffHydrate === migrated, 'flag off hydrate noop');
+
+// Preview metadata (workspace card)
+const previewContent = {
+  ...migrated,
+  body: '# Lecture\n\nFirst note.\n\nSecond line.',
+  sections: [
+    { id: 's1', title: 'Week 1', pageIds: ['p1', 'p2'] },
+    { id: 's2', title: 'Week 2', pageIds: ['p3'] },
+  ],
+  pages: [
+    { id: 'p1', sectionId: 's1', kind: 'document', documentBody: 'A' },
+    { id: 'p2', sectionId: 's1', kind: 'document', documentBody: 'B' },
+    { id: 'p3', sectionId: 's2', kind: 'document', documentBody: 'C' },
+  ],
+  activeSectionId: 's1',
+  activePageId: 'p2',
+} as NotebookContentWithPages;
+const preview = getNotebookPreviewMeta(previewContent);
+assert(preview.sectionTitle === 'Week 1', 'preview section title');
+assert(preview.pageTitle === 'Page 2', 'preview page title');
+assert(preview.pageIndexInSection === 2, 'preview page index');
+assert(preview.pagesInSection === 2, 'preview pages in section');
+assert(preview.totalPages === 3, 'preview total pages');
+assert(preview.snippet.includes('Lecture'), 'preview snippet from body');
+assert(
+  getNotebookWorkspaceBreadcrumb(previewContent) === 'Week 1 › Page 2',
+  'workspace breadcrumb',
+);
 
 console.log('notebookPages.test.ts: all passed');

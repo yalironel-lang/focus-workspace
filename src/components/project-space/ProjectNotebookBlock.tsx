@@ -23,6 +23,7 @@ import {
   addNotebookPage,
   addNotebookSection,
   applyNotebookPersist,
+  getNotebookWorkspaceBreadcrumb,
   isNotebookV1PagesEnabled,
   renameNotebookPage,
   renameNotebookSection,
@@ -30,7 +31,8 @@ import {
   setActiveNotebookSection,
   switchNotebookPage,
 } from '../../lib/notebookPages';
-import { NotebookShellNavigator } from '../notebook/NotebookShellNavigator';
+import { NotebookWorkspaceLayout } from '../notebook/NotebookWorkspaceLayout';
+import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigator';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
@@ -1131,7 +1133,7 @@ interface Props {
   freeSpaceSectionId?: string;
   freeSpaceBoardId?: string;
   /** Desk layout: paper-first math surface inside MathDeskPrototype shell. */
-  presentation?: 'notebook' | 'desk';
+  presentation?: 'notebook' | 'desk' | 'workspace';
   /** Desk: notify shell when the focused derivation line changes (for Plot-from-line). */
   onDeskFocusedLine?: (payload: { blockId: string | null; text: string }) => void;
   /** Study session: one-time restore of focused block after resume. */
@@ -1193,6 +1195,8 @@ export function ProjectNotebookBlock({
   const contentRef = useRef(content);
   contentRef.current = content;
   const isDeskPresentation = presentation === 'desk';
+  const isWorkspacePresentation = presentation === 'workspace';
+  const showCardChrome = !isDeskPresentation && !isWorkspacePresentation;
   const deskFormattingV1 = useDeskFormattingV1();
   const deskFormattingActive = isDeskPresentation && deskFormattingV1;
   const sessionRestoreAppliedRef = useRef(false);
@@ -4230,7 +4234,7 @@ export function ProjectNotebookBlock({
         ref={shellRef}
         onPaste={handleNotebookPaste}
         style={{
-          padding: isDeskPresentation
+          padding: isDeskPresentation || isWorkspacePresentation
             ? 0
             : context === 'free-space'
               ? (isMathWorkspaceMode ? '12px 10px 10px' : '18px 18px 18px')
@@ -4242,7 +4246,7 @@ export function ProjectNotebookBlock({
                 height: '100%',
                 minHeight: 0,
                 boxSizing: 'border-box',
-                ...(isDeskPresentation ? { flex: 1 } : {}),
+                ...((isDeskPresentation || isWorkspacePresentation) ? { flex: 1 } : {}),
               }
             : { minHeight: '420px' }),
           borderRadius: context === 'free-space' ? 0 : '22px',
@@ -4267,7 +4271,7 @@ export function ProjectNotebookBlock({
               }),
         }}
       >
-      {!isDeskPresentation ? (
+      {showCardChrome ? (
       <div
         onMouseEnter={() => setHeaderHovered(true)}
         onMouseLeave={() => setHeaderHovered(false)}
@@ -4412,6 +4416,7 @@ export function ProjectNotebookBlock({
           }}
         >
           <span style={{ opacity: headerHovered ? 1 : 0.55, transition: 'opacity 0.4s ease' }}>
+            {!isWorkspacePresentation ? (
             <button
               type="button"
               title="Focus mode"
@@ -4432,6 +4437,7 @@ export function ProjectNotebookBlock({
                 <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
+            ) : null}
           </span>
           <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? (notebookMode === 'math-workspace' ? 0.75 : 1) : (notebookMode === 'math-workspace' ? 0.08 : 0.32), transition: 'opacity 0.4s ease' }}>
           {context === 'free-space' ? (
@@ -4611,19 +4617,25 @@ export function ProjectNotebookBlock({
       </div>
       ) : null}
 
-      {v1PagesShell && !isFocusModeOpen && (content.sections?.length ?? 0) > 0 ? (
-        <NotebookShellNavigator
-          content={content}
-          tokens={tokens}
-          onSwitchSection={handleShellSwitchSection}
-          onSwitchPage={handleShellSwitchPage}
-          onAddSection={handleShellAddSection}
-          onAddPage={handleShellAddPage}
-          onRenameSection={handleShellRenameSection}
-          onRenamePage={handleShellRenamePage}
-        />
-      ) : null}
-
+      <NotebookWorkspaceLayout
+        enabled={v1PagesShell && isWorkspacePresentation}
+        tokens={tokens}
+        breadcrumb={getNotebookWorkspaceBreadcrumb(content)}
+        navigator={
+          (content.sections?.length ?? 0) > 0 ? (
+            <NotebookWorkspaceNavigator
+              content={content}
+              tokens={tokens}
+              onSwitchSection={handleShellSwitchSection}
+              onSwitchPage={handleShellSwitchPage}
+              onAddSection={handleShellAddSection}
+              onAddPage={handleShellAddPage}
+              onRenameSection={handleShellRenameSection}
+              onRenamePage={handleShellRenamePage}
+            />
+          ) : null
+        }
+      >
       {editorMode === 'edit' && selectionToolbar && !isDeskPresentation ? (
         <NotebookSelectionToolbar
           tokens={tokens}
@@ -6255,6 +6267,7 @@ export function ProjectNotebookBlock({
       ) : null}
       </div>
       </NotebookBodyScroll>
+      </NotebookWorkspaceLayout>
     </div>
 
     {isFocusModeOpen && typeof document !== 'undefined' ? createPortal(

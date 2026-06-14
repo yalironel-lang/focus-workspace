@@ -34,3 +34,8 @@ export {
   renameNotebookSection,
   renameNotebookPage,
 } from './operations';
+export {
+  getNotebookPreviewMeta,
+  getNotebookWorkspaceBreadcrumb,
+  type NotebookPreviewMeta,
+} from './previewMeta';

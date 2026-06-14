@@ -3383,6 +3383,8 @@ export function SectionPage() {
             studySessionPrimary &&
             (contentHost === 'study-session' || obj.type === 'pdf')
           }
+          objectPresentationMode={getObjectPresentation(objectId).mode}
+          onSetObjectPresentationMode={setObjectPresentationMode}
         />
       );
     },
@@ -3402,6 +3404,8 @@ export function SectionPage() {
       studyPaneFocus,
       enterStudySession,
       handleStudySessionWorkFocus,
+      getObjectPresentation,
+      setObjectPresentationMode,
     ],
   );
 

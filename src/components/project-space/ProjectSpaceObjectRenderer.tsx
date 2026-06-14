@@ -10,7 +10,13 @@ import { NoteBlock } from '../workspace/blocks/NoteBlock';
 import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
 import { FreeSpaceImageCard } from './FreeSpaceImageCard';
+import { NotebookCardPreview } from '../notebook/NotebookCardPreview';
 import { ProjectNotebookBlock } from './ProjectNotebookBlock';
+import { isNotebookV1PagesEnabled } from '../../lib/notebookPages';
+import type {
+  UniversalObjectSplitSide,
+  UniversalObjectViewMode,
+} from '../../hooks/useSectionFreeSpaceObjects';
 import { MathDeskPrototype } from './MathDeskPrototype';
 import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
@@ -79,6 +85,13 @@ interface Props {
   suppressStudyToolbar?: boolean;
   studyDeskQuiet?: boolean;
   onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
+  /** Canvas object presentation (floating / split / fullscreen). */
+  objectPresentationMode?: UniversalObjectViewMode;
+  onSetObjectPresentationMode?: (
+    objectId: string,
+    mode: UniversalObjectViewMode,
+    splitSide?: UniversalObjectSplitSide,
+  ) => void;
 }
 
 function copyText(text: string): Promise<void> {
@@ -169,6 +182,8 @@ function FreeSpaceMathNotebookRenderer({
   studyFocusQuestionToken = 0,
   onStudySessionActiveQuestionNumber,
   studyDeskQuiet = false,
+  objectPresentationMode = 'floating',
+  onSetObjectPresentationMode,
 }: {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -190,6 +205,12 @@ function FreeSpaceMathNotebookRenderer({
   studyFocusQuestionToken?: number;
   onStudySessionActiveQuestionNumber?: (questionNumber: number | null) => void;
   studyDeskQuiet?: boolean;
+  objectPresentationMode?: UniversalObjectViewMode;
+  onSetObjectPresentationMode?: (
+    objectId: string,
+    mode: UniversalObjectViewMode,
+    splitSide?: UniversalObjectSplitSide,
+  ) => void;
 }) {
   const useDeskPrototype = content.notebookMode === 'math';
   const [legacyOpen, setLegacyOpen] = useState(false);
@@ -216,6 +237,26 @@ function FreeSpaceMathNotebookRenderer({
         onReturnToCanvas={() => onStudyLayoutChange?.('canvas')}
         onSelect={() => onRequestSelectObject?.(object.id)}
       />
+    );
+  }
+
+  const v1PagesCardPreview =
+    isNotebookV1PagesEnabled() &&
+    contentHost === 'canvas' &&
+    objectPresentationMode === 'floating' &&
+    !useDeskPrototype;
+
+  if (v1PagesCardPreview) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        {attemptBtn}
+        <NotebookCardPreview
+          content={content}
+          objectTitle={object.title}
+          tokens={tokens}
+          onOpen={() => onSetObjectPresentationMode?.(object.id, 'fullscreen')}
+        />
+      </div>
     );
   }
 
@@ -295,6 +336,13 @@ function FreeSpaceMathNotebookRenderer({
               : undefined
           }
           compositionChromeSuppressed={studyDeskQuiet}
+          presentation={
+            isNotebookV1PagesEnabled() &&
+            contentHost === 'canvas' &&
+            objectPresentationMode !== 'floating'
+              ? 'workspace'
+              : 'notebook'
+          }
         />
       </div>
     </div>
@@ -327,6 +375,8 @@ function ProjectSpaceObjectRendererInner({
   suppressStudyToolbar = false,
   studyDeskQuiet = false,
   onStudyMarksChromeChange,
+  objectPresentationMode = 'floating',
+  onSetObjectPresentationMode,
 }: Props) {
   useEffect(() => {
     flickerDebugCount(`ProjectSpaceObjectRenderer:${object.id}`);
@@ -476,6 +526,8 @@ function ProjectSpaceObjectRendererInner({
             studyFocusQuestionToken={studyFocusQuestionToken}
             onStudySessionActiveQuestionNumber={onStudySessionActiveQuestionNumber}
             studyDeskQuiet={studyDeskQuiet}
+            objectPresentationMode={objectPresentationMode}
+            onSetObjectPresentationMode={onSetObjectPresentationMode}
           />
         </WorkspaceSurfaceErrorBoundary>
       );
