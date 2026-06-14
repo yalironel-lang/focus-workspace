@@ -29,10 +29,14 @@ import {
   canvasHasVisualScale,
   collectPointerSamples,
   drawStrokes,
+  findHandwritingScrollContainer,
+  HW_INK_CANVAS_TOUCH_ACTION,
+  HW_INK_CONTAINER_TOUCH_ACTION,
   isInkPointer,
   logPointerCoordinateSample,
   pointerToNormalized,
   readVisualViewportMetrics,
+  scrollHandwritingByFinger,
   strokeCornerSharpness,
   strokesAfterEraser,
   isHandwritingCoalescedEnabled,
@@ -208,6 +212,11 @@ export function HandwritingBlock({
   const saveChainRef = useRef(Promise.resolve(true));
   const layoutRef = useRef({ w: 1, h: DEFAULT_CANVAS_MIN_HEIGHT });
   const pointerCaptureRef = useRef<{ id: number; target: HTMLCanvasElement } | null>(null);
+  const fingerScrollRef = useRef<{
+    pointerId: number;
+    lastY: number;
+    scrollEl: HTMLElement | null;
+  } | null>(null);
   const unmountFlushDoneRef = useRef(false);
   const flushSaveRef = useRef<
     (reason?: 'registry' | 'unmount' | 'stroke' | 'debounce' | 'visibility') => Promise<boolean>
@@ -982,8 +991,24 @@ export function HandwritingBlock({
   const inkBlocked = saveNotReady || loadError !== null;
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (readOnly || inkBlocked || e.button !== 0) return;
-    if (!isInkPointer(e.nativeEvent)) return;
+    if (inkBlocked || e.button !== 0) return;
+
+    if (e.nativeEvent.pointerType === 'touch') {
+      fingerScrollRef.current = {
+        pointerId: e.pointerId,
+        lastY: e.clientY,
+        scrollEl: findHandwritingScrollContainer(e.currentTarget),
+      };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      e.stopPropagation();
+      return;
+    }
+
+    if (readOnly || !isInkPointer(e.nativeEvent)) return;
 
     const hadTextFocus =
       document.activeElement instanceof HTMLElement &&
@@ -1013,6 +1038,15 @@ export function HandwritingBlock({
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    const fingerScroll = fingerScrollRef.current;
+    if (fingerScroll && e.pointerId === fingerScroll.pointerId) {
+      const dy = e.clientY - fingerScroll.lastY;
+      fingerScroll.lastY = e.clientY;
+      scrollHandwritingByFinger(fingerScroll.scrollEl, dy);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!drawingRef.current || !draftRef.current) return;
     e.stopPropagation();
     e.preventDefault();
@@ -1026,6 +1060,16 @@ export function HandwritingBlock({
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (fingerScrollRef.current?.pointerId === e.pointerId) {
+      fingerScrollRef.current = null;
+      e.stopPropagation();
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     if (!drawingRef.current) return;
     e.stopPropagation();
     try {
@@ -1037,6 +1081,16 @@ export function HandwritingBlock({
   };
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (fingerScrollRef.current?.pointerId === e.pointerId) {
+      fingerScrollRef.current = null;
+      e.stopPropagation();
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     if (!drawingRef.current) return;
     const cap = pointerCaptureRef.current;
     if (cap && e.pointerId !== cap.id) return;
@@ -1134,7 +1188,7 @@ export function HandwritingBlock({
       style={{
         margin: pageLayout ? 0 : '10px 0',
         userSelect: 'none',
-        touchAction: 'pan-y',
+        touchAction: HW_INK_CONTAINER_TOUCH_ACTION,
         ...surfaceChrome,
       }}
       onPointerDown={e => {
@@ -1313,17 +1367,18 @@ export function HandwritingBlock({
             ? '0 1px 3px rgba(28,25,23,0.06), inset 0 0 0 1px rgba(255,255,255,0.65)'
             : 'inset 0 1px 0 rgba(255,255,255,0.04)',
           overflow: 'hidden',
-          touchAction: 'pan-y',
+          touchAction: HW_INK_CANVAS_TOUCH_ACTION,
         }}
       >
         <canvas
           ref={canvasRef}
           aria-label="Handwriting canvas"
+          data-hw-ink-canvas="1"
           style={{
             display: 'block',
             width: '100%',
             height: '100%',
-            touchAction: 'pan-y',
+            touchAction: HW_INK_CANVAS_TOUCH_ACTION,
             cursor: readOnly ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair',
           }}
           onPointerDown={onPointerDown}

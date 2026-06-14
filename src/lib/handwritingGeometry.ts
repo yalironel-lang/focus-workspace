@@ -330,6 +330,36 @@ export function isInkPointer(e: Pick<PointerEvent, 'pointerType'>): boolean {
   return e.pointerType === 'pen' || e.pointerType === 'mouse';
 }
 
+/** Ink bitmap — never delegate touch gestures to the browser (prevents Pencil vs pan-y fights). */
+export const HW_INK_CANVAS_TOUCH_ACTION = 'none' as const;
+
+/** Block chrome — allow vertical scroll on non-canvas areas (toolbar margins). */
+export const HW_INK_CONTAINER_TOUCH_ACTION = 'pan-y' as const;
+
+/** Nearest scroll container for finger passthrough when the canvas uses touch-action: none. */
+export function findHandwritingScrollContainer(from: Element): HTMLElement | null {
+  const marked = from.closest('[data-nb-body-scroll]');
+  if (marked instanceof HTMLElement) return marked;
+  let node: HTMLElement | null = from.parentElement;
+  while (node) {
+    const style = getComputedStyle(node);
+    const oy = style.overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 1) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+export function scrollHandwritingByFinger(container: HTMLElement | null, deltaY: number): void {
+  if (container) {
+    container.scrollTop -= deltaY;
+    return;
+  }
+  window.scrollBy(0, -deltaY);
+}
+
 export function isIosLike(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;

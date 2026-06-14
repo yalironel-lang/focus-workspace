@@ -9,7 +9,7 @@ import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
-import { strokesAfterEraser, clientToNormalized } from './handwritingGeometry';
+import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
@@ -212,5 +212,12 @@ assert(
   hwLoadErrorMessage(corruptErr).includes('damaged'),
   'corrupted load message mentions damaged data',
 );
+
+// P0-A3: ink canvas touch-action — pen draws, finger scrolls via JS passthrough
+assert(isInkPointer({ pointerType: 'pen' } as PointerEvent), 'pen pointer draws ink');
+assert(isInkPointer({ pointerType: 'mouse' } as PointerEvent), 'mouse pointer draws ink');
+assert(!isInkPointer({ pointerType: 'touch' } as PointerEvent), 'finger touch does not draw ink');
+assert(HW_INK_CANVAS_TOUCH_ACTION === 'none', 'ink canvas uses touch-action none');
+assert(HW_INK_CONTAINER_TOUCH_ACTION === 'pan-y', 'ink block chrome keeps pan-y');
 
 console.log('handwritingQa.test.ts: all checks passed');
