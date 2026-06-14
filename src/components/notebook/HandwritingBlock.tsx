@@ -982,18 +982,20 @@ export function HandwritingBlock({
 
   const onPointerCancel = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!drawingRef.current) return;
+    const cap = pointerCaptureRef.current;
+    if (cap && e.pointerId !== cap.id) return;
     e.stopPropagation();
-    draftRef.current = null;
-    drawingRef.current = false;
-    pointerCaptureRef.current = null;
-    onDrawingChange?.(false);
-    draftPaintedCountRef.current = 0;
+    hwDiagLog('HandwritingBlock.tsx:onPointerCancel', 'committing in-progress stroke', {
+      pointerId: e.pointerId,
+      capturedPointerId: cap?.id ?? null,
+      draftPoints: draftRef.current?.points.length ?? 0,
+    });
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
     }
-    schedulePaint();
+    finishStroke();
   };
 
   const handleUndo = () => {

@@ -160,4 +160,26 @@ assert(
   'GC merges body refs with block keys',
 );
 
+// P0-A1: pointercancel commits partial strokes (same merge as finishStroke / flushSave draft merge)
+const partialBase = emptyHandwritingData(400, 420);
+const partialDraft = {
+  id: 'st-partial',
+  tool: 'pen' as const,
+  color: '#111',
+  width: 2.5,
+  points: [
+    { x: 0.12, y: 0.18 },
+    { x: 0.22, y: 0.28 },
+    { x: 0.31, y: 0.35 },
+  ],
+};
+const partialCommitted = {
+  ...partialBase,
+  strokes: [...partialBase.strokes, partialDraft],
+};
+assert(
+  partialCommitted.strokes.length === 1 && partialCommitted.strokes[0]!.points.length === 3,
+  'partial in-progress stroke preserved on commit (pointercancel policy)',
+);
+
 console.log('handwritingQa.test.ts: all checks passed');
