@@ -15,6 +15,15 @@ import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
 import { pageInkCanvasWrapStyle } from './handwritingStrokeDiag';
 import {
+  FW_QA_MODE_KEY,
+  isQaModeEnabled,
+  qaBuildEnvLabel,
+  qaModeFromStorage,
+  qaModeFromUrl,
+} from './qaMode';
+import { gateIndicator, strokeDiagGates } from './qaInkPanelMetrics';
+import type { StrokeDiagSnapshot } from './handwritingStrokeDiag';
+import {
   hwLoadErrorMessage,
   hwLoadRecoveryGuidance,
   makeHandwritingStorageKey,
@@ -258,5 +267,64 @@ assert(fastSeg < slowSeg, 'fast draft segments render narrower (thinning proxy)'
 const wrap360 = pageInkCanvasWrapStyle(360);
 assert(wrap360.height === 360 && wrap360.minHeight === 360, 'page ink wrap height matches displayHeight');
 assert(wrap360.flexShrink === 0 && wrap360.flexGrow === 0, 'page ink wrap does not flex-shrink');
+
+// Step 0: QA mode visibility gates
+assert(qaModeFromUrl('?qa=1') === true, 'qaModeFromUrl ?qa=1');
+assert(qaModeFromUrl('') === false, 'qaModeFromUrl empty');
+const mockStorage = {
+  data: {} as Record<string, string>,
+  getItem(k: string) {
+    return this.data[k] ?? null;
+  },
+  setItem(k: string, v: string) {
+    this.data[k] = v;
+  },
+};
+mockStorage.setItem(FW_QA_MODE_KEY, '1');
+assert(qaModeFromStorage(mockStorage) === true, 'qaModeFromStorage');
+assert(
+  isQaModeEnabled({ dev: false, search: '', storage: mockStorage }) === true,
+  'isQaModeEnabled via storage',
+);
+assert(
+  isQaModeEnabled({ dev: false, search: '?qa=1', storage: { getItem: () => null } }) === true,
+  'isQaModeEnabled via url',
+);
+assert(isQaModeEnabled({ dev: true, search: '', storage: mockStorage }) === true, 'isQaModeEnabled dev');
+assert(qaBuildEnvLabel(true) === 'prod' && qaBuildEnvLabel(false) === 'dev', 'qaBuildEnvLabel');
+
+const sampleStroke: StrokeDiagSnapshot = {
+  gitCommit: 'abc1234',
+  recordedAt: Date.now(),
+  pointerTypes: ['pen'],
+  sawPen: true,
+  sawMouse: false,
+  sawTouch: false,
+  pressureMin: 0.2,
+  pressureMax: 0.8,
+  moveEvents: 10,
+  rawSamples: 14,
+  appendedPoints: 12,
+  droppedByMinDist: 1,
+  samplesPerMove: 1.4,
+  lastBatchSize: 2,
+  coalescedUsed: 8,
+  coalescedFallback: 0,
+  canvasCssAtDown: null,
+  canvasCssAtMove: null,
+  canvasCssAtEnd: null,
+  displayHeight: 360,
+  layoutMismatchPxAtEnd: 0,
+  rectHeightDeltaDownToMove: 0,
+  rectWidthDeltaDownToMove: 0,
+  rectStableDownToMove: true,
+  dpr: 2,
+  bitmapAtEnd: { w: 800, h: 720 },
+  bitmapMatchesCssAtEnd: true,
+};
+const gates = strokeDiagGates(sampleStroke);
+assert(gates.find(g => g.id === 'sawPen')?.pass === true, 'gate sawPen pass');
+assert(gates.find(g => g.id === 'layoutMismatch')?.pass === true, 'gate layout pass');
+assert(gateIndicator(true) === '✓' && gateIndicator(false) === '✗', 'gateIndicator');
 
 console.log('handwritingQa.test.ts: all checks passed');

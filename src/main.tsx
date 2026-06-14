@@ -4,6 +4,8 @@ import App from './App.tsx'
 import './index.css'
 import 'katex/dist/katex.min.css'
 import { logAppBuildInfo } from './lib/appBuildInfo'
+import { persistQaModeFromUrl } from './lib/qaMode'
+import { QaBuildOverlay } from './components/qa/QaBuildOverlay'
 import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
 import {
@@ -13,6 +15,9 @@ import {
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
 logAppBuildInfo()
+if (typeof window !== 'undefined') {
+  persistQaModeFromUrl(localStorage)
+}
 initPerformanceSafeModeListeners()
 suppressVercelToolbar()
 initServiceWorkerUpdateChecks()
@@ -132,5 +137,6 @@ if ('serviceWorker' in navigator) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
+    <QaBuildOverlay />
   </React.StrictMode>,
 )

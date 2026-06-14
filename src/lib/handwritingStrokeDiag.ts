@@ -71,6 +71,10 @@ let coalescedFallback = 0;
 let canvasCssAtDown: CanvasRectSnap | null = null;
 let canvasCssAtMove: CanvasRectSnap | null = null;
 let lastStroke: StrokeDiagSnapshot | null = null;
+const RECENT_STROKES_MAX = 5;
+let recentStrokes: StrokeDiagSnapshot[] = [];
+
+export const HW_STROKE_DIAG_EVENT = 'fw-hw-stroke-diag';
 
 function recordPressure(pressure: number): void {
   if (!Number.isFinite(pressure) || pressure <= 0) return;
@@ -207,12 +211,20 @@ export function finalizeHandwritingStrokeDiag(
     bitmapMatchesCssAtEnd,
   };
   lastStroke = snapshot;
+  recentStrokes = [snapshot, ...recentStrokes].slice(0, RECENT_STROKES_MAX);
   active = false;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(HW_STROKE_DIAG_EVENT, { detail: snapshot }));
+  }
   return snapshot;
 }
 
 export function getLastHandwritingStrokeDiag(): StrokeDiagSnapshot | null {
   return lastStroke;
+}
+
+export function getRecentHandwritingStrokeDiags(): StrokeDiagSnapshot[] {
+  return recentStrokes;
 }
 
 declare global {
