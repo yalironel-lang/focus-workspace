@@ -21,6 +21,9 @@ export type StrokeDiagSnapshot = {
   sawTouch: boolean;
   pressureMin: number | null;
   pressureMax: number | null;
+  /** All raw/coalesced samples before minDist (includes dropped). */
+  rawPressureMin: number | null;
+  rawPressureMax: number | null;
   moveEvents: number;
   rawSamples: number;
   appendedPoints: number;
@@ -61,6 +64,8 @@ let active = false;
 let pointerTypes = new Set<string>();
 let pressureMin: number | null = null;
 let pressureMax: number | null = null;
+let rawPressureMin: number | null = null;
+let rawPressureMax: number | null = null;
 let moveEvents = 0;
 let rawSamples = 0;
 let appendedPoints = 0;
@@ -87,6 +92,8 @@ export function resetHandwritingStrokeDiag(): void {
   pointerTypes = new Set();
   pressureMin = null;
   pressureMax = null;
+  rawPressureMin = null;
+  rawPressureMax = null;
   moveEvents = 0;
   rawSamples = 0;
   appendedPoints = 0;
@@ -108,6 +115,7 @@ export function recordHandwritingStrokePointerDown(
   active = true;
   pointerTypes.add(pointerType);
   recordPressure(pressure);
+  recordHandwritingStrokeRawSample(pressure > 0 ? pressure : undefined);
   canvasCssAtDown = snapRect(canvas.getBoundingClientRect());
 }
 
@@ -128,15 +136,26 @@ export function recordHandwritingStrokePointerMove(
   canvasCssAtMove = snapRect(canvas.getBoundingClientRect());
 }
 
+/** Raw/coalesced sample before appendPoint — captures input variation pre-filter. */
+export function recordHandwritingStrokeRawSample(pressure?: number): void {
+  if (!active) return;
+  if (pressure === undefined || !Number.isFinite(pressure) || pressure <= 0) return;
+  rawPressureMin =
+    rawPressureMin === null ? pressure : Math.min(rawPressureMin, pressure);
+  rawPressureMax =
+    rawPressureMax === null ? pressure : Math.max(rawPressureMax, pressure);
+}
+
 export function recordHandwritingStrokePointAppended(pressure?: number): void {
   if (!active) return;
   appendedPoints += 1;
   if (pressure !== undefined) recordPressure(pressure);
 }
 
-export function recordHandwritingStrokePointDropped(): void {
+export function recordHandwritingStrokePointDropped(pressure?: number): void {
   if (!active) return;
   droppedByMinDist += 1;
+  if (pressure !== undefined) recordPressure(pressure);
 }
 
 /** Page-ink wrap style — fixed height, never flex-shrink (exported for QA). */
@@ -190,6 +209,8 @@ export function finalizeHandwritingStrokeDiag(
     sawTouch: types.includes('touch'),
     pressureMin,
     pressureMax,
+    rawPressureMin,
+    rawPressureMax,
     moveEvents,
     rawSamples,
     appendedPoints,

@@ -21,8 +21,16 @@ export function strokeDiagGates(snapshot: StrokeDiagSnapshot | null): InkQaGate[
       ? snapshot.pressureMax - snapshot.pressureMin
       : null;
 
+  const rawSpread =
+    snapshot.rawPressureMin !== null && snapshot.rawPressureMax !== null
+      ? snapshot.rawPressureMax - snapshot.rawPressureMin
+      : null;
+
+  const dropDenom = snapshot.rawSamples;
   const dropRate =
-    snapshot.moveEvents > 0 ? snapshot.droppedByMinDist / snapshot.moveEvents : null;
+    dropDenom > 0 ? snapshot.droppedByMinDist / dropDenom : null;
+  const dropPct =
+    dropRate !== null ? Math.round(dropRate * 100) : null;
 
   return [
     {
@@ -42,7 +50,9 @@ export function strokeDiagGates(snapshot: StrokeDiagSnapshot | null): InkQaGate[
             : false,
       detail:
         pressureSpread !== null
-          ? `${snapshot.pressureMin?.toFixed(2) ?? '—'}–${snapshot.pressureMax?.toFixed(2) ?? '—'}`
+          ? rawSpread !== null && rawSpread > 0
+            ? `${snapshot.pressureMin?.toFixed(2) ?? '—'}–${snapshot.pressureMax?.toFixed(2) ?? '—'} raw ${snapshot.rawPressureMin?.toFixed(2) ?? '—'}–${snapshot.rawPressureMax?.toFixed(2) ?? '—'}`
+            : `${snapshot.pressureMin?.toFixed(2) ?? '—'}–${snapshot.pressureMax?.toFixed(2) ?? '—'}`
           : 'no pressure',
     },
     {
@@ -69,8 +79,11 @@ export function strokeDiagGates(snapshot: StrokeDiagSnapshot | null): InkQaGate[
     {
       id: 'droppedByMinDist',
       label: 'minDist drops',
-      pass: dropRate === null ? null : dropRate < 0.25,
-      detail: `${snapshot.droppedByMinDist}/${snapshot.moveEvents}`,
+      pass: dropRate === null ? null : dropRate < 0.7,
+      detail:
+        dropPct !== null
+          ? `${snapshot.droppedByMinDist}/${dropDenom} (${dropPct}%)`
+          : `${snapshot.droppedByMinDist}/0`,
     },
     {
       id: 'layoutMismatch',

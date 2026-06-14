@@ -66,6 +66,7 @@ import {
   recordHandwritingStrokePointAppended,
   recordHandwritingStrokePointDropped,
   recordHandwritingStrokePointerMove,
+  recordHandwritingStrokeRawSample,
 } from '../../lib/handwritingStrokeDiag';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
 import {
@@ -1099,14 +1100,20 @@ export function HandwritingBlock({
       pick.fallbackReason,
     );
     let points = draftRef.current.points;
+    let pressureMerged = false;
     for (const pt of samples) {
-      const prevLen = points.length;
-      points = appendPoint(points, pt, pt.pressure);
-      if (points.length > prevLen) {
+      recordHandwritingStrokeRawSample(pt.pressure);
+      const result = appendPoint(points, pt, pt.pressure);
+      points = result.points;
+      if (result.appended) {
         recordHandwritingStrokePointAppended(pt.pressure);
       } else {
-        recordHandwritingStrokePointDropped();
+        recordHandwritingStrokePointDropped(pt.pressure);
+        if (result.pressureMerged) pressureMerged = true;
       }
+    }
+    if (pressureMerged) {
+      draftPaintedCountRef.current = Math.max(0, draftPaintedCountRef.current - 1);
     }
     draftRef.current = { ...draftRef.current, points };
     paintDraftNow();

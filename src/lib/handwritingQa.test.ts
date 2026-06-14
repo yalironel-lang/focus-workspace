@@ -9,7 +9,7 @@ import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
-import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION } from './handwritingGeometry';
+import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION, appendPoint, mergeDroppedSamplePressure } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount } from './handwritingLayers';
@@ -268,6 +268,23 @@ const wrap360 = pageInkCanvasWrapStyle(360);
 assert(wrap360.height === 360 && wrap360.minHeight === 360, 'page ink wrap height matches displayHeight');
 assert(wrap360.flexShrink === 0 && wrap360.flexGrow === 0, 'page ink wrap does not flex-shrink');
 
+// P0 ink Step 2: pressure merge on minDist reject
+assert(
+  mergeDroppedSamplePressure(0.24, 0.55)! > 0.24 && mergeDroppedSamplePressure(0.24, 0.55)! <= 0.42,
+  'pressure merge increases with cap',
+);
+assert(
+  mergeDroppedSamplePressure(0.6, 0.3)! < 0.6 && mergeDroppedSamplePressure(0.6, 0.3)! >= 0.42,
+  'pressure merge decreases with cap',
+);
+const basePts = [{ x: 0.1, y: 0.1, pressure: 0.2 }];
+const near = appendPoint(basePts, { x: 0.1005, y: 0.1005, pressure: 0.7 }, 0.7);
+assert(!near.appended && near.pressureMerged, 'near point merges pressure');
+assert(near.points.length === 1, 'near point keeps single coordinate');
+assert((near.points[0]!.pressure ?? 0) > 0.2, 'near point raises merged pressure');
+const far = appendPoint(basePts, { x: 0.2, y: 0.2, pressure: 0.5 }, 0.5);
+assert(far.appended && far.points.length === 2, 'far point appends');
+
 // Step 0: QA mode visibility gates
 assert(qaModeFromUrl('?qa=1') === true, 'qaModeFromUrl ?qa=1');
 assert(qaModeFromUrl('') === false, 'qaModeFromUrl empty');
@@ -302,8 +319,10 @@ const sampleStroke: StrokeDiagSnapshot = {
   sawTouch: false,
   pressureMin: 0.2,
   pressureMax: 0.8,
+  rawPressureMin: 0.15,
+  rawPressureMax: 0.85,
   moveEvents: 10,
-  rawSamples: 14,
+  rawSamples: 10,
   appendedPoints: 12,
   droppedByMinDist: 1,
   samplesPerMove: 1.4,
@@ -325,6 +344,7 @@ const sampleStroke: StrokeDiagSnapshot = {
 const gates = strokeDiagGates(sampleStroke);
 assert(gates.find(g => g.id === 'sawPen')?.pass === true, 'gate sawPen pass');
 assert(gates.find(g => g.id === 'layoutMismatch')?.pass === true, 'gate layout pass');
+assert(gates.find(g => g.id === 'droppedByMinDist')?.detail.includes('(10%)'), 'gate minDist uses rawSamples pct');
 assert(gateIndicator(true) === '✓' && gateIndicator(false) === '✗', 'gateIndicator');
 
 console.log('handwritingQa.test.ts: all checks passed');

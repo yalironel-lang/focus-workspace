@@ -197,15 +197,44 @@ export function readVisualViewportMetrics(): {
   };
 }
 
+const PRESSURE_MERGE_MAX_STEP = 0.18;
+
+export function normalizeHandwritingPressure(pressure?: number): number | undefined {
+  if (pressure === undefined || !Number.isFinite(pressure) || pressure <= 0) return undefined;
+  return Math.max(0, Math.min(1, pressure));
+}
+
+/**
+ * Merge pressure from a minDist-rejected sample into the last kept point.
+ * Coordinates stay on the last kept point; step is capped to avoid sudden thickening.
+ */
+export function mergeDroppedSamplePressure(
+  lastPressure: number | undefined,
+  incomingPressure: number | undefined,
+): number | undefined {
+  const last = normalizeHandwritingPressure(lastPressure);
+  const incoming = normalizeHandwritingPressure(incomingPressure);
+  if (last === undefined) return incoming;
+  if (incoming === undefined) return last;
+  if (incoming >= last) return Math.min(1, Math.min(incoming, last + PRESSURE_MERGE_MAX_STEP));
+  return Math.max(0, Math.max(incoming, last - PRESSURE_MERGE_MAX_STEP));
+}
+
+export type AppendPointResult = {
+  points: HandwritingPoint[];
+  appended: boolean;
+  pressureMerged: boolean;
+};
+
 export function appendPoint(
   points: HandwritingPoint[],
   next: HandwritingPoint,
   pressure?: number,
-): HandwritingPoint[] {
+): AppendPointResult {
   const p: HandwritingPoint = { ...next };
-  if (pressure !== undefined && Number.isFinite(pressure) && pressure > 0) {
-    p.pressure = Math.max(0, Math.min(1, pressure));
-  }
+  const incomingPressure = normalizeHandwritingPressure(pressure);
+  if (incomingPressure !== undefined) p.pressure = incomingPressure;
+
   const last = points[points.length - 1];
   if (last) {
     const dx = p.x - last.x;
@@ -214,12 +243,18 @@ export function appendPoint(
     if (dx * dx + dy * dy < minDist * minDist) {
       if (isHandwritingDevBuild()) recordPointDropped();
       hwDiagRecordSamplingPointDropped();
-      return points;
+      const mergedPressure = mergeDroppedSamplePressure(last.pressure, p.pressure);
+      if (mergedPressure !== undefined && mergedPressure !== last.pressure) {
+        const updated = points.slice();
+        updated[updated.length - 1] = { ...last, pressure: mergedPressure };
+        return { points: updated, appended: false, pressureMerged: true };
+      }
+      return { points, appended: false, pressureMerged: false };
     }
   }
   if (isHandwritingDevBuild()) recordPointAppended();
   hwDiagRecordSamplingPointAppended();
-  return [...points, p];
+  return { points: [...points, p], appended: true, pressureMerged: false };
 }
 
 export function strokeBounds(stroke: HandwritingStroke): {
