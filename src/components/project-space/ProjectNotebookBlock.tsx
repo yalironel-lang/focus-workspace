@@ -19,6 +19,7 @@ import { createPortal } from 'react-dom';
 import { flushSync } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent, ProjectSpaceObject, NotebookWritingMode } from '../../hooks/useSectionFreeSpaceObjects';
+import { applyNotebookPersist } from '../../lib/notebookPages';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
@@ -1154,7 +1155,7 @@ function formatRelativeTime(ts: number): string {
 export function ProjectNotebookBlock({
   content,
   tokens,
-  onChange,
+  onChange: emitContentChange,
   objectId,
   objectTitle,
   objectUpdatedAt,
@@ -1173,6 +1174,10 @@ export function ProjectNotebookBlock({
   onActiveQuestionNumber,
   compositionChromeSuppressed = false,
 }: Props) {
+  const persistNotebookContent = useCallback(
+    (next: NotebookContent) => emitContentChange(applyNotebookPersist(next)),
+    [emitContentChange],
+  );
   const isDeskPresentation = presentation === 'desk';
   const deskFormattingV1 = useDeskFormattingV1();
   const deskFormattingActive = isDeskPresentation && deskFormattingV1;
@@ -1303,8 +1308,8 @@ export function ProjectNotebookBlock({
   slashMenuRef.current = slashMenu;
   const focusIndexRef = useRef(0);
   const pendingCaretRef = useRef<PendingCaretIntent | null>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  const onChangeRef = useRef(persistNotebookContent);
+  onChangeRef.current = persistNotebookContent;
   // Stable ref so onEditingChange reference churn never fires the editing effect
   const onEditingChangeRef = useRef(onEditingChange);
   onEditingChangeRef.current = onEditingChange;
@@ -2332,10 +2337,10 @@ export function ProjectNotebookBlock({
       void (async () => {
         await flushHandwritingBeforeTransition();
         dismissNotebookTextEditing();
-        onChange({ ...content, writingMode: next });
+        persistNotebookContent({ ...content, writingMode: next });
       })();
     },
-    [writingMode, flushHandwritingBeforeTransition, dismissNotebookTextEditing, onChange, content],
+    [writingMode, flushHandwritingBeforeTransition, dismissNotebookTextEditing, persistNotebookContent, content],
   );
 
   useEffect(() => {
@@ -3880,7 +3885,7 @@ export function ProjectNotebookBlock({
       applyBlockLevel,
       updateBlockText,
       content,
-      onChange,
+      persistNotebookContent,
       onCreateRecallItem,
       focusEditableBlock,
       getEditorRoot,
@@ -4246,7 +4251,7 @@ export function ProjectNotebookBlock({
                 const icons = ['◈','∑','✕','→','∂','∫','⊞','◎'];
                 const curr = content.icon ?? '◈';
                 const next = icons[(icons.indexOf(curr) + 1) % icons.length];
-                onChange({ ...content, icon: next });
+                persistNotebookContent({ ...content, icon: next });
               }}
               title="Change icon"
               style={{
@@ -4283,7 +4288,7 @@ export function ProjectNotebookBlock({
               suppressContentEditableWarning
               onBlur={e => {
                 const text = e.currentTarget.textContent?.trim() ?? '';
-                if (text !== (content.subtitle ?? '')) onChange({ ...content, subtitle: text || undefined });
+                if (text !== (content.subtitle ?? '')) persistNotebookContent({ ...content, subtitle: text || undefined });
               }}
               style={{
                 fontSize: 11, color: tokens.textGhost, outline: 'none',
@@ -4470,14 +4475,14 @@ export function ProjectNotebookBlock({
             mode={notebookMode}
             paperStyle={paperStyle}
             body={content.body ?? ''}
-            onChange={patch => onChange({ ...content, ...patch })}
+            onChange={patch => persistNotebookContent({ ...content, ...patch })}
           />
           {notebookMode !== 'math-workspace' && (
             <button
               type="button"
               onClick={() => {
                 const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
-                onChange({ ...content, notebookSurface: next });
+                persistNotebookContent({ ...content, notebookSurface: next });
               }}
               title={notebookSurface === 'paper' ? 'Switch to spatial notebook' : 'Switch to paper page'}
               style={{
@@ -4519,7 +4524,7 @@ export function ProjectNotebookBlock({
                 borderRadius: 8, padding: '4px', display: 'flex', flexDirection: 'column', gap: 2,
               }}>
                 {(['blank','ruled','grid'] as const).map(s => (
-                  <button key={s} type="button" onClick={() => { onChange({ ...content, paperStyle: s }); setPaperPopoverOpen(false); }}
+                  <button key={s} type="button" onClick={() => { persistNotebookContent({ ...content, paperStyle: s }); setPaperPopoverOpen(false); }}
                     style={{
                       background: paperStyle === s ? 'rgba(245,158,11,0.12)' : 'none',
                       border: 'none', borderRadius: 5, cursor: 'pointer', padding: '5px 12px',
@@ -6281,7 +6286,7 @@ export function ProjectNotebookBlock({
                   title={notebookSurface === 'paper' ? 'Spatial notebook' : 'Paper page'}
                   onClick={() => {
                     const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
-                    onChange({ ...content, notebookSurface: next });
+                    persistNotebookContent({ ...content, notebookSurface: next });
                   }}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
@@ -6294,7 +6299,7 @@ export function ProjectNotebookBlock({
                 mode={notebookMode}
                 paperStyle={paperStyle}
                 body={content.body ?? ''}
-                onChange={patch => onChange({ ...content, ...patch })}
+                onChange={patch => persistNotebookContent({ ...content, ...patch })}
               />
 
               {/* Paper style cycle */}
@@ -6304,7 +6309,7 @@ export function ProjectNotebookBlock({
                 onClick={() => {
                   const styles: ('blank' | 'ruled' | 'grid')[] = ['blank', 'ruled', 'grid'];
                   const next = styles[(styles.indexOf(paperStyle as 'blank' | 'ruled' | 'grid') + 1) % styles.length];
-                  onChange({ ...content, paperStyle: next });
+                  persistNotebookContent({ ...content, paperStyle: next });
                 }}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',

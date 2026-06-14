@@ -22,6 +22,11 @@ import {
   sanitizeDeskLayout,
   sanitizeDeskScratch,
 } from '../lib/mathDesk/sanitize';
+import {
+  hydrateNotebookPages,
+  sanitizeNotebookPagesFields,
+  type NotebookPagesFields,
+} from '../lib/notebookPages';
 
 export type { DeskFormulaItem, DeskLayoutState, DeskComputeHistoryEntry, DeskZoneId } from '../lib/mathDesk/types';
 
@@ -73,7 +78,7 @@ export type ProjectObjectContent =
       deskComputeHistory?: DeskComputeHistoryEntry[];
       /** Viewport study layout (math desk beside PDF); `canvas` = normal free-space card. */
       studyLayout?: StudyLayoutMode;
-    }
+    } & NotebookPagesFields
   | { type: 'note'; body: string }
   | {
       type: 'mistake';
@@ -363,8 +368,13 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const wm = r.writingMode;
       const writingMode: NotebookWritingMode | undefined =
         wm === 'ink' ? 'ink' : wm === 'text' ? 'text' : undefined;
-      return {
-        type: 'notebook', body, paperStyle, notebookMode, notebookSurface,
+      const pagesFields = sanitizeNotebookPagesFields(r);
+      const base = {
+        type: 'notebook' as const,
+        body,
+        paperStyle,
+        notebookMode,
+        notebookSurface,
         ...(icon !== undefined ? { icon } : {}),
         ...(accentColor !== undefined ? { accentColor } : {}),
         ...(subtitle !== undefined ? { subtitle } : {}),
@@ -375,7 +385,9 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ...(deskComputeHistory !== undefined ? { deskComputeHistory } : {}),
         ...(studyLayout !== 'canvas' ? { studyLayout } : {}),
         ...(writingMode !== undefined ? { writingMode } : {}),
+        ...pagesFields,
       };
+      return hydrateNotebookPages(base) as Extract<ProjectObjectContent, { type: 'notebook' }>;
     }
     case 'note':
       return { type: 'note', body: typeof r.body === 'string' ? r.body : '' };
