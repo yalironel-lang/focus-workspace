@@ -1,0 +1,79 @@
+{
+  "scenarios": [
+    {
+      "id": "01-normal",
+      "name": "Math notebook normal mode",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/01-normal-after-interactions.png"
+    },
+    {
+      "id": "02-pdf-split",
+      "name": "PDF + notebook split",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/02-pdf-split.png"
+    },
+    {
+      "id": "03-fullscreen",
+      "name": "Fullscreen notebook",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/03-fullscreen.png"
+    },
+    {
+      "id": "04-deep-focus",
+      "name": "Deep Focus",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/04-deep-focus.png"
+    },
+    {
+      "id": "05-ipad-landscape",
+      "name": "iPad landscape simulation",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/05-ipad-landscape.png"
+    },
+    {
+      "id": "06-ipad-portrait",
+      "name": "iPad portrait simulation",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/06-ipad-portrait.png"
+    },
+    {
+      "id": "07-handwriting-focus",
+      "name": "Handwriting block focus",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/07-handwriting-focus.png"
+    },
+    {
+      "id": "08-preview",
+      "name": "Preview mode",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/08-preview.png"
+    },
+    {
+      "id": "09-exam-focus",
+      "name": "Exam focus mode",
+      "pass": true,
+      "notes": [],
+      "screenshot": "/Users/ylyrwnl/Desktop/work/focus-workspace/qa-screenshots/composition/09-exam-focus.png"
+    }
+  ],
+  "interactions": [
+    {
+      "scenarioId": "01-normal",
+      "pass": true,
+      "notes": [],
+      "chipCount": 1,
+      "bubbleCount": 0,
+      "sheetCount": 0,
+      "gutterCount": 1
+    }
+  ],
+  "generatedAt": "2026-06-11T19:35:34.685Z"
+}

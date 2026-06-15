@@ -77,6 +77,13 @@ import {
   noteNotebookPointerUp,
   shouldRejectPenTextBeforeInput,
 } from '../../lib/notebookInputPolicy';
+import {
+  inkPenTrace,
+  inkPenTraceSetSurface,
+  installInkPenTraceGlobal,
+  isInkPenTraceEnabled,
+} from '../../lib/inkPenTrace';
+import { InkPenTraceHud } from '../notebook/InkPenTraceHud';
 import { flushAllHandwritingForObject } from '../../lib/handwritingFlushRegistry';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
@@ -2484,14 +2491,22 @@ export function ProjectNotebookBlock({
     (e: ReactPointerEvent) => {
       if (showInkMode) return;
       noteNotebookPointerDown(e.nativeEvent);
-      if (!isPenPointer(e.nativeEvent)) return;
       const target = e.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('[data-hw-ink-canvas="1"]')) return;
-      const hitsText =
-        target.closest('[data-rich-editable="1"]') !== null ||
-        (target instanceof HTMLElement && target.isContentEditable) ||
-        target.closest('[data-nb-editor-root="1"] [contenteditable]') !== null;
+      const el = target instanceof Element ? target : null;
+      const hitsRich = el?.closest('[data-rich-editable="1"]') !== null;
+      const hitsCe = el instanceof HTMLElement && el.isContentEditable;
+      const hitsBrokenDescendant =
+        el?.closest('[data-nb-editor-root="1"] [contenteditable]') !== null;
+      const hitsText = hitsRich || hitsCe || hitsBrokenDescendant;
+      inkPenTrace('pointerdown', 'H2', 'nb editor pen guard', {
+        surface: hitsRich ? 'RichEditableLine' : hitsCe ? 'contenteditable' : 'editor-shell',
+        pointerType: e.nativeEvent.pointerType,
+        inNbRoot: true,
+        detail: `hitsText=${hitsText} rich=${hitsRich} ce=${hitsCe} desc=${hitsBrokenDescendant} pen=${isPenPointer(e.nativeEvent)}`,
+      });
+      if (!isPenPointer(e.nativeEvent)) return;
+      if (!el) return;
+      if (el.closest('[data-hw-ink-canvas="1"]')) return;
       if (!hitsText) return;
       e.preventDefault();
       e.stopPropagation();
@@ -2513,7 +2528,17 @@ export function ProjectNotebookBlock({
       if (t.closest('[data-hw-ink-canvas="1"]')) return;
       if (!t.closest('[data-rich-editable="1"]') && !t.closest('[contenteditable]')) return;
       const ie = e as InputEvent;
-      if (shouldRejectPenTextBeforeInput(ie)) {
+      const reject = shouldRejectPenTextBeforeInput(ie);
+      const rich = t.closest('[data-rich-editable="1"]');
+      inkPenTrace('beforeinput', reject ? 'D' : 'E', reject ? 'doc reject' : 'doc allow', {
+        surface: rich
+          ? `RichEditableLine:${rich.getAttribute('data-block-id') ?? '?'}`
+          : 'NotebookEditorOtherCE',
+        inputType: ie.inputType,
+        rejected: reject,
+        inNbRoot: true,
+      });
+      if (reject) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }
@@ -2521,6 +2546,26 @@ export function ProjectNotebookBlock({
     document.addEventListener('beforeinput', onBeforeInput, { capture: true });
     return () => document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
   }, [showInkMode, editorMode]);
+
+  useEffect(() => {
+    if (!isInkPenTraceEnabled()) return;
+    installInkPenTraceGlobal();
+    inkPenTraceSetSurface({
+      presentation,
+      v1Enabled: isNotebookV1PagesEnabled(),
+      v1PagesRaw: String(import.meta.env.VITE_NOTEBOOK_V1_PAGES ?? ''),
+      showInkMode,
+      pageKind: activePageKind,
+      workspaceBinderMode,
+      context,
+    });
+  }, [
+    presentation,
+    showInkMode,
+    activePageKind,
+    workspaceBinderMode,
+    context,
+  ]);
 
   const handleWritingModeChange = useCallback(
     (next: NotebookWritingMode) => {
@@ -6768,6 +6813,7 @@ export function ProjectNotebookBlock({
       </div>,
       document.body
     )}
+    <InkPenTraceHud />
     </Fragment>
   );
 }

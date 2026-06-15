@@ -12,7 +12,11 @@ import {
 import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION, appendPoint, mergeDroppedSamplePressure } from './handwritingGeometry';
 import { MATH_INK_PRESET, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
-import { nextDraftPaintedCount } from './handwritingLayers';
+import { nextDraftPaintedCount, usesInkDraftPenRenderer } from './handwritingLayers';
+import {
+  FW_INK_DRAFT_MODE_KEY,
+  parseFwInkDraftMode,
+} from './handwritingInkDraftMode';
 import { pageInkCanvasWrapStyle } from './handwritingStrokeDiag';
 import {
   FW_QA_MODE_KEY,
@@ -115,11 +119,19 @@ const farBatch = [
 ] as PointerEvent[];
 assert(!isCoalescedBatchSafe(farBatch, parent), 'coalesced rejects far sample');
 
-// dual-layer draft paint cursor
+// dual-layer draft paint cursor (polyline mode)
 assert(nextDraftPaintedCount(0, 0) === 0, 'draft cursor empty stroke');
 assert(nextDraftPaintedCount(1, 0) === 1, 'draft cursor first point');
 assert(nextDraftPaintedCount(5, 1) === 5, 'draft cursor catches up to point count');
 assert(nextDraftPaintedCount(3, 3) === 3, 'draft cursor unchanged when caught up');
+
+// stroke continuity — ink draft mode default
+assert(parseFwInkDraftMode(null) === 'ink', 'fwInkDraftMode default ink');
+assert(parseFwInkDraftMode(undefined) === 'ink', 'fwInkDraftMode undefined is ink');
+assert(parseFwInkDraftMode('ink') === 'ink', 'fwInkDraftMode ink');
+assert(parseFwInkDraftMode('polyline') === 'polyline', 'fwInkDraftMode polyline rollback');
+assert(FW_INK_DRAFT_MODE_KEY === 'fwInkDraftMode', 'fwInkDraftMode storage key');
+assert(usesInkDraftPenRenderer() === true, 'usesInkDraftPenRenderer default ink in test env');
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;

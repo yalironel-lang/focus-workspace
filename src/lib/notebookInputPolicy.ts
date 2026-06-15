@@ -69,6 +69,19 @@ export function shouldBlockPenFocusOnText(): boolean {
   return isPenTextBlockActive();
 }
 
+/** Local debug only — inkPenTrace HUD. */
+export function getNotebookInputPolicyDebugState(): {
+  lastPointerType: string | null;
+  penTextBlockUntil: number;
+  penBlockActive: boolean;
+} {
+  return {
+    lastPointerType,
+    penTextBlockUntil,
+    penBlockActive: isPenTextBlockActive(),
+  };
+}
+
 /** Reset for tests. */
 export function resetNotebookInputPolicyForTests(): void {
   lastPointerType = null;

@@ -46,9 +46,12 @@ import {
   appendDraftStrokeSegment,
   blitCommitLayer,
   getCommitLayerContext,
+  paintDraftPenInkLayer,
   rebuildCommitLayer,
   syncCommitCanvasSize,
+  usesInkDraftPenRenderer,
 } from '../../lib/handwritingLayers';
+import { getFwInkDraftMode } from '../../lib/handwritingInkDraftMode';
 import { getHwRenderMode, setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { hwPointerSamplingStats, pickPointerEventsForSample, recordPointerSamplePick } from '../../lib/handwritingPointerSamples';
 import {
@@ -419,32 +422,41 @@ export function HandwritingBlock({
     const commitCanvas = ensureCommitCanvas();
     syncCommitCanvasSize(commitCanvas, { w, h, dpr });
 
-    if (draftPaintedCountRef.current === 0) {
-      const commitCtx = getCommitLayerContext(commitCanvas);
-      if (!commitCtx) return;
-      const needsRebuild =
-        !commitCacheValidRef.current ||
-        commitCacheStrokeCountRef.current !== data.strokes.length;
-      if (needsRebuild) {
-        rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
-        commitCacheValidRef.current = true;
-        commitCacheStrokeCountRef.current = data.strokes.length;
-      }
-      blitCommitLayer(visibleCtx, commitCanvas, w, h);
+    const commitCtx = getCommitLayerContext(commitCanvas);
+    if (!commitCtx) return;
+    const needsRebuild =
+      !commitCacheValidRef.current ||
+      commitCacheStrokeCountRef.current !== data.strokes.length;
+    if (needsRebuild) {
+      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
+      commitCacheValidRef.current = true;
+      commitCacheStrokeCountRef.current = data.strokes.length;
     }
 
-    draftPaintedCountRef.current = appendDraftStrokeSegment(
-      visibleCtx,
-      draft,
-      draftPaintedCountRef.current,
-      w,
-      h,
-      refW,
-    );
+    const inkDraftPen = draft.tool === 'pen' && usesInkDraftPenRenderer();
+    if (inkDraftPen) {
+      paintDraftPenInkLayer(visibleCtx, commitCanvas, draft, w, h, refW);
+      draftPaintedCountRef.current = draft.points.length;
+    } else {
+      if (draftPaintedCountRef.current === 0) {
+        blitCommitLayer(visibleCtx, commitCanvas, w, h);
+      }
+
+      draftPaintedCountRef.current = appendDraftStrokeSegment(
+        visibleCtx,
+        draft,
+        draftPaintedCountRef.current,
+        w,
+        h,
+        refW,
+      );
+    }
 
     if (isPageInkBlock) {
       recordPageInkRenderState({
-        lastPaintStatus: `draft-append pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
+        lastPaintStatus: inkDraftPen
+          ? `draft-ink pts=${draft.points.length} mode=${getFwInkDraftMode()}`
+          : `draft-append pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }

@@ -33,7 +33,7 @@ export function strokeHasRealPressure(stroke: HandwritingStroke): boolean {
   return stroke.points.some(p => p.pressure !== undefined && p.pressure > 0);
 }
 
-/** Shared scale for commit mesh and draft polyline (no perfect-freehand on draft). */
+/** Shared scale for commit mesh and draft ink (same renderer in ink draft mode). */
 export function commitStrokeSizePx(
   strokeWidth: number,
   canvasW: number,
@@ -101,7 +101,23 @@ function inkPathFromOutline(outline: number[][]): Path2D {
   return path;
 }
 
-/** Render one committed pen stroke with mathInk (commit layer only). */
+function mathInkStrokeOptions(stroke: HandwritingStroke, size: number) {
+  return {
+    size,
+    thinning: MATH_INK_PRESET.thinning,
+    smoothing: MATH_INK_PRESET.smoothing,
+    streamline: MATH_INK_PRESET.streamline,
+    simulatePressure: !strokeHasRealPressure(stroke),
+    last: true,
+    start: { taper: false, cap: true },
+    end: { taper: false, cap: true },
+  } as const;
+}
+
+/**
+ * Shared pen ink renderer — used for commit layer and live draft (stroke continuity).
+ * Storage and point model unchanged; render-only.
+ */
 export function drawPenStrokeMathInk(
   ctx: CanvasRenderingContext2D,
   stroke: HandwritingStroke,
@@ -124,18 +140,11 @@ export function drawPenStrokeMathInk(
     return;
   }
 
-  const outline = getStroke(inkPoints, {
-    size,
-    thinning: MATH_INK_PRESET.thinning,
-    smoothing: MATH_INK_PRESET.smoothing,
-    streamline: MATH_INK_PRESET.streamline,
-    simulatePressure: !strokeHasRealPressure(stroke),
-    last: true,
-    start: { taper: false, cap: true },
-    end: { taper: false, cap: true },
-  });
-
+  const outline = getStroke(inkPoints, mathInkStrokeOptions(stroke, size));
   const path = inkPathFromOutline(outline);
   ctx.fillStyle = stroke.color;
   ctx.fill(path);
 }
+
+/** Alias — draft and commit use identical visual path when fwInkDraftMode=ink. */
+export const drawDraftPenStrokeMathInk = drawPenStrokeMathInk;

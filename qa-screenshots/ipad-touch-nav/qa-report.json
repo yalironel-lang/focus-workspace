@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-06-12T17:04:41.326Z",
+  "device": "iPad Pro 11 (Playwright emulation)",
+  "disclaimer": "Emulated QA — physical iPad confirmation still required for pencil feel and PDF iframe scroll.",
+  "results": {
+    "A_oneFingerPan": {
+      "pass": true,
+      "notes": []
+    },
+    "B_pinchZoom": {
+      "pass": false,
+      "notes": [
+        "before=1",
+        "mid=2",
+        "after=2",
+        "INCONCLUSIVE in headless — two-finger pinch must be confirmed on physical iPad"
+      ]
+    },
+    "C_pencilIsolation": {
+      "pass": true,
+      "notes": []
+    },
+    "D_objectTap": {
+      "pass": true,
+      "notes": []
+    }
+  }
+}

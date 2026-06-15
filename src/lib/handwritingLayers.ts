@@ -1,7 +1,8 @@
 /**
- * Dual-layer handwriting rendering (Phase 1A).
- * Commit layer: perfect-freehand once per stroke, cached on hidden canvas.
- * Draft layer: incremental polyline on visible canvas while pen is down.
+ * Dual-layer handwriting rendering.
+ * Commit layer: perfect-freehand per stroke, cached on hidden canvas.
+ * Draft layer (fwInkDraftMode=ink): same renderer as commit on visible canvas.
+ * Draft layer (fwInkDraftMode=polyline): legacy incremental polyline rollback.
  */
 
 import type { HandwritingStroke } from './handwritingTypes';
@@ -9,6 +10,7 @@ import {
   drawEraserStrokePolyline,
   drawPenStrokePolyline,
 } from './handwritingGeometry';
+import { getFwInkDraftMode } from './handwritingInkDraftMode';
 import { drawPenStrokeMathInk, draftPenSegmentLineWidthPx } from './handwritingInk';
 
 export type LayerCanvasMetrics = {
@@ -78,7 +80,30 @@ export function blitCommitLayer(
 }
 
 /**
- * Incremental draft ink on visible canvas (no perfect-freehand, no commit rebuild).
+ * Live pen draft using the same ink renderer as commit (stroke continuity).
+ * Caller must ensure commit cache is up to date before calling.
+ */
+export function paintDraftPenInkLayer(
+  visibleCtx: CanvasRenderingContext2D,
+  commitCanvas: HTMLCanvasElement,
+  draftStroke: HandwritingStroke,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+): void {
+  blitCommitLayer(visibleCtx, commitCanvas, canvasW, canvasH);
+  if (draftStroke.tool === 'pen' && draftStroke.points.length > 0) {
+    drawPenStrokeMathInk(visibleCtx, draftStroke, canvasW, canvasH, refWidth);
+  }
+}
+
+export function usesInkDraftPenRenderer(): boolean {
+  return getFwInkDraftMode() === 'ink';
+}
+
+/**
+ * Incremental draft on visible canvas.
+ * Pen + fwInkDraftMode=ink: use paintDraftPenInkLayer instead (full blit + shared renderer).
  * Returns the number of points now painted on the visible canvas.
  */
 export function appendDraftStrokeSegment(
@@ -101,6 +126,10 @@ export function appendDraftStrokeSegment(
       canvasH,
       refWidth,
     );
+  }
+
+  if (getFwInkDraftMode() === 'ink') {
+    return points.length;
   }
 
   if (points.length === 1 && paintedPointCount === 0) {

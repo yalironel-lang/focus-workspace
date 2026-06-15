@@ -22,6 +22,7 @@ import {
   noteNotebookPointerUp,
   shouldRejectPenTextBeforeInput,
 } from '../../lib/notebookInputPolicy';
+import { inkPenTrace } from '../../lib/inkPenTrace';
 
 export interface RichTextUpdate {
   plain: string;
@@ -296,7 +297,14 @@ export function RichEditableLine({
     if (!el) return;
     const onNativeBeforeInput = (ev: Event) => {
       const ie = ev as InputEvent;
-      if (shouldRejectPenTextBeforeInput(ie)) {
+      const reject = shouldRejectPenTextBeforeInput(ie);
+      inkPenTrace('beforeinput', reject ? 'D' : 'E', reject ? 'REL reject' : 'REL allow', {
+        surface: `RichEditableLine:${id}`,
+        inputType: ie.inputType,
+        rejected: reject,
+        inNbRoot: true,
+      });
+      if (reject) {
         ev.preventDefault();
         return;
       }

@@ -13,6 +13,8 @@ import {
   isExploreFocusWorkspace,
 } from '../lib/exploreFocus';
 import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWorkspaceShell';
+import { InkPenTraceHud } from '../components/notebook/InkPenTraceHud';
+import { installInkPenTraceGlobal, isInkPenTraceEnabled } from '../lib/inkPenTrace';
 import { MathZone } from '../components/math-zone/MathZone';
 import { WORKSPACE_SHELL_TOP_INSET } from '../components/workspace-shell/shellGlass';
 import { ExploreFocusGuide } from '../components/explore-focus/ExploreFocusGuide';
@@ -761,6 +763,11 @@ export function SectionPage() {
   useEffect(() => {
     if (section?.id) touchRecentWorkspace(section.id);
   }, [section?.id, touchRecentWorkspace]);
+
+  useEffect(() => {
+    if (!isInkPenTraceEnabled()) return;
+    installInkPenTraceGlobal();
+  }, []);
 
   const sectionId = id ?? '';
 
@@ -3672,6 +3679,7 @@ export function SectionPage() {
         `,
       }}
     >
+      <InkPenTraceHud />
 
       <FloatingWorkspaceShell
         title={section.title}
