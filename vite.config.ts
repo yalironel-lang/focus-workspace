@@ -7,11 +7,18 @@ import { execSync } from 'node:child_process'
 
 const buildId = new Date().toISOString()
 let gitCommit = 'unknown'
-try {
-  gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
-} catch {
-  /* not a git checkout */
+const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA
+if (vercelSha && vercelSha.length >= 7) {
+  gitCommit = vercelSha.slice(0, 7)
+} else {
+  try {
+    gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
+  } catch {
+    /* not a git checkout */
+  }
 }
+
+const fwFeatureFlags = { incrementalDraft: true } as const
 
 function debugLogIngestPlugin(): Plugin {
   const logPath = path.join(process.cwd(), '.cursor/debug-3f83e8.log')
@@ -46,6 +53,7 @@ export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(buildId),
     __GIT_COMMIT__: JSON.stringify(gitCommit),
+    __FW_FEATURE_FLAGS__: JSON.stringify(fwFeatureFlags),
   },
   plugins: [
     react(),

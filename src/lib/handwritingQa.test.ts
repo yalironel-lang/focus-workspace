@@ -15,8 +15,15 @@ import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount, usesIncrementalDraftPenRenderer, usesInkDraftPenRenderer } from './handwritingLayers';
 import {
   FW_INK_DRAFT_MODE_KEY,
+  getFwInkDraftModeDiag,
   parseFwInkDraftMode,
 } from './handwritingInkDraftMode';
+import { getFwFeatureFlags } from './appBuildInfo';
+import {
+  getHwPaintProfile,
+  hwPaintProfileClear,
+  hwPaintProfileRecord,
+} from './handwritingPaintProfile';
 import { pageInkCanvasWrapStyle } from './handwritingStrokeDiag';
 import {
   FW_QA_MODE_KEY,
@@ -134,6 +141,33 @@ assert(parseFwInkDraftMode('polyline') === 'polyline', 'fwInkDraftMode polyline 
 assert(FW_INK_DRAFT_MODE_KEY === 'fwInkDraftMode', 'fwInkDraftMode storage key');
 assert(usesIncrementalDraftPenRenderer() === true, 'usesIncrementalDraftPenRenderer default in test env');
 assert(usesInkDraftPenRenderer() === false, 'usesInkDraftPenRenderer off unless ink rollback');
+
+const draftDiagDefault = getFwInkDraftModeDiag();
+assert(draftDiagDefault.mode === 'incremental', 'draft diag default incremental');
+assert(draftDiagDefault.usesIncremental === true, 'draft diag usesIncremental');
+assert(draftDiagDefault.usesFullInk === false, 'draft diag not full ink');
+
+assert(getFwFeatureFlags().incrementalDraft === true, 'build featureFlags incrementalDraft');
+
+hwPaintProfileClear();
+hwPaintProfileRecord({
+  paintMs: 4,
+  segmentsDrawn: 2,
+  pointsProcessed: 10,
+  draftMode: 'incremental',
+});
+hwPaintProfileRecord({
+  paintMs: 8,
+  segmentsDrawn: 1,
+  pointsProcessed: 12,
+  draftMode: 'incremental',
+});
+const paintProfile = getHwPaintProfile();
+assert(paintProfile.sampleCount === 2, 'paint profile sample count');
+assert(paintProfile.avgPaintMs === 6, 'paint profile avgPaintMs');
+assert(paintProfile.maxPaintMs === 8, 'paint profile maxPaintMs');
+assert(paintProfile.draftMode === 'incremental', 'paint profile draftMode');
+hwPaintProfileClear();
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;

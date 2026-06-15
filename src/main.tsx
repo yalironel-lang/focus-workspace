@@ -4,6 +4,8 @@ import App from './App.tsx'
 import './index.css'
 import 'katex/dist/katex.min.css'
 import { logAppBuildInfo } from './lib/appBuildInfo'
+import { installFwInkDraftModeDiag } from './lib/handwritingInkDraftMode'
+import { installHwPaintProfile } from './lib/handwritingPaintProfile'
 import { persistQaModeFromUrl } from './lib/qaMode'
 import { QaBuildOverlay } from './components/qa/QaBuildOverlay'
 import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
@@ -15,6 +17,8 @@ import {
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
 logAppBuildInfo()
+installFwInkDraftModeDiag()
+installHwPaintProfile()
 if (typeof window !== 'undefined') {
   persistQaModeFromUrl(localStorage)
 }

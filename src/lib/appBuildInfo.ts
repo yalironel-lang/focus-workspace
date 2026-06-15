@@ -1,8 +1,13 @@
 /** Injected at build time via vite.config `define`. */
 declare const __APP_BUILD_ID__: string;
 declare const __GIT_COMMIT__: string;
+declare const __FW_FEATURE_FLAGS__: string;
 
 export type FwHostKind = 'localhost' | 'lan' | 'vercel' | 'other';
+
+export type FwFeatureFlags = {
+  incrementalDraft: boolean;
+};
 
 export interface FwBuildInfo {
   gitCommit: string;
@@ -11,6 +16,7 @@ export interface FwBuildInfo {
   url: string;
   userAgent: string;
   hostKind: FwHostKind;
+  featureFlags: FwFeatureFlags;
 }
 
 export function getAppBuildId(): string {
@@ -26,6 +32,29 @@ export function getGitCommit(): string {
     return typeof __GIT_COMMIT__ === 'string' ? __GIT_COMMIT__ : 'unknown';
   } catch {
     return 'unknown';
+  }
+}
+
+function readFeatureFlagsJson(): string | null {
+  try {
+    return typeof __FW_FEATURE_FLAGS__ === 'string' ? __FW_FEATURE_FLAGS__ : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getFwFeatureFlags(): FwFeatureFlags {
+  const raw = readFeatureFlagsJson();
+  if (raw === null) {
+    return { incrementalDraft: true };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<FwFeatureFlags>;
+    return {
+      incrementalDraft: parsed.incrementalDraft === true,
+    };
+  } catch {
+    return { incrementalDraft: false };
   }
 }
 
@@ -48,6 +77,7 @@ export function getFwBuildInfo(): FwBuildInfo {
     url: typeof window !== 'undefined' ? window.location.href : '',
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
     hostKind: classifyHost(hostname),
+    featureFlags: getFwFeatureFlags(),
   };
 }
 

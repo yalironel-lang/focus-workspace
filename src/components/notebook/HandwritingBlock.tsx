@@ -52,6 +52,7 @@ import {
   usesInkDraftPenRenderer,
 } from '../../lib/handwritingLayers';
 import { getFwInkDraftMode } from '../../lib/handwritingInkDraftMode';
+import { hwPaintProfileRecord } from '../../lib/handwritingPaintProfile';
 import {
   STUDY_INK_COLOR,
   STUDY_PEN_WIDTH,
@@ -419,6 +420,9 @@ export function HandwritingBlock({
     const draft = draftRef.current;
     if (!canvas || !data || !draft) return;
 
+    const paintT0 = performance.now();
+    const prevPainted = draftPaintedCountRef.current;
+
     const synced = syncCanvasFromRect(canvas, { allowResize: false });
     if (!synced) return;
     const visibleCtx = canvas.getContext('2d');
@@ -464,6 +468,15 @@ export function HandwritingBlock({
         inkPreset,
       );
     }
+
+    hwPaintProfileRecord({
+      paintMs: performance.now() - paintT0,
+      segmentsDrawn: inkDraftFull
+        ? 1
+        : Math.max(0, draftPaintedCountRef.current - prevPainted),
+      pointsProcessed: draft.points.length,
+      draftMode: getFwInkDraftMode(),
+    });
 
     if (isPageInkBlock) {
       recordPageInkRenderState({
