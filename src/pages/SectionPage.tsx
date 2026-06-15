@@ -839,6 +839,12 @@ export function SectionPage() {
     return Number.isFinite(n) ? Math.max(0.12, Math.min(0.88, n)) : 0.75;
   });
   const [rvStudyPdfId, setRvStudyPdfId] = useState<string | null>(null);
+  const [binderStudy, setBinderStudy] = useState<{
+    pdfObjectId: string;
+    inkObjectId: string;
+    inkBlockKey: string;
+    surfaceTitle: string;
+  } | null>(null);
   const studySessionWorkPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const studySessionPagePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
@@ -2898,6 +2904,7 @@ export function SectionPage() {
 
   const openRvStudy = useCallback((pdfObjectId: string) => {
     closeLearningAttempt();
+    setBinderStudy(null);
     setRvStudyPdfId(pdfObjectId);
   }, [closeLearningAttempt]);
 
@@ -2907,6 +2914,27 @@ export function SectionPage() {
     }
     setRvStudyPdfId(null);
   }, [rvStudyPdfId]);
+
+  const openBinderStudy = useCallback(
+    (payload: {
+      pdfObjectId: string;
+      inkObjectId: string;
+      inkBlockKey: string;
+      surfaceTitle: string;
+    }) => {
+      closeLearningAttempt();
+      setRvStudyPdfId(null);
+      setBinderStudy(payload);
+    },
+    [closeLearningAttempt],
+  );
+
+  const closeBinderStudy = useCallback(() => {
+    if (binderStudy) {
+      void flushAllHandwritingForObject(binderStudy.inkObjectId);
+    }
+    setBinderStudy(null);
+  }, [binderStudy]);
 
   const handleSelectStudyQuestion = useCallback((questionNumber: number) => {
     setActiveQuestionNumber(questionNumber);
@@ -3382,6 +3410,9 @@ export function SectionPage() {
               ? () => openRvStudy(objectId)
               : undefined
           }
+          onOpenBinderStudy={
+            obj.type === 'notebook' && contentHost === 'canvas' ? openBinderStudy : undefined
+          }
           studySessionChip={studySessionChip}
           sessionRestoreBlockId={restoreBlockId}
           onStudySessionWorkFocus={
@@ -3424,6 +3455,7 @@ export function SectionPage() {
       studyPaneFocus,
       enterStudySession,
       openRvStudy,
+      openBinderStudy,
       handleStudySessionWorkFocus,
       getObjectPresentation,
       setObjectPresentationMode,
@@ -3957,6 +3989,32 @@ export function SectionPage() {
                     sectionObjects.updateObjectContent(rvStudyPdfId, content)
                   }
                   onClose={closeRvStudy}
+                />
+              );
+            })()}
+
+          {freeSpaceSurfaceVisible &&
+            binderStudy &&
+            sectionId &&
+            (() => {
+              const binderPdf = sectionObjects.objects.find(o => o.id === binderStudy.pdfObjectId);
+              if (!binderPdf || binderPdf.type !== 'pdf') return null;
+              const binderPdfContent = ensureProjectObjectContent('pdf', binderPdf.content);
+              if (binderPdfContent.type !== 'pdf') return null;
+              return (
+                <RvStudySurface
+                  tokens={freeSpaceTokens}
+                  sectionId={sectionId}
+                  pdfObjectId={binderStudy.pdfObjectId}
+                  pdfContent={binderPdfContent}
+                  pdfTitle={binderPdf.title}
+                  onPdfContentChange={content =>
+                    sectionObjects.updateObjectContent(binderStudy.pdfObjectId, content)
+                  }
+                  inkObjectId={binderStudy.inkObjectId}
+                  inkBlockKey={binderStudy.inkBlockKey}
+                  headerTitle={binderStudy.surfaceTitle}
+                  onClose={closeBinderStudy}
                 />
               );
             })()}

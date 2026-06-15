@@ -5,6 +5,7 @@ import {
   useState,
   useCallback,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
@@ -13,6 +14,14 @@ import { mergeAdjacentMarks, sortMarks } from '../../lib/notebookInlineMarks';
 import { getCaretOffsetIn, setCaretOffsetIn } from '../../lib/notebookCaret';
 import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
 import { nbAgentLog } from '../../lib/notebookDebugIngest';
+import {
+  isPenPointer,
+  isPenTextBlockActive,
+  noteNotebookKeyboardTyping,
+  noteNotebookPointerDown,
+  noteNotebookPointerUp,
+  shouldRejectPenTextBeforeInput,
+} from '../../lib/notebookInputPolicy';
 
 export interface RichTextUpdate {
   plain: string;
@@ -286,6 +295,11 @@ export function RichEditableLine({
     const el = ref.current;
     if (!el) return;
     const onNativeBeforeInput = (ev: Event) => {
+      const ie = ev as InputEvent;
+      if (shouldRejectPenTextBeforeInput(ie)) {
+        ev.preventDefault();
+        return;
+      }
       if (
         programmaticRef.current ||
         isInputSuppressed(id, suppressInputRef, ignoreDomInputBlockIdRef)
@@ -302,9 +316,36 @@ export function RichEditableLine({
     if (el && onSelectionChange) onSelectionChange(id, el);
   }, [id, onSelectionChange]);
 
+  const handlePenGuardPointerDown = useCallback((ev: ReactPointerEvent<HTMLDivElement>) => {
+    noteNotebookPointerDown(ev.nativeEvent);
+    if (!isPenPointer(ev.nativeEvent)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ref.current && document.activeElement === ref.current) {
+      ref.current.blur();
+    }
+  }, []);
+
+  const handlePenGuardPointerUp = useCallback((ev: ReactPointerEvent<HTMLDivElement>) => {
+    noteNotebookPointerUp(ev.nativeEvent);
+  }, []);
+
+  const rejectPenBeforeInput = useCallback(
+    (ev: { preventDefault: () => void; nativeEvent: InputEvent }) => {
+      if (shouldRejectPenTextBeforeInput(ev.nativeEvent)) {
+        ev.preventDefault();
+        return true;
+      }
+      return false;
+    },
+    [],
+  );
+
   return (
     <div
       style={{ position: 'relative', width: '100%' }}
+      onPointerDownCapture={handlePenGuardPointerDown}
+      onPointerUpCapture={handlePenGuardPointerUp}
       onFocusCapture={() => {
         focusedRef.current = true;
         setFocused(true);
@@ -344,7 +385,10 @@ export function RichEditableLine({
         contentEditable
         suppressContentEditableWarning
         spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         onBeforeInput={(ev) => {
+          if (rejectPenBeforeInput(ev)) return;
           const blocked =
             programmaticRef.current ||
             isInputSuppressed(id, suppressInputRef, ignoreDomInputBlockIdRef);
@@ -369,6 +413,12 @@ export function RichEditableLine({
         }}
         onInput={(ev) => {
           const target = ev.currentTarget;
+          if (isPenTextBlockActive()) {
+            programmaticRef.current = true;
+            renderRichContent(target, plain, marks);
+            finishProgrammaticRender();
+            return;
+          }
           if (toolbarActiveBlockIdRef?.current === id) {
             // #region agent log
             nbAgentLog(
@@ -436,6 +486,7 @@ export function RichEditableLine({
         }}
         onMouseUp={notifySelection}
         onKeyUp={notifySelection}
+        onKeyDown={() => noteNotebookKeyboardTyping()}
         onFocus={() => onFocusIndex(id)}
         style={{
           ...style,

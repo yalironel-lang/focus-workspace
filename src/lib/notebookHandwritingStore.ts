@@ -17,6 +17,7 @@ import {
 } from './handwritingPageInkDebug';
 import {
   PAGE_INK_BLOCK_KEY,
+  isNotebookPageInkKey,
   referencedHandwritingKeys,
   sanitizeHandwritingData,
   type HandwritingBlockData,
@@ -562,7 +563,7 @@ function outcomeToHwGetResult(
 
 export async function hwLoadBlock(objectId: string, blockKey: string): Promise<HwGetResult> {
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
-  const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+  const isPageInk = isNotebookPageInkKey(blockKey);
   probePageInkPersistOnce(isPageInk);
   if (cache.has(storageKey)) {
     const cached = cache.get(storageKey)!;
@@ -660,7 +661,7 @@ export async function hwSet(
   }
 
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
-  const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+  const isPageInk = isNotebookPageInkKey(blockKey);
   probePageInkPersistOnce(isPageInk);
   const payloadSummary = {
     objectId,
@@ -864,7 +865,7 @@ export async function gcOrphanHandwritingKeys(
       });
       continue;
     }
-    if (blockKey === PAGE_INK_BLOCK_KEY) {
+    if (isNotebookPageInkKey(blockKey)) {
       hwDiagLog('notebookHandwritingStore.ts:gc', 'deleting page-ink orphan', {
         storageKey,
         referencedKeys: [...referenced],

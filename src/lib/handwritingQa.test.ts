@@ -24,6 +24,12 @@ import {
 import { gateIndicator, strokeDiagGates } from './qaInkPanelMetrics';
 import type { StrokeDiagSnapshot } from './handwritingStrokeDiag';
 import {
+  noteNotebookKeyboardTyping,
+  noteNotebookPointerDown,
+  resetNotebookInputPolicyForTests,
+  shouldRejectPenTextBeforeInput,
+} from './notebookInputPolicy';
+import {
   hwLoadErrorMessage,
   hwLoadRecoveryGuidance,
   makeHandwritingStorageKey,
@@ -346,5 +352,23 @@ assert(gates.find(g => g.id === 'sawPen')?.pass === true, 'gate sawPen pass');
 assert(gates.find(g => g.id === 'layoutMismatch')?.pass === true, 'gate layout pass');
 assert(gates.find(g => g.id === 'droppedByMinDist')?.detail.includes('(10%)'), 'gate minDist uses rawSamples pct');
 assert(gateIndicator(true) === '✓' && gateIndicator(false) === '✗', 'gateIndicator');
+
+// P0 ink-first: pen must not enter text pipeline
+resetNotebookInputPolicyForTests();
+noteNotebookPointerDown({ pointerType: 'pen' } as PointerEvent);
+assert(
+  shouldRejectPenTextBeforeInput({ inputType: 'insertText' } as InputEvent),
+  'pen-active insertText rejected',
+);
+assert(
+  shouldRejectPenTextBeforeInput({ inputType: 'insertFromHandwriting' } as InputEvent),
+  'insertFromHandwriting always rejected',
+);
+noteNotebookKeyboardTyping();
+assert(
+  !shouldRejectPenTextBeforeInput({ inputType: 'insertText' } as InputEvent),
+  'keyboard insertText allowed after keydown',
+);
+resetNotebookInputPolicyForTests();
 
 console.log('handwritingQa.test.ts: all checks passed');

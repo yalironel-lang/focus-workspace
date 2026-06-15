@@ -12,6 +12,7 @@ import type {
   FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactNode,
   RefObject,
 } from 'react';
@@ -23,13 +24,18 @@ import {
   addNotebookPage,
   addNotebookSection,
   applyNotebookPersist,
+  collectNotebookPageInkKeys,
   getNotebookWorkspaceBreadcrumb,
+  inkPageKeyForNotebookPage,
   isNotebookV1PagesEnabled,
+  pageDisplayTitle,
   renameNotebookPage,
   renameNotebookSection,
   saveNotebookPageBody,
   setActiveNotebookSection,
+  setNotebookPageLinkedPdf,
   switchNotebookPage,
+  type NotebookPageKind,
 } from '../../lib/notebookPages';
 import { NotebookWorkspaceLayout } from '../notebook/NotebookWorkspaceLayout';
 import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigator';
@@ -64,6 +70,13 @@ import {
   hwDelete,
 } from '../../lib/notebookHandwritingStore';
 import { newHandwritingKey, referencedHandwritingKeys, PAGE_INK_BLOCK_KEY, PAGE_INK_INITIAL_HEIGHT } from '../../lib/handwritingTypes';
+import {
+  isPenPointer,
+  noteNotebookKeyboardTyping,
+  noteNotebookPointerDown,
+  noteNotebookPointerUp,
+  shouldRejectPenTextBeforeInput,
+} from '../../lib/notebookInputPolicy';
 import { flushAllHandwritingForObject } from '../../lib/handwritingFlushRegistry';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
@@ -1145,6 +1158,13 @@ interface Props {
   onActiveQuestionNumber?: (questionNumber: number | null) => void;
   /** Exam / reading focus: hide composition chrome (chip, bubble, gutter). */
   compositionChromeSuppressed?: boolean;
+  /** Opens PDF + ink split for a write page (past exam practice). */
+  onOpenBinderStudy?: (payload: {
+    pdfObjectId: string;
+    inkObjectId: string;
+    inkBlockKey: string;
+    surfaceTitle: string;
+  }) => void;
 }
 
 function blocksToExamRefs(blocks: Block[]): ExamQuestionBlockRef[] {
@@ -1186,6 +1206,7 @@ export function ProjectNotebookBlock({
   studyFocusQuestionToken = 0,
   onActiveQuestionNumber,
   compositionChromeSuppressed = false,
+  onOpenBinderStudy,
 }: Props) {
   const persistNotebookContent = useCallback(
     (next: NotebookContent) => emitContentChange(applyNotebookPersist(next)),
@@ -1197,6 +1218,16 @@ export function ProjectNotebookBlock({
   const isDeskPresentation = presentation === 'desk';
   const isWorkspacePresentation = presentation === 'workspace';
   const showCardChrome = !isDeskPresentation && !isWorkspacePresentation;
+  const activeNotebookPage = useMemo(() => {
+    if (!v1PagesShell || !content.activePageId) return null;
+    return (content.pages ?? []).find(p => p.id === content.activePageId) ?? null;
+  }, [v1PagesShell, content.activePageId, content.pages]);
+  const activePageKind: NotebookPageKind = activeNotebookPage?.kind ?? 'document';
+  const activeInkBlockKey =
+    activeNotebookPage?.kind === 'write'
+      ? inkPageKeyForNotebookPage(activeNotebookPage)
+      : null;
+  const workspaceBinderMode = v1PagesShell && isWorkspacePresentation;
   const deskFormattingV1 = useDeskFormattingV1();
   const deskFormattingActive = isDeskPresentation && deskFormattingV1;
   const sessionRestoreAppliedRef = useRef(false);
@@ -1240,12 +1271,15 @@ export function ProjectNotebookBlock({
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
     const fromBody = referencedHandwritingKeys(content.body ?? '');
-    const hwKeys = [...new Set([...fromBlocks, ...fromBody, PAGE_INK_BLOCK_KEY])];
+    const pageInkKeys = workspaceBinderMode
+      ? collectNotebookPageInkKeys(content.pages)
+      : [PAGE_INK_BLOCK_KEY];
+    const hwKeys = [...new Set([...fromBlocks, ...fromBody, ...pageInkKeys])];
     const timer = window.setTimeout(() => {
       void gcOrphanHandwritingKeys(objectId, hwKeys);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [objectId, blocks, content.body]);
+  }, [objectId, blocks, content.body, content.pages, workspaceBinderMode]);
 
   useEffect(() => {
     if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
@@ -1591,11 +1625,14 @@ export function ProjectNotebookBlock({
     applyShellMutation((current, body) => addNotebookSection(current, body));
   }, [applyShellMutation]);
 
-  const handleShellAddPage = useCallback(() => {
-    const sectionId = contentRef.current.activeSectionId;
-    if (!sectionId) return;
-    applyShellMutation((current, body) => addNotebookPage(current, sectionId, body));
-  }, [applyShellMutation]);
+  const handleShellAddPage = useCallback(
+    (kind: NotebookPageKind) => {
+      const sectionId = contentRef.current.activeSectionId;
+      if (!sectionId) return;
+      applyShellMutation((current, body) => addNotebookPage(current, sectionId, body, undefined, kind));
+    },
+    [applyShellMutation],
+  );
 
   const handleShellRenameSection = useCallback(
     (sectionId: string, title: string) => {
@@ -1830,10 +1867,15 @@ export function ProjectNotebookBlock({
   const isPaperSurface = notebookSurface === 'paper';
   const notebookMode = content.notebookMode ?? 'normal';
   const writingMode: NotebookWritingMode = content.writingMode ?? 'text';
-  const showInkMode = writingMode === 'ink' && !isFocusModeOpen && editorMode === 'edit';
+  const showInkMode = workspaceBinderMode
+    ? activePageKind === 'write' && !isFocusModeOpen && editorMode === 'edit'
+    : writingMode === 'ink' && !isFocusModeOpen && editorMode === 'edit';
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
   const compositionActive =
-    isMathNotebook && editorMode === 'edit' && !compositionChromeSuppressed;
+    isMathNotebook &&
+    editorMode === 'edit' &&
+    !compositionChromeSuppressed &&
+    !workspaceBinderMode;
   const compositionUiVisible = useMemo(() => {
     if (!compositionActive) return false;
     if (!surfaceFocusBlockId) return true;
@@ -2405,6 +2447,81 @@ export function ProjectNotebookBlock({
     [context, dismissNotebookTextEditing, onEditingChange],
   );
 
+  const sectionPdfObjects = useMemo(
+    () => (allObjects ?? []).filter(o => o.type === 'pdf'),
+    [allObjects],
+  );
+
+  const handleLinkActivePagePdf = useCallback(
+    (pdfObjectId: string) => {
+      const pageId = contentRef.current.activePageId;
+      if (!pageId) return;
+      applyShellMutation((current, body) =>
+        setNotebookPageLinkedPdf(saveNotebookPageBody(current, body), pageId, pdfObjectId),
+      );
+    },
+    [applyShellMutation],
+  );
+
+  const handleOpenActivePageBinderStudy = useCallback(() => {
+    if (!objectId || !activeInkBlockKey || !activeNotebookPage?.linkedPdfObjectId) return;
+    const pdf = sectionPdfObjects.find(o => o.id === activeNotebookPage.linkedPdfObjectId);
+    onOpenBinderStudy?.({
+      pdfObjectId: activeNotebookPage.linkedPdfObjectId,
+      inkObjectId: objectId,
+      inkBlockKey: activeInkBlockKey,
+      surfaceTitle: pdf?.title?.trim() || pageDisplayTitle(activeNotebookPage, 1),
+    });
+  }, [
+    objectId,
+    activeInkBlockKey,
+    activeNotebookPage,
+    sectionPdfObjects,
+    onOpenBinderStudy,
+  ]);
+
+  const handleNotebookTextPenGuard = useCallback(
+    (e: ReactPointerEvent) => {
+      if (showInkMode) return;
+      noteNotebookPointerDown(e.nativeEvent);
+      if (!isPenPointer(e.nativeEvent)) return;
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-hw-ink-canvas="1"]')) return;
+      const hitsText =
+        target.closest('[data-rich-editable="1"]') !== null ||
+        (target instanceof HTMLElement && target.isContentEditable) ||
+        target.closest('[data-nb-editor-root="1"] [contenteditable]') !== null;
+      if (!hitsText) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissNotebookTextEditing();
+    },
+    [showInkMode, dismissNotebookTextEditing],
+  );
+
+  const handleNotebookTextPenUp = useCallback((e: ReactPointerEvent) => {
+    if (showInkMode) return;
+    noteNotebookPointerUp(e.nativeEvent);
+  }, [showInkMode]);
+
+  useEffect(() => {
+    if (showInkMode || editorMode !== 'edit') return;
+    const onBeforeInput = (e: Event) => {
+      const t = e.target;
+      if (!(t instanceof Element) || !t.closest('[data-nb-editor-root="1"]')) return;
+      if (t.closest('[data-hw-ink-canvas="1"]')) return;
+      if (!t.closest('[data-rich-editable="1"]') && !t.closest('[contenteditable]')) return;
+      const ie = e as InputEvent;
+      if (shouldRejectPenTextBeforeInput(ie)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+    document.addEventListener('beforeinput', onBeforeInput, { capture: true });
+    return () => document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
+  }, [showInkMode, editorMode]);
+
   const handleWritingModeChange = useCallback(
     (next: NotebookWritingMode) => {
       if (next === writingMode) return;
@@ -2419,8 +2536,9 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!showInkMode || !objectId) return;
-    void hydrateHandwritingBlocks(objectId, [PAGE_INK_BLOCK_KEY]);
-  }, [showInkMode, objectId]);
+    const keys = activeInkBlockKey ? [activeInkBlockKey] : [PAGE_INK_BLOCK_KEY];
+    void hydrateHandwritingBlocks(objectId, keys);
+  }, [showInkMode, objectId, activeInkBlockKey]);
 
   const restoreRichSelection = useCallback(
     (blockId: string, start: number, end: number) => {
@@ -3422,6 +3540,9 @@ export function ProjectNotebookBlock({
   const handleEditorKeyCapture = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (editorMode !== 'edit') return;
+      if (!['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
+        noteNotebookKeyboardTyping();
+      }
 
       const root = getEditorRoot();
       if (!root) return;
@@ -4360,6 +4481,16 @@ export function ProjectNotebookBlock({
             <div
               contentEditable
               suppressContentEditableWarning
+              onPointerDownCapture={e => {
+                if (e.pointerType === 'pen') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLElement).blur();
+                }
+              }}
+              onBeforeInput={e => {
+                if (shouldRejectPenTextBeforeInput(e.nativeEvent)) e.preventDefault();
+              }}
               onBlur={e => {
                 const text = e.currentTarget.textContent?.trim() ?? '';
                 if (text !== (content.subtitle ?? '')) persistNotebookContent({ ...content, subtitle: text || undefined });
@@ -4636,6 +4767,70 @@ export function ProjectNotebookBlock({
           ) : null
         }
       >
+      {workspaceBinderMode && showInkMode && activeNotebookPage ? (
+        <div
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 12px',
+            borderBottom: `1px solid ${tokens.cardBorder}`,
+            background: tokens.wellBg,
+          }}
+        >
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: tokens.textGhost, textTransform: 'uppercase' }}>
+            Ink page
+          </span>
+          {sectionPdfObjects.length > 0 ? (
+            <select
+              value={activeNotebookPage.linkedPdfObjectId ?? ''}
+              onChange={e => {
+                const next = e.target.value;
+                if (next) handleLinkActivePagePdf(next);
+              }}
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: '6px 8px',
+                borderRadius: 8,
+                border: `1px solid ${tokens.cardBorder}`,
+                background: tokens.cardBg,
+                color: tokens.textSecondary,
+                maxWidth: 200,
+              }}
+            >
+              <option value="">Link past exam PDF…</option>
+              {sectionPdfObjects.map(pdf => (
+                <option key={pdf.id} value={pdf.id}>
+                  {pdf.title?.trim() || 'PDF'}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span style={{ fontSize: 11, color: tokens.textGhost }}>Add a PDF to the canvas to link</span>
+          )}
+          {activeNotebookPage.linkedPdfObjectId && onOpenBinderStudy ? (
+            <button
+              type="button"
+              onClick={handleOpenActivePageBinderStudy}
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: `1px solid ${tokens.accent}55`,
+                background: `${tokens.accent}14`,
+                color: tokens.accent,
+                cursor: 'pointer',
+              }}
+            >
+              Open past exam
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {editorMode === 'edit' && selectionToolbar && !isDeskPresentation ? (
         <NotebookSelectionToolbar
           tokens={tokens}
@@ -4887,8 +5082,12 @@ export function ProjectNotebookBlock({
           onKeyDownCapture={handleEditorKeyCapture}
           onFocusCapture={handleSurfaceFocusIn}
           onBlur={handleSurfaceBlur}
+          onPointerDownCapture={handleNotebookTextPenGuard}
+          onPointerUpCapture={handleNotebookTextPenUp}
           className="nb-document-surface"
           data-nb-surface={notebookSurface}
+          data-nb-block-pen-text={!showInkMode ? '1' : undefined}
+          data-nb-v1-document={workspaceBinderMode && activePageKind === 'document' ? '1' : undefined}
           data-desk-surface={isDeskPresentation ? '1' : undefined}
           style={{
             ...editorSurfaceStyle,
@@ -4922,7 +5121,25 @@ export function ProjectNotebookBlock({
                 WebkitOverflowScrolling: 'touch',
               }}
             >
-              {objectId ? (
+              {objectId && activeInkBlockKey ? (
+                <HandwritingBlock
+                  key={activeInkBlockKey}
+                  blockId={`__page-ink-${activeInkBlockKey}__`}
+                  objectId={objectId}
+                  blockKey={activeInkBlockKey}
+                  tokens={tokens}
+                  pageLayout
+                  surfaceChrome={{
+                    margin: 0,
+                    width: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flexShrink: 0,
+                  }}
+                  onDismissTextEditing={dismissNotebookTextEditing}
+                  onDrawingChange={handlePageInkDrawingChange}
+                />
+              ) : objectId ? (
                 <HandwritingBlock
                   blockId="__page-ink__"
                   objectId={objectId}
@@ -4944,6 +5161,7 @@ export function ProjectNotebookBlock({
                   Ink mode unavailable — notebook is still loading.
                 </p>
               )}
+              {!workspaceBinderMode ? (
               <p
                 style={{
                   margin: '10px 0 4px',
@@ -4956,6 +5174,7 @@ export function ProjectNotebookBlock({
               >
                 Switch to Text mode to edit typed notes.
               </p>
+              ) : null}
             </div>
           ) : (
           <>
@@ -6304,9 +6523,12 @@ export function ProjectNotebookBlock({
             data-fw-cmd-ignore="1"
             className="nb-document-page"
             data-nb-surface={notebookSurface}
+            data-nb-block-pen-text={!showInkMode ? '1' : undefined}
             onKeyDownCapture={handleEditorKeyCapture}
             onFocusCapture={handleSurfaceFocusIn}
             onBlur={handleSurfaceBlur}
+            onPointerDownCapture={handleNotebookTextPenGuard}
+            onPointerUpCapture={handleNotebookTextPenUp}
             style={
               isPaperSurface
                 ? {

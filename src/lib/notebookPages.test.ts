@@ -7,6 +7,7 @@ import {
   LEGACY_DEFAULT_SECTION_ID,
   LEGACY_DEFAULT_SECTION_TITLE,
   NOTEBOOK_SCHEMA_VERSION_V1,
+  addNotebookPage,
   applyNotebookPersist,
   getNotebookPreviewMeta,
   getNotebookWorkspaceBreadcrumb,
@@ -58,7 +59,14 @@ assert(migrated.activePageId === LEGACY_DEFAULT_PAGE_ID, 'active page');
 const ink = sampleNotebook('', 'ink');
 const inkMigrated = migrateLegacyNotebook(ink as NotebookContentWithPages);
 assert(inkMigrated.pages?.[0]?.kind === 'write', 'ink → write page');
-assert(inkMigrated.pages?.[0]?.inkPageKey === PAGE_INK_BLOCK_KEY, 'inkPageKey page-ink');
+assert(inkMigrated.pages?.[0]?.inkPageKey === PAGE_INK_BLOCK_KEY, 'legacy inkPageKey page-ink');
+
+// New write pages use page id as ink key
+const docBase = migrateLegacyNotebook(sampleNotebook('') as NotebookContentWithPages);
+const secId = docBase.activeSectionId!;
+const inkPage = addNotebookPage(docBase, secId, '', 'PS Work', 'write');
+const writePage = (inkPage.pages ?? []).find(p => p.kind === 'write');
+assert(writePage?.inkPageKey === writePage?.id, 'new write page uses page id ink key');
 
 // serializePageToBody
 assert(

@@ -24,6 +24,8 @@ export interface NotebookPage {
   documentBody?: string;
   /** Write page IDB ink key (legacy alias: page-ink). */
   inkPageKey?: string;
+  /** Optional PDF on canvas for past-exam practice (write pages only). */
+  linkedPdfObjectId?: string;
 }
 
 export interface NotebookPagesFields {

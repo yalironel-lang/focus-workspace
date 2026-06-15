@@ -3,6 +3,7 @@ import {
   NOTEBOOK_SCHEMA_VERSION_V1,
   type NotebookContentWithPages,
   type NotebookPage,
+  type NotebookPageKind,
   type NotebookSection,
 } from './types';
 
@@ -128,19 +129,29 @@ export function addNotebookPage<T extends NotebookContentWithPages>(
   sectionId: string,
   currentBody: string,
   title?: string,
+  kind: NotebookPageKind = 'document',
 ): T {
   const saved = saveNotebookPageBody(content, currentBody);
   const section = (saved.sections ?? []).find(s => s.id === sectionId);
   if (!section) return saved;
   const pageIndex = section.pageIds.length + 1;
   const pageId = newNotebookPageId();
-  const page: NotebookPage = {
-    id: pageId,
-    sectionId,
-    kind: 'document',
-    title: title?.trim() || defaultPageTitle(pageIndex),
-    documentBody: '',
-  };
+  const page: NotebookPage =
+    kind === 'write'
+      ? {
+          id: pageId,
+          sectionId,
+          kind: 'write',
+          title: title?.trim() || defaultPageTitle(pageIndex),
+          inkPageKey: pageId,
+        }
+      : {
+          id: pageId,
+          sectionId,
+          kind: 'document',
+          title: title?.trim() || defaultPageTitle(pageIndex),
+          documentBody: '',
+        };
   const sections = (saved.sections ?? []).map(s =>
     s.id === sectionId ? { ...s, pageIds: [...s.pageIds, pageId] } : s,
   );
@@ -153,6 +164,23 @@ export function addNotebookPage<T extends NotebookContentWithPages>(
     activePageId: pageId,
     body: '',
   } as T;
+}
+
+export function setNotebookPageLinkedPdf<T extends NotebookContentWithPages>(
+  content: T,
+  pageId: string,
+  pdfObjectId: string | null,
+): T {
+  const migrated = migrateLegacyNotebook(content);
+  const pages = (migrated.pages ?? []).map(p => {
+    if (p.id !== pageId || p.kind !== 'write') return p;
+    if (!pdfObjectId) {
+      const { linkedPdfObjectId: _removed, ...rest } = p;
+      return rest as NotebookPage;
+    }
+    return { ...p, linkedPdfObjectId: pdfObjectId };
+  });
+  return { ...migrated, pages, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1 } as T;
 }
 
 export function renameNotebookSection<T extends NotebookContentWithPages>(

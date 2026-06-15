@@ -31,9 +31,15 @@ export {
   setActiveNotebookSection,
   addNotebookSection,
   addNotebookPage,
+  setNotebookPageLinkedPdf,
   renameNotebookSection,
   renameNotebookPage,
 } from './operations';
+export {
+  inkPageKeyForNotebookPage,
+  collectNotebookPageInkKeys,
+  isLegacySharedPageInkKey,
+} from './inkPageKey';
 export {
   getNotebookPreviewMeta,
   getNotebookWorkspaceBreadcrumb,

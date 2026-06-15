@@ -88,11 +88,11 @@ import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
   CANVAS_HEIGHT_STEP,
-  PAGE_INK_BLOCK_KEY,
   PAGE_INK_INITIAL_HEIGHT,
   clampCanvasHeight,
   DEFAULT_CANVAS_MIN_HEIGHT,
   emptyHandwritingData,
+  isNotebookPageInkKey,
   newStrokeId,
   type HandwritingBlockData,
   type HandwritingPoint,
@@ -207,7 +207,7 @@ export function HandwritingBlock({
   onDelete,
   pageLayout = false,
 }: Props) {
-  const isPageInkBlock = blockKey === PAGE_INK_BLOCK_KEY;
+  const isPageInkBlock = isNotebookPageInkKey(blockKey);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -658,7 +658,7 @@ export function HandwritingBlock({
       }
       const loadResult = await hwLoadBlock(objectId, blockKey);
       if (cancelled) return;
-      const isPageInk = blockKey === PAGE_INK_BLOCK_KEY;
+      const isPageInk = isNotebookPageInkKey(blockKey);
       if (loadResult.status === 'error') {
         setLoadError(loadResult);
         setMissing(false);

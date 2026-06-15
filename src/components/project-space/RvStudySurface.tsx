@@ -33,6 +33,10 @@ interface Props {
   pdfTitle: string;
   onPdfContentChange: (content: ProjectObjectContent) => void;
   onClose: () => void;
+  /** Notebook object for per-page ink (defaults to pdfObjectId + rv-ink). */
+  inkObjectId?: string;
+  inkBlockKey?: string;
+  headerTitle?: string;
 }
 
 /** Minimal fullscreen PDF + ink split for 30-minute iPad validation. */
@@ -44,7 +48,13 @@ export function RvStudySurface({
   pdfTitle,
   onPdfContentChange,
   onClose,
+  inkObjectId,
+  inkBlockKey,
+  headerTitle,
 }: Props) {
+  const resolvedInkObjectId = inkObjectId ?? pdfObjectId;
+  const resolvedInkBlockKey = inkBlockKey ?? RV_INK_BLOCK_KEY;
+  const surfaceTitle = headerTitle ?? 'RV Study Surface';
   const suppressMarksChrome = useCallback((_chrome: PdfStudyMarksChrome | null) => {}, []);
   const content = ensureProjectObjectContent('pdf', pdfContent);
   if (content.type !== 'pdf') return null;
@@ -54,8 +64,8 @@ export function RvStudySurface({
   }, [onClose]);
 
   useEffect(() => {
-    void hydrateHandwritingBlocks(pdfObjectId, [RV_INK_BLOCK_KEY]);
-  }, [pdfObjectId]);
+    void hydrateHandwritingBlocks(resolvedInkObjectId, [resolvedInkBlockKey]);
+  }, [resolvedInkObjectId, resolvedInkBlockKey]);
 
   useEffect(() => pushEscapeHandler(handleClose), [handleClose]);
   useEffect(() => acquireBodyScrollLock(), []);
@@ -115,7 +125,7 @@ export function RvStudySurface({
               color: tokens.textPrimary,
             }}
           >
-            RV Study Surface
+            {surfaceTitle}
           </div>
           <button
             type="button"
@@ -199,9 +209,9 @@ export function RvStudySurface({
               }}
             >
               <HandwritingBlock
-                blockId="__rv-ink__"
-                objectId={pdfObjectId}
-                blockKey={RV_INK_BLOCK_KEY}
+                blockId={`__rv-ink-${resolvedInkBlockKey}__`}
+                objectId={resolvedInkObjectId}
+                blockKey={resolvedInkBlockKey}
                 tokens={tokens}
                 pageLayout
                 surfaceChrome={{

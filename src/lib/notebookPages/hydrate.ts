@@ -1,4 +1,5 @@
 import { PAGE_INK_BLOCK_KEY } from '../handwritingTypes';
+import { inkPageKeyForNotebookPage } from './inkPageKey';
 import { isNotebookV1PagesEnabled } from './featureFlag';
 import {
   LEGACY_DEFAULT_PAGE_ID,
@@ -41,6 +42,8 @@ export function sanitizeNotebookPage(raw: unknown): NotebookPage | null {
   const title = typeof r.title === 'string' && r.title ? r.title : undefined;
   const documentBody = typeof r.documentBody === 'string' ? r.documentBody : undefined;
   const inkPageKey = typeof r.inkPageKey === 'string' && r.inkPageKey ? r.inkPageKey : undefined;
+  const linkedPdfObjectId =
+    typeof r.linkedPdfObjectId === 'string' && r.linkedPdfObjectId ? r.linkedPdfObjectId : undefined;
   return {
     id: r.id,
     sectionId: r.sectionId,
@@ -48,6 +51,7 @@ export function sanitizeNotebookPage(raw: unknown): NotebookPage | null {
     ...(title !== undefined ? { title } : {}),
     ...(documentBody !== undefined ? { documentBody } : {}),
     ...(inkPageKey !== undefined ? { inkPageKey } : {}),
+    ...(linkedPdfObjectId !== undefined ? { linkedPdfObjectId } : {}),
   };
 }
 
@@ -149,12 +153,26 @@ function buildLegacyDefaultPages(content: NotebookContentWithPages): NotebookCon
   };
 }
 
+function ensureWritePageInkKeys<T extends NotebookContentWithPages>(content: T): T {
+  const pages = content.pages ?? [];
+  let changed = false;
+  const nextPages = pages.map(p => {
+    if (p.kind !== 'write') return p;
+    const key = inkPageKeyForNotebookPage(p);
+    if (p.inkPageKey === key) return p;
+    changed = true;
+    return { ...p, inkPageKey: key };
+  });
+  if (!changed) return content;
+  return { ...content, pages: nextPages } as T;
+}
+
 /** One-time legacy shape → Section "Notes" / Page 1. Idempotent when V1 pages already valid. */
 export function migrateLegacyNotebook<T extends NotebookContentWithPages>(content: T): T {
   if (hasValidV1Pages(content)) {
-    return syncBodyOntoActiveDocumentPage(content);
+    return syncBodyOntoActiveDocumentPage(ensureWritePageInkKeys(content));
   }
-  return syncBodyOntoActiveDocumentPage(buildLegacyDefaultPages(content) as T);
+  return syncBodyOntoActiveDocumentPage(ensureWritePageInkKeys(buildLegacyDefaultPages(content) as T));
 }
 
 /** Phase 1: legacy `body` is UI source of truth; mirror onto active document page. */

@@ -77,7 +77,17 @@ assert(
 );
 assert(nb.body === pageBBody, 'B body intact on active page');
 
-const withSec2 = addNotebookSection(nb, pageBBody, 'Unit 2');
+// Ink pages get unique per-page storage keys
+const withInkA = addNotebookPage(nb, secId, pageBBody, 'PS Work', 'write');
+const inkAId = withInkA.activePageId!;
+const inkAKey = (withInkA.pages ?? []).find(p => p.id === inkAId)?.inkPageKey;
+assert(inkAKey === inkAId, 'write page inkPageKey equals page id');
+const withInkB = addNotebookPage(withInkA, secId, '', 'Past Exam Practice', 'write');
+const inkBId = withInkB.activePageId!;
+const inkBKey = (withInkB.pages ?? []).find(p => p.id === inkBId)?.inkPageKey;
+assert(inkBKey === inkBId && inkBKey !== inkAKey, 'second ink page has distinct key');
+
+const withSec2 = addNotebookSection(withInkB, '', 'Unit 2');
 assert((withSec2.sections ?? []).length >= 2, 'second section');
 assert(withSec2.body === '', 'new section starts empty');
 assert(withSec2.activeSectionId !== secId, 'active section changed');

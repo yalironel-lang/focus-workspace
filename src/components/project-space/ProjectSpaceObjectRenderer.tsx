@@ -74,6 +74,13 @@ interface Props {
   onStartStudySession?: () => void;
   /** Opens RV validation surface from PDF card. */
   onStartRvStudy?: () => void;
+  /** Opens PDF + ink split for a binder write page (past exam practice). */
+  onOpenBinderStudy?: (payload: {
+    pdfObjectId: string;
+    inkObjectId: string;
+    inkBlockKey: string;
+    surfaceTitle: string;
+  }) => void;
   /** When set, canvas card shows a studying chip instead of live content. */
   studySessionChip?: { subtitle: string; onOpen: () => void } | null;
   sessionRestoreBlockId?: string | null;
@@ -186,6 +193,7 @@ function FreeSpaceMathNotebookRenderer({
   studyDeskQuiet = false,
   objectPresentationMode = 'floating',
   onSetObjectPresentationMode,
+  onOpenBinderStudy,
 }: {
   content: NotebookContent;
   tokens: AtmosphereTokens;
@@ -213,6 +221,12 @@ function FreeSpaceMathNotebookRenderer({
     mode: UniversalObjectViewMode,
     splitSide?: UniversalObjectSplitSide,
   ) => void;
+  onOpenBinderStudy?: (payload: {
+    pdfObjectId: string;
+    inkObjectId: string;
+    inkBlockKey: string;
+    surfaceTitle: string;
+  }) => void;
 }) {
   const useDeskPrototype = content.notebookMode === 'math';
   const [legacyOpen, setLegacyOpen] = useState(false);
@@ -345,6 +359,7 @@ function FreeSpaceMathNotebookRenderer({
               ? 'workspace'
               : 'notebook'
           }
+          onOpenBinderStudy={onOpenBinderStudy}
         />
       </div>
     </div>
@@ -368,6 +383,7 @@ function ProjectSpaceObjectRendererInner({
   onStudyLayoutChange,
   onStartStudySession,
   onStartRvStudy,
+  onOpenBinderStudy,
   studySessionChip = null,
   sessionRestoreBlockId = null,
   onStudySessionWorkFocus,
@@ -531,6 +547,7 @@ function ProjectSpaceObjectRendererInner({
             studyDeskQuiet={studyDeskQuiet}
             objectPresentationMode={objectPresentationMode}
             onSetObjectPresentationMode={onSetObjectPresentationMode}
+            onOpenBinderStudy={onOpenBinderStudy}
           />
         </WorkspaceSurfaceErrorBoundary>
       );

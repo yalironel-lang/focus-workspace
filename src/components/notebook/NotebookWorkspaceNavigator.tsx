@@ -5,6 +5,7 @@ import {
   sectionDisplayTitle,
   type NotebookContentWithPages,
   type NotebookPage,
+  type NotebookPageKind,
   type NotebookSection,
 } from '../../lib/notebookPages';
 
@@ -16,9 +17,31 @@ interface Props {
   onSwitchSection: (sectionId: string) => void;
   onSwitchPage: (pageId: string) => void;
   onAddSection: () => void;
-  onAddPage: () => void;
+  onAddPage: (kind: NotebookPageKind) => void;
   onRenameSection: (sectionId: string, title: string) => void;
   onRenamePage: (pageId: string, title: string) => void;
+}
+
+function PageKindIcon({ kind, tokens }: { kind: NotebookPageKind; tokens: AtmosphereTokens }) {
+  const color = tokens.textGhost;
+  if (kind === 'write') {
+    return (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+        <path
+          d="M2 9.5L8.5 3l1 1L3 10.5H2v-1zM9 2.5l.5-.5a.7.7 0 0 1 1 1L10 3.5"
+          stroke={color}
+          strokeWidth="1.1"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+      <path d="M2.5 3h7M2.5 6h7M2.5 9h4.5" stroke={color} strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function InlineRenameRow({
@@ -27,12 +50,14 @@ function InlineRenameRow({
   tokens,
   onCommit,
   onActivate,
+  leading,
 }: {
   label: string;
   isActive: boolean;
   tokens: AtmosphereTokens;
   onCommit: (next: string) => void;
   onActivate: () => void;
+  leading?: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -108,9 +133,14 @@ function InlineRenameRow({
         padding: '6px 8px',
         borderRadius: 6,
         cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        minWidth: 0,
       }}
     >
-      {label}
+      {leading}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
     </button>
   );
 }
@@ -185,6 +215,7 @@ export function NotebookWorkspaceNavigator({
                         label={pageDisplayTitle(page, pageIndex + 1)}
                         isActive={isActivePage}
                         tokens={tokens}
+                        leading={<PageKindIcon kind={page.kind} tokens={tokens} />}
                         onCommit={title => onRenamePage(page.id, title)}
                         onActivate={() => {
                           if (!isActivePage) onSwitchPage(page.id);
@@ -201,7 +232,7 @@ export function NotebookWorkspaceNavigator({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
         <button
           type="button"
-          onClick={onAddPage}
+          onClick={() => onAddPage('document')}
           style={{
             border: `1px dashed ${tokens.cardBorder}`,
             background: 'transparent',
@@ -211,9 +242,27 @@ export function NotebookWorkspaceNavigator({
             fontSize: 11,
             fontWeight: 600,
             cursor: 'pointer',
+            textAlign: 'left',
           }}
         >
-          + Page
+          + Document page
+        </button>
+        <button
+          type="button"
+          onClick={() => onAddPage('write')}
+          style={{
+            border: `1px dashed ${tokens.cardBorder}`,
+            background: 'transparent',
+            color: tokens.textMuted,
+            borderRadius: 8,
+            padding: '8px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          + Ink page
         </button>
         <button
           type="button"

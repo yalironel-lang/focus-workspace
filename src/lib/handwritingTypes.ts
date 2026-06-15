@@ -25,8 +25,15 @@ export const DEFAULT_CANVAS_MIN_HEIGHT = 360;
 export const CANVAS_HEIGHT_MIN = DEFAULT_CANVAS_MIN_HEIGHT;
 export const CANVAS_HEIGHT_STEP = 180;
 export const CANVAS_HEIGHT_MAX = 1080;
-/** Fixed IDB block key for notebook page ink (not serialized in body). */
+/** Legacy shared IDB block key — only for migrated single write pages. */
 export const PAGE_INK_BLOCK_KEY = 'page-ink';
+
+/** True for full-page notebook ink (legacy shared key or per-page keys). */
+export function isNotebookPageInkKey(blockKey: string): boolean {
+  if (blockKey === PAGE_INK_BLOCK_KEY) return true;
+  // Per-page keys match newNotebookPageId(): page-{timestamp}-{seq}
+  return /^page-\d+-\d+$/.test(blockKey);
+}
 /** Initial page ink canvas height (manual Add space still applies). */
 export const PAGE_INK_INITIAL_HEIGHT = 480;
 
