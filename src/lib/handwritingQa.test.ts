@@ -10,7 +10,7 @@ import {
   CANVAS_HEIGHT_MIN,
 } from './handwritingTypes';
 import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION, appendPoint, mergeDroppedSamplePressure } from './handwritingGeometry';
-import { MATH_INK_PRESET, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
+import { MATH_INK_PRESET, STUDY_INK_PRESET, STUDY_INK_COLOR, STUDY_PEN_WIDTH, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
 import { nextDraftPaintedCount, usesInkDraftPenRenderer } from './handwritingLayers';
 import {
@@ -145,6 +145,17 @@ assert(MATH_INK_PRESET.smoothing === 0.08, 'mathInk smoothing');
 assert(MATH_INK_PRESET.streamline === 0.06, 'mathInk streamline');
 assert(MATH_INK_PRESET.thinning === 0.48, 'mathInk thinning');
 assert(MATH_INK_PRESET.sizeMultiplier === 1.08, 'mathInk size multiplier');
+
+// study ink presence — darker, heavier, smoother than math preset
+assert(STUDY_INK_PRESET.smoothing > MATH_INK_PRESET.smoothing, 'study ink smoother than math');
+assert(STUDY_INK_PRESET.thinning < MATH_INK_PRESET.thinning, 'study ink more stable width');
+assert(STUDY_INK_PRESET.sizeMultiplier > MATH_INK_PRESET.sizeMultiplier, 'study ink heavier');
+assert(STUDY_INK_COLOR === '#141416', 'study ink near-black');
+assert(STUDY_PEN_WIDTH > 2.5, 'study pen wider than legacy default');
+const studyCommit = commitStrokeSizePx(STUDY_PEN_WIDTH, 600, 600, 'study');
+const mathCommit = commitStrokeSizePx(2.5, 600, 600, 'math');
+assert(studyCommit > mathCommit, 'study commit footprint larger than math at page scale');
+
 assert(
   strokeHasRealPressure({
     id: 'st-p',

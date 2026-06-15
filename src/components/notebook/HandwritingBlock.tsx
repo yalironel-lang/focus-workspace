@@ -52,6 +52,11 @@ import {
   usesInkDraftPenRenderer,
 } from '../../lib/handwritingLayers';
 import { getFwInkDraftMode } from '../../lib/handwritingInkDraftMode';
+import {
+  STUDY_INK_COLOR,
+  STUDY_PEN_WIDTH,
+  type InkPresetId,
+} from '../../lib/handwritingInk';
 import { getHwRenderMode, setHwRenderMode, type HwRenderMode } from '../../lib/handwritingRenderMode';
 import { hwPointerSamplingStats, pickPointerEventsForSample, recordPointerSamplePick } from '../../lib/handwritingPointerSamples';
 import {
@@ -332,7 +337,9 @@ export function HandwritingBlock({
   );
   toolRef.current = tool;
 
-  const inkColor = tokens.textPrimary ?? '#1c1917';
+  const inkPreset: InkPresetId = pageLayout ? 'study' : 'math';
+  const inkColor = pageLayout ? STUDY_INK_COLOR : (tokens.textPrimary ?? '#1c1917');
+  const penInkWidth = pageLayout ? STUDY_PEN_WIDTH : PEN_WIDTH;
   const atMaxHeight = displayHeight >= CANVAS_HEIGHT_MAX;
 
   const paintIdle = useCallback(() => {
@@ -389,7 +396,7 @@ export function HandwritingBlock({
       !commitCacheValidRef.current ||
       commitCacheStrokeCountRef.current !== data.strokes.length;
     if (needsRebuild) {
-      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
+      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW, inkPreset);
       commitCacheValidRef.current = true;
       commitCacheStrokeCountRef.current = data.strokes.length;
     }
@@ -403,7 +410,7 @@ export function HandwritingBlock({
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }
-  }, [ensureCommitCanvas, isPageInkBlock]);
+  }, [ensureCommitCanvas, isPageInkBlock, inkPreset]);
 
   const paintDraft = useCallback(() => {
     const canvas = canvasRef.current;
@@ -428,14 +435,14 @@ export function HandwritingBlock({
       !commitCacheValidRef.current ||
       commitCacheStrokeCountRef.current !== data.strokes.length;
     if (needsRebuild) {
-      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW);
+      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW, inkPreset);
       commitCacheValidRef.current = true;
       commitCacheStrokeCountRef.current = data.strokes.length;
     }
 
     const inkDraftPen = draft.tool === 'pen' && usesInkDraftPenRenderer();
     if (inkDraftPen) {
-      paintDraftPenInkLayer(visibleCtx, commitCanvas, draft, w, h, refW);
+      paintDraftPenInkLayer(visibleCtx, commitCanvas, draft, w, h, refW, inkPreset);
       draftPaintedCountRef.current = draft.points.length;
     } else {
       if (draftPaintedCountRef.current === 0) {
@@ -449,6 +456,7 @@ export function HandwritingBlock({
         w,
         h,
         refW,
+        inkPreset,
       );
     }
 
@@ -460,7 +468,7 @@ export function HandwritingBlock({
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }
-  }, [ensureCommitCanvas, isPageInkBlock]);
+  }, [ensureCommitCanvas, isPageInkBlock, inkPreset]);
 
   const paint = useCallback(() => {
     if (drawingRef.current && draftRef.current) {
@@ -902,14 +910,14 @@ export function HandwritingBlock({
               !commitCacheValidRef.current ||
               commitCacheStrokeCountRef.current !== base.strokes.length
             ) {
-              rebuildCommitLayer(commitCtx, base.strokes, w, h, refW);
+              rebuildCommitLayer(commitCtx, base.strokes, w, h, refW, inkPreset);
             }
-            appendCommittedStroke(commitCtx, draft, w, h, refW);
+            appendCommittedStroke(commitCtx, draft, w, h, refW, inkPreset);
             commitCacheValidRef.current = true;
             commitCacheStrokeCountRef.current = strokes.length;
             blitCommitLayer(visibleCtx, commitCanvas, w, h);
           } else if (draft.tool === 'eraser') {
-            rebuildCommitLayer(commitCtx, strokes, w, h, refW);
+            rebuildCommitLayer(commitCtx, strokes, w, h, refW, inkPreset);
             commitCacheValidRef.current = true;
             commitCacheStrokeCountRef.current = strokes.length;
             blitCommitLayer(visibleCtx, commitCanvas, w, h);
@@ -957,7 +965,7 @@ export function HandwritingBlock({
       !(import.meta.env.DEV && getHwRenderMode() === 'polyline');
     commitData({ ...base, strokes }, true, { skipCacheInvalidate });
     void flushSave('stroke');
-  }, [commitData, ensureCommitCanvas, onDrawingChange, schedulePaint, flushSave]);
+  }, [commitData, ensureCommitCanvas, inkPreset, onDrawingChange, schedulePaint, flushSave]);
 
   const beginStroke = useCallback(
     (
@@ -1009,7 +1017,7 @@ export function HandwritingBlock({
         id: newStrokeId(),
         tool: activeTool,
         color: activeTool === 'pen' ? inkColor : 'rgba(0,0,0,1)',
-        width: activeTool === 'pen' ? PEN_WIDTH : ERASER_WIDTH,
+        width: activeTool === 'pen' ? penInkWidth : ERASER_WIDTH,
         points: [pt],
       };
       draftPaintedCountRef.current = 0;
@@ -1017,7 +1025,7 @@ export function HandwritingBlock({
       paintDraftNow();
       onDrawingChange?.(true);
     },
-    [inkColor, objectId, blockKey, onDrawingChange, paintDraftNow, displayHeight],
+    [inkColor, objectId, blockKey, onDrawingChange, paintDraftNow, displayHeight, penInkWidth],
   );
 
   const saveNotReady = !objectId || !blockKey;

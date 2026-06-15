@@ -11,7 +11,11 @@ import {
   drawPenStrokePolyline,
 } from './handwritingGeometry';
 import { getFwInkDraftMode } from './handwritingInkDraftMode';
-import { drawPenStrokeMathInk, draftPenSegmentLineWidthPx } from './handwritingInk';
+import {
+  drawPenStrokeInk,
+  draftPenSegmentLineWidthPx,
+  type InkPresetId,
+} from './handwritingInk';
 
 export type LayerCanvasMetrics = {
   w: number;
@@ -47,11 +51,12 @@ export function rebuildCommitLayer(
   canvasW: number,
   canvasH: number,
   refWidth: number,
+  preset: InkPresetId = 'math',
 ): void {
   commitCtx.clearRect(0, 0, canvasW, canvasH);
   for (const stroke of strokes) {
     if (stroke.tool === 'pen') {
-      drawPenStrokeMathInk(commitCtx, stroke, canvasW, canvasH, refWidth);
+      drawPenStrokeInk(commitCtx, stroke, canvasW, canvasH, refWidth, preset);
     }
   }
 }
@@ -63,9 +68,10 @@ export function appendCommittedStroke(
   canvasW: number,
   canvasH: number,
   refWidth: number,
+  preset: InkPresetId = 'math',
 ): void {
   if (stroke.tool !== 'pen' || stroke.points.length === 0) return;
-  drawPenStrokeMathInk(commitCtx, stroke, canvasW, canvasH, refWidth);
+  drawPenStrokeInk(commitCtx, stroke, canvasW, canvasH, refWidth, preset);
 }
 
 /** Copy commit cache bitmap to visible canvas (replaces visible pixels). */
@@ -90,10 +96,11 @@ export function paintDraftPenInkLayer(
   canvasW: number,
   canvasH: number,
   refWidth: number,
+  preset: InkPresetId = 'math',
 ): void {
   blitCommitLayer(visibleCtx, commitCanvas, canvasW, canvasH);
   if (draftStroke.tool === 'pen' && draftStroke.points.length > 0) {
-    drawPenStrokeMathInk(visibleCtx, draftStroke, canvasW, canvasH, refWidth);
+    drawPenStrokeInk(visibleCtx, draftStroke, canvasW, canvasH, refWidth, preset);
   }
 }
 
@@ -113,6 +120,7 @@ export function appendDraftStrokeSegment(
   canvasW: number,
   canvasH: number,
   refWidth: number,
+  preset: InkPresetId = 'math',
 ): number {
   const points = stroke.points;
   if (points.length === 0) return paintedPointCount;
@@ -169,6 +177,7 @@ export function appendDraftStrokeSegment(
       refWidth,
       prev,
       p,
+      preset,
     );
     visibleCtx.stroke();
   }
