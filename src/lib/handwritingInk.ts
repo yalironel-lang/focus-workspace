@@ -205,5 +205,5 @@ export function drawPenStrokeMathInk(
   drawPenStrokeInk(ctx, stroke, canvasW, canvasH, refWidth, 'math');
 }
 
-/** Alias — draft and commit use identical visual path when fwInkDraftMode=ink. */
+/** Commit uses perfect-freehand; live draft mode is controlled by fwInkDraftMode. */
 export const drawDraftPenStrokeMathInk = drawPenStrokeMathInk;

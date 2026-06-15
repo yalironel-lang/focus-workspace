@@ -1,23 +1,25 @@
 /**
- * Draft pen renderer mode — stroke continuity (PR-1).
- * Safari console rollback: localStorage.setItem('fwInkDraftMode', 'polyline'); location.reload();
- * Default: ink (shared perfect-freehand path for live + committed strokes).
+ * Draft pen renderer mode.
+ * Default: incremental (fast tail segments live; perfect-freehand on pen-up).
+ * Rollback: localStorage.setItem('fwInkDraftMode', 'ink' | 'polyline'); location.reload();
  */
 
-export type FwInkDraftMode = 'ink' | 'polyline';
+export type FwInkDraftMode = 'incremental' | 'ink' | 'polyline';
 
 export const FW_INK_DRAFT_MODE_KEY = 'fwInkDraftMode';
 
 export function parseFwInkDraftMode(raw: string | null | undefined): FwInkDraftMode {
-  return raw === 'polyline' ? 'polyline' : 'ink';
+  if (raw === 'ink') return 'ink';
+  if (raw === 'polyline') return 'polyline';
+  return 'incremental';
 }
 
 export function getFwInkDraftMode(): FwInkDraftMode {
-  if (typeof window === 'undefined') return 'ink';
+  if (typeof window === 'undefined') return 'incremental';
   try {
     return parseFwInkDraftMode(window.localStorage.getItem(FW_INK_DRAFT_MODE_KEY));
   } catch {
-    return 'ink';
+    return 'incremental';
   }
 }
 

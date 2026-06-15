@@ -243,6 +243,7 @@ export function HandwritingBlock({
   const schedulePaintRef = useRef<() => void>(() => undefined);
   const commitCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const draftPaintedCountRef = useRef(0);
+  const draftReplayRef = useRef(false);
   const commitCacheValidRef = useRef(false);
   const commitCacheStrokeCountRef = useRef(0);
 
@@ -440,12 +441,16 @@ export function HandwritingBlock({
       commitCacheStrokeCountRef.current = data.strokes.length;
     }
 
-    const inkDraftPen = draft.tool === 'pen' && usesInkDraftPenRenderer();
-    if (inkDraftPen) {
+    const inkDraftFull = draft.tool === 'pen' && usesInkDraftPenRenderer();
+    if (inkDraftFull) {
       paintDraftPenInkLayer(visibleCtx, commitCanvas, draft, w, h, refW, inkPreset);
       draftPaintedCountRef.current = draft.points.length;
     } else {
-      if (draftPaintedCountRef.current === 0) {
+      if (draftReplayRef.current) {
+        draftReplayRef.current = false;
+        blitCommitLayer(visibleCtx, commitCanvas, w, h);
+        draftPaintedCountRef.current = 0;
+      } else if (draftPaintedCountRef.current === 0) {
         blitCommitLayer(visibleCtx, commitCanvas, w, h);
       }
 
@@ -462,9 +467,9 @@ export function HandwritingBlock({
 
     if (isPageInkBlock) {
       recordPageInkRenderState({
-        lastPaintStatus: inkDraftPen
+        lastPaintStatus: inkDraftFull
           ? `draft-ink pts=${draft.points.length} mode=${getFwInkDraftMode()}`
-          : `draft-append pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
+          : `draft-${getFwInkDraftMode()} pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }
@@ -1021,6 +1026,7 @@ export function HandwritingBlock({
         points: [pt],
       };
       draftPaintedCountRef.current = 0;
+      draftReplayRef.current = false;
       recordHandwritingStrokePointAppended(pt.pressure);
       paintDraftNow();
       onDrawingChange?.(true);
@@ -1133,7 +1139,11 @@ export function HandwritingBlock({
       }
     }
     if (pressureMerged) {
-      draftPaintedCountRef.current = Math.max(0, draftPaintedCountRef.current - 1);
+      if (getFwInkDraftMode() === 'incremental') {
+        draftReplayRef.current = true;
+      } else {
+        draftPaintedCountRef.current = Math.max(0, draftPaintedCountRef.current - 1);
+      }
     }
     draftRef.current = { ...draftRef.current, points };
     paintDraftNow();

@@ -12,7 +12,7 @@ import {
 import { strokesAfterEraser, clientToNormalized, isInkPointer, HW_INK_CANVAS_TOUCH_ACTION, HW_INK_CONTAINER_TOUCH_ACTION, appendPoint, mergeDroppedSamplePressure } from './handwritingGeometry';
 import { MATH_INK_PRESET, STUDY_INK_PRESET, STUDY_INK_COLOR, STUDY_PEN_WIDTH, strokeHasRealPressure, commitStrokeSizePx, draftPenLineWidthPx, draftPenSegmentLineWidthPx } from './handwritingInk';
 import { isCoalescedBatchSafe } from './handwritingPointerSamples';
-import { nextDraftPaintedCount, usesInkDraftPenRenderer } from './handwritingLayers';
+import { nextDraftPaintedCount, usesIncrementalDraftPenRenderer, usesInkDraftPenRenderer } from './handwritingLayers';
 import {
   FW_INK_DRAFT_MODE_KEY,
   parseFwInkDraftMode,
@@ -125,13 +125,15 @@ assert(nextDraftPaintedCount(1, 0) === 1, 'draft cursor first point');
 assert(nextDraftPaintedCount(5, 1) === 5, 'draft cursor catches up to point count');
 assert(nextDraftPaintedCount(3, 3) === 3, 'draft cursor unchanged when caught up');
 
-// stroke continuity — ink draft mode default
-assert(parseFwInkDraftMode(null) === 'ink', 'fwInkDraftMode default ink');
-assert(parseFwInkDraftMode(undefined) === 'ink', 'fwInkDraftMode undefined is ink');
-assert(parseFwInkDraftMode('ink') === 'ink', 'fwInkDraftMode ink');
+// stroke continuity — incremental draft default (perfect-freehand on pen-up only)
+assert(parseFwInkDraftMode(null) === 'incremental', 'fwInkDraftMode default incremental');
+assert(parseFwInkDraftMode(undefined) === 'incremental', 'fwInkDraftMode undefined is incremental');
+assert(parseFwInkDraftMode('incremental') === 'incremental', 'fwInkDraftMode incremental');
+assert(parseFwInkDraftMode('ink') === 'ink', 'fwInkDraftMode ink rollback');
 assert(parseFwInkDraftMode('polyline') === 'polyline', 'fwInkDraftMode polyline rollback');
 assert(FW_INK_DRAFT_MODE_KEY === 'fwInkDraftMode', 'fwInkDraftMode storage key');
-assert(usesInkDraftPenRenderer() === true, 'usesInkDraftPenRenderer default ink in test env');
+assert(usesIncrementalDraftPenRenderer() === true, 'usesIncrementalDraftPenRenderer default in test env');
+assert(usesInkDraftPenRenderer() === false, 'usesInkDraftPenRenderer off unless ink rollback');
 
 // DPR coordinate expectation: logical size must be canvas.width/dpr, not canvas.width
 const dpr = 2;

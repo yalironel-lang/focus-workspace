@@ -1,11 +1,12 @@
 /**
  * Dual-layer handwriting rendering.
  * Commit layer: perfect-freehand per stroke, cached on hidden canvas.
- * Draft layer (fwInkDraftMode=ink): same renderer as commit on visible canvas.
- * Draft layer (fwInkDraftMode=polyline): legacy incremental polyline rollback.
+ * Draft incremental (default): ink-weight segments, blit commit once per stroke.
+ * Draft ink (rollback): full blit + perfect-freehand every move (PR-1).
+ * Draft polyline (rollback): legacy thin polyline segments.
  */
 
-import type { HandwritingStroke } from './handwritingTypes';
+import type { HandwritingPoint, HandwritingStroke } from './handwritingTypes';
 import {
   drawEraserStrokePolyline,
   drawPenStrokePolyline,
@@ -13,6 +14,7 @@ import {
 import { getFwInkDraftMode } from './handwritingInkDraftMode';
 import {
   drawPenStrokeInk,
+  draftPenLineWidthPx,
   draftPenSegmentLineWidthPx,
   type InkPresetId,
 } from './handwritingInk';
@@ -86,7 +88,7 @@ export function blitCommitLayer(
 }
 
 /**
- * Live pen draft using the same ink renderer as commit (stroke continuity).
+ * Live pen draft using the same ink renderer as commit (stroke continuity rollback).
  * Caller must ensure commit cache is up to date before calling.
  */
 export function paintDraftPenInkLayer(
@@ -104,13 +106,65 @@ export function paintDraftPenInkLayer(
   }
 }
 
+/** Full perfect-freehand redraw every pointermove (PR-1 rollback). */
 export function usesInkDraftPenRenderer(): boolean {
   return getFwInkDraftMode() === 'ink';
 }
 
+/** Fast ink-weight segment tail (production default). */
+export function usesIncrementalDraftPenRenderer(): boolean {
+  return getFwInkDraftMode() === 'incremental';
+}
+
+function drawIncrementalDraftPenDot(
+  ctx: CanvasRenderingContext2D,
+  stroke: HandwritingStroke,
+  point: HandwritingPoint,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+  preset: InkPresetId,
+): void {
+  const r =
+    draftPenLineWidthPx(stroke.width, canvasW, refWidth, point.pressure, preset) / 2;
+  ctx.beginPath();
+  ctx.fillStyle = stroke.color;
+  ctx.arc(point.x * canvasW, point.y * canvasH, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function strokeIncrementalDraftPenSegment(
+  ctx: CanvasRenderingContext2D,
+  stroke: HandwritingStroke,
+  from: HandwritingPoint,
+  to: HandwritingPoint,
+  canvasW: number,
+  canvasH: number,
+  refWidth: number,
+  preset: InkPresetId,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(from.x * canvasW, from.y * canvasH);
+  ctx.lineTo(to.x * canvasW, to.y * canvasH);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = draftPenSegmentLineWidthPx(
+    stroke.width,
+    canvasW,
+    canvasH,
+    refWidth,
+    from,
+    to,
+    preset,
+  );
+  ctx.stroke();
+}
+
 /**
  * Incremental draft on visible canvas.
- * Pen + fwInkDraftMode=ink: use paintDraftPenInkLayer instead (full blit + shared renderer).
+ * Pen + incremental: ink-weight segments (blit commit once at stroke start).
+ * Pen + ink: caller uses paintDraftPenInkLayer instead.
  * Returns the number of points now painted on the visible canvas.
  */
 export function appendDraftStrokeSegment(
@@ -140,46 +194,63 @@ export function appendDraftStrokeSegment(
     return points.length;
   }
 
-  if (points.length === 1 && paintedPointCount === 0) {
-    drawPenStrokePolyline(visibleCtx, stroke, canvasW, canvasH, refWidth);
-    return 1;
-  }
+  const incremental = getFwInkDraftMode() === 'incremental';
 
   if (points.length <= paintedPointCount) return paintedPointCount;
 
   if (paintedPointCount === 0) {
-    drawPenStrokePolyline(
-      visibleCtx,
-      { ...stroke, points: [points[0]!] },
-      canvasW,
-      canvasH,
-      refWidth,
-    );
+    const first = points[0]!;
+    if (incremental) {
+      drawIncrementalDraftPenDot(visibleCtx, stroke, first, canvasW, canvasH, refWidth, preset);
+    } else {
+      drawPenStrokePolyline(
+        visibleCtx,
+        { ...stroke, points: [first] },
+        canvasW,
+        canvasH,
+        refWidth,
+      );
+    }
     paintedPointCount = 1;
   }
 
   if (points.length <= paintedPointCount) return paintedPointCount;
 
   const startIdx = Math.max(1, paintedPointCount);
-  visibleCtx.lineCap = 'round';
-  visibleCtx.lineJoin = 'round';
-  visibleCtx.strokeStyle = stroke.color;
+  if (!incremental) {
+    visibleCtx.lineCap = 'round';
+    visibleCtx.lineJoin = 'round';
+    visibleCtx.strokeStyle = stroke.color;
+  }
   for (let i = startIdx; i < points.length; i++) {
     const prev = points[i - 1]!;
     const p = points[i]!;
-    visibleCtx.beginPath();
-    visibleCtx.moveTo(prev.x * canvasW, prev.y * canvasH);
-    visibleCtx.lineTo(p.x * canvasW, p.y * canvasH);
-    visibleCtx.lineWidth = draftPenSegmentLineWidthPx(
-      stroke.width,
-      canvasW,
-      canvasH,
-      refWidth,
-      prev,
-      p,
-      preset,
-    );
-    visibleCtx.stroke();
+    if (incremental) {
+      strokeIncrementalDraftPenSegment(
+        visibleCtx,
+        stroke,
+        prev,
+        p,
+        canvasW,
+        canvasH,
+        refWidth,
+        preset,
+      );
+    } else {
+      visibleCtx.beginPath();
+      visibleCtx.moveTo(prev.x * canvasW, prev.y * canvasH);
+      visibleCtx.lineTo(p.x * canvasW, p.y * canvasH);
+      visibleCtx.lineWidth = draftPenSegmentLineWidthPx(
+        stroke.width,
+        canvasW,
+        canvasH,
+        refWidth,
+        prev,
+        p,
+        preset,
+      );
+      visibleCtx.stroke();
+    }
   }
 
   return points.length;
