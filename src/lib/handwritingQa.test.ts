@@ -146,7 +146,9 @@ assert(MATH_INK_PRESET.streamline === 0.06, 'mathInk streamline');
 assert(MATH_INK_PRESET.thinning === 0.48, 'mathInk thinning');
 assert(MATH_INK_PRESET.sizeMultiplier === 1.08, 'mathInk size multiplier');
 
-// study ink presence — darker, heavier, smoother than math preset
+// study ink clarity — dark and heavier than math, but less blobby than presence pass
+assert(STUDY_INK_PRESET.smoothing === 0.18, 'study ink smoothing clarity-tuned');
+assert(STUDY_INK_PRESET.streamline === 0.12, 'study ink streamline clarity-tuned');
 assert(STUDY_INK_PRESET.smoothing > MATH_INK_PRESET.smoothing, 'study ink smoother than math');
 assert(STUDY_INK_PRESET.thinning < MATH_INK_PRESET.thinning, 'study ink more stable width');
 assert(STUDY_INK_PRESET.sizeMultiplier > MATH_INK_PRESET.sizeMultiplier, 'study ink heavier');

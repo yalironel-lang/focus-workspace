@@ -20,21 +20,21 @@ export const MATH_INK_PRESET = {
 
 /**
  * Study notebook — dark, confident, legible at arm's length (Ink Pages).
- * Optimized for "would I trust these notes before an exam?" not equation corners.
+ * Clarity-tuned: less smooth/streamline than presence pass to preserve letter separation.
  */
 export const STUDY_INK_PRESET = {
-  sizeMultiplier: 1.26,
-  thinning: 0.34,
-  smoothing: 0.5,
-  streamline: 0.38,
+  sizeMultiplier: 1.14,
+  thinning: 0.42,
+  smoothing: 0.18,
+  streamline: 0.12,
   defaultPressure: 0.58,
-  minSizePx: 2.75,
+  minSizePx: 2.5,
 } as const;
 
 /** Near-black pen on paper — not theme-muted UI text. */
 export const STUDY_INK_COLOR = '#141416';
 
-export const STUDY_PEN_WIDTH = 3.25;
+export const STUDY_PEN_WIDTH = 3.0;
 
 const INK_PRESETS = {
   math: MATH_INK_PRESET,
@@ -151,8 +151,8 @@ function inkStrokeOptions(
     streamline: p.streamline,
     simulatePressure: !strokeHasRealPressure(stroke),
     last: true,
-    start: subtleTaper ? { taper: 0.12, cap: true } : { taper: false, cap: true },
-    end: subtleTaper ? { taper: 0.18, cap: true } : { taper: false, cap: true },
+    start: subtleTaper ? { taper: 0.08, cap: true } : { taper: false, cap: true },
+    end: subtleTaper ? { taper: 0.12, cap: true } : { taper: false, cap: true },
   } as const;
 }
 
