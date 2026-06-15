@@ -4,6 +4,7 @@
  */
 
 import { getGitCommit } from './appBuildInfo';
+import { hwDiagActive } from './handwritingDiagnostics';
 
 export type CanvasRectSnap = {
   w: number;
@@ -111,6 +112,13 @@ export function recordHandwritingStrokePointerDown(
   pointerType: string,
   pressure: number,
 ): void {
+  // Gate hot-path recording: when inactive, `active` stays false so the
+  // per-move/per-sample recorders below short-circuit (no rect reads, no
+  // counters) in production. Re-enable at runtime with window.__fwHwDiag.
+  if (!hwDiagActive()) {
+    active = false;
+    return;
+  }
   resetHandwritingStrokeDiag();
   active = true;
   pointerTypes.add(pointerType);

@@ -34,6 +34,7 @@ const DEFAULTS: HwSpikeSettings = {
 };
 
 import { isHandwritingDevBuild } from './handwritingRenderMode';
+import { hwDiagActive } from './handwritingDiagnostics';
 
 function isDevBuild(): boolean {
   return isHandwritingDevBuild();
@@ -170,6 +171,7 @@ export function recordMovePick(
   usedCoalesced: boolean,
   fallbackReason?: string,
 ): void {
+  if (!hwDiagActive()) return;
   strokeStats.moveEvents += 1;
   strokeStats.rawSamples += batchSize;
   strokeStats.lastPick = { batchSize, usedCoalesced, fallbackReason };
@@ -180,6 +182,7 @@ export function recordMovePick(
 }
 
 export function recordPointAppended(): void {
+  if (!hwDiagActive()) return;
   strokeStats.appendedPoints += 1;
 }
 

@@ -159,18 +159,19 @@ export function canvasHasVisualScale(canvas: HTMLCanvasElement): boolean {
  * Map a pointer sample to normalized canvas coordinates.
  * clientX/clientY + getBoundingClientRect() is the single source of truth
  * (works for desk, free-space zoom, and Safari Apple Pencil).
+ *
+ * Pass `cachedRect` to reuse a rect captured once at stroke start instead of
+ * forcing a layout reflow per coalesced sample. The canvas rect is stable for
+ * the duration of a pen stroke (scroll is suppressed while drawing), so the
+ * cached rect yields identical coordinates to a fresh read.
  */
 export function pointerToNormalized(
   canvas: HTMLCanvasElement,
   e: Pick<PointerEvent, 'clientX' | 'clientY'>,
+  cachedRect?: DOMRect | null,
 ): HandwritingPoint | null {
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return null;
-
-  const localX = e.clientX - rect.left;
-  const localY = e.clientY - rect.top;
-
-  return { x: Math.max(0, Math.min(1, localX / rect.width)), y: Math.max(0, Math.min(1, localY / rect.height)) };
+  const rect = cachedRect ?? canvas.getBoundingClientRect();
+  return clientToNormalized(e.clientX, e.clientY, rect);
 }
 
 /** Production uses guarded coalesced batches; dev respects spike coalesced toggle. */

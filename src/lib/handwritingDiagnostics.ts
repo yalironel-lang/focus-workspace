@@ -10,6 +10,18 @@ export type HwDiagEntry = {
   data?: Record<string, unknown>;
 };
 
+/**
+ * Gate for hot-path diagnostic recording. Returns true in dev builds, or in
+ * production when QA opts in at runtime via `window.__fwHwDiag = true`.
+ * Production drawing does zero per-sample diagnostic work by default while all
+ * `window.__fwHw*` dump hooks stay available when enabled.
+ */
+export function hwDiagActive(): boolean {
+  const dev = typeof import.meta !== 'undefined' && !!import.meta.env?.DEV;
+  if (dev) return true;
+  return typeof window !== 'undefined' && window.__fwHwDiag === true;
+}
+
 const MAX_ENTRIES = 80;
 const buffer: HwDiagEntry[] = [];
 
@@ -51,6 +63,7 @@ export function hwDiagRecordPressure(
   pressure: number,
   pointerType: string,
 ): void {
+  if (!hwDiagActive()) return;
   if (!Number.isFinite(pressure)) return;
   pressureSession.samples += 1;
   pressureSession.lastPointerType = pointerType;
@@ -83,6 +96,8 @@ export function hwDiagResetPressureSession(): void {
 
 declare global {
   interface Window {
+    /** Opt in to hot-path handwriting diagnostics in production builds. */
+    __fwHwDiag?: boolean;
     __fwHwDiagDump?: () => HwDiagEntry[];
     __fwHwPressureSummary?: () => ReturnType<typeof hwDiagPressureSummary>;
     __fwHwSamplingDump?: () => HwSamplingStrokeSummary[];
@@ -158,6 +173,7 @@ export function hwDiagRecordSamplingPick(
   usedCoalesced: boolean,
   fallbackReason?: string,
 ): void {
+  if (!hwDiagActive()) return;
   strokeSampling.moveEvents += 1;
   strokeSampling.rawSamples += batchSize;
   strokeSampling.lastPick = { batchSize, usedCoalesced, fallbackReason };

@@ -2,7 +2,7 @@
  * Safer coalesced pointer sampling for handwriting input fidelity.
  */
 
-import { hwDiagLog } from './handwritingDiagnostics';
+import { hwDiagActive, hwDiagLog } from './handwritingDiagnostics';
 import { hwSpikeLog, recordMovePick } from './handwritingSpikeDebug';
 
 const MAX_COALESCED_BATCH = 64;
@@ -140,6 +140,7 @@ export function hwPointerSamplingStats(): {
 }
 
 export function recordPointerSamplePick(result: PointerSamplePickResult): void {
+  if (!hwDiagActive()) return;
   if (result.usedCoalesced) {
     coalescedUseCount += 1;
     if (coalescedUseCount <= 3 || coalescedUseCount % 50 === 0) {

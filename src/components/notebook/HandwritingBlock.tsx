@@ -18,6 +18,7 @@ import {
 import toast from 'react-hot-toast';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
+  hwDiagActive,
   hwDiagLog,
   hwDiagPressureSummary,
   hwDiagFinishStrokeSampling,
@@ -231,6 +232,8 @@ export function HandwritingBlock({
   const saveChainRef = useRef(Promise.resolve(true));
   const layoutRef = useRef({ w: 1, h: DEFAULT_CANVAS_MIN_HEIGHT });
   const pointerCaptureRef = useRef<{ id: number; target: HTMLCanvasElement } | null>(null);
+  /** Canvas rect captured once at stroke start; reused per coalesced sample to avoid per-sample layout reflow. */
+  const strokeRectRef = useRef<DOMRect | null>(null);
   const fingerScrollRef = useRef<{
     pointerId: number;
     lastY: number;
@@ -420,8 +423,9 @@ export function HandwritingBlock({
     const draft = draftRef.current;
     if (!canvas || !data || !draft) return;
 
-    const paintT0 = performance.now();
-    const prevPainted = draftPaintedCountRef.current;
+    const diagOn = hwDiagActive();
+    const paintT0 = diagOn ? performance.now() : 0;
+    const prevPainted = diagOn ? draftPaintedCountRef.current : 0;
 
     const synced = syncCanvasFromRect(canvas, { allowResize: false });
     if (!synced) return;
@@ -469,22 +473,24 @@ export function HandwritingBlock({
       );
     }
 
-    hwPaintProfileRecord({
-      paintMs: performance.now() - paintT0,
-      segmentsDrawn: inkDraftFull
-        ? 1
-        : Math.max(0, draftPaintedCountRef.current - prevPainted),
-      pointsProcessed: draft.points.length,
-      draftMode: getFwInkDraftMode(),
-    });
-
-    if (isPageInkBlock) {
-      recordPageInkRenderState({
-        lastPaintStatus: inkDraftFull
-          ? `draft-ink pts=${draft.points.length} mode=${getFwInkDraftMode()}`
-          : `draft-${getFwInkDraftMode()} pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
-        canvasSizeAtRedraw: formatCanvasSize(canvas),
+    if (diagOn) {
+      hwPaintProfileRecord({
+        paintMs: performance.now() - paintT0,
+        segmentsDrawn: inkDraftFull
+          ? 1
+          : Math.max(0, draftPaintedCountRef.current - prevPainted),
+        pointsProcessed: draft.points.length,
+        draftMode: getFwInkDraftMode(),
       });
+
+      if (isPageInkBlock) {
+        recordPageInkRenderState({
+          lastPaintStatus: inkDraftFull
+            ? `draft-ink pts=${draft.points.length} mode=${getFwInkDraftMode()}`
+            : `draft-${getFwInkDraftMode()} pts=${draft.points.length} painted=${draftPaintedCountRef.current}`,
+          canvasSizeAtRedraw: formatCanvasSize(canvas),
+        });
+      }
     }
   }, [ensureCommitCanvas, isPageInkBlock, inkPreset]);
 
@@ -996,8 +1002,9 @@ export function HandwritingBlock({
       resetStrokeSampleStats();
       recordPointAppended();
       const rect = canvas.getBoundingClientRect();
+      strokeRectRef.current = rect;
       logPointerCoordinateSample(canvas, sample, 'down');
-      const pt = pointerToNormalized(canvas, sample);
+      const pt = pointerToNormalized(canvas, sample, rect);
       if (!pt) return;
       const expectedDrawY = pt.y * rect.height;
       if (hwDebugEnabled()) {
@@ -1124,7 +1131,7 @@ export function HandwritingBlock({
     );
     const samples: HandwritingPoint[] = [];
     for (const ev of pick.events) {
-      const pt = pointerToNormalized(canvas, ev);
+      const pt = pointerToNormalized(canvas, ev, strokeRectRef.current);
       if (!pt) continue;
       if (ev.pressure > 0) {
         pt.pressure = ev.pressure;
