@@ -14,6 +14,7 @@ import {
   initServiceWorkerUpdateChecks,
   shouldReloadAfterServiceWorkerUpdate,
 } from './lib/serviceWorkerUpdate'
+import { hasAuthCallbackInUrl } from './lib/authCallback'
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
 
 logAppBuildInfo()
@@ -57,6 +58,8 @@ if ('serviceWorker' in navigator) {
     // Cleared automatically on reload (new page instance, flag = false).
     if ((window as Window & { __swRefreshing?: boolean }).__swRefreshing) return
     if (!shouldReloadAfterServiceWorkerUpdate()) return
+    // Never reload mid-OAuth — would discard PKCE code / hash before Supabase exchanges it.
+    if (hasAuthCallbackInUrl()) return
 
     const reload = () => {
       ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true
