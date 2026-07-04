@@ -31,3 +31,16 @@ export async function flushAllHandwritingForObject(objectId: string): Promise<bo
   }
   return allOk;
 }
+
+/** Flush every registered handwriting surface (SW reload / tab hide). */
+export async function flushAllRegisteredHandwriting(): Promise<boolean> {
+  if (byObject.size === 0) return true;
+  let allOk = true;
+  for (const set of byObject.values()) {
+    for (const fn of set) {
+      const ok = await fn().catch(() => false);
+      if (!ok) allOk = false;
+    }
+  }
+  return allOk;
+}

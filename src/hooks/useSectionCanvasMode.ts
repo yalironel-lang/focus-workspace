@@ -1,15 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ZOOM_MIN, ZOOM_MAX } from './useCanvasMode';
 import { fwPersistWarn, sanitizePrefs, sanitizeViewport, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
+import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
+import { mergeViewport, parseFreeSpaceStorageKey, type PersistedViewport } from '../lib/freeSpaceLocalMerge';
+import { tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
+import { markSavePending, recordStorageConflict } from '../lib/saveStatus';
 
 export const SECTION_ZOOM_STEP = 0.1;
 export const SECTION_DEFAULT_GRID_SIZE = 24;
-
-interface PersistedViewport {
-  zoom: number;
-  panX: number;
-  panY: number;
-}
 
 interface PersistedPrefs {
   snapToGrid: boolean;
@@ -78,18 +76,16 @@ function loadPrefs(sectionId: string, boardId = ''): PersistedPrefs {
   }
 }
 
-function saveViewport(sectionId: string, boardId: string, v: PersistedViewport): void {
-  if (!sectionId) return;
-  try {
-    localStorage.setItem(viewportKey(sectionId, boardId), JSON.stringify(v));
-  } catch { /* quota */ }
+function persistViewportMerged(sectionId: string, boardId: string, pending: PersistedViewport): boolean {
+  if (!sectionId) return false;
+  const disk = loadViewport(sectionId, boardId);
+  const merged = mergeViewport(disk, pending);
+  return tryPersistLocalStorage(viewportKey(sectionId, boardId), JSON.stringify(merged), 'freeSpaceViewport');
 }
 
 function savePrefs(sectionId: string, boardId: string, p: PersistedPrefs): void {
   if (!sectionId) return;
-  try {
-    localStorage.setItem(prefsKey(sectionId, boardId), JSON.stringify(p));
-  } catch { /* quota */ }
+  tryPersistLocalStorage(prefsKey(sectionId, boardId), JSON.stringify(p), 'freeSpacePrefs');
 }
 
 export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCanvasState {
@@ -102,9 +98,41 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
   const [gridSize, setGridSize] = useState(initialPrefs.gridSize);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = useRef<PersistedViewport>({ zoom, panX, panY });
+  const pendingPersistRef = useRef<{
+    sectionId: string;
+    boardId: string;
+    viewport: PersistedViewport;
+  } | null>(null);
+
+  const flushViewport = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingPersistRef.current;
+    if (!pending) return;
+    if (persistViewportMerged(pending.sectionId, pending.boardId, pending.viewport)) {
+      pendingPersistRef.current = null;
+    }
+  }, []);
+
+  const scheduleViewportPersist = useCallback((v: PersistedViewport, sid: string, bid: string) => {
+    if (!sid) return;
+    pendingPersistRef.current = { sectionId: sid, boardId: bid, viewport: v };
+    markSavePending('freeSpaceViewport');
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      const pending = pendingPersistRef.current;
+      if (!pending) return;
+      if (persistViewportMerged(pending.sectionId, pending.boardId, pending.viewport)) {
+        pendingPersistRef.current = null;
+      }
+    }, 300);
+  }, []);
 
   useEffect(() => {
+    flushViewport();
     const v = loadViewport(sectionId, boardId);
     const p = loadPrefs(sectionId, boardId);
     setZoomRaw(v.zoom);
@@ -112,16 +140,36 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
     setPanYRaw(v.panY);
     setSnapToGrid(p.snapToGrid);
     setGridSize(p.gridSize);
+  }, [sectionId, boardId, flushViewport]);
+
+  useEffect(() => {
+    if (!sectionId) return;
+    const storageKey = viewportKey(sectionId, boardId);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== storageKey || e.newValue == null) return;
+      if (!parseFreeSpaceStorageKey(storageKey)) return;
+      try {
+        const parsed: unknown = JSON.parse(e.newValue);
+        const s = sanitizeViewport(parsed, sectionId, VIEW_DEFAULTS);
+        const remote = { zoom: s.zoom, panX: s.panX, panY: s.panY };
+        setZoomRaw(prev => remote.zoom ?? prev);
+        setPanXRaw(prev => remote.panX ?? prev);
+        setPanYRaw(prev => remote.panY ?? prev);
+        pendingPersistRef.current = { sectionId, boardId, viewport: remote };
+      } catch {
+        recordStorageConflict(`Could not merge viewport from storage event for "${storageKey}"`);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [sectionId, boardId]);
 
   useEffect(() => {
-    pendingRef.current = { zoom, panX, panY };
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => saveViewport(sectionId, boardId, pendingRef.current), 300);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [sectionId, boardId, zoom, panX, panY]);
+    scheduleViewportPersist({ zoom, panX, panY }, sectionId, boardId);
+    return () => flushViewport();
+  }, [sectionId, boardId, zoom, panX, panY, scheduleViewportPersist, flushViewport]);
+
+  useEffect(() => registerFreeSpacePersistFlush(flushViewport), [flushViewport]);
 
   useEffect(() => {
     savePrefs(sectionId, boardId, { snapToGrid, gridSize });

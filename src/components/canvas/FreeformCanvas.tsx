@@ -102,6 +102,7 @@ import { getFocusTier, tierToPresentation, type FreeSpaceBlockLite } from '../..
 import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/freeSpaceSemanticClusters';
 import { resolveFreeSpaceMaterialTier } from '../../lib/freeSpaceMaterials';
 import { isAcceptablePdfFile } from '../../lib/freeSpacePdfIdb';
+import { registerFreeSpaceDragCommit } from '../../lib/freeSpaceDragCommit';
 import { isAcceptableImageFile } from '../../lib/freeSpaceImageIdb';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 import { flickerDebugCount } from '../../lib/flickerDebug';
@@ -446,6 +447,7 @@ export function FreeformCanvas({
   const viewportRef  = useRef<HTMLDivElement>(null);
   const worldRef     = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
+  const dragPersistThrottleRef = useRef(0);
   const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
 
@@ -1205,12 +1207,36 @@ export function FreeformCanvas({
     };
   }, []);
 
+  const commitInFlightDragState = useCallback(() => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (drag.type === 'block-move' && drag.blockId != null && drag.moveStarted) {
+      onSetPos(drag.blockId, {
+        x: drag.currentBlockX ?? drag.startBlockX ?? 0,
+        y: drag.currentBlockY ?? drag.startBlockY ?? 0,
+      });
+    } else if (drag.type === 'block-resize' && drag.blockId != null && drag.resizeStarted) {
+      onSetPos(drag.blockId, {
+        w: drag.currentBlockW ?? drag.startBlockW ?? 340,
+        h: drag.currentBlockH ?? drag.startBlockH ?? 200,
+      });
+    } else if (drag.type === 'canvas' && drag.panStarted) {
+      setPan(
+        drag.currentPanX ?? liveViewRef.current.panX,
+        drag.currentPanY ?? liveViewRef.current.panY,
+      );
+    }
+  }, [onSetPos, setPan]);
+
+  useEffect(() => registerFreeSpaceDragCommit(commitInFlightDragState), [commitInFlightDragState]);
+
   // Attach global mousemove/mouseup on mount (avoids losing drag on fast moves)
   useEffect(() => {
     const applyDragMove = (clientX: number, clientY: number) => {
       const drag = dragRef.current;
       if (!drag) return;
 
+      const now = performance.now();
       const dx = clientX - drag.startMouseX;
       const dy = clientY - drag.startMouseY;
 
@@ -1239,10 +1265,14 @@ export function FreeformCanvas({
         drag.currentPanX = newPanX;
         drag.currentPanY = newPanY;
 
+        if (now - dragPersistThrottleRef.current >= 200) {
+          dragPersistThrottleRef.current = now;
+          setPan(newPanX, newPanY);
+        }
+
         // ── EMA velocity smoothing ────────────────────────────────────
         // Exponential moving average reduces jitter in instantaneous velocity
         // readings, giving momentum a smoother, more predictable character.
-        const now = performance.now();
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
           if (dt > 0 && dt < 50) {
@@ -1281,7 +1311,6 @@ export function FreeformCanvas({
           blockEl.style.top  = `${newY}px`;
         }
 
-        const now = performance.now();
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
           if (dt > 0 && dt < 50) {
@@ -1297,6 +1326,11 @@ export function FreeformCanvas({
         drag.lastT = now;
         drag.currentBlockX = newX;
         drag.currentBlockY = newY;
+
+        if (now - dragPersistThrottleRef.current >= 200) {
+          dragPersistThrottleRef.current = now;
+          onSetPos(drag.blockId, { x: newX, y: newY });
+        }
 
       } else if (drag.type === 'block-resize' && drag.blockId != null) {
         const worldDx = dx / zoom;
@@ -1321,6 +1355,11 @@ export function FreeformCanvas({
         }
         drag.currentBlockW = newW;
         drag.currentBlockH = newH;
+
+        if (now - dragPersistThrottleRef.current >= 200) {
+          dragPersistThrottleRef.current = now;
+          onSetPos(drag.blockId, { w: newW, h: newH });
+        }
       }
     };
 

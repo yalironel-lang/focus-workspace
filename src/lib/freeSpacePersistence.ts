@@ -59,13 +59,31 @@ export function clearFreeSpacePersistenceForSection(sectionId: string): void {
     fwPersistWarn('clearFreeSpacePersistenceForSection: missing sectionId; nothing cleared.');
     return;
   }
-  const k = freeSpaceStorageKeys(sectionId);
+  const prefix = `fw_section_${sectionId}`;
+  const keysToRemove: string[] = [];
   try {
-    localStorage.removeItem(k.objects);
-    localStorage.removeItem(k.positions);
-    localStorage.removeItem(k.viewport);
-    localStorage.removeItem(k.prefs);
-    fwPersistWarn(`Cleared Free Space storage keys for section "${sectionId}". Reload the page to reset in-memory state.`);
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix)) continue;
+      if (
+        k.endsWith('_free_space_objects_v1') ||
+        k.endsWith('_free_space_positions_v1') ||
+        k.endsWith('_free_space_viewport_v1') ||
+        k.endsWith('_free_space_prefs_v1') ||
+        k.endsWith('_objects_v1') ||
+        k.endsWith('_positions_v1') ||
+        k.endsWith('_viewport_v1') ||
+        k.endsWith('_prefs_v1') ||
+        k === sectionBoardsListKey(sectionId) ||
+        k === sectionActiveBoardKey(sectionId)
+      ) {
+        keysToRemove.push(k);
+      }
+    }
+    for (const k of keysToRemove) localStorage.removeItem(k);
+    fwPersistWarn(
+      `Cleared ${keysToRemove.length} Free Space storage key(s) for section "${sectionId}". Reload the page to reset in-memory state.`,
+    );
   } catch (e) {
     fwPersistWarn(`Failed to clear Free Space storage: ${String(e)}`);
   }

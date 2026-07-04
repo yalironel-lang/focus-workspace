@@ -2,6 +2,10 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
 import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
+import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
+import { mergePositionMaps, parseFreeSpaceStorageKey } from '../lib/freeSpaceLocalMerge';
+import { tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
+import { markSavePending, recordStorageConflict } from '../lib/saveStatus';
 
 function key(sectionId: string, boardId = ''): string {
   return boardScopedFreeSpaceKeys(sectionId, boardId).positions;
@@ -30,9 +34,11 @@ function load(sectionId: string, boardId = ''): PositionMap {
   }
 }
 
-function persist(sectionId: string, boardId: string, m: PositionMap): void {
-  if (!sectionId) return;
-  try { localStorage.setItem(key(sectionId, boardId), JSON.stringify(m)); } catch { /* quota */ }
+function persistMerged(sectionId: string, boardId: string, pending: PositionMap): boolean {
+  if (!sectionId) return false;
+  const disk = load(sectionId, boardId);
+  const merged = mergePositionMaps(disk, pending);
+  return tryPersistLocalStorage(key(sectionId, boardId), JSON.stringify(merged), 'freeSpacePositions');
 }
 
 const makeDefault = (hint?: Partial<BlockPos>): BlockPos => ({
@@ -46,10 +52,8 @@ const makeDefault = (hint?: Partial<BlockPos>): BlockPos => ({
 export interface SectionBlockPositionsState {
   positions: PositionMap;
   setPos: (id: string, pos: Partial<BlockPos>) => void;
-  /** Apply many positions at once (e.g. spatial templates). Merges with existing map. */
   applyPositions: (patches: Record<string, BlockPos> | null | undefined) => void;
   initPos: (id: string, hint?: Partial<BlockPos>) => void;
-  /** Ensures every listed id has a position (single batched write). Recovers from missing/cleared position maps. */
   seedMissingPositions: (ids: string[]) => void;
   removePos: (id: string) => void;
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
@@ -67,20 +71,32 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     }
     const pending = pendingPersistRef.current;
     if (!pending) return;
-    pendingPersistRef.current = null;
-    persist(pending.sectionId, pending.boardId, pending.positions);
+    if (persistMerged(pending.sectionId, pending.boardId, pending.positions)) {
+      pendingPersistRef.current = null;
+    }
   }, []);
 
-  const schedulePersist = useCallback((next: PositionMap, targetSectionId: string, targetBoardId: string) => {
+  const writePositions = useCallback((
+    next: PositionMap,
+    targetSectionId: string,
+    targetBoardId: string,
+    immediate = false,
+  ) => {
     if (!targetSectionId) return;
     pendingPersistRef.current = { sectionId: targetSectionId, boardId: targetBoardId, positions: next };
+    markSavePending('freeSpacePositions');
+    if (immediate && persistMerged(targetSectionId, targetBoardId, next)) {
+      pendingPersistRef.current = null;
+      return;
+    }
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
-      const pending = pendingPersistRef.current;
       persistTimerRef.current = null;
-      if (!pending) return;
-      pendingPersistRef.current = null;
-      persist(pending.sectionId, pending.boardId, pending.positions);
+      const p = pendingPersistRef.current;
+      if (!p) return;
+      if (persistMerged(p.sectionId, p.boardId, p.positions)) {
+        pendingPersistRef.current = null;
+      }
     }, 120);
   }, []);
 
@@ -89,7 +105,31 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     setPositions(load(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
 
+  useEffect(() => {
+    if (!sectionId) return;
+    const storageKey = key(sectionId, boardId);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== storageKey || e.newValue == null) return;
+      if (!parseFreeSpaceStorageKey(storageKey)) return;
+      try {
+        const parsed: unknown = JSON.parse(e.newValue);
+        const { map } = sanitizePositionMap(parsed, sectionId);
+        setPositions(prev => {
+          const merged = { ...map, ...prev };
+          pendingPersistRef.current = { sectionId, boardId, positions: merged };
+          return merged;
+        });
+      } catch {
+        recordStorageConflict(`Could not merge positions from storage event for "${storageKey}"`);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [sectionId, boardId]);
+
   useEffect(() => () => flushPersist(), [flushPersist]);
+
+  useEffect(() => registerFreeSpacePersistFlush(flushPersist), [flushPersist]);
 
   const setPos = useCallback((id: string, patch: Partial<BlockPos>) => {
     setPositions(prev => {
@@ -98,10 +138,10 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
         ...prev,
         [id]: sanitizeBlockPos(merged),
       };
-      schedulePersist(next, sectionId, boardId);
+      writePositions(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [writePositions, sectionId, boardId]);
 
   const applyPositions = useCallback((patches: Record<string, BlockPos> | null | undefined) => {
     if (!patches || typeof patches !== 'object') return;
@@ -112,19 +152,19 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
         const merged = sanitizeBlockPos({ ...(prev[id] ?? makeDefault()), ...pos });
         next[id] = merged;
       }
-      schedulePersist(next, sectionId, boardId);
+      writePositions(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [writePositions, sectionId, boardId]);
 
   const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
     setPositions(prev => {
       if (prev[id]) return prev;
       const next: PositionMap = { ...prev, [id]: sanitizeBlockPos(makeDefault(hint)) };
-      schedulePersist(next, sectionId, boardId);
+      writePositions(next, sectionId, boardId, true);
       return next;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [writePositions, sectionId, boardId]);
 
   const seedMissingPositions = useCallback((ids: string[]) => {
     if (!sectionId || !ids.length) return;
@@ -151,18 +191,18 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
         changed = true;
       }
       if (!changed) return prev;
-      schedulePersist(next, sectionId, boardId);
+      writePositions(next, sectionId, boardId);
       return next;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [writePositions, sectionId, boardId]);
 
   const removePos = useCallback((id: string) => {
     setPositions(prev => {
       const { [id]: _removed, ...rest } = prev;
-      schedulePersist(rest, sectionId, boardId);
+      writePositions(rest, sectionId, boardId);
       return rest;
     });
-  }, [schedulePersist, sectionId, boardId]);
+  }, [writePositions, sectionId, boardId]);
 
   const nextFreePos = useCallback((existingMap?: PositionMap): { x: number; y: number } => {
     const map = existingMap ?? positions;
@@ -178,8 +218,6 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     return { x, y };
   }, [positions]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(() => ({ positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos }),
     [positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos]);
 }
-

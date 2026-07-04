@@ -8,7 +8,10 @@ import { installFwInkDraftModeDiag } from './lib/handwritingInkDraftMode'
 import { installHwPaintProfile } from './lib/handwritingPaintProfile'
 import { persistQaModeFromUrl } from './lib/qaMode'
 import { QaBuildOverlay } from './components/qa/QaBuildOverlay'
-import { flushAllFreeSpacePersistence } from './lib/freeSpacePersistFlush'
+import { flushAllPersistenceBeforeUnload, awaitAllPersistenceFlush } from './lib/freeSpacePersistFlush'
+import './lib/saveDiagnostics'
+import './lib/indexedDbEnvironment'
+import './lib/pdfUploadDiag'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
 import {
   initServiceWorkerUpdateChecks,
@@ -26,6 +29,15 @@ if (typeof window !== 'undefined') {
 initPerformanceSafeModeListeners()
 suppressVercelToolbar()
 initServiceWorkerUpdateChecks()
+
+if (typeof window !== 'undefined') {
+  const onHideOrUnload = () => {
+    if (document.visibilityState === 'hidden') flushAllPersistenceBeforeUnload();
+  };
+  document.addEventListener('visibilitychange', onHideOrUnload);
+  window.addEventListener('pagehide', () => flushAllPersistenceBeforeUnload());
+  window.addEventListener('beforeunload', () => flushAllPersistenceBeforeUnload());
+}
 
 // ── Service Worker update lifecycle ──────────────────────────────────────────
 //
@@ -63,15 +75,16 @@ if ('serviceWorker' in navigator) {
 
     const reload = () => {
       ;(window as Window & { __swRefreshing?: boolean }).__swRefreshing = true
-      flushAllFreeSpacePersistence()
-      if (import.meta.env.DEV) {
-        console.info('[SW] Controller changed — reloading to pick up new assets')
-      }
-      window.location.reload()
+      void awaitAllPersistenceFlush().finally(() => {
+        if (import.meta.env.DEV) {
+          console.info('[SW] Controller changed — reloading to pick up new assets')
+        }
+        window.location.reload()
+      })
     }
 
     const flushOnHide = () => {
-      if (document.visibilityState === 'hidden') flushAllFreeSpacePersistence()
+      if (document.visibilityState === 'hidden') flushAllPersistenceBeforeUnload()
     }
     document.addEventListener('visibilitychange', flushOnHide)
 

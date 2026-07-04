@@ -16,6 +16,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlobFromFile } from '../../lib/freeSpacePdfIdb';
+import { loadPdfThumbnail } from '../../lib/freeSpacePdfThumbIdb';
 import { pdfUploadDiag, pdfUploadDiagDump } from '../../lib/pdfUploadDiag';
 import { flickerDebugLog } from '../../lib/flickerDebug';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
@@ -101,6 +102,7 @@ export function FreeSpacePdfCard({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [idbThumbnail, setIdbThumbnail] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'recover' | 'error'>('idle');
   const [dragOver, setDragOver] = useState(false);
   const mounted = useRef(true);
@@ -112,6 +114,23 @@ export function FreeSpacePdfCard({
       mounted.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const inline = content.thumbnailDataUrl;
+    if (inline) {
+      setIdbThumbnail(inline);
+      return;
+    }
+    void loadPdfThumbnail(sectionId, objectId).then(url => {
+      if (!cancelled) setIdbThumbnail(url ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sectionId, objectId, content.thumbnailDataUrl]);
+
+  const thumbSrc = content.thumbnailDataUrl ?? idbThumbnail;
 
   const revokeIf = useCallback((url: string | null) => {
     if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
@@ -745,10 +764,10 @@ export function FreeSpacePdfCard({
             className="absolute inset-0 flex items-center justify-center overflow-hidden"
             style={{ backgroundColor: tokens.wellBg }}
           >
-            {content.thumbnailDataUrl ? (
+            {thumbSrc ? (
               /* Thumbnail — first page preview at rest, no label, no decoration */
               <img
-                src={content.thumbnailDataUrl}
+                src={thumbSrc}
                 alt=""
                 aria-hidden
                 style={{

@@ -7,6 +7,7 @@
 import { hwDiagLog } from './handwritingDiagnostics';
 import { getIndexedDB, probeIndexedDbEnvironment } from './indexedDbEnvironment';
 import { fwPersistWarn } from './freeSpacePersistence';
+import { markSaveError, markSaveOk, markSavePending } from './saveStatus';
 import {
   recordPageInkDbState,
   recordPageInkHwGet,
@@ -662,6 +663,7 @@ export async function hwSet(
 
   const storageKey = makeHandwritingStorageKey(objectId, blockKey);
   const isPageInk = isNotebookPageInkKey(blockKey);
+  markSavePending('handwriting');
   probePageInkPersistOnce(isPageInk);
   const payloadSummary = {
     objectId,
@@ -747,9 +749,11 @@ export async function hwSet(
         cache.set(storageKey, toStore);
       }
     }
+    markSaveOk('handwriting');
     return { ok: true, reachedIdb: backend === 'idb', verifyMismatch: verifyMismatch || undefined };
   } catch (e) {
     const err = serializeIdbError(e);
+    markSaveError('handwriting', err.message);
     const backend = activePersistBackend;
     hwDiagLog('notebookHandwritingStore.ts:hwSet', 'persist put failed', {
       ...payloadSummary,

@@ -5,6 +5,14 @@ import { copyPdfBlob } from '../lib/freeSpacePdfIdb';
 import { copyPdfStudyMarks } from '../lib/pdfStudyMarks/pdfStudyMarksIdb';
 import { copyImageBlob } from '../lib/freeSpaceImageIdb';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
+import { mergeFreeSpaceObjects, parseFreeSpaceStorageKey } from '../lib/freeSpaceLocalMerge';
+import { recordMergeConflicts, tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
+import {
+  copyPdfThumbnail,
+  migrateInlinePdfThumbnail,
+  stripPdfThumbnailsFromObjects,
+} from '../lib/freeSpacePdfThumbIdb';
+import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
@@ -779,11 +787,23 @@ function load(sectionId: string, boardId = ''): ProjectSpaceObject[] {
   }
 }
 
-function persist(sectionId: string, boardId: string, objects: ProjectSpaceObject[]): void {
-  if (!sectionId) return;
-  try {
-    localStorage.setItem(key(sectionId, boardId), JSON.stringify(objects));
-  } catch { /* quota */ }
+function persistMerged(sectionId: string, boardId: string, objects: ProjectSpaceObject[]): boolean {
+  if (!sectionId) return false;
+  const disk = load(sectionId, boardId);
+  const stripped = stripPdfThumbnailsFromObjects(objects);
+  const { merged, conflicts } = mergeFreeSpaceObjects(disk, stripped);
+  recordMergeConflicts(conflicts);
+  return tryPersistLocalStorage(
+    key(sectionId, boardId),
+    JSON.stringify(merged),
+    'freeSpaceObjects',
+  );
+}
+
+function loadAndMigrate(sectionId: string, boardId = ''): ProjectSpaceObject[] {
+  const objects = load(sectionId, boardId);
+  for (const o of objects) migrateInlinePdfThumbnail(sectionId, o);
+  return objects;
 }
 
 export interface SectionFreeSpaceObjectsState {
@@ -818,13 +838,17 @@ export interface SectionFreeSpaceObjectsState {
 }
 
 export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): SectionFreeSpaceObjectsState {
-  const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => load(sectionId, boardId));
+  const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => loadAndMigrate(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistRef = useRef<{ sectionId: string; boardId: string; objects: ProjectSpaceObject[] } | null>(null);
   /** Always-current scope — avoids stale boardId in callbacks after board switch (data loss / cross-board bleed). */
   const scopeRef = useRef({ sectionId, boardId });
   scopeRef.current = { sectionId, boardId };
   const persistScopeGenRef = useRef(0);
+
+  useEffect(() => {
+    setSaveScope(sectionId || null, boardId || 'main');
+  }, [sectionId, boardId]);
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -833,34 +857,80 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }
     const pending = pendingPersistRef.current;
     if (!pending) return;
-    pendingPersistRef.current = null;
-    persist(pending.sectionId, pending.boardId, pending.objects);
+    if (persistMerged(pending.sectionId, pending.boardId, pending.objects)) {
+      pendingPersistRef.current = null;
+    }
   }, []);
 
-  const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
+  const schedulePersistDebounced = useCallback((next: ProjectSpaceObject[]) => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
-    if (!sid) {
-      fwPersistWarn('Free Space persist skipped: missing sectionId.');
-      return;
-    }
+    if (!sid) return;
     const gen = persistScopeGenRef.current;
     pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
+    markSavePending('freeSpaceObjects');
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
       if (gen !== persistScopeGenRef.current) return;
       const pending = pendingPersistRef.current;
       if (!pending) return;
-      pendingPersistRef.current = null;
-      persist(pending.sectionId, pending.boardId, pending.objects);
+      if (persistMerged(pending.sectionId, pending.boardId, pending.objects)) {
+        pendingPersistRef.current = null;
+      }
     }, 400);
   }, []);
+
+  const writeObjects = useCallback((next: ProjectSpaceObject[], immediate = false) => {
+    const { sectionId: sid, boardId: bid } = scopeRef.current;
+    if (!sid) {
+      fwPersistWarn('Free Space persist skipped: missing sectionId.');
+      return;
+    }
+    pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
+    markSavePending('freeSpaceObjects');
+    if (immediate && persistMerged(sid, bid, next)) {
+      pendingPersistRef.current = null;
+      return;
+    }
+    schedulePersistDebounced(next);
+  }, [schedulePersistDebounced]);
+
+  const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
+    writeObjects(next, false);
+  }, [writeObjects]);
+
+  const persistCreates = useCallback((next: ProjectSpaceObject[]) => {
+    writeObjects(next, true);
+  }, [writeObjects]);
 
   useEffect(() => {
     persistScopeGenRef.current += 1;
     flushPersist();
-    setObjects(load(sectionId, boardId));
+    setObjects(loadAndMigrate(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
+
+  useEffect(() => {
+    if (!sectionId) return;
+    const storageKey = key(sectionId, boardId);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== storageKey || e.newValue == null) return;
+      const parsed = parseFreeSpaceStorageKey(storageKey);
+      if (!parsed) return;
+      try {
+        const remote = repairFreeSpaceObjectList(JSON.parse(e.newValue) as unknown, sectionId).objects;
+        setObjects(prev => {
+          const { merged, conflicts } = mergeFreeSpaceObjects(prev, remote);
+          recordMergeConflicts(conflicts);
+          pendingPersistRef.current = { sectionId, boardId, objects: merged };
+          return merged;
+        });
+      } catch {
+        recordStorageConflict(`Could not merge objects from storage event for "${storageKey}"`);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [sectionId, boardId]);
 
   useEffect(() => () => flushPersist(), [flushPersist]);
 
@@ -870,10 +940,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     if (!incoming.length) return;
     setObjects(prev => {
       const next = [...prev, ...incoming];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
-  }, [schedulePersist]);
+  }, [persistCreates]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
     const d = makeDefaults(type);
@@ -888,11 +958,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
     return obj;
-  }, [schedulePersist]);
+  }, [persistCreates]);
 
   const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -909,11 +979,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
     return obj;
-  }, [schedulePersist]);
+  }, [persistCreates]);
 
   const addQuickCaptureMistake = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -949,11 +1019,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
     return obj;
-  }, [schedulePersist]);
+  }, [persistCreates]);
 
   const addRecallItem = useCallback((rawPrompt: string): ProjectSpaceObject => {
     const trimmed = rawPrompt.trim();
@@ -989,11 +1059,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     };
     setObjects(prev => {
       const next = [...prev, obj];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
     return obj;
-  }, [schedulePersist]);
+  }, [persistCreates]);
 
   const convertNoteToMistake = useCallback((objectId: string): ProjectSpaceObject | null => {
     let out: ProjectSpaceObject | null = null;
@@ -1163,6 +1233,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     if (source.type === 'pdf') {
       void copyPdfBlob(sectionId, source.id, copy.id);
       void copyPdfStudyMarks(sectionId, source.id, copy.id);
+      void copyPdfThumbnail(sectionId, source.id, copy.id);
     }
     if (source.type === 'image') {
       void copyImageBlob(sectionId, source.id, copy.id);
@@ -1172,11 +1243,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }
     setObjects(prev => {
       const next = [...prev, copy];
-      schedulePersist(next);
+      persistCreates(next);
       return next;
     });
     return copy;
-  }, [objects, schedulePersist, sectionId]);
+  }, [objects, persistCreates, sectionId]);
 
   const getObject = useCallback((id: string) => objects.find(o => o.id === id), [objects]);
 

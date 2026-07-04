@@ -5,10 +5,11 @@
 
 import { getIndexedDB, probeIndexedDbEnvironment } from './indexedDbEnvironment';
 import { pdfUploadDiag } from './pdfUploadDiag';
+import { markSaveError, markSaveOk, markSavePending } from './saveStatus';
 
 const DB_NAME = 'fw_free_space_pdf_v1';
 const STORE = 'blobs';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function storeKey(sectionId: string, objectId: string): string {
   return `${sectionId}::${objectId}`;
@@ -100,6 +101,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE);
       }
+      if (!db.objectStoreNames.contains('thumbnails')) {
+        db.createObjectStore('thumbnails');
+      }
     };
     req.onsuccess = () => resolve(req.result);
   });
@@ -107,14 +111,17 @@ function openDb(): Promise<IDBDatabase> {
 
 export async function savePdfBlob(sectionId: string, objectId: string, blob: Blob): Promise<void> {
   const key = storeKey(sectionId, objectId);
+  markSavePending('pdfBlob');
   let db: IDBDatabase;
   try {
     db = await openDb();
     pdfUploadDiag('savePdfBlob:dbOpen', { key });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    markSaveError('pdfBlob', msg);
     pdfUploadDiag('savePdfBlob:dbOpenFailed', {
       key,
-      error: err instanceof Error ? err.message : String(err),
+      error: msg,
     });
     throw err;
   }
@@ -122,14 +129,17 @@ export async function savePdfBlob(sectionId: string, objectId: string, blob: Blo
     const tx = db.transaction(STORE, 'readwrite');
     tx.oncomplete = () => {
       db.close();
+      markSaveOk('pdfBlob');
       pdfUploadDiag('savePdfBlob:txComplete', { key, blobSize: blob.size });
       resolve();
     };
     tx.onerror = () => {
       db.close();
+      const msg = tx.error?.message ?? 'transaction error';
+      markSaveError('pdfBlob', msg);
       pdfUploadDiag('savePdfBlob:txError', {
         key,
-        error: tx.error?.message ?? 'transaction error',
+        error: msg,
       });
       reject(tx.error);
     };

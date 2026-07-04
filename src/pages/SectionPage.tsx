@@ -166,6 +166,7 @@ import {
   loadPdfBlob,
   savePdfBlob,
 } from '../lib/freeSpacePdfIdb';
+import { savePdfThumbnail } from '../lib/freeSpacePdfThumbIdb';
 import {
   fitImageFrame,
   isAcceptableImageFile,
@@ -1751,8 +1752,11 @@ export function SectionPage() {
         ingestionPhase: 'ready' as const,
         ...(spatial?.pageCount ? { pageCount: spatial.pageCount } : {}),
         ...(spatial?.documentTitle ? { documentTitle: spatial.documentTitle } : {}),
-        ...(spatial?.thumbnailDataUrl ? { thumbnailDataUrl: spatial.thumbnailDataUrl } : {}),
       };
+
+      if (spatial?.thumbnailDataUrl) {
+        void savePdfThumbnail(sectionId, obj.id, spatial.thumbnailDataUrl);
+      }
 
       if (storageFailed) {
         // Keep object + position; card shows recover/reconnect when blob is missing.
