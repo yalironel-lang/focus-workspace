@@ -1708,17 +1708,23 @@ export function ProjectNotebookBlock({
     if (!hasNotebookContext && contextPanelOpen) setContextPanelOpen(false);
   }, [hasNotebookContext, contextPanelOpen]);
 
+  const commitBlocks = useCallback((next: Block[]) => {
+    const normalized = normalizeOrderedSequences(next);
+    const serialized = serializeBlocks(normalized);
+    setBlocks(normalized);
+    pushContent({ ...contentRef.current, body: serialized });
+  }, [pushContent]);
+
   const insertImageBlock = useCallback((key: string, alt: string) => {
-    const focusedId = surfaceFocusBlockId ?? (blocks.length > 0 ? blocks[blocks.length - 1]!.id : null);
+    const focusedId = surfaceFocusBlockId ?? (blocksRef.current.length > 0 ? blocksRef.current[blocksRef.current.length - 1]!.id : null);
     const newBlock: Block = { id: newBlockId(), kind: 'image-ref', key, alt };
-    setBlocks(prev => {
-      const idx = focusedId ? prev.findIndex(b => b.id === focusedId) : prev.length - 1;
-      const insertIdx = idx < 0 ? prev.length : idx + 1;
-      const next = [...prev];
-      next.splice(insertIdx, 0, newBlock);
-      return next;
-    });
-  }, [blocks, surfaceFocusBlockId]);
+    const prev = blocksRef.current;
+    const idx = focusedId ? prev.findIndex(b => b.id === focusedId) : prev.length - 1;
+    const insertIdx = idx < 0 ? prev.length : idx + 1;
+    const next = [...prev];
+    next.splice(insertIdx, 0, newBlock);
+    commitBlocks(next);
+  }, [surfaceFocusBlockId, commitBlocks]);
 
   const handleNotebookPaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items ?? []);
@@ -1767,11 +1773,9 @@ export function ProjectNotebookBlock({
 
   const persist = useCallback(
     (next: Block[]) => {
-      const normalized = normalizeOrderedSequences(next);
-      setBlocks(normalized);
-      pushContent({ ...content, body: serializeBlocks(normalized) });
+      commitBlocks(next);
     },
-    [content, pushContent],
+    [commitBlocks],
   );
 
   const getEditorRoot = useCallback((): HTMLElement | null => {
