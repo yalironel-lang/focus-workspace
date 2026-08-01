@@ -7,6 +7,7 @@ export default defineConfig({
       'src/lib/katexVisualExtract/**/*.test.ts',
       'src/lib/persistenceQa.test.ts',
       'src/lib/notebookImagePersist.test.ts',
+      'src/lib/freeSpaceLocalMerge.test.ts',
       'src/lib/sync/**/*.test.ts',
     ],
   },
