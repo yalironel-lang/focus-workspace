@@ -14,6 +14,7 @@ import { SchedulePage } from './pages/SchedulePage';
 import { SessionPage } from './pages/SessionPage';
 import { Toaster } from 'react-hot-toast';
 import { AppConnectivityBanner } from './components/AppConnectivityBanner';
+import { SyncStatusIndicator } from './components/sync/SyncStatusIndicator';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -26,7 +27,15 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return user ? <>{children}</> : <Navigate to="/" replace />;
+  // Narrowest shared authenticated shell: all PrivateRoute pages, never Auth/landing.
+  return user ? (
+    <>
+      <SyncStatusIndicator />
+      {children}
+    </>
+  ) : (
+    <Navigate to="/" replace />
+  );
 }
 
 function AppRoutes() {
