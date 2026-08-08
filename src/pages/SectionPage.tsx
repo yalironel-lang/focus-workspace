@@ -73,6 +73,7 @@ import {
   coerceFreeSpaceConnectionIds,
 } from '../hooks/useSectionFreeSpaceObjects';
 import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
+import { useAuth } from '../hooks/useAuth';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
@@ -751,6 +752,7 @@ export function SectionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const navState = (location.state ?? null) as WorkspaceNavigationState | null;
   const workspaceBackLabel = navState?.returnTo === 'universe' ? 'Universe' : 'Library';
 
@@ -792,7 +794,11 @@ export function SectionPage() {
   const sectionCanvasRef = useRef(sectionCanvas);
   sectionCanvasRef.current = sectionCanvas;
   const sectionPositions = useSectionBlockPositions(sectionId, sectionBoards.activeBoardId);
-  const sectionObjects = useSectionFreeSpaceObjects(sectionId, sectionBoards.activeBoardId);
+  const sectionObjects = useSectionFreeSpaceObjects(
+    sectionId,
+    sectionBoards.activeBoardId,
+    user?.id ?? null,
+  );
   const sectionObjectsRef = useRef(sectionObjects);
   sectionObjectsRef.current = sectionObjects;
   const {
