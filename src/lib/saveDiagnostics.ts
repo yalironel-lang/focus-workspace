@@ -7,11 +7,21 @@ import { probeIndexedDbEnvironment } from './indexedDbEnvironment';
 import { pdfUploadDiagDump } from './pdfUploadDiag';
 import { getSaveScope, getSaveStatusSnapshot } from './saveStatus';
 import { isSupabaseConfigured, supabase } from './supabase';
+import { deriveSyncUiStatus } from './sync/deriveSyncUiStatus';
+import {
+  formatSyncTimelineLines,
+  getSyncTimelineEvents,
+  isSyncTimelineEnabled,
+} from './sync/syncEventTimeline';
+import type { SyncUiStatus } from './sync/syncStatusTypes';
 
 export interface SaveDiagSnapshot {
   scope: ReturnType<typeof getSaveScope>;
   devSectionContext: string | null;
   saveStatus: ReturnType<typeof getSaveStatusSnapshot>;
+  syncUi: SyncUiStatus;
+  syncTimelineEnabled: boolean;
+  syncTimeline: string[];
   indexedDb: ReturnType<typeof probeIndexedDbEnvironment>;
   localStorage: {
     available: boolean;
@@ -113,8 +123,11 @@ function buildHints(snapshot: SaveDiagSnapshot): string[] {
   }
   if (saveStatus.storageConflicts.length > 0) {
     hints.push(
-      `Multi-tab storage conflicts (${saveStatus.storageConflicts.length}) — see saveStatus.storageConflicts.`,
+      `Multi-tab storage conflicts (${saveStatus.storageConflicts.length}) — diagnostics only in PR 0; not shown in the user indicator.`,
     );
+  }
+  if (snapshot.syncUi.phase === 'local_failed') {
+    hints.push('Derived sync UI phase: local_failed (Save failed).');
   }
   if (serviceWorker.controller && serviceWorker.openCaches.length > 0) {
     hints.push('Service worker is active with open caches — stale asset cache can cause 404s after deploy (not data loss).');
@@ -130,10 +143,16 @@ export async function buildSaveDiagSnapshot(): Promise<SaveDiagSnapshot> {
   const indexedDb = probeIndexedDbEnvironment();
   const serviceWorker = await serviceWorkerSnapshot();
 
+  const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const syncUi = deriveSyncUiStatus(saveStatus, { online, showSavedLocal: false });
+  const syncTimelineEnabled = isSyncTimelineEnabled();
   const snapshot: SaveDiagSnapshot = {
     scope,
     devSectionContext: getFwFreeSpaceDevSectionContext(),
     saveStatus,
+    syncUi,
+    syncTimelineEnabled,
+    syncTimeline: syncTimelineEnabled ? formatSyncTimelineLines(getSyncTimelineEvents()) : [],
     indexedDb,
     localStorage: {
       available: localStorageProbe(),
