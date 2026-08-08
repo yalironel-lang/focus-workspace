@@ -3,7 +3,7 @@ import type { BlockPos, PositionMap } from './useBlockPositions';
 import { DEFAULT_BLOCK_H, DEFAULT_BLOCK_W } from './useBlockPositions';
 import { fwPersistWarn, sanitizeBlockPos, sanitizePositionMap, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
-import { mergePositionMaps, parseFreeSpaceStorageKey } from '../lib/freeSpaceLocalMerge';
+import { mergePositionMaps, parseFreeSpaceStorageKey, persistWithPendingDeletes } from '../lib/freeSpaceLocalMerge';
 import { tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
 import { markSavePending, recordStorageConflict } from '../lib/saveStatus';
 
@@ -34,10 +34,15 @@ function load(sectionId: string, boardId = ''): PositionMap {
   }
 }
 
-function persistMerged(sectionId: string, boardId: string, pending: PositionMap): boolean {
+function persistMerged(
+  sectionId: string,
+  boardId: string,
+  pending: PositionMap,
+  deletedIds?: ReadonlySet<string>,
+): boolean {
   if (!sectionId) return false;
   const disk = load(sectionId, boardId);
-  const merged = mergePositionMaps(disk, pending);
+  const merged = mergePositionMaps(disk, pending, deletedIds);
   return tryPersistLocalStorage(key(sectionId, boardId), JSON.stringify(merged), 'freeSpacePositions');
 }
 
@@ -63,6 +68,16 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
   const [positions, setPositions] = useState<PositionMap>(() => load(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistRef = useRef<{ sectionId: string; boardId: string; positions: PositionMap } | null>(null);
+  /** Ids deleted in this tab whose delete has not yet been committed to disk. */
+  const pendingDeletedIdsRef = useRef<Set<string>>(new Set());
+
+  const commitPersist = useCallback(
+    (sid: string, bid: string, pos: PositionMap): boolean =>
+      persistWithPendingDeletes(pendingDeletedIdsRef.current, deletedIds =>
+        persistMerged(sid, bid, pos, deletedIds),
+      ),
+    [],
+  );
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -71,10 +86,10 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     }
     const pending = pendingPersistRef.current;
     if (!pending) return;
-    if (persistMerged(pending.sectionId, pending.boardId, pending.positions)) {
+    if (commitPersist(pending.sectionId, pending.boardId, pending.positions)) {
       pendingPersistRef.current = null;
     }
-  }, []);
+  }, [commitPersist]);
 
   const writePositions = useCallback((
     next: PositionMap,
@@ -85,7 +100,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     if (!targetSectionId) return;
     pendingPersistRef.current = { sectionId: targetSectionId, boardId: targetBoardId, positions: next };
     markSavePending('freeSpacePositions');
-    if (immediate && persistMerged(targetSectionId, targetBoardId, next)) {
+    if (immediate && commitPersist(targetSectionId, targetBoardId, next)) {
       pendingPersistRef.current = null;
       return;
     }
@@ -94,14 +109,16 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       persistTimerRef.current = null;
       const p = pendingPersistRef.current;
       if (!p) return;
-      if (persistMerged(p.sectionId, p.boardId, p.positions)) {
+      if (commitPersist(p.sectionId, p.boardId, p.positions)) {
         pendingPersistRef.current = null;
       }
     }, 120);
-  }, []);
+  }, [commitPersist]);
 
   useEffect(() => {
     flushPersist();
+    // Deleted ids belong to the previous scope; never let them bleed into the next one.
+    pendingDeletedIdsRef.current.clear();
     setPositions(load(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
 
@@ -197,6 +214,7 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
   }, [writePositions, sectionId, boardId]);
 
   const removePos = useCallback((id: string) => {
+    pendingDeletedIdsRef.current.add(id);
     setPositions(prev => {
       const { [id]: _removed, ...rest } = prev;
       writePositions(rest, sectionId, boardId);

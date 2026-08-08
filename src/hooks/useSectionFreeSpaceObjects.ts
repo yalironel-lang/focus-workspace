@@ -5,7 +5,7 @@ import { copyPdfBlob } from '../lib/freeSpacePdfIdb';
 import { copyPdfStudyMarks } from '../lib/pdfStudyMarks/pdfStudyMarksIdb';
 import { copyImageBlob } from '../lib/freeSpaceImageIdb';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
-import { mergeFreeSpaceObjects, parseFreeSpaceStorageKey } from '../lib/freeSpaceLocalMerge';
+import { mergeFreeSpaceObjects, parseFreeSpaceStorageKey, persistWithPendingDeletes } from '../lib/freeSpaceLocalMerge';
 import { recordMergeConflicts, tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
 import {
   copyPdfThumbnail,
@@ -787,11 +787,16 @@ function load(sectionId: string, boardId = ''): ProjectSpaceObject[] {
   }
 }
 
-function persistMerged(sectionId: string, boardId: string, objects: ProjectSpaceObject[]): boolean {
+function persistMerged(
+  sectionId: string,
+  boardId: string,
+  objects: ProjectSpaceObject[],
+  deletedIds?: ReadonlySet<string>,
+): boolean {
   if (!sectionId) return false;
   const disk = load(sectionId, boardId);
   const stripped = stripPdfThumbnailsFromObjects(objects);
-  const { merged, conflicts } = mergeFreeSpaceObjects(disk, stripped);
+  const { merged, conflicts } = mergeFreeSpaceObjects(disk, stripped, deletedIds);
   recordMergeConflicts(conflicts);
   return tryPersistLocalStorage(
     key(sectionId, boardId),
@@ -845,10 +850,20 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   const scopeRef = useRef({ sectionId, boardId });
   scopeRef.current = { sectionId, boardId };
   const persistScopeGenRef = useRef(0);
+  /** Ids deleted in this tab whose delete has not yet been committed to disk. */
+  const pendingDeletedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setSaveScope(sectionId || null, boardId || 'main');
   }, [sectionId, boardId]);
+
+  const commitPersist = useCallback(
+    (sid: string, bid: string, objs: ProjectSpaceObject[]): boolean =>
+      persistWithPendingDeletes(pendingDeletedIdsRef.current, deletedIds =>
+        persistMerged(sid, bid, objs, deletedIds),
+      ),
+    [],
+  );
 
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
@@ -857,10 +872,10 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }
     const pending = pendingPersistRef.current;
     if (!pending) return;
-    if (persistMerged(pending.sectionId, pending.boardId, pending.objects)) {
+    if (commitPersist(pending.sectionId, pending.boardId, pending.objects)) {
       pendingPersistRef.current = null;
     }
-  }, []);
+  }, [commitPersist]);
 
   const schedulePersistDebounced = useCallback((next: ProjectSpaceObject[]) => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
@@ -874,11 +889,11 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       if (gen !== persistScopeGenRef.current) return;
       const pending = pendingPersistRef.current;
       if (!pending) return;
-      if (persistMerged(pending.sectionId, pending.boardId, pending.objects)) {
+      if (commitPersist(pending.sectionId, pending.boardId, pending.objects)) {
         pendingPersistRef.current = null;
       }
     }, 400);
-  }, []);
+  }, [commitPersist]);
 
   const writeObjects = useCallback((next: ProjectSpaceObject[], immediate = false) => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
@@ -888,12 +903,12 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }
     pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
     markSavePending('freeSpaceObjects');
-    if (immediate && persistMerged(sid, bid, next)) {
+    if (immediate && commitPersist(sid, bid, next)) {
       pendingPersistRef.current = null;
       return;
     }
     schedulePersistDebounced(next);
-  }, [schedulePersistDebounced]);
+  }, [schedulePersistDebounced, commitPersist]);
 
   const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
     writeObjects(next, false);
@@ -906,6 +921,8 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   useEffect(() => {
     persistScopeGenRef.current += 1;
     flushPersist();
+    // Deleted ids belong to the previous scope; never let them bleed into the next one.
+    pendingDeletedIdsRef.current.clear();
     setObjects(loadAndMigrate(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
 
@@ -1201,6 +1218,7 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
   }, [schedulePersist]);
 
   const removeObject = useCallback((id: string) => {
+    pendingDeletedIdsRef.current.add(id);
     setObjects(prev => {
       const victim = prev.find(o => o.id === id);
       if (victim) {
