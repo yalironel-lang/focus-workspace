@@ -9,6 +9,7 @@ export default defineConfig({
       'src/lib/notebookImagePersist.test.ts',
       'src/lib/freeSpaceLocalMerge.test.ts',
       'src/lib/focusCacheNamespace.test.ts',
+      'src/lib/focusCache/pendingOperations.test.ts',
       'src/lib/sync/**/*.test.ts',
     ],
   },
