@@ -228,6 +228,44 @@ export interface Database {
         };
         Relationships: [];
       };
+      free_space_objects: {
+        Row: {
+          id: string;
+          user_id: string;
+          section_id: string;
+          board_id: string;
+          object: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          user_id: string;
+          section_id: string;
+          board_id?: string;
+          object: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          section_id?: string;
+          board_id?: string;
+          object?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'free_space_objects_section_id_fkey';
+            columns: ['section_id'];
+            isOneToOne: false;
+            referencedRelation: 'sections';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
