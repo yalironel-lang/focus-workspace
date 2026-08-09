@@ -14,6 +14,7 @@ import {
 } from '../lib/freeSpacePdfThumbIdb';
 import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
+import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -842,7 +843,11 @@ export interface SectionFreeSpaceObjectsState {
   getObject: (id: string) => ProjectSpaceObject | undefined;
 }
 
-export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): SectionFreeSpaceObjectsState {
+export function useSectionFreeSpaceObjects(
+  sectionId: string,
+  boardId = '',
+  userId: string | null = null,
+): SectionFreeSpaceObjectsState {
   const [objects, setObjects] = useState<ProjectSpaceObject[]>(() => loadAndMigrate(sectionId, boardId));
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistRef = useRef<{ sectionId: string; boardId: string; objects: ProjectSpaceObject[] } | null>(null);
@@ -895,28 +900,42 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     }, 400);
   }, [commitPersist]);
 
-  const writeObjects = useCallback((next: ProjectSpaceObject[], immediate = false) => {
+  const writeObjects = useCallback((next: ProjectSpaceObject[], immediate = false): boolean => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
     if (!sid) {
       fwPersistWarn('Free Space persist skipped: missing sectionId.');
-      return;
+      return false;
     }
     pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
     markSavePending('freeSpaceObjects');
     if (immediate && commitPersist(sid, bid, next)) {
       pendingPersistRef.current = null;
-      return;
+      return true;
     }
     schedulePersistDebounced(next);
+    return false;
   }, [schedulePersistDebounced, commitPersist]);
 
   const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
     writeObjects(next, false);
   }, [writeObjects]);
 
-  const persistCreates = useCallback((next: ProjectSpaceObject[]) => {
-    writeObjects(next, true);
+  const persistCreates = useCallback((next: ProjectSpaceObject[]): boolean => {
+    return writeObjects(next, true);
   }, [writeObjects]);
+
+  const enqueueCreatesIfPersisted = useCallback(
+    (persisted: boolean, created: readonly ProjectSpaceObject[]) => {
+      const { sectionId: sid, boardId: bid } = scopeRef.current;
+      enqueueFreeSpaceObjectCreatesAfterLocalPersist(persisted, {
+        userId,
+        sectionId: sid,
+        boardId: bid,
+        objects: created,
+      });
+    },
+    [userId],
+  );
 
   useEffect(() => {
     persistScopeGenRef.current += 1;
@@ -955,12 +974,14 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
 
   const appendObjects = useCallback((incoming: ProjectSpaceObject[]) => {
     if (!incoming.length) return;
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, ...incoming];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
-  }, [persistCreates]);
+    enqueueCreatesIfPersisted(persisted, incoming);
+  }, [persistCreates, enqueueCreatesIfPersisted]);
 
   const addObject = useCallback((type: ProjectObjectType): ProjectSpaceObject => {
     const d = makeDefaults(type);
@@ -973,13 +994,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       createdAt: now,
       updatedAt: now,
     };
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, obj];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
+    enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
-  }, [persistCreates]);
+  }, [persistCreates, enqueueCreatesIfPersisted]);
 
   const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -994,13 +1017,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       createdAt: now,
       updatedAt: now,
     };
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, obj];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
+    enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
-  }, [persistCreates]);
+  }, [persistCreates, enqueueCreatesIfPersisted]);
 
   const addQuickCaptureMistake = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
@@ -1034,13 +1059,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       createdAt: now,
       updatedAt: now,
     };
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, obj];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
+    enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
-  }, [persistCreates]);
+  }, [persistCreates, enqueueCreatesIfPersisted]);
 
   const addRecallItem = useCallback((rawPrompt: string): ProjectSpaceObject => {
     const trimmed = rawPrompt.trim();
@@ -1074,13 +1101,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
       createdAt: now,
       updatedAt: now,
     };
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, obj];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
+    enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
-  }, [persistCreates]);
+  }, [persistCreates, enqueueCreatesIfPersisted]);
 
   const convertNoteToMistake = useCallback((objectId: string): ProjectSpaceObject | null => {
     let out: ProjectSpaceObject | null = null;
@@ -1259,13 +1288,15 @@ export function useSectionFreeSpaceObjects(sectionId: string, boardId = ''): Sec
     if (source.type === 'studyfile') {
       void copyStudyFileBlob(sectionId, source.id, copy.id);
     }
+    let persisted = false;
     setObjects(prev => {
       const next = [...prev, copy];
-      persistCreates(next);
+      persisted = persistCreates(next);
       return next;
     });
+    enqueueCreatesIfPersisted(persisted, [copy]);
     return copy;
-  }, [objects, persistCreates, sectionId]);
+  }, [objects, persistCreates, sectionId, enqueueCreatesIfPersisted]);
 
   const getObject = useCallback((id: string) => objects.find(o => o.id === id), [objects]);
 
