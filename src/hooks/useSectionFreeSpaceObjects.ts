@@ -15,6 +15,7 @@ import {
 import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
+import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -857,10 +858,18 @@ export function useSectionFreeSpaceObjects(
   const persistScopeGenRef = useRef(0);
   /** Ids deleted in this tab whose delete has not yet been committed to disk. */
   const pendingDeletedIdsRef = useRef<Set<string>>(new Set());
+  /** Object ids edited since last successful UPDATE enqueue (PR5). */
+  const dirtyIdsRef = useRef<Set<string>>(new Set());
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   useEffect(() => {
     setSaveScope(sectionId || null, boardId || 'main');
   }, [sectionId, boardId]);
+
+  const markObjectDirty = useCallback((id: string) => {
+    if (id) dirtyIdsRef.current.add(id);
+  }, []);
 
   const commitPersist = useCallback(
     (sid: string, bid: string, objs: ProjectSpaceObject[]): boolean =>
@@ -870,6 +879,55 @@ export function useSectionFreeSpaceObjects(
     [],
   );
 
+  /**
+   * PR5: enqueue UPDATE coalesces only after durable local persist succeeds.
+   * Hard constraint — never call from editors. Re-marks dirty if coalesce fails.
+   */
+  const enqueueDirtyUpdatesAfterCommit = useCallback((objs: ProjectSpaceObject[]) => {
+    const dirty = dirtyIdsRef.current;
+    if (dirty.size === 0) return;
+
+    const byId = new Map(objs.map(o => [o.id, o]));
+    const toEnqueue: ProjectSpaceObject[] = [];
+    for (const id of [...dirty]) {
+      if (pendingDeletedIdsRef.current.has(id) || !byId.has(id)) {
+        dirty.delete(id);
+        continue;
+      }
+      const obj = byId.get(id);
+      if (!obj) {
+        dirty.delete(id);
+        continue;
+      }
+      toEnqueue.push(obj);
+      dirty.delete(id);
+    }
+    if (toEnqueue.length === 0) return;
+
+    const { sectionId: sid, boardId: bid } = scopeRef.current;
+    enqueueFreeSpaceObjectUpdatesAfterLocalPersist(
+      true,
+      {
+        userId: userIdRef.current,
+        sectionId: sid,
+        boardId: bid,
+        objects: toEnqueue,
+      },
+      (objectId, result) => {
+        if (!result.ok) dirtyIdsRef.current.add(objectId);
+      },
+    );
+  }, []);
+
+  const commitPersistAndEnqueueUpdates = useCallback(
+    (sid: string, bid: string, objs: ProjectSpaceObject[]): boolean => {
+      const ok = commitPersist(sid, bid, objs);
+      if (ok) enqueueDirtyUpdatesAfterCommit(objs);
+      return ok;
+    },
+    [commitPersist, enqueueDirtyUpdatesAfterCommit],
+  );
+
   const flushPersist = useCallback(() => {
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
@@ -877,10 +935,10 @@ export function useSectionFreeSpaceObjects(
     }
     const pending = pendingPersistRef.current;
     if (!pending) return;
-    if (commitPersist(pending.sectionId, pending.boardId, pending.objects)) {
+    if (commitPersistAndEnqueueUpdates(pending.sectionId, pending.boardId, pending.objects)) {
       pendingPersistRef.current = null;
     }
-  }, [commitPersist]);
+  }, [commitPersistAndEnqueueUpdates]);
 
   const schedulePersistDebounced = useCallback((next: ProjectSpaceObject[]) => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
@@ -894,11 +952,11 @@ export function useSectionFreeSpaceObjects(
       if (gen !== persistScopeGenRef.current) return;
       const pending = pendingPersistRef.current;
       if (!pending) return;
-      if (commitPersist(pending.sectionId, pending.boardId, pending.objects)) {
+      if (commitPersistAndEnqueueUpdates(pending.sectionId, pending.boardId, pending.objects)) {
         pendingPersistRef.current = null;
       }
     }, 400);
-  }, [commitPersist]);
+  }, [commitPersistAndEnqueueUpdates]);
 
   const writeObjects = useCallback((next: ProjectSpaceObject[], immediate = false): boolean => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
@@ -908,13 +966,13 @@ export function useSectionFreeSpaceObjects(
     }
     pendingPersistRef.current = { sectionId: sid, boardId: bid, objects: next };
     markSavePending('freeSpaceObjects');
-    if (immediate && commitPersist(sid, bid, next)) {
+    if (immediate && commitPersistAndEnqueueUpdates(sid, bid, next)) {
       pendingPersistRef.current = null;
       return true;
     }
     schedulePersistDebounced(next);
     return false;
-  }, [schedulePersistDebounced, commitPersist]);
+  }, [schedulePersistDebounced, commitPersistAndEnqueueUpdates]);
 
   const schedulePersist = useCallback((next: ProjectSpaceObject[]) => {
     writeObjects(next, false);
@@ -942,6 +1000,7 @@ export function useSectionFreeSpaceObjects(
     flushPersist();
     // Deleted ids belong to the previous scope; never let them bleed into the next one.
     pendingDeletedIdsRef.current.clear();
+    dirtyIdsRef.current.clear();
     setObjects(loadAndMigrate(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
 
@@ -1151,20 +1210,22 @@ export function useSectionFreeSpaceObjects(
         updatedAt: Date.now(),
       };
       out = nextObj;
+      markObjectDirty(objectId);
       const next = prev.map(x => (x.id === objectId ? nextObj : x));
       schedulePersist(next);
       return next;
     });
     return out;
-  }, [schedulePersist]);
+  }, [schedulePersist, markObjectDirty]);
 
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
+      markObjectDirty(id);
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist]);
+  }, [schedulePersist, markObjectDirty]);
 
   const updateObjectFields = useCallback(
     (
@@ -1193,11 +1254,12 @@ export function useSectionFreeSpaceObjects(
           updatedAt: Date.now(),
         };
         const next = [...prev.slice(0, i), nextObj, ...prev.slice(i + 1)];
+        markObjectDirty(objectId);
         schedulePersist(next);
         return next;
       });
     },
-    [schedulePersist],
+    [schedulePersist, markObjectDirty],
   );
 
   const addConnection = useCallback((fromId: string, toId: string) => {
@@ -1218,36 +1280,42 @@ export function useSectionFreeSpaceObjects(
         if (cur.includes(toId)) return o;
         return { ...o, connections: [...cur, toId], updatedAt: Date.now() };
       });
+      markObjectDirty(fromId);
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist]);
+  }, [schedulePersist, markObjectDirty]);
 
   const clearConnectionsForObject = useCallback((id: string) => {
     if (!id) return;
     setObjects(prev => {
+      const dirtyIds: string[] = [];
       const next = prev.map(o => {
         if (o.id === id) {
           const cur = coerceFreeSpaceConnectionIds(o.connections);
           if (cur.length === 0) return o;
+          dirtyIds.push(o.id);
           return { ...o, connections: undefined, updatedAt: Date.now() };
         }
         const prevList = coerceFreeSpaceConnectionIds(o.connections);
         const filtered = prevList.filter(cid => cid !== id);
         if (filtered.length === prevList.length) return o;
+        dirtyIds.push(o.id);
         return {
           ...o,
           connections: filtered.length ? filtered : undefined,
           updatedAt: Date.now(),
         };
       });
+      for (const dirtyId of dirtyIds) markObjectDirty(dirtyId);
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist]);
+  }, [schedulePersist, markObjectDirty]);
 
   const removeObject = useCallback((id: string) => {
     pendingDeletedIdsRef.current.add(id);
+    dirtyIdsRef.current.delete(id);
     setObjects(prev => {
       const victim = prev.find(o => o.id === id);
       if (victim) {
@@ -1257,10 +1325,14 @@ export function useSectionFreeSpaceObjects(
       }
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
+      for (const o of next) {
+        const prevObj = rest.find(x => x.id === o.id);
+        if (prevObj && prevObj !== o) markObjectDirty(o.id);
+      }
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist]);
+  }, [schedulePersist, markObjectDirty, sectionId, boardId]);
 
   const duplicateObject = useCallback((id: string): ProjectSpaceObject | null => {
     const source = objects.find(o => o.id === id);

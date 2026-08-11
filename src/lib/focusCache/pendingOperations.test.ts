@@ -9,6 +9,7 @@ import {
   enqueuePendingOperation,
   listPendingOperations,
   removePendingOperation,
+  replacePendingOperationPayload,
 } from './pendingOperations';
 import { FOCUS_CACHE_DB_NAME } from './types';
 
@@ -393,5 +394,73 @@ describe('pendingOperations queue', () => {
     expect(list.value).toHaveLength(8);
     const seqs = list.value.map((op) => op.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+
+  it('replaces payload on an existing operation keeping id and seq', async () => {
+    const enq = await enqueuePendingOperation({
+      namespace: nsA,
+      entityType: 'free_space_object',
+      entityId: 'obj-1',
+      operationType: 'update',
+      payload: { boardId: 'main', object: { id: 'obj-1', updatedAt: 1 } },
+      id: 'op-replace-1',
+    });
+    expect(enq.ok).toBe(true);
+    if (!enq.ok) return;
+
+    const replaced = await replacePendingOperationPayload(nsA, 'op-replace-1', {
+      boardId: 'main',
+      object: { id: 'obj-1', updatedAt: 99, content: { type: 'note', body: 'later' } },
+    });
+    expect(replaced.ok).toBe(true);
+    if (!replaced.ok) return;
+    expect(replaced.value.replaced).toBe(true);
+    expect(replaced.value.operation?.seq).toBe(enq.value.seq);
+    expect(replaced.value.operation?.id).toBe('op-replace-1');
+    expect(replaced.value.operation?.operationType).toBe('update');
+    expect(replaced.value.operation?.payload).toEqual({
+      boardId: 'main',
+      object: { id: 'obj-1', updatedAt: 99, content: { type: 'note', body: 'later' } },
+    });
+
+    const list = await listPendingOperations(nsA);
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    expect(list.value).toHaveLength(1);
+    expect(list.value[0]?.payload).toEqual({
+      boardId: 'main',
+      object: { id: 'obj-1', updatedAt: 99, content: { type: 'note', body: 'later' } },
+    });
+  });
+
+  it('does not replace across namespaces or missing ids', async () => {
+    await enqueuePendingOperation({
+      namespace: nsA,
+      entityType: 'note',
+      entityId: '1',
+      operationType: 'create',
+      payload: { v: 1 },
+      id: 'op-ns',
+    });
+
+    const cross = await replacePendingOperationPayload(nsB, 'op-ns', { v: 2 });
+    expect(cross).toEqual({ ok: true, value: { replaced: false } });
+
+    const missing = await replacePendingOperationPayload(nsA, 'no-such-op', { v: 3 });
+    expect(missing).toEqual({ ok: true, value: { replaced: false } });
+
+    const list = await listPendingOperations(nsA);
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    expect(list.value[0]?.payload).toEqual({ v: 1 });
+  });
+
+  it('rejects invalid payload replace inputs', async () => {
+    expect(
+      await replacePendingOperationPayload(nsA, '', { ok: true }),
+    ).toEqual({ ok: false, reason: 'invalid_operation' });
+    expect(
+      await replacePendingOperationPayload(nsA, 'op-x', undefined as never),
+    ).toEqual({ ok: false, reason: 'invalid_operation' });
   });
 });

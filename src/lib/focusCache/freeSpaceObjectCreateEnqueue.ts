@@ -31,7 +31,8 @@ export type EnqueueFreeSpaceObjectCreateInput = {
   object: ProjectSpaceObject;
 };
 
-function buildCreatePayload(
+/** Shared CREATE/UPDATE queue payload: `{ boardId, object }` (thumbs stripped, JSON-safe). */
+export function buildFreeSpaceObjectWritePayload(
   boardId: string,
   object: ProjectSpaceObject,
 ): JsonValue | null {
@@ -63,7 +64,7 @@ export async function enqueueFreeSpaceObjectCreate(
       return { ok: false, reason: ns.reason };
     }
 
-    const payload = buildCreatePayload(input.boardId, input.object);
+    const payload = buildFreeSpaceObjectWritePayload(input.boardId, input.object);
     if (payload == null) {
       fwPersistWarn('pending queue enqueue skipped: reason=invalid_operation');
       return { ok: false, reason: 'invalid_operation' };

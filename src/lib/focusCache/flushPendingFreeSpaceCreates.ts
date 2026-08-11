@@ -1,11 +1,16 @@
 /**
- * Explicit create-only consumer for pending Free Space object creates.
+ * Explicit consumer for pending Free Space object CREATE + UPDATE writes.
  *
- * - Must be invoked manually (no timers / background workers / auto-flush).
- * - Processes only entityType=free_space_object + operationType=create.
+ * - Manual invoke only for PR5 (temporary). No timers / background workers / auto-flush.
+ * - Future automatic triggers (not implemented here): app startup, login/session restore,
+ *   navigator.onLine, visibilitychange, explicit Sync button.
+ * - Processes entityType=free_space_object + operationType=create|update.
+ * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
+ *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
  * - Upserts by entityId; removes queue row only after confirmed cloud success.
  * - Leaves unknown / malformed / failed ops queued.
  * - Does not change local Free Space SOT or saveStatus UI.
+ * - No server-side reject-if-older in PR5 (blind upsert; version carried in object jsonb).
  */
 
 import type { CacheNamespace } from '../focusCacheNamespace';
@@ -32,7 +37,7 @@ export type FlushPendingFreeSpaceCreatesResult = {
     | 'remove_failed';
 };
 
-type CreatePayload = {
+type WritePayload = {
   boardId: string;
   object: JsonValue;
 };
@@ -41,7 +46,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseCreatePayload(payload: JsonValue | null): CreatePayload | null {
+function parseWritePayload(payload: JsonValue | null): WritePayload | null {
   if (!isPlainObject(payload)) return null;
   if (typeof payload.boardId !== 'string') return null;
   if (!isPlainObject(payload.object)) return null;
@@ -51,15 +56,27 @@ function parseCreatePayload(payload: JsonValue | null): CreatePayload | null {
   };
 }
 
-function isSupportedCreate(op: PendingOperation): boolean {
+/** Authoritative snapshot version from payload.object.updatedAt (not seq). */
+function readObjectUpdatedAt(object: JsonValue): number | null {
+  if (!isPlainObject(object)) return null;
+  const value = object.updatedAt;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function isSupportedWrite(op: PendingOperation): boolean {
   return (
-    op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE && op.operationType === 'create'
+    op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE &&
+    (op.operationType === 'create' || op.operationType === 'update')
   );
 }
 
 /**
- * Drain create ops for one namespace in `seq` order.
+ * Drain create+update ops for one namespace in `seq` order (drain order only).
+ * Newer snapshot is determined only by object.updatedAt — stale duplicate ops for the
+ * same entityId are removed without cloud write once a newer version has been upserted
+ * earlier in this flush pass.
  * Stops on cloud failure or remove failure (remaining ops stay queued).
+ * Must be invoked manually in PR5.
  */
 export async function flushPendingFreeSpaceCreates(
   namespace: CacheNamespace,
@@ -74,30 +91,52 @@ export async function flushPendingFreeSpaceCreates(
 
   const ns = assertCacheNamespace(namespace);
   if (!ns.ok) {
-    fwPersistWarn(`pending create flush skipped: reason=${ns.reason}`);
+    fwPersistWarn(`pending free-space flush skipped: reason=${ns.reason}`);
     return { ...result, stoppedReason: 'namespace_invalid' };
   }
 
   const listed = await listPendingOperations(ns.namespace);
   if (!listed.ok) {
-    fwPersistWarn(`pending create flush list failed: reason=${listed.reason}`);
+    fwPersistWarn(`pending free-space flush list failed: reason=${listed.reason}`);
     return { ...result, stoppedReason: 'list_failed' };
   }
 
+  /** Highest object.updatedAt successfully upserted this pass, per entityId. */
+  const latestWrittenUpdatedAt = new Map<string, number>();
+
   for (const op of listed.value) {
-    if (!isSupportedCreate(op)) {
+    if (!isSupportedWrite(op)) {
       result.skippedUnsupported += 1;
       continue;
     }
 
     result.processed += 1;
 
-    const parsed = parseCreatePayload(op.payload);
+    const parsed = parseWritePayload(op.payload);
     if (!parsed) {
       result.skippedMalformed += 1;
       fwPersistWarn(
-        `pending create flush left malformed op queued: entityId=${op.entityId}`,
+        `pending free-space flush left malformed op queued: entityId=${op.entityId}`,
       );
+      continue;
+    }
+
+    const version = readObjectUpdatedAt(parsed.object);
+    const alreadyWritten = latestWrittenUpdatedAt.get(op.entityId);
+    if (
+      version != null &&
+      alreadyWritten != null &&
+      version < alreadyWritten
+    ) {
+      // Stale duplicate relative to a newer snapshot already flushed this pass.
+      const removed = await removePendingOperation(ns.namespace, op.id);
+      if (!removed.ok || !removed.value.removed) {
+        fwPersistWarn(
+          `pending free-space flush remove failed for superseded op: opId=${op.id}`,
+        );
+        return { ...result, stoppedReason: 'remove_failed' };
+      }
+      result.removed += 1;
       continue;
     }
 
@@ -112,7 +151,7 @@ export async function flushPendingFreeSpaceCreates(
     if (!cloud.ok) {
       result.failedCloud += 1;
       fwPersistWarn(
-        `pending create flush cloud write failed: reason=${cloud.reason}` +
+        `pending free-space flush cloud write failed: reason=${cloud.reason}` +
           (cloud.message ? ` message=${cloud.message}` : ''),
       );
       return { ...result, stoppedReason: 'cloud_write_failed' };
@@ -121,12 +160,18 @@ export async function flushPendingFreeSpaceCreates(
     const removed = await removePendingOperation(ns.namespace, op.id);
     if (!removed.ok || !removed.value.removed) {
       fwPersistWarn(
-        `pending create flush remove failed after cloud success: opId=${op.id}`,
+        `pending free-space flush remove failed after cloud success: opId=${op.id}`,
       );
       return { ...result, stoppedReason: 'remove_failed' };
     }
 
     result.removed += 1;
+    if (version != null) {
+      const prev = latestWrittenUpdatedAt.get(op.entityId);
+      if (prev == null || version >= prev) {
+        latestWrittenUpdatedAt.set(op.entityId, version);
+      }
+    }
   }
 
   return result;
