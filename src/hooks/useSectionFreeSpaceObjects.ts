@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ChecklistItem } from './useCustomBlocks';
-import { fwPersistWarn, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
+import {
+  fwPersistWarn,
+  boardScopedFreeSpaceKeys,
+  sectionBoardsListKey,
+} from '../lib/freeSpacePersistence';
 import { copyPdfBlob } from '../lib/freeSpacePdfIdb';
 import { copyPdfStudyMarks } from '../lib/pdfStudyMarks/pdfStudyMarksIdb';
 import { copyImageBlob } from '../lib/freeSpaceImageIdb';
@@ -16,6 +20,10 @@ import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/sav
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
 import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
+import {
+  cancelOrphanPendingFreeSpaceObjectWrites,
+  cancelPendingFreeSpaceObjectWritesAfterLocalDelete,
+} from '../lib/focusCache/freeSpaceObjectDeleteCancel';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -813,6 +821,52 @@ function loadAndMigrate(sectionId: string, boardId = ''): ProjectSpaceObject[] {
   return objects;
 }
 
+/**
+ * PR6 orphan reconcile: complete authoritative active entity ids for a section.
+ * Queue namespace is section-scoped (workspaceId := sectionId), so include every board.
+ * Reads persisted localStorage only — never React state / filtered views.
+ */
+function loadAuthoritativeActiveEntityIdsForSection(sectionId: string): Set<string> {
+  const ids = new Set<string>();
+  if (!sectionId || typeof localStorage === 'undefined') return ids;
+
+  const boardIds = new Set<string>(['main']);
+  try {
+    const raw = localStorage.getItem(sectionBoardsListKey(sectionId));
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const b of parsed) {
+          if (
+            b &&
+            typeof b === 'object' &&
+            typeof (b as { id?: unknown }).id === 'string' &&
+            (b as { id: string }).id.trim()
+          ) {
+            boardIds.add((b as { id: string }).id);
+          }
+        }
+      }
+    }
+    const prefix = `fw_section_${sectionId}_board_`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix) || !k.endsWith('_objects_v1')) continue;
+      const mid = k.slice(prefix.length, -'_objects_v1'.length);
+      if (mid) boardIds.add(mid);
+    }
+  } catch {
+    /* ignore — still load main */
+  }
+
+  for (const boardId of boardIds) {
+    for (const o of loadAndMigrate(sectionId, boardId)) {
+      if (o?.id) ids.add(o.id);
+    }
+  }
+  return ids;
+}
+
 export interface SectionFreeSpaceObjectsState {
   objects: ProjectSpaceObject[];
   /** Single persist write; use for workspace starters and batched inserts. */
@@ -860,6 +914,11 @@ export function useSectionFreeSpaceObjects(
   const pendingDeletedIdsRef = useRef<Set<string>>(new Set());
   /** Object ids edited since last successful UPDATE enqueue (PR5). */
   const dirtyIdsRef = useRef<Set<string>>(new Set());
+  /**
+   * PR6: entityIds awaiting successful pending CREATE/UPDATE queue cancellation
+   * after durable soft-delete. Cleared per-id only after cancel succeeds.
+   */
+  const pendingCancelIdsRef = useRef<Set<string>>(new Set());
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
 
@@ -919,13 +978,45 @@ export function useSectionFreeSpaceObjects(
     );
   }, []);
 
+  /**
+   * PR6: retry pending CREATE/UPDATE cancellation for soft-deleted entities.
+   * Never throws into persist. Does not undo local deletion on failure.
+   */
+  const drainPendingCancels = useCallback(() => {
+    const ids = [...pendingCancelIdsRef.current];
+    if (ids.length === 0) return;
+    const { sectionId: sid } = scopeRef.current;
+    if (!sid) return;
+    cancelPendingFreeSpaceObjectWritesAfterLocalDelete(
+      true,
+      {
+        userId: userIdRef.current,
+        sectionId: sid,
+        entityIds: ids,
+      },
+      result => {
+        for (const id of result.succeededEntityIds) {
+          pendingCancelIdsRef.current.delete(id);
+        }
+      },
+    );
+  }, []);
+
   const commitPersistAndEnqueueUpdates = useCallback(
     (sid: string, bid: string, objs: ProjectSpaceObject[]): boolean => {
+      // Snapshot before persistWithPendingDeletes clears committed delete ids.
+      const deletedSnapshot = [...pendingDeletedIdsRef.current];
       const ok = commitPersist(sid, bid, objs);
-      if (ok) enqueueDirtyUpdatesAfterCommit(objs);
+      if (ok) {
+        enqueueDirtyUpdatesAfterCommit(objs);
+        for (const id of deletedSnapshot) {
+          if (id) pendingCancelIdsRef.current.add(id);
+        }
+        drainPendingCancels();
+      }
       return ok;
     },
-    [commitPersist, enqueueDirtyUpdatesAfterCommit],
+    [commitPersist, enqueueDirtyUpdatesAfterCommit, drainPendingCancels],
   );
 
   const flushPersist = useCallback(() => {
@@ -933,12 +1024,14 @@ export function useSectionFreeSpaceObjects(
       clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
     }
+    // Retry queue cancels even when there is no pending localStorage write.
+    drainPendingCancels();
     const pending = pendingPersistRef.current;
     if (!pending) return;
     if (commitPersistAndEnqueueUpdates(pending.sectionId, pending.boardId, pending.objects)) {
       pendingPersistRef.current = null;
     }
-  }, [commitPersistAndEnqueueUpdates]);
+  }, [commitPersistAndEnqueueUpdates, drainPendingCancels]);
 
   const schedulePersistDebounced = useCallback((next: ProjectSpaceObject[]) => {
     const { sectionId: sid, boardId: bid } = scopeRef.current;
@@ -1001,8 +1094,24 @@ export function useSectionFreeSpaceObjects(
     // Deleted ids belong to the previous scope; never let them bleed into the next one.
     pendingDeletedIdsRef.current.clear();
     dirtyIdsRef.current.clear();
+    pendingCancelIdsRef.current.clear();
     setObjects(loadAndMigrate(sectionId, boardId));
   }, [sectionId, boardId, flushPersist]);
+
+  /**
+   * PR6 load-time orphan reconcile.
+   * HARD SAFETY: uses fully hydrated persisted SOT for the section (all boards),
+   * never React objects state / filtered board view / pre-hydrate empties.
+   */
+  useEffect(() => {
+    if (!sectionId || !userId) return;
+    const authoritativeLocalEntityIds = loadAuthoritativeActiveEntityIdsForSection(sectionId);
+    void cancelOrphanPendingFreeSpaceObjectWrites({
+      userId,
+      sectionId,
+      authoritativeLocalEntityIds,
+    });
+  }, [sectionId, userId]);
 
   useEffect(() => {
     if (!sectionId) return;

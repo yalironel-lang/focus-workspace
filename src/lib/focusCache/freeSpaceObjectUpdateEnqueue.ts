@@ -10,6 +10,8 @@
  * 3. Else enqueue operationType=update.
  *
  * Authoritative snapshot version: object.updatedAt (not queue seq / flush order).
+ * Soft-delete (PR6) cancels pending create|update via freeSpaceObjectDeleteCancel
+ * after durable local delete — does not enqueue cloud DELETE.
  * Future optimization (not implemented): entityId → pendingOperationId lookup map.
  *
  * Temporary mapping: workspaceId := sectionId. Queue failure is warn-only.
