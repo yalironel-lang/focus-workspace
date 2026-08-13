@@ -24,17 +24,13 @@ import {
   cancelOrphanPendingFreeSpaceObjectWrites,
   cancelPendingFreeSpaceObjectWritesAfterLocalDelete,
 } from '../lib/focusCache/freeSpaceObjectDeleteCancel';
-import { fetchFreeSpaceObjectsForSection } from '../lib/focusCache/freeSpaceObjectCloud';
 import {
-  buildFreshMountedBoardPersistPlan,
-  buildProtectedEntityIds,
-  collectFreeSpacePullGuardIds,
-  computeMountedBoardPullApply,
-  filterCloudWinnersForReactPatch,
+  applyCloudWinnersToReactState,
+  applyFreeSpaceCloudRowsToMountedBoard,
   isFreeSpacePullScopeCurrent,
-  mergeAcceptedIntoObjectList,
-  persistMountedBoardPullWinners,
+  runFreeSpaceSectionPullCatchUp,
 } from '../lib/focusCache/freeSpaceObjectPull';
+import { subscribeFreeSpaceObjectsRealtime } from '../lib/focusCache/freeSpaceObjectRealtime';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -1128,10 +1124,9 @@ export function useSectionFreeSpaceObjects(
   }, [sectionId, userId]);
 
   /**
-   * PR7: initial cloud pull for the currently mounted board only.
-   * Section-scoped SELECT; apply ignores other boards. Stale section/board gen → zero writes.
-   * C1/C2: re-validate winners immediately before LS write and again inside React patch;
-   * final LS merge always uses a freshly loaded durable snapshot.
+   * PR7b: Realtime thin delivery + mandatory PR7 pull catch-up on SUBSCRIBED.
+   * Lifecycle: local hydrate (above) → subscribe → SUBSCRIBED → pull catch-up → live INSERT/UPDATE.
+   * DELETE events ignored. All applies use shared PR7 mounted-board pipeline (C1/C2).
    */
   useEffect(() => {
     if (!sectionId || !userId) return;
@@ -1142,6 +1137,8 @@ export function useSectionFreeSpaceObjects(
       generation: persistScopeGenRef.current,
     };
     let cancelled = false;
+    let catchUpOnErrorDone = false;
+    let applyChain: Promise<void> = Promise.resolve();
 
     const currentScope = () => ({
       sectionId: scopeRef.current.sectionId,
@@ -1149,105 +1146,105 @@ export function useSectionFreeSpaceObjects(
       generation: persistScopeGenRef.current,
     });
 
-    void (async () => {
-      const fetched = await fetchFreeSpaceObjectsForSection(captured.sectionId);
-      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+    const isCurrent = () =>
+      !cancelled && isFreeSpacePullScopeCurrent(captured, currentScope());
 
-      if (!fetched.ok) {
-        fwPersistWarn(
-          `Free Space cloud pull failed: reason=${fetched.reason}${fetched.message ? ` message=${fetched.message}` : ''}`,
-        );
-        return;
-      }
+    const applyContext = () => ({
+      sectionId: captured.sectionId,
+      boardId: scopeRef.current.boardId,
+      userId,
+      getDirtyIds: () => dirtyIdsRef.current,
+      getPendingDeletedIds: () => pendingDeletedIdsRef.current,
+      getReactObjects: () => objectsRef.current,
+      loadDurableObjects: () =>
+        loadAndMigrate(captured.sectionId, scopeRef.current.boardId),
+      isCurrent,
+    });
 
-      const guards = await collectFreeSpacePullGuardIds({
-        userId,
-        sectionId: captured.sectionId,
-      });
-      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+    const patchReactFromApply = (
+      result: Awaited<ReturnType<typeof applyFreeSpaceCloudRowsToMountedBoard>>,
+    ) => {
+      if (!result.ok || !result.persisted || result.reactWinners.length === 0) return;
+      if (!isCurrent()) return;
+      const winners = result.reactWinners;
+      const pendingCreateEntityIds = result.pendingCreateEntityIds;
+      const pendingUpdateEntityIds = result.pendingUpdateEntityIds;
+      const tombstoneObjectIds = result.tombstoneObjectIds;
+      setObjects(prev =>
+        applyCloudWinnersToReactState({
+          prev,
+          candidates: winners,
+          getDirtyIds: () => dirtyIdsRef.current,
+          getPendingDeletedIds: () => pendingDeletedIdsRef.current,
+          pendingCreateEntityIds,
+          pendingUpdateEntityIds,
+          tombstoneObjectIds,
+        }),
+      );
+    };
 
-      if (!guards.ok) {
-        fwPersistWarn(
-          `Free Space cloud pull aborted (fail-closed guards): reason=${guards.reason}`,
-        );
-        return;
-      }
-
-      // Initial protected snapshot for provisional compute (Case H debounce window).
-      const protectedEntityIds = buildProtectedEntityIds({
-        dirtyIds: dirtyIdsRef.current,
-        pendingDeletedIds: pendingDeletedIdsRef.current,
-        pendingCreateEntityIds: guards.pendingCreateEntityIds,
-        pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
-        tombstoneObjectIds: guards.tombstoneObjectIds,
-      });
-
-      const durableObjects = loadAndMigrate(captured.sectionId, captured.boardId);
-      const computed = computeMountedBoardPullApply({
-        sectionId: captured.sectionId,
-        mountedBoardId: captured.boardId,
-        rows: fetched.rows,
-        reactObjects: objectsRef.current,
-        durableObjects,
-        protectedEntityIds,
-      });
-
-      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
-      if (computed.accepted.length === 0) return;
-
-      // --- C1 + C2: immediately before LS write ---
-      const protectedAtPersist = buildProtectedEntityIds({
-        dirtyIds: dirtyIdsRef.current,
-        pendingDeletedIds: pendingDeletedIdsRef.current,
-        pendingCreateEntityIds: guards.pendingCreateEntityIds,
-        pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
-        tombstoneObjectIds: guards.tombstoneObjectIds,
-      });
-      const freshDurableObjects = loadAndMigrate(captured.sectionId, captured.boardId);
-      const persistPlan = buildFreshMountedBoardPersistPlan({
-        provisionalAccepted: computed.accepted,
-        reactObjects: objectsRef.current,
-        freshDurableObjects,
-        protectedEntityIds: protectedAtPersist,
-      });
-      if (!persistPlan) return;
-      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
-
-      const persisted = persistMountedBoardPullWinners({
-        sectionId: captured.sectionId,
-        boardId: captured.boardId,
-        nextDurableObjects: persistPlan.nextDurableObjects,
-      });
-      if (!persisted) {
-        fwPersistWarn(
-          `Free Space cloud pull could not persist mounted board "${captured.boardId}" for section "${captured.sectionId}".`,
-        );
-        return;
-      }
-      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
-
-      const winnersPersisted = persistPlan.finalAccepted;
-      setObjects(prev => {
-        // --- C1: re-check again at React patch time (never blind apply) ---
-        const protectedAtReact = buildProtectedEntityIds({
-          dirtyIds: dirtyIdsRef.current,
-          pendingDeletedIds: pendingDeletedIdsRef.current,
-          pendingCreateEntityIds: guards.pendingCreateEntityIds,
-          pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
-          tombstoneObjectIds: guards.tombstoneObjectIds,
+    const enqueueApply = (task: () => Promise<void>) => {
+      applyChain = applyChain
+        .then(async () => {
+          if (!isCurrent()) return;
+          await task();
+        })
+        .catch(err => {
+          fwPersistWarn(`Free Space cloud apply queue failed: ${String(err)}`);
         });
-        const stillValid = filterCloudWinnersForReactPatch({
-          candidates: winnersPersisted,
-          prevReactObjects: prev,
-          protectedEntityIds: protectedAtReact,
-        });
-        if (stillValid.length === 0) return prev;
-        return mergeAcceptedIntoObjectList(prev, stillValid);
+    };
+
+    const runCatchUpPull = () => {
+      enqueueApply(async () => {
+        const result = await runFreeSpaceSectionPullCatchUp(applyContext());
+        patchReactFromApply(result);
       });
-    })();
+    };
+
+    const subscription = subscribeFreeSpaceObjectsRealtime({
+      sectionId: captured.sectionId,
+      onEvent: event => {
+        if (!isCurrent()) return;
+        if (event.ignored || !event.row) {
+          if (event.ignoreReason === 'malformed_payload') {
+            fwPersistWarn(
+              `Free Space realtime ignored malformed ${event.eventType} for section "${captured.sectionId}"`,
+            );
+          }
+          return;
+        }
+        const row = event.row;
+        enqueueApply(async () => {
+          const result = await applyFreeSpaceCloudRowsToMountedBoard({
+            ...applyContext(),
+            rows: [row],
+          });
+          patchReactFromApply(result);
+        });
+      },
+      onStatus: status => {
+        if (cancelled) return;
+        if (status === 'SUBSCRIBED') {
+          // Mandatory PR7 catch-up closes the pre/during-subscribe gap.
+          runCatchUpPull();
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          fwPersistWarn(
+            `Free Space realtime channel status=${status} for section "${captured.sectionId}"`,
+          );
+          // Failure safety: keep PR7 pull functional if realtime cannot subscribe.
+          if (!catchUpOnErrorDone) {
+            catchUpOnErrorDone = true;
+            runCatchUpPull();
+          }
+        }
+      },
+    });
 
     return () => {
       cancelled = true;
+      subscription.unsubscribe();
     };
   }, [sectionId, boardId, userId]);
 

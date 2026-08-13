@@ -20,7 +20,10 @@ import { boardScopedFreeSpaceKeys, fwPersistWarn } from '../freeSpacePersistence
 import { tryPersistLocalStorage } from '../freeSpacePersistWrite';
 import { idbGetByIndex, TOMBSTONES_STORE } from '../knowledge/knowledgeJournalIdb';
 import type { KnowledgeTombstone } from '../knowledge/knowledgeTypes';
-import type { FreeSpaceObjectCloudRow } from './freeSpaceObjectCloud';
+import {
+  fetchFreeSpaceObjectsForSection,
+  type FreeSpaceObjectCloudRow,
+} from './freeSpaceObjectCloud';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
 import { listPendingOperations } from './pendingOperations';
 
@@ -403,4 +406,186 @@ export async function collectFreeSpacePullGuardIds(input: {
     pendingUpdateEntityIds,
     tombstoneObjectIds,
   };
+}
+
+export type ApplyMountedBoardCloudRowsResult =
+  | {
+      ok: true;
+      acceptedCount: number;
+      persisted: boolean;
+      /** Final LS winners; empty when nothing persisted. Re-validate again before React patch. */
+      reactWinners: ProjectSpaceObject[];
+      pendingCreateEntityIds: readonly string[];
+      pendingUpdateEntityIds: readonly string[];
+      tombstoneObjectIds: readonly string[];
+    }
+  | { ok: false; reason: string };
+
+export type ApplyMountedBoardCloudRowsInput = {
+  sectionId: string;
+  boardId: string;
+  userId: string | null | undefined;
+  rows: readonly FreeSpaceObjectCloudRow[];
+  getDirtyIds: () => Iterable<string>;
+  getPendingDeletedIds: () => Iterable<string>;
+  getReactObjects: () => readonly ProjectSpaceObject[];
+  loadDurableObjects: () => ProjectSpaceObject[];
+  /** False when cancelled or section/board generation is stale. */
+  isCurrent: () => boolean;
+};
+
+/**
+ * Shared PR7/PR7b mounted-board apply orchestration (guards + C1/C2).
+ * Used by section pull catch-up and realtime INSERT/UPDATE.
+ * Does not patch React — caller must call {@link applyCloudWinnersToReactState}.
+ */
+export async function applyFreeSpaceCloudRowsToMountedBoard(
+  input: ApplyMountedBoardCloudRowsInput,
+): Promise<ApplyMountedBoardCloudRowsResult> {
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+
+  const guards = await collectFreeSpacePullGuardIds({
+    userId: input.userId,
+    sectionId: input.sectionId,
+  });
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+  if (!guards.ok) {
+    fwPersistWarn(
+      `Free Space cloud apply aborted (fail-closed guards): reason=${guards.reason}`,
+    );
+    return { ok: false, reason: `guards:${guards.reason}` };
+  }
+
+  const guardSnapshot = {
+    pendingCreateEntityIds: [...guards.pendingCreateEntityIds],
+    pendingUpdateEntityIds: [...guards.pendingUpdateEntityIds],
+    tombstoneObjectIds: [...guards.tombstoneObjectIds],
+  };
+
+  const protectedEntityIds = buildProtectedEntityIds({
+    dirtyIds: input.getDirtyIds(),
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: guards.pendingCreateEntityIds,
+    pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
+    tombstoneObjectIds: guards.tombstoneObjectIds,
+  });
+
+  const durableObjects = input.loadDurableObjects();
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+
+  const computed = computeMountedBoardPullApply({
+    sectionId: input.sectionId,
+    mountedBoardId: input.boardId,
+    rows: input.rows,
+    reactObjects: input.getReactObjects(),
+    durableObjects,
+    protectedEntityIds,
+  });
+
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+  if (computed.accepted.length === 0) {
+    return {
+      ok: true,
+      acceptedCount: 0,
+      persisted: false,
+      reactWinners: [],
+      ...guardSnapshot,
+    };
+  }
+
+  // --- C1 + C2: immediately before LS write ---
+  const protectedAtPersist = buildProtectedEntityIds({
+    dirtyIds: input.getDirtyIds(),
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: guards.pendingCreateEntityIds,
+    pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
+    tombstoneObjectIds: guards.tombstoneObjectIds,
+  });
+  const freshDurableObjects = input.loadDurableObjects();
+  const persistPlan = buildFreshMountedBoardPersistPlan({
+    provisionalAccepted: computed.accepted,
+    reactObjects: input.getReactObjects(),
+    freshDurableObjects,
+    protectedEntityIds: protectedAtPersist,
+  });
+  if (!persistPlan) {
+    return {
+      ok: true,
+      acceptedCount: 0,
+      persisted: false,
+      reactWinners: [],
+      ...guardSnapshot,
+    };
+  }
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+
+  const persisted = persistMountedBoardPullWinners({
+    sectionId: input.sectionId,
+    boardId: input.boardId,
+    nextDurableObjects: persistPlan.nextDurableObjects,
+  });
+  if (!persisted) {
+    fwPersistWarn(
+      `Free Space cloud apply could not persist mounted board "${input.boardId}" for section "${input.sectionId}".`,
+    );
+    return { ok: false, reason: 'persist_failed' };
+  }
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope_after_persist' };
+
+  return {
+    ok: true,
+    acceptedCount: persistPlan.finalAccepted.length,
+    persisted: true,
+    reactWinners: persistPlan.finalAccepted,
+    ...guardSnapshot,
+  };
+}
+
+/** C1 React patch helper — never blindly apply precomputed winners. */
+export function applyCloudWinnersToReactState(input: {
+  prev: readonly ProjectSpaceObject[];
+  candidates: readonly ProjectSpaceObject[];
+  getDirtyIds: () => Iterable<string>;
+  getPendingDeletedIds: () => Iterable<string>;
+  pendingCreateEntityIds: Iterable<string>;
+  pendingUpdateEntityIds: Iterable<string>;
+  tombstoneObjectIds: Iterable<string>;
+}): ProjectSpaceObject[] {
+  const protectedAtReact = buildProtectedEntityIds({
+    dirtyIds: input.getDirtyIds(),
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: input.pendingCreateEntityIds,
+    pendingUpdateEntityIds: input.pendingUpdateEntityIds,
+    tombstoneObjectIds: input.tombstoneObjectIds,
+  });
+  const stillValid = filterCloudWinnersForReactPatch({
+    candidates: input.candidates,
+    prevReactObjects: input.prev,
+    protectedEntityIds: protectedAtReact,
+  });
+  if (stillValid.length === 0) return [...input.prev];
+  return mergeAcceptedIntoObjectList(input.prev, stillValid);
+}
+
+/**
+ * PR7 section SELECT + shared mounted-board apply (catch-up after Realtime SUBSCRIBED).
+ */
+export async function runFreeSpaceSectionPullCatchUp(
+  input: Omit<ApplyMountedBoardCloudRowsInput, 'rows'>,
+): Promise<ApplyMountedBoardCloudRowsResult> {
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+
+  const fetched = await fetchFreeSpaceObjectsForSection(input.sectionId);
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+  if (!fetched.ok) {
+    fwPersistWarn(
+      `Free Space cloud pull failed: reason=${fetched.reason}${fetched.message ? ` message=${fetched.message}` : ''}`,
+    );
+    return { ok: false, reason: `fetch:${fetched.reason}` };
+  }
+
+  return applyFreeSpaceCloudRowsToMountedBoard({
+    ...input,
+    rows: fetched.rows,
+  });
 }
