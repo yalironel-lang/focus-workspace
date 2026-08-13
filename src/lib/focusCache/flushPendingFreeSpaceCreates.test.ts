@@ -99,7 +99,7 @@ describe('flushPendingFreeSpaceCreates', () => {
     expect(removeMock.mock.calls.map(c => c[1])).toEqual(['op-a', 'op-b']);
   });
 
-  it('leaves unsupported ops queued without upsert or remove', async () => {
+  it('processes update ops the same as create (upsert + remove)', async () => {
     listMock.mockResolvedValue({
       ok: true,
       value: [
@@ -107,6 +107,49 @@ describe('flushPendingFreeSpaceCreates', () => {
           seq: 1,
           id: 'op-upd',
           operationType: 'update',
+          entityId: 'ps-note-1',
+          payload: {
+            boardId: 'main',
+            object: {
+              id: 'ps-note-1',
+              type: 'note',
+              title: 'Note',
+              content: { type: 'note', body: 'edited' },
+              createdAt: 1,
+              updatedAt: 99,
+            },
+          },
+        }),
+      ],
+    });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result).toMatchObject({
+      processed: 1,
+      removed: 1,
+      skippedUnsupported: 0,
+      failedCloud: 0,
+    });
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objectId: 'ps-note-1',
+        object: expect.objectContaining({
+          updatedAt: 99,
+          content: { type: 'note', body: 'edited' },
+        }),
+      }),
+    );
+    expect(removeMock).toHaveBeenCalledWith(ns, 'op-upd');
+  });
+
+  it('leaves unsupported ops queued without upsert or remove', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        createOp({
+          seq: 1,
+          id: 'op-del',
+          operationType: 'delete',
         }),
         createOp({
           seq: 2,
@@ -122,6 +165,88 @@ describe('flushPendingFreeSpaceCreates', () => {
     expect(result.removed).toBe(0);
     expect(upsertMock).not.toHaveBeenCalled();
     expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it('processes create then update in seq drain order', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        createOp({ seq: 1, id: 'op-create', entityId: 'a', operationType: 'create' }),
+        createOp({
+          seq: 2,
+          id: 'op-update',
+          entityId: 'b',
+          operationType: 'update',
+          payload: {
+            boardId: 'main',
+            object: {
+              id: 'b',
+              type: 'note',
+              title: 'B',
+              content: { type: 'note', body: 'x' },
+              createdAt: 1,
+              updatedAt: 5,
+            },
+          },
+        }),
+      ],
+    });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result.processed).toBe(2);
+    expect(result.removed).toBe(2);
+    expect(upsertMock.mock.calls[0]?.[0]?.objectId).toBe('a');
+    expect(upsertMock.mock.calls[1]?.[0]?.objectId).toBe('b');
+    expect(removeMock.mock.calls.map(c => c[1])).toEqual(['op-create', 'op-update']);
+  });
+
+  it('drops stale duplicate ops by object.updatedAt without cloud write', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        createOp({
+          seq: 1,
+          id: 'op-newer',
+          entityId: 'same',
+          operationType: 'update',
+          payload: {
+            boardId: 'main',
+            object: {
+              id: 'same',
+              type: 'note',
+              title: 'Note',
+              content: { type: 'note', body: 'new' },
+              createdAt: 1,
+              updatedAt: 200,
+            },
+          },
+        }),
+        createOp({
+          seq: 2,
+          id: 'op-older',
+          entityId: 'same',
+          operationType: 'update',
+          payload: {
+            boardId: 'main',
+            object: {
+              id: 'same',
+              type: 'note',
+              title: 'Note',
+              content: { type: 'note', body: 'old' },
+              createdAt: 1,
+              updatedAt: 100,
+            },
+          },
+        }),
+      ],
+    });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result.processed).toBe(2);
+    expect(result.removed).toBe(2);
+    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(upsertMock.mock.calls[0]?.[0]?.object).toMatchObject({ updatedAt: 200, content: { type: 'note', body: 'new' } });
+    expect(removeMock.mock.calls.map(c => c[1])).toEqual(['op-newer', 'op-older']);
   });
 
   it('leaves malformed create payloads queued', async () => {

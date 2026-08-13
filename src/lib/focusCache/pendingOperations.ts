@@ -1,6 +1,11 @@
 /**
  * Durable pending_operations queue for focus_cache_v1.
- * Namespace-scoped only — no sync, coalescing, retry, or automatic enqueue.
+ * Namespace-scoped only — no sync, retry, or automatic enqueue.
+ *
+ * Payload replace supports Free Space UPDATE coalesce (one write per entityId).
+ * PR5 uses a linear list scan for coalesce lookups (acceptable at current scale).
+ * Future optimization (not implemented): entityId → pendingOperationId map
+ * (scoped by namespace + entityType) for O(1) coalesce lookups.
  */
 
 import {
@@ -292,6 +297,71 @@ export async function removePendingOperation(
         delReq.onerror = () => finish(fail('transaction_failed'));
 
         tx.oncomplete = () => finish(ok({ removed: true }));
+        tx.onerror = () => finish(fail('transaction_failed'));
+        tx.onabort = () => finish(fail('transaction_failed'));
+      };
+
+      getReq.onerror = () => finish(fail('transaction_failed'));
+      tx.onerror = () => {
+        if (!settled) finish(fail('transaction_failed'));
+      };
+    }),
+  );
+}
+
+/**
+ * Replace payload on an existing pending op (same id/seq/operationType).
+ * Namespace-scoped: cross-namespace or missing id → { replaced: false }.
+ */
+export async function replacePendingOperationPayload(
+  namespace: CacheNamespace,
+  operationId: string,
+  payload: JsonValue | null,
+): Promise<PendingQueueResult<{ replaced: boolean; operation?: PendingOperation }>> {
+  const ns = assertCacheNamespace(namespace);
+  if (!ns.ok) return fail(ns.reason);
+  if (!isExactNonEmptyId(operationId)) return fail('invalid_operation');
+  if (!isJsonValue(payload)) return fail('invalid_operation');
+
+  return withDb((db) =>
+    new Promise((resolve) => {
+      let settled = false;
+      const finish = (
+        result: PendingQueueResult<{ replaced: boolean; operation?: PendingOperation }>,
+      ) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      let tx: IDBTransaction;
+      try {
+        tx = db.transaction(PENDING_OPERATIONS_STORE, 'readwrite');
+      } catch {
+        finish(fail('transaction_failed'));
+        return;
+      }
+
+      const store = tx.objectStore(PENDING_OPERATIONS_STORE);
+      const getReq = store.index(BY_ID_INDEX).get(operationId);
+      let updated: PendingOperation | undefined;
+
+      getReq.onsuccess = () => {
+        const row = getReq.result as PendingOperation | undefined;
+        if (
+          !row ||
+          row.userId !== ns.namespace.userId ||
+          row.workspaceId !== ns.namespace.workspaceId
+        ) {
+          finish(ok({ replaced: false }));
+          return;
+        }
+
+        updated = { ...row, payload };
+        const putReq = store.put(updated);
+        putReq.onerror = () => finish(fail('transaction_failed'));
+
+        tx.oncomplete = () => finish(ok({ replaced: true, operation: updated }));
         tx.onerror = () => finish(fail('transaction_failed'));
         tx.onabort = () => finish(fail('transaction_failed'));
       };
