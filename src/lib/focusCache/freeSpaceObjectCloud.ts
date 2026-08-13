@@ -1,6 +1,6 @@
 /**
- * Cloud repository for Free Space object CREATE upserts.
- * Does not touch the local queue or local Free Space SOT.
+ * Cloud repository for Free Space object CREATE upserts and PR7 section SELECT.
+ * Does not touch the local queue or local Free Space SOT (except callers of pull apply).
  */
 
 import type { Json } from '../database.types';
@@ -8,7 +8,8 @@ import { supabase } from '../supabase';
 
 export type FreeSpaceObjectCloudFailureReason =
   | 'invalid_payload'
-  | 'cloud_write_failed';
+  | 'cloud_write_failed'
+  | 'cloud_read_failed';
 
 export type FreeSpaceObjectCloudResult =
   | { ok: true }
@@ -23,6 +24,21 @@ export type UpsertFreeSpaceObjectCreateInput = {
   /** JSON-safe ProjectSpaceObject body from the queue payload. */
   object: Json;
 };
+
+/** Row shape returned by section SELECT (PR7). */
+export type FreeSpaceObjectCloudRow = {
+  id: string;
+  user_id: string;
+  section_id: string;
+  board_id: string;
+  object: Json;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FetchFreeSpaceObjectsForSectionResult =
+  | { ok: true; rows: FreeSpaceObjectCloudRow[] }
+  | { ok: false; reason: FreeSpaceObjectCloudFailureReason; message?: string };
 
 function isExactNonEmptyId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
@@ -68,4 +84,51 @@ export async function upsertFreeSpaceObjectFromCreatePayload(
   }
 
   return { ok: true };
+}
+
+/**
+ * PR7: SELECT all free_space_objects rows for a section.
+ * Does not write local state. Caller filters to mounted board and applies guards.
+ */
+export async function fetchFreeSpaceObjectsForSection(
+  sectionId: string,
+): Promise<FetchFreeSpaceObjectsForSectionResult> {
+  if (!isExactNonEmptyId(sectionId)) {
+    return { ok: false, reason: 'invalid_payload' };
+  }
+
+  const { data, error } = await supabase
+    .from('free_space_objects')
+    .select('id, user_id, section_id, board_id, object, created_at, updated_at')
+    .eq('section_id', sectionId);
+
+  if (error) {
+    return {
+      ok: false,
+      reason: 'cloud_read_failed',
+      message: error.message,
+    };
+  }
+
+  const rows: FreeSpaceObjectCloudRow[] = [];
+  if (Array.isArray(data)) {
+    for (const row of data) {
+      if (!row || typeof row !== 'object') continue;
+      const r = row as Record<string, unknown>;
+      if (!isExactNonEmptyId(r.id)) continue;
+      if (typeof r.section_id !== 'string') continue;
+      if (typeof r.board_id !== 'string') continue;
+      rows.push({
+        id: r.id,
+        user_id: typeof r.user_id === 'string' ? r.user_id : '',
+        section_id: r.section_id,
+        board_id: r.board_id,
+        object: (r.object ?? null) as Json,
+        created_at: typeof r.created_at === 'string' ? r.created_at : '',
+        updated_at: typeof r.updated_at === 'string' ? r.updated_at : '',
+      });
+    }
+  }
+
+  return { ok: true, rows };
 }

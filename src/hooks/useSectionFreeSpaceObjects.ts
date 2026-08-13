@@ -24,6 +24,17 @@ import {
   cancelOrphanPendingFreeSpaceObjectWrites,
   cancelPendingFreeSpaceObjectWritesAfterLocalDelete,
 } from '../lib/focusCache/freeSpaceObjectDeleteCancel';
+import { fetchFreeSpaceObjectsForSection } from '../lib/focusCache/freeSpaceObjectCloud';
+import {
+  buildFreshMountedBoardPersistPlan,
+  buildProtectedEntityIds,
+  collectFreeSpacePullGuardIds,
+  computeMountedBoardPullApply,
+  filterCloudWinnersForReactPatch,
+  isFreeSpacePullScopeCurrent,
+  mergeAcceptedIntoObjectList,
+  persistMountedBoardPullWinners,
+} from '../lib/focusCache/freeSpaceObjectPull';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -910,6 +921,9 @@ export function useSectionFreeSpaceObjects(
   const scopeRef = useRef({ sectionId, boardId });
   scopeRef.current = { sectionId, boardId };
   const persistScopeGenRef = useRef(0);
+  /** Latest React objects for PR7 pull local comparison (React-first). */
+  const objectsRef = useRef(objects);
+  objectsRef.current = objects;
   /** Ids deleted in this tab whose delete has not yet been committed to disk. */
   const pendingDeletedIdsRef = useRef<Set<string>>(new Set());
   /** Object ids edited since last successful UPDATE enqueue (PR5). */
@@ -1112,6 +1126,130 @@ export function useSectionFreeSpaceObjects(
       authoritativeLocalEntityIds,
     });
   }, [sectionId, userId]);
+
+  /**
+   * PR7: initial cloud pull for the currently mounted board only.
+   * Section-scoped SELECT; apply ignores other boards. Stale section/board gen → zero writes.
+   * C1/C2: re-validate winners immediately before LS write and again inside React patch;
+   * final LS merge always uses a freshly loaded durable snapshot.
+   */
+  useEffect(() => {
+    if (!sectionId || !userId) return;
+
+    const captured = {
+      sectionId,
+      boardId,
+      generation: persistScopeGenRef.current,
+    };
+    let cancelled = false;
+
+    const currentScope = () => ({
+      sectionId: scopeRef.current.sectionId,
+      boardId: scopeRef.current.boardId,
+      generation: persistScopeGenRef.current,
+    });
+
+    void (async () => {
+      const fetched = await fetchFreeSpaceObjectsForSection(captured.sectionId);
+      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+
+      if (!fetched.ok) {
+        fwPersistWarn(
+          `Free Space cloud pull failed: reason=${fetched.reason}${fetched.message ? ` message=${fetched.message}` : ''}`,
+        );
+        return;
+      }
+
+      const guards = await collectFreeSpacePullGuardIds({
+        userId,
+        sectionId: captured.sectionId,
+      });
+      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+
+      if (!guards.ok) {
+        fwPersistWarn(
+          `Free Space cloud pull aborted (fail-closed guards): reason=${guards.reason}`,
+        );
+        return;
+      }
+
+      // Initial protected snapshot for provisional compute (Case H debounce window).
+      const protectedEntityIds = buildProtectedEntityIds({
+        dirtyIds: dirtyIdsRef.current,
+        pendingDeletedIds: pendingDeletedIdsRef.current,
+        pendingCreateEntityIds: guards.pendingCreateEntityIds,
+        pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
+        tombstoneObjectIds: guards.tombstoneObjectIds,
+      });
+
+      const durableObjects = loadAndMigrate(captured.sectionId, captured.boardId);
+      const computed = computeMountedBoardPullApply({
+        sectionId: captured.sectionId,
+        mountedBoardId: captured.boardId,
+        rows: fetched.rows,
+        reactObjects: objectsRef.current,
+        durableObjects,
+        protectedEntityIds,
+      });
+
+      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+      if (computed.accepted.length === 0) return;
+
+      // --- C1 + C2: immediately before LS write ---
+      const protectedAtPersist = buildProtectedEntityIds({
+        dirtyIds: dirtyIdsRef.current,
+        pendingDeletedIds: pendingDeletedIdsRef.current,
+        pendingCreateEntityIds: guards.pendingCreateEntityIds,
+        pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
+        tombstoneObjectIds: guards.tombstoneObjectIds,
+      });
+      const freshDurableObjects = loadAndMigrate(captured.sectionId, captured.boardId);
+      const persistPlan = buildFreshMountedBoardPersistPlan({
+        provisionalAccepted: computed.accepted,
+        reactObjects: objectsRef.current,
+        freshDurableObjects,
+        protectedEntityIds: protectedAtPersist,
+      });
+      if (!persistPlan) return;
+      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+
+      const persisted = persistMountedBoardPullWinners({
+        sectionId: captured.sectionId,
+        boardId: captured.boardId,
+        nextDurableObjects: persistPlan.nextDurableObjects,
+      });
+      if (!persisted) {
+        fwPersistWarn(
+          `Free Space cloud pull could not persist mounted board "${captured.boardId}" for section "${captured.sectionId}".`,
+        );
+        return;
+      }
+      if (cancelled || !isFreeSpacePullScopeCurrent(captured, currentScope())) return;
+
+      const winnersPersisted = persistPlan.finalAccepted;
+      setObjects(prev => {
+        // --- C1: re-check again at React patch time (never blind apply) ---
+        const protectedAtReact = buildProtectedEntityIds({
+          dirtyIds: dirtyIdsRef.current,
+          pendingDeletedIds: pendingDeletedIdsRef.current,
+          pendingCreateEntityIds: guards.pendingCreateEntityIds,
+          pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
+          tombstoneObjectIds: guards.tombstoneObjectIds,
+        });
+        const stillValid = filterCloudWinnersForReactPatch({
+          candidates: winnersPersisted,
+          prevReactObjects: prev,
+          protectedEntityIds: protectedAtReact,
+        });
+        if (stillValid.length === 0) return prev;
+        return mergeAcceptedIntoObjectList(prev, stillValid);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sectionId, boardId, userId]);
 
   useEffect(() => {
     if (!sectionId) return;

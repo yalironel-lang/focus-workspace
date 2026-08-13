@@ -14,6 +14,7 @@ export default defineConfig({
       'src/lib/focusCache/freeSpaceObjectUpdateEnqueue.test.ts',
       'src/lib/focusCache/freeSpaceObjectDeleteCancel.test.ts',
       'src/lib/focusCache/freeSpaceObjectCloud.test.ts',
+      'src/lib/focusCache/freeSpaceObjectPull.test.ts',
       'src/lib/focusCache/flushPendingFreeSpaceCreates.test.ts',
       'src/lib/sync/**/*.test.ts',
     ],
