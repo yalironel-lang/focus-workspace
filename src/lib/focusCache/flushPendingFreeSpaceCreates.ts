@@ -1,16 +1,19 @@
 /**
  * Explicit consumer for pending Free Space object CREATE + UPDATE writes.
  *
- * - Manual invoke only for PR5 (temporary). No timers / background workers / auto-flush.
+ * - Manual invoke only (temporary). No timers / background workers / auto-flush.
  * - Future automatic triggers (not implemented here): app startup, login/session restore,
  *   navigator.onLine, visibilitychange, explicit Sync button.
  * - Processes entityType=free_space_object + operationType=create|update.
  * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
  *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
  * - Upserts by entityId; removes queue row only after confirmed cloud success.
+ * - Queue presence after upsert does not prove cloud absence if remove failed (crash window).
+ * - Soft-delete (PR6) cancels pending create|update locally; does NOT cloud-delete rows
+ *   (deferred until permanent purge). In-flight upsert after soft-delete is acceptable.
  * - Leaves unknown / malformed / failed ops queued.
  * - Does not change local Free Space SOT or saveStatus UI.
- * - No server-side reject-if-older in PR5 (blind upsert; version carried in object jsonb).
+ * - No server-side reject-if-older (blind upsert; version carried in object jsonb).
  */
 
 import type { CacheNamespace } from '../focusCacheNamespace';
