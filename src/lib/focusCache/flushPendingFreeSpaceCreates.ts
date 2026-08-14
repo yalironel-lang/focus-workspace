@@ -1,9 +1,9 @@
 /**
- * Explicit consumer for pending Free Space object CREATE + UPDATE writes.
+ * Drain consumer for pending Free Space object CREATE + UPDATE writes.
  *
- * - Manual invoke only (temporary). No timers / background workers / auto-flush.
- * - Future automatic triggers (not implemented here): app startup, login/session restore,
- *   navigator.onLine, visibilitychange, explicit Sync button.
+ * - Production auto-flush is scheduled by freeSpaceObjectAutoFlush (enqueue /
+ *   online / remount). This function remains the only cloud writer and the
+ *   manual/diagnostic API.
  * - Processes entityType=free_space_object + operationType=create|update.
  * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
  *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
@@ -79,7 +79,7 @@ function isSupportedWrite(op: PendingOperation): boolean {
  * same entityId are removed without cloud write once a newer version has been upserted
  * earlier in this flush pass.
  * Stops on cloud failure or remove failure (remaining ops stay queued).
- * Must be invoked manually in PR5.
+ * Must be invoked via freeSpaceObjectAutoFlush or manually for diagnostics.
  */
 export async function flushPendingFreeSpaceCreates(
   namespace: CacheNamespace,

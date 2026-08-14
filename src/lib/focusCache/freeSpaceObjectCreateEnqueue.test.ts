@@ -7,6 +7,10 @@ vi.mock('./pendingOperations', () => ({
   enqueuePendingOperation: vi.fn(),
 }));
 
+vi.mock('./freeSpacePendingFlushTrigger', () => ({
+  notifyFreeSpacePendingEnqueue: vi.fn(),
+}));
+
 vi.mock('../freeSpacePersistence', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../freeSpacePersistence')>();
   return {
@@ -16,6 +20,7 @@ vi.mock('../freeSpacePersistence', async (importOriginal) => {
 });
 
 import { enqueuePendingOperation } from './pendingOperations';
+import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { JsonValue, PendingOperation } from './types';
 import {
   FREE_SPACE_OBJECT_ENTITY_TYPE,
@@ -24,6 +29,7 @@ import {
 } from './freeSpaceObjectCreateEnqueue';
 
 const enqueueMock = vi.mocked(enqueuePendingOperation);
+const scheduleFlushMock = vi.mocked(notifyFreeSpacePendingEnqueue);
 const warnMock = vi.mocked(fwPersistWarn);
 
 function sampleObject(id = 'ps-note-1'): ProjectSpaceObject {
@@ -39,6 +45,7 @@ function sampleObject(id = 'ps-note-1'): ProjectSpaceObject {
 
 beforeEach(() => {
   enqueueMock.mockReset();
+  scheduleFlushMock.mockReset();
   warnMock.mockReset();
   enqueueMock.mockResolvedValue({
     ok: true,
@@ -77,6 +84,11 @@ describe('enqueueFreeSpaceObjectCreate', () => {
 
     expect(result).toEqual({ ok: true });
     expect(enqueueMock).toHaveBeenCalledTimes(1);
+    expect(scheduleFlushMock).toHaveBeenCalledTimes(1);
+    expect(scheduleFlushMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      workspaceId: 'section-1',
+    });
     const arg = enqueueMock.mock.calls[0]?.[0];
     expect(arg).toMatchObject({
       namespace: { userId: 'user-1', workspaceId: 'section-1' },
@@ -127,6 +139,7 @@ describe('enqueueFreeSpaceObjectCreate', () => {
     if (result.ok) return;
     expect(result.reason).toBe('auth_missing');
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
     expect(warnMock).toHaveBeenCalled();
   });
 
@@ -140,6 +153,7 @@ describe('enqueueFreeSpaceObjectCreate', () => {
     });
     expect(result).toEqual({ ok: false, reason: 'transaction_failed' });
     expect(warnMock).toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
   });
 
   it('does not throw when enqueuePendingOperation rejects', async () => {
@@ -194,6 +208,7 @@ describe('enqueueFreeSpaceObjectCreatesAfterLocalPersist', () => {
     });
     await Promise.resolve();
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
   });
 
   it('enqueues once per object when local persist succeeded', async () => {

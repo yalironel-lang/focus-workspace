@@ -30,6 +30,7 @@ import {
   removePendingOperation,
   replacePendingOperationPayload,
 } from './pendingOperations';
+import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { PendingOperation, PendingQueueFailureReason } from './types';
 
 export type FreeSpaceObjectUpdateEnqueueResult =
@@ -130,6 +131,7 @@ export async function enqueueFreeSpaceObjectUpdate(
       for (const sibling of listMatchingWriteOps(listed.value, entityId, 'update')) {
         await removePendingOperation(ns.namespace, sibling.id);
       }
+      notifyFreeSpacePendingEnqueue(ns.namespace);
       return { ok: true, action: 'create_payload_replaced' };
     }
 
@@ -152,6 +154,7 @@ export async function enqueueFreeSpaceObjectUpdate(
       for (const extra of pendingUpdates.slice(1)) {
         await removePendingOperation(ns.namespace, extra.id);
       }
+      notifyFreeSpacePendingEnqueue(ns.namespace);
       return { ok: true, action: 'update_payload_replaced' };
     }
 
@@ -166,6 +169,7 @@ export async function enqueueFreeSpaceObjectUpdate(
       fwPersistWarn(`pending update enqueue failed: reason=${enqueued.reason}`);
       return { ok: false, reason: enqueued.reason };
     }
+    notifyFreeSpacePendingEnqueue(ns.namespace);
     return { ok: true, action: 'update_enqueued' };
   } catch {
     fwPersistWarn('pending update enqueue failed: reason=unexpected_error');

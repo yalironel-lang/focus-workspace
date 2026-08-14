@@ -13,6 +13,7 @@ import { resolveCacheNamespace } from '../focusCacheNamespace';
 import { stripPdfThumbnailsFromObjects } from '../freeSpacePdfThumbIdb';
 import { fwPersistWarn } from '../freeSpacePersistence';
 import { enqueuePendingOperation } from './pendingOperations';
+import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { JsonValue, PendingQueueFailureReason } from './types';
 
 export const FREE_SPACE_OBJECT_ENTITY_TYPE = 'free_space_object' as const;
@@ -83,6 +84,7 @@ export async function enqueueFreeSpaceObjectCreate(
       return { ok: false, reason: result.reason };
     }
 
+    notifyFreeSpacePendingEnqueue(ns.namespace);
     return { ok: true };
   } catch {
     fwPersistWarn('pending queue enqueue failed: reason=unexpected_error');
