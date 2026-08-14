@@ -477,6 +477,8 @@ export function FreeformCanvas({
   const velRef     = useRef({ vx: 0, vy: 0 });  // velocity in px/ms
   const rafRef     = useRef(0);                   // pan momentum RAF handle
   const zoomRafRef = useRef(0);                   // zoom lerp RAF handle
+  /** True only while mouse-canvas pan momentum owns rafRef (not touch/block). */
+  const canvasPanMomentumActiveRef = useRef(false);
 
   // Smooth zoom target — wheel events write here; a RAF loop lerps toward it
   // This gives the cinematic "camera settling" feel instead of instant snaps.
@@ -606,7 +608,8 @@ export function FreeformCanvas({
   // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
   const panDragActive = dragRef.current?.type === 'canvas' && dragRef.current.panStarted;
-  if (!followPanActiveRef.current && !panDragActive && !touchPanActive) {
+  const canvasPanLive = panDragActive || canvasPanMomentumActiveRef.current;
+  if (!followPanActiveRef.current && !canvasPanLive && !touchPanActive) {
     liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
   } else if (!followPanActiveRef.current) {
     liveViewRef.current.zoom = safeZoom;
@@ -651,12 +654,22 @@ export function FreeformCanvas({
     syncDotGridVars(px, py, z);
   }, [setPan, applyWorldTransform, syncDotGridVars]);
 
-  const cancelViewportAnimations = useCallback(() => {
+  const stopCanvasPanMomentum = useCallback((commit: boolean) => {
+    if (!canvasPanMomentumActiveRef.current) return;
+    canvasPanMomentumActiveRef.current = false;
     cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+    if (commit) commitLiveViewport();
+  }, [commitLiveViewport]);
+
+  const cancelViewportAnimations = useCallback(() => {
+    stopCanvasPanMomentum(true);
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
     cancelAnimationFrame(zoomRafRef.current);
     zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
-  }, []);
+  }, [stopCanvasPanMomentum]);
 
   const stopFollowPan = useCallback(() => {
     if (!followPanActiveRef.current) return;
@@ -673,13 +686,9 @@ export function FreeformCanvas({
       stopFollowPan();
       return;
     }
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(zoomRafRef.current);
-    zoomRafRef.current = 0;
-    velRef.current = { vx: 0, vy: 0 };
+    cancelViewportAnimations();
 
-    liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
-    targetViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
+    targetViewRef.current = { ...liveViewRef.current };
 
     const el = viewportRef.current;
     const rect = el?.getBoundingClientRect();
@@ -697,7 +706,7 @@ export function FreeformCanvas({
     setFollowPanActive(true);
     document.body.setAttribute('data-fw-follow-pan', 'true');
     document.body.style.cursor = 'none';
-  }, [stopFollowPan, safePanX, safePanY, safeZoom, tokens.accent]);
+  }, [stopFollowPan, cancelViewportAnimations, tokens.accent]);
 
   const handleTouchNavigationStart = useCallback(() => {
     if (followPanActiveRef.current) stopFollowPan();
@@ -816,7 +825,10 @@ export function FreeformCanvas({
   }, []);
 
   useLayoutEffect(() => {
-    if (!followPanActiveRef.current && !touchPanActiveRef.current) return;
+    const mouseCanvasPanLive =
+      canvasPanMomentumActiveRef.current ||
+      (dragRef.current?.type === 'canvas' && dragRef.current.panStarted);
+    if (!followPanActiveRef.current && !touchPanActiveRef.current && !mouseCanvasPanLive) return;
     const { panX: px, panY: py, zoom: z } = liveViewRef.current;
     applyWorldTransform(px, py, z);
     syncDotGridVars(px, py, z);
@@ -1076,18 +1088,15 @@ export function FreeformCanvas({
     if (spaceHeldRef.current || e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
-      cancelAnimationFrame(rafRef.current);
-      cancelAnimationFrame(zoomRafRef.current);
-      zoomRafRef.current = 0;
-      velRef.current = { vx: 0, vy: 0 };
+      cancelViewportAnimations();
       onSelect(null);
       onCancelConnectMode?.();
       dragRef.current = {
         type: 'canvas',
         startMouseX: e.clientX,
         startMouseY: e.clientY,
-        startPanX: panX,
-        startPanY: panY,
+        startPanX: liveViewRef.current.panX,
+        startPanY: liveViewRef.current.panY,
         panStarted: true,
       };
       return;
@@ -1099,10 +1108,7 @@ export function FreeformCanvas({
       return;
     }
     // Cancel any running momentum or zoom lerp so a fresh drag starts clean
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(zoomRafRef.current);
-    zoomRafRef.current = 0;
-    velRef.current = { vx: 0, vy: 0 };
+    cancelViewportAnimations();
     // Detect revisit: was this thought dormant/fading? If so, surface it.
     const prevLifecycle = computeLifecycle(activityRef.current[blockId]);
     if (prevLifecycle.state === 'dormant' || prevLifecycle.state === 'fading' || prevLifecycle.state === 'deep') {
@@ -1137,12 +1143,11 @@ export function FreeformCanvas({
     setActiveDragKind(type === 'resize' ? 'resize' : 'move');
   }, [
     positions,
-    panX,
-    panY,
     handleBlockSelect,
     connectModeSourceId,
     onConnectPairComplete,
     stopFollowPan,
+    cancelViewportAnimations,
   ]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
@@ -1155,21 +1160,18 @@ export function FreeformCanvas({
     if (!forcePan && target.closest('[data-freeform-block]')) return;
     if (e.button === 1) e.preventDefault();
     // Cancel any running momentum or zoom lerp so the new drag starts fresh
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(zoomRafRef.current);
-    zoomRafRef.current = 0;
-    velRef.current = { vx: 0, vy: 0 };
+    cancelViewportAnimations();
     onSelect(null);
     onCancelConnectMode?.();
     dragRef.current = {
       type:        'canvas',
       startMouseX: e.clientX,
       startMouseY: e.clientY,
-      startPanX:   panX,
-      startPanY:   panY,
+      startPanX:   liveViewRef.current.panX,
+      startPanY:   liveViewRef.current.panY,
       panStarted:  forcePan ? true : false,
     };
-  }, [onSelect, onCancelConnectMode, panX, panY, stopFollowPan]);
+  }, [onSelect, onCancelConnectMode, stopFollowPan, cancelViewportAnimations]);
 
   useEffect(() => {
     const isEditingTarget = (el: EventTarget | null): boolean => {
@@ -1255,20 +1257,14 @@ export function FreeformCanvas({
         const newPanX = curPanX + (targetPanX - curPanX) * DRAG_SMOOTHING;
         const newPanY = curPanY + (targetPanY - curPanY) * DRAG_SMOOTHING;
 
-        // Write directly to DOM — skip React state during active pan drag
-        if (worldRef.current) {
-          const z = liveViewRef.current.zoom;
-          worldRef.current.style.transform = `translate(${newPanX}px,${newPanY}px) scale(${z})`;
-        }
+        // Transient pan: liveViewRef + DOM only. React/persist commit on pointerup or momentum end.
+        const z = liveViewRef.current.zoom;
         liveViewRef.current.panX = newPanX;
         liveViewRef.current.panY = newPanY;
         drag.currentPanX = newPanX;
         drag.currentPanY = newPanY;
-
-        if (now - dragPersistThrottleRef.current >= 200) {
-          dragPersistThrottleRef.current = now;
-          setPan(newPanX, newPanY);
-        }
+        applyWorldTransform(newPanX, newPanY, z);
+        syncDotGridVars(newPanX, newPanY, z);
 
         // ── EMA velocity smoothing ────────────────────────────────────
         // Exponential moving average reduces jitter in instantaneous velocity
@@ -1395,29 +1391,29 @@ export function FreeformCanvas({
         onSetPos(drag.blockId, { w: finalW, h: finalH });
       }
 
-      // Commit pan position to React state (was written directly to DOM during drag)
+      // Commit pan to React once. If momentum will run, wait until it stops so
+      // React does not overwrite the live DOM transform mid-coast.
       if (drag?.type === 'canvas' && drag.panStarted) {
         const finalPanX = drag.currentPanX ?? liveViewRef.current.panX;
         const finalPanY = drag.currentPanY ?? liveViewRef.current.panY;
-        setPan(finalPanX, finalPanY);
-      }
+        liveViewRef.current.panX = finalPanX;
+        liveViewRef.current.panY = finalPanY;
 
-      // Launch momentum only when the pan threshold was actually crossed
-      if (drag?.type === 'canvas' && drag.panStarted) {
         const { vx, vy } = velRef.current;
         const cvx = Math.sign(vx) * Math.min(Math.abs(vx), PAN_VELOCITY_CLAMP);
         const cvy = Math.sign(vy) * Math.min(Math.abs(vy), PAN_VELOCITY_CLAMP);
 
         if (Math.abs(cvx) > 0.12 || Math.abs(cvy) > 0.12) {
-          let px = liveViewRef.current.panX;
-          let py = liveViewRef.current.panY;
+          let px = finalPanX;
+          let py = finalPanY;
           let mvx = cvx;
           let mvy = cvy;
           let lastTs = performance.now();
 
-          cancelAnimationFrame(rafRef.current);
+          stopCanvasPanMomentum(false);
           cancelAnimationFrame(zoomRafRef.current);
           zoomRafRef.current = 0;
+          canvasPanMomentumActiveRef.current = true;
           const step = (ts: number) => {
             const dtMs = Math.min(40, Math.max(0.5, ts - lastTs));
             const dtSec = dtMs / 1000;
@@ -1425,13 +1421,25 @@ export function FreeformCanvas({
             const decay = Math.exp(-PAN_FRICTION * dtSec);
             mvx *= decay;
             mvy *= decay;
-            if (Math.abs(mvx) < 0.01 && Math.abs(mvy) < 0.01) return;
+            if (Math.abs(mvx) < 0.01 && Math.abs(mvy) < 0.01) {
+              canvasPanMomentumActiveRef.current = false;
+              rafRef.current = 0;
+              liveViewRef.current.panX = px;
+              liveViewRef.current.panY = py;
+              commitLiveViewport();
+              return;
+            }
             px += mvx * dtMs;
             py += mvy * dtMs;
-            setPan(px, py);
+            liveViewRef.current.panX = px;
+            liveViewRef.current.panY = py;
+            applyWorldTransform(px, py, liveViewRef.current.zoom);
+            syncDotGridVars(px, py, liveViewRef.current.zoom);
             rafRef.current = requestAnimationFrame(step);
           };
           rafRef.current = requestAnimationFrame(step);
+        } else {
+          commitLiveViewport();
         }
         velRef.current = { vx: 0, vy: 0 };
 
@@ -1497,7 +1505,7 @@ export function FreeformCanvas({
       window.removeEventListener('pointerup', onPointerUpEnd);
       window.removeEventListener('pointercancel', onPointerUpEnd);
     };
-  }, [zoom, snap, setPan, onSetPos]);
+  }, [zoom, snap, onSetPos, applyWorldTransform, syncDotGridVars, commitLiveViewport, stopCanvasPanMomentum]);
 
   // ── Smooth zoom interpolation ─────────────────────────────────────────────
   // Wheel events write to targetViewRef; a separate RAF loop smoothly lerps
@@ -1518,6 +1526,7 @@ export function FreeformCanvas({
       e.preventDefault();
 
       // Cancel pan momentum — zoom and momentum shouldn't fight
+      stopCanvasPanMomentum(true);
       cancelAnimationFrame(rafRef.current);
 
       const rect = el.getBoundingClientRect();
@@ -1595,7 +1604,7 @@ export function FreeformCanvas({
     };
     // Stable dependencies only — the lerp loop reads liveViewRef/targetViewRef
     // via refs to avoid stale closures, so zoom/panX/panY are NOT needed here
-  }, [setViewport, stopFollowPan]);
+  }, [setViewport, stopFollowPan, stopCanvasPanMomentum]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -1627,8 +1636,8 @@ export function FreeformCanvas({
 
   // ── Dot grid background ───────────────────────────────────────────────────
 
-  const displayPanX = followPanActive || touchPanActive ? liveViewRef.current.panX : safePanX;
-  const displayPanY = followPanActive || touchPanActive ? liveViewRef.current.panY : safePanY;
+  const displayPanX = followPanActive || touchPanActive || canvasPanLive ? liveViewRef.current.panX : safePanX;
+  const displayPanY = followPanActive || touchPanActive || canvasPanLive ? liveViewRef.current.panY : safePanY;
   const dotSpacing = safeGridSize * safeZoom;
   const dotOffX    = ((displayPanX % dotSpacing) + dotSpacing) % dotSpacing;
   const dotOffY    = ((displayPanY % dotSpacing) + dotSpacing) % dotSpacing;
