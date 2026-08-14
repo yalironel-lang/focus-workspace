@@ -10,6 +10,10 @@ vi.mock('./pendingOperations', () => ({
   removePendingOperation: vi.fn(),
 }));
 
+vi.mock('./freeSpacePendingFlushTrigger', () => ({
+  notifyFreeSpacePendingEnqueue: vi.fn(),
+}));
+
 vi.mock('../freeSpacePersistence', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../freeSpacePersistence')>();
   return {
@@ -24,6 +28,7 @@ import {
   removePendingOperation,
   replacePendingOperationPayload,
 } from './pendingOperations';
+import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { JsonValue, PendingOperation } from './types';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
 import {
@@ -35,6 +40,7 @@ const enqueueMock = vi.mocked(enqueuePendingOperation);
 const listMock = vi.mocked(listPendingOperations);
 const replaceMock = vi.mocked(replacePendingOperationPayload);
 const removeMock = vi.mocked(removePendingOperation);
+const scheduleFlushMock = vi.mocked(notifyFreeSpacePendingEnqueue);
 const warnMock = vi.mocked(fwPersistWarn);
 
 function sampleObject(id = 'ps-note-1', updatedAt = 100): ProjectSpaceObject {
@@ -77,6 +83,7 @@ beforeEach(() => {
   listMock.mockReset();
   replaceMock.mockReset();
   removeMock.mockReset();
+  scheduleFlushMock.mockReset();
   warnMock.mockReset();
   listMock.mockResolvedValue({ ok: true, value: [] });
   replaceMock.mockResolvedValue({
@@ -103,6 +110,10 @@ describe('enqueueFreeSpaceObjectUpdate', () => {
     expect(result).toEqual({ ok: true, action: 'update_enqueued' });
     expect(replaceMock).not.toHaveBeenCalled();
     expect(enqueueMock).toHaveBeenCalledTimes(1);
+    expect(scheduleFlushMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      workspaceId: 'section-1',
+    });
     const arg = enqueueMock.mock.calls[0]?.[0];
     expect(arg).toMatchObject({
       namespace: { userId: 'user-1', workspaceId: 'section-1' },
@@ -135,6 +146,7 @@ describe('enqueueFreeSpaceObjectUpdate', () => {
 
     expect(result).toEqual({ ok: true, action: 'create_payload_replaced' });
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).toHaveBeenCalledTimes(1);
     expect(replaceMock).toHaveBeenCalledWith(
       { userId: 'user-1', workspaceId: 'section-1' },
       'create-op',
@@ -160,6 +172,7 @@ describe('enqueueFreeSpaceObjectUpdate', () => {
 
     expect(result).toEqual({ ok: true, action: 'update_payload_replaced' });
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).toHaveBeenCalledTimes(1);
     expect(replaceMock).toHaveBeenCalledWith(
       { userId: 'user-1', workspaceId: 'section-1' },
       'upd-op',
@@ -210,6 +223,7 @@ describe('enqueueFreeSpaceObjectUpdate', () => {
     expect(result).toEqual({ ok: false, reason: 'missing_updated_at' });
     expect(listMock).not.toHaveBeenCalled();
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
   });
 
   it('skips when userId is missing without throwing', async () => {
@@ -221,6 +235,7 @@ describe('enqueueFreeSpaceObjectUpdate', () => {
     });
     expect(result.ok).toBe(false);
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
   });
 });
 
@@ -234,6 +249,7 @@ describe('enqueueFreeSpaceObjectUpdatesAfterLocalPersist', () => {
     });
     expect(listMock).not.toHaveBeenCalled();
     expect(enqueueMock).not.toHaveBeenCalled();
+    expect(scheduleFlushMock).not.toHaveBeenCalled();
   });
 
   it('fires enqueue for each object when persisted is true', async () => {

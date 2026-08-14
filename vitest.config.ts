@@ -17,6 +17,7 @@ export default defineConfig({
       'src/lib/focusCache/freeSpaceObjectPull.test.ts',
       'src/lib/focusCache/freeSpaceObjectRealtime.test.ts',
       'src/lib/focusCache/flushPendingFreeSpaceCreates.test.ts',
+      'src/lib/focusCache/freeSpaceObjectAutoFlush.test.ts',
       'src/lib/sync/**/*.test.ts',
     ],
   },

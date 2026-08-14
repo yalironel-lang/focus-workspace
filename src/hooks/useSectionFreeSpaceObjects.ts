@@ -31,6 +31,12 @@ import {
   runFreeSpaceSectionPullCatchUp,
 } from '../lib/focusCache/freeSpaceObjectPull';
 import { subscribeFreeSpaceObjectsRealtime } from '../lib/focusCache/freeSpaceObjectRealtime';
+import {
+  invalidateFreeSpaceAutoFlushScope,
+  registerFreeSpaceAutoFlushScope,
+  requestFreeSpacePendingFlushNow,
+} from '../lib/focusCache/freeSpacePendingFlushTrigger';
+import { resolveCacheNamespace } from '../lib/focusCacheNamespace';
 import type { StudyFileKind, StudyFileRole } from '../lib/studyFiles';
 import {
   buildCompanionContent,
@@ -1121,6 +1127,25 @@ export function useSectionFreeSpaceObjects(
       sectionId,
       authoritativeLocalEntityIds,
     });
+  }, [sectionId, userId]);
+
+  /**
+   * PR8: drain leftover queued CREATE/UPDATE on mount, and again when the
+   * browser reports online. Scope invalidate never deletes the IDB queue.
+   * Inbound catch-up stays on SUBSCRIBED in the realtime effect below.
+   */
+  useEffect(() => {
+    if (!sectionId || !userId) return;
+    const ns = resolveCacheNamespace(userId, sectionId);
+    if (!ns.ok) return;
+    registerFreeSpaceAutoFlushScope(ns.namespace);
+    requestFreeSpacePendingFlushNow(ns.namespace);
+    const onOnline = () => requestFreeSpacePendingFlushNow(ns.namespace);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      invalidateFreeSpaceAutoFlushScope(ns.namespace);
+    };
   }, [sectionId, userId]);
 
   /**
