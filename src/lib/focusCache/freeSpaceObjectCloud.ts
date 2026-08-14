@@ -132,3 +132,26 @@ export async function fetchFreeSpaceObjectsForSection(
 
   return { ok: true, rows };
 }
+
+/**
+ * Normalize an unknown realtime/SELECT row into FreeSpaceObjectCloudRow.
+ * Returns null when required fields are missing/malformed.
+ */
+export function normalizeFreeSpaceObjectCloudRow(
+  raw: unknown,
+): FreeSpaceObjectCloudRow | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (!isExactNonEmptyId(r.id)) return null;
+  if (typeof r.section_id !== 'string' || !r.section_id.trim()) return null;
+  if (typeof r.board_id !== 'string') return null;
+  return {
+    id: r.id,
+    user_id: typeof r.user_id === 'string' ? r.user_id : '',
+    section_id: r.section_id,
+    board_id: r.board_id,
+    object: (r.object ?? null) as Json,
+    created_at: typeof r.created_at === 'string' ? r.created_at : '',
+    updated_at: typeof r.updated_at === 'string' ? r.updated_at : '',
+  };
+}
