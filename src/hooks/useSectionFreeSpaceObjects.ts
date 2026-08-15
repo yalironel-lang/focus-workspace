@@ -18,6 +18,10 @@ import {
 } from '../lib/freeSpacePdfThumbIdb';
 import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
+import {
+  normalizeFreeSpaceObjectGeometry,
+  type FreeSpaceObjectGeometry,
+} from '../lib/freeSpaceObjectGeometry';
 import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
 import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
 import {
@@ -208,7 +212,15 @@ export interface ProjectSpaceObject {
   splitSide?: UniversalObjectSplitSide;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Optional canvas geometry (PR A: model/transport only).
+   * Independent of object.updatedAt. Invalid or missing => omitted.
+   * Never defaulted for legacy objects. Visual SOT remains PositionMap.
+   */
+  geometry?: FreeSpaceObjectGeometry;
 }
+
+export type { FreeSpaceObjectGeometry };
 
 function sanitizeUniversalViewMode(raw: unknown): UniversalObjectViewMode {
   return raw === 'split' || raw === 'fullscreen' ? raw : 'floating';
@@ -636,7 +648,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
   }
 }
 
-function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
+export function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
   const id = typeof o.id === 'string' && o.id ? o.id : null;
@@ -658,6 +670,7 @@ function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
 
   const viewMode = sanitizeUniversalViewMode(o.viewMode);
   const splitSide = sanitizeUniversalSplitSide(o.splitSide);
+  const geometry = normalizeFreeSpaceObjectGeometry(o.geometry);
   return {
     id,
     type,
@@ -667,6 +680,7 @@ function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | null {
     ...(splitSide !== 'right' ? { splitSide } : {}),
     createdAt,
     updatedAt,
+    ...(geometry ? { geometry } : {}),
   };
 }
 
