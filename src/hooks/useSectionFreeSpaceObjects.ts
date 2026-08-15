@@ -21,6 +21,7 @@ import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import {
   normalizeFreeSpaceObjectGeometry,
   type FreeSpaceObjectGeometry,
+  stampLocalObjectGeometry,
 } from '../lib/freeSpaceObjectGeometry';
 import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
 import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
@@ -923,6 +924,11 @@ export interface SectionFreeSpaceObjectsState {
   removeObject: (id: string) => void;
   duplicateObject: (id: string) => ProjectSpaceObject | null;
   getObject: (id: string) => ProjectSpaceObject | undefined;
+  /**
+   * PR B: stamp object.geometry from a final local PositionMap commit.
+   * Does not bump object.updatedAt. Persists immediately and enqueues UPDATE.
+   */
+  commitLocalGeometry: (id: string, pos: { x: number; y: number; w: number; h: number }) => void;
 }
 
 export function useSectionFreeSpaceObjects(
@@ -1655,6 +1661,24 @@ export function useSectionFreeSpaceObjects(
 
   const getObject = useCallback((id: string) => objects.find(o => o.id === id), [objects]);
 
+  const commitLocalGeometry = useCallback((
+    id: string,
+    pos: { x: number; y: number; w: number; h: number },
+  ) => {
+    if (!id) return;
+    setObjects(prev => {
+      const o = prev.find(x => x.id === id);
+      if (!o) return prev;
+      const nextObj = stampLocalObjectGeometry(o, pos);
+      if (nextObj === o) return prev;
+      objectsRef.current = prev.map(x => (x.id === id ? nextObj : x));
+      markObjectDirty(id);
+      const next = objectsRef.current;
+      writeObjects(next, true);
+      return next;
+    });
+  }, [markObjectDirty, writeObjects]);
+
   return useMemo(() => ({
     objects,
     appendObjects,
@@ -1670,6 +1694,7 @@ export function useSectionFreeSpaceObjects(
     removeObject,
     duplicateObject,
     getObject,
+    commitLocalGeometry,
   }), [
     objects,
     appendObjects,
@@ -1685,5 +1710,6 @@ export function useSectionFreeSpaceObjects(
     removeObject,
     duplicateObject,
     getObject,
+    commitLocalGeometry,
   ]);
 }

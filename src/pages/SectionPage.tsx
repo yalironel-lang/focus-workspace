@@ -63,6 +63,11 @@ import { useLivingEnvironment } from '../hooks/useLivingEnvironment';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import { useSectionCanvasMode } from '../hooks/useSectionCanvasMode';
 import { useSectionBlockPositions } from '../hooks/useSectionBlockPositions';
+import type { BlockPos } from '../hooks/useBlockPositions';
+import {
+  committedPosFromInitPosHint,
+  committedPosFromSetPosPatch,
+} from '../lib/freeSpaceLocalGeometryCommit';
 import {
   useSectionFreeSpaceObjects,
   type ProjectObjectType,
@@ -1367,10 +1372,24 @@ export function SectionPage() {
           getObject: getSpaceObject,
           convertNoteToMistake,
           clearConnectionsForObject,
-          removeObject: removeSpaceObject } = sectionObjects;
-  const { initPos, setPos: setSpacePos, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
+          removeObject: removeSpaceObject,
+          commitLocalGeometry } = sectionObjects;
+  const { initPos: initPosRaw, setPos: setSpacePosRaw, positions: spacePositions, removePos, seedMissingPositions } = sectionPositions;
   const spacePositionsRef = useRef(spacePositions);
   spacePositionsRef.current = spacePositions;
+
+  const setSpacePos = useCallback((id: string, patch: Partial<BlockPos>) => {
+    const pos = committedPosFromSetPosPatch(spacePositionsRef.current[id], patch);
+    setSpacePosRaw(id, patch);
+    commitLocalGeometry(id, pos);
+  }, [setSpacePosRaw, commitLocalGeometry]);
+
+  const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
+    const existed = !!spacePositionsRef.current[id];
+    initPosRaw(id, hint);
+    if (existed) return;
+    commitLocalGeometry(id, committedPosFromInitPosHint(hint));
+  }, [initPosRaw, commitLocalGeometry]);
 
   const focusNotebookOnCanvas = useCallback(
     (objectId: string) => {
@@ -3826,7 +3845,7 @@ export function SectionPage() {
               selectedIds={spaceSelectedIds}
               focusEditingId={spaceEditingId}
               spatialAmbient={!isStabilityFeatureDisabled('disableFreeSpaceSpatialAmbient')}
-              onSetPos={sectionPositions.setPos}
+              onSetPos={setSpacePos}
               onSelect={handleSpaceSelection}
               onRemoveModule={() => {}}
               onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
@@ -3835,7 +3854,7 @@ export function SectionPage() {
                 const duplicated = sectionObjects.duplicateObject(id);
                 if (!duplicated) return;
                 const p = sectionPositions.positions[id];
-                sectionPositions.initPos(
+                initPos(
                   duplicated.id,
                   p ? { x: p.x + 48, y: p.y + 40, w: p.w, h: p.h } : { x: 100, y: 100, w: 360 },
                 );

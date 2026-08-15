@@ -53,3 +53,39 @@ export function normalizeFreeSpaceObjectGeometry(
   if (updatedAt <= 0) return undefined;
   return { x, y, w, h, updatedAt };
 }
+
+/**
+ * V1 client-ms timestamp, monotonic vs the previous geometry.updatedAt.
+ * Avoids same-millisecond collisions on immediate consecutive commits.
+ */
+export function nextGeometryUpdatedAt(
+  previousUpdatedAt: number | undefined,
+  now = Date.now(),
+): number {
+  const prev =
+    typeof previousUpdatedAt === 'number' && Number.isFinite(previousUpdatedAt) && previousUpdatedAt > 0
+      ? previousUpdatedAt
+      : 0;
+  const clock = typeof now === 'number' && Number.isFinite(now) ? now : Date.now();
+  return Math.max(clock, prev + 1);
+}
+
+/**
+ * Stamp committed PositionMap x/y/w/h onto an object. Preserves object.updatedAt
+ * and all content fields. Returns the original object if geometry would be invalid.
+ */
+export function stampLocalObjectGeometry<T extends { geometry?: FreeSpaceObjectGeometry }>(
+  object: T,
+  pos: { x: number; y: number; w: number; h: number },
+  now = Date.now(),
+): T {
+  const geometry = normalizeFreeSpaceObjectGeometry({
+    x: pos.x,
+    y: pos.y,
+    w: pos.w,
+    h: pos.h,
+    updatedAt: nextGeometryUpdatedAt(object.geometry?.updatedAt, now),
+  });
+  if (!geometry) return object;
+  return { ...object, geometry };
+}
