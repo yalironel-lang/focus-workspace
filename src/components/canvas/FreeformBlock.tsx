@@ -8,7 +8,7 @@
  * Resize: minimal corner affordance, visible on selection / hover / active resize.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { GripHorizontal, X, Copy, Link2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { BlockPos } from '../../hooks/useBlockPositions';
@@ -21,9 +21,21 @@ import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
 export type BlockActiveGesture = 'move' | 'resize' | null;
 
+/** Transient geometry while this block is dragged, resized, or coasting. */
+export interface LiveBlockGeom {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: 'move' | 'resize';
+}
+
 interface Props {
   id: string;
   pos: BlockPos;
+  /** Canvas live-geometry ref — authority over `pos` while this block is live. */
+  liveGeomRef?: RefObject<LiveBlockGeom | null>;
   label?: string;
   tokens: AtmosphereTokens;
   selected: boolean;
@@ -63,9 +75,19 @@ interface Props {
 const chromeEase = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
 const liftEase = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
+function readLiveGeom(
+  id: string,
+  liveGeomRef: RefObject<LiveBlockGeom | null> | undefined,
+): LiveBlockGeom | null {
+  const live = liveGeomRef?.current;
+  if (!live || live.id !== id) return null;
+  return live;
+}
+
 export function FreeformBlock({
   id,
   pos,
+  liveGeomRef,
   label,
   tokens,
   selected,
@@ -104,8 +126,23 @@ export function FreeformBlock({
   }, []);
   const material = freeSpaceMaterialStyle(materialTier);
 
-  const w = pos.w > 0 ? pos.w : undefined;
-  const h = pos.h > 0 ? pos.h : undefined;
+  const live = readLiveGeom(id, liveGeomRef);
+  const left = live ? live.x : pos.x;
+  const top = live ? live.y : pos.y;
+  const liveW = live ? live.w : pos.w;
+  const liveH = live ? live.h : pos.h;
+  const w = liveW > 0 ? liveW : undefined;
+  const h = liveH > 0 ? liveH : undefined;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const geom = readLiveGeom(id, liveGeomRef);
+    if (!el || !geom) return;
+    el.style.left = `${geom.x}px`;
+    el.style.top = `${geom.y}px`;
+    if (geom.w > 0) el.style.width = `${geom.w}px`;
+    if (geom.h > 0) el.style.height = `${geom.h}px`;
+  });
 
   const engaged = selected || hovered || isDragging;
   const recede = !engaged;
@@ -203,8 +240,8 @@ export function FreeformBlock({
       }}
       style={{
         position: 'absolute',
-        left: pos.x,
-        top: pos.y,
+        left,
+        top,
         width: w,
         height: h,
         minWidth: '200px',

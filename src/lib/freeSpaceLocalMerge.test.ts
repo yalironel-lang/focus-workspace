@@ -57,6 +57,30 @@ describe('mergeFreeSpaceObjects — existing behaviour (no deletedIds)', () => {
     expect(conflicts).toHaveLength(1);
   });
 
+  it('O. sibling geometry is not copied onto an existing local object', () => {
+    const g1 = { x: 10, y: 10, w: 200, h: 80, updatedAt: 1 };
+    const g2 = { x: 400, y: 300, w: 200, h: 80, updatedAt: 50 };
+    const base: ProjectSpaceObject[] = [{ ...makeObj('a', 10, 'one'), geometry: g1 }];
+    const incomingEqual: ProjectSpaceObject[] = [{ ...makeObj('a', 10, 'two'), geometry: g2 }];
+    const { merged: equalMerged } = mergeFreeSpaceObjects(base, incomingEqual);
+    expect((equalMerged[0].content as { body: string }).body).toBe('two');
+    expect(equalMerged[0].geometry).toEqual(g1);
+
+    const incomingNewer: ProjectSpaceObject[] = [{ ...makeObj('a', 20, 'new'), geometry: g2 }];
+    const { merged: newerMerged } = mergeFreeSpaceObjects(base, incomingNewer);
+    expect((newerMerged[0].content as { body: string }).body).toBe('new');
+    expect(newerMerged[0].geometry).toEqual(g1);
+  });
+
+  it('legacy object without geometry stays without geometry when sibling LS has geometry', () => {
+    const g2 = { x: 400, y: 300, w: 200, h: 80, updatedAt: 50 };
+    const base = [makeObj('a', 10, 'one')];
+    const incoming: ProjectSpaceObject[] = [{ ...makeObj('a', 10, 'two'), geometry: g2 }];
+    const { merged } = mergeFreeSpaceObjects(base, incoming);
+    expect(merged[0].geometry).toBeUndefined();
+    expect((merged[0].content as { body: string }).body).toBe('two');
+  });
+
   it('storage-event style merge (in-memory as base, remote as incoming) still unions', () => {
     const inMemory = [makeObj('local', 10)];
     const remote = [makeObj('local', 10), makeObj('remote', 15)];

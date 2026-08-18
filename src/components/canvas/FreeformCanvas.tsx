@@ -72,7 +72,7 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ModuleConfig } from '../../hooks/useWorkspaceLayout';
 import type { CustomTool } from '../../hooks/useCustomTools';
 import type { BlockPos, PositionMap } from '../../hooks/useBlockPositions';
-import { FreeformBlock } from './FreeformBlock';
+import { FreeformBlock, type LiveBlockGeom } from './FreeformBlock';
 import { CustomToolBlock } from './CustomToolBlock';
 import { FreeSpaceSpatialAmbient } from './FreeSpaceSpatialAmbient';
 import { FreeSpaceConnectionsLayer } from './FreeSpaceConnectionsLayer';
@@ -103,6 +103,7 @@ import { buildSemanticClusterRegions, buildSemanticClusters } from '../../lib/fr
 import { resolveFreeSpaceMaterialTier } from '../../lib/freeSpaceMaterials';
 import { isAcceptablePdfFile } from '../../lib/freeSpacePdfIdb';
 import { registerFreeSpaceDragCommit } from '../../lib/freeSpaceDragCommit';
+import { getActiveFreeSpaceGeometryIds, setFreeSpaceGeometryActive } from '../../lib/freeSpaceActiveGeometry';
 import { isAcceptableImageFile } from '../../lib/freeSpaceImageIdb';
 import { WorkspaceMicroScene } from '../workspace-guidance/WorkspaceMicroScene';
 import { flickerDebugCount } from '../../lib/flickerDebug';
@@ -447,9 +448,16 @@ export function FreeformCanvas({
   const viewportRef  = useRef<HTMLDivElement>(null);
   const worldRef     = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<DragState | null>(null);
-  const dragPersistThrottleRef = useRef(0);
+  const liveBlockGeomRef = useRef<LiveBlockGeom | null>(null);
+  const blockMomentumActiveRef = useRef(false);
   const spaceHeldRef = useRef(false);
   const [draggingId,      setDraggingId]      = useState<string | null>(null);
+
+  useEffect(() => () => {
+    for (const id of [...getActiveFreeSpaceGeometryIds()]) {
+      setFreeSpaceGeometryActive(id, false);
+    }
+  }, []);
 
   useEffect(() => {
     setPerformancePressure('canvas-drag', draggingId !== null);
@@ -654,6 +662,41 @@ export function FreeformCanvas({
     syncDotGridVars(px, py, z);
   }, [setPan, applyWorldTransform, syncDotGridVars]);
 
+  const applyLiveBlockDom = useCallback((geom: LiveBlockGeom) => {
+    const el = worldRef.current?.querySelector<HTMLElement>(
+      `[data-freeform-block="${geom.id}"]`,
+    );
+    if (!el) return;
+    el.style.left = `${geom.x}px`;
+    el.style.top = `${geom.y}px`;
+    if (geom.kind === 'resize') {
+      el.style.width = `${geom.w}px`;
+      el.style.height = `${geom.h}px`;
+    }
+  }, []);
+
+  const writeLiveBlockGeom = useCallback((geom: LiveBlockGeom) => {
+    setFreeSpaceGeometryActive(geom.id, true);
+    liveBlockGeomRef.current = geom;
+    applyLiveBlockDom(geom);
+  }, [applyLiveBlockDom]);
+
+  const commitLiveBlockGeom = useCallback(() => {
+    const live = liveBlockGeomRef.current;
+    if (!live) return;
+    if (live.kind === 'resize') onSetPos(live.id, { w: live.w, h: live.h });
+    else onSetPos(live.id, { x: live.x, y: live.y });
+    if (!blockMomentumActiveRef.current) setFreeSpaceGeometryActive(live.id, false);
+  }, [onSetPos]);
+
+  const stopBlockMomentum = useCallback((commit: boolean) => {
+    if (!blockMomentumActiveRef.current) return;
+    blockMomentumActiveRef.current = false;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+    if (commit) commitLiveBlockGeom();
+  }, [commitLiveBlockGeom]);
+
   const stopCanvasPanMomentum = useCallback((commit: boolean) => {
     if (!canvasPanMomentumActiveRef.current) return;
     canvasPanMomentumActiveRef.current = false;
@@ -664,12 +707,13 @@ export function FreeformCanvas({
 
   const cancelViewportAnimations = useCallback(() => {
     stopCanvasPanMomentum(true);
+    stopBlockMomentum(true);
     cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
     cancelAnimationFrame(zoomRafRef.current);
     zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
-  }, [stopCanvasPanMomentum]);
+  }, [stopCanvasPanMomentum, stopBlockMomentum]);
 
   const stopFollowPan = useCallback(() => {
     if (!followPanActiveRef.current) return;
@@ -828,10 +872,19 @@ export function FreeformCanvas({
     const mouseCanvasPanLive =
       canvasPanMomentumActiveRef.current ||
       (dragRef.current?.type === 'canvas' && dragRef.current.panStarted);
-    if (!followPanActiveRef.current && !touchPanActiveRef.current && !mouseCanvasPanLive) return;
-    const { panX: px, panY: py, zoom: z } = liveViewRef.current;
-    applyWorldTransform(px, py, z);
-    syncDotGridVars(px, py, z);
+    if (followPanActiveRef.current || touchPanActiveRef.current || mouseCanvasPanLive) {
+      const { panX: px, panY: py, zoom: z } = liveViewRef.current;
+      applyWorldTransform(px, py, z);
+      syncDotGridVars(px, py, z);
+    }
+    const liveBlock = liveBlockGeomRef.current;
+    if (liveBlock) applyLiveBlockDom(liveBlock);
+    const blockDragActive =
+      dragRef.current?.type === 'block-move' || dragRef.current?.type === 'block-resize';
+    if (liveBlock && !blockDragActive && !blockMomentumActiveRef.current) {
+      liveBlockGeomRef.current = null;
+      setFreeSpaceGeometryActive(liveBlock.id, false);
+    }
   });
 
   // Initialize targetView to current viewport on first render
@@ -1119,7 +1172,12 @@ export function FreeformCanvas({
     activityRef.current[blockId] = Date.now();
     try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activityRef.current)); } catch { /* quota */ }
     handleBlockSelect(blockId);
-    const pos = positions[blockId] ?? { x: 0, y: 0, w: 340, h: 0 };
+    const stored = positions[blockId] ?? { x: 0, y: 0, w: 340, h: 0 };
+    const live = liveBlockGeomRef.current;
+    const pos =
+      live?.id === blockId
+        ? { x: live.x, y: live.y, w: live.w || stored.w || 340, h: live.h || stored.h || 200 }
+        : stored;
     const pointerId = 'pointerId' in e ? e.pointerId : undefined;
     dragRef.current = {
       type:        type === 'move' ? 'block-move' : 'block-resize',
@@ -1134,6 +1192,7 @@ export function FreeformCanvas({
       resizeStarted: false,
       pointerId,
     };
+    setFreeSpaceGeometryActive(blockId, true);
     if (pointerId != null && e.currentTarget instanceof HTMLElement) {
       try {
         e.currentTarget.setPointerCapture(pointerId);
@@ -1210,6 +1269,13 @@ export function FreeformCanvas({
   }, []);
 
   const commitInFlightDragState = useCallback(() => {
+    const live = liveBlockGeomRef.current;
+    if (live) {
+      if (live.kind === 'resize') onSetPos(live.id, { w: live.w, h: live.h });
+      else onSetPos(live.id, { x: live.x, y: live.y });
+      setFreeSpaceGeometryActive(live.id, false);
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     if (drag.type === 'block-move' && drag.blockId != null && drag.moveStarted) {
@@ -1298,15 +1364,6 @@ export function FreeformCanvas({
         const newX = baseX + (targetX - baseX) * DRAG_SMOOTHING;
         const newY = baseY + (targetY - baseY) * DRAG_SMOOTHING;
 
-        // Write directly to the block DOM element — skip React state during drag
-        const blockEl = worldRef.current?.querySelector<HTMLElement>(
-          `[data-freeform-block="${drag.blockId}"]`
-        );
-        if (blockEl) {
-          blockEl.style.left = `${newX}px`;
-          blockEl.style.top  = `${newY}px`;
-        }
-
         if (drag.lastT != null && drag.lastX != null && drag.lastY != null) {
           const dt = now - drag.lastT;
           if (dt > 0 && dt < 50) {
@@ -1322,11 +1379,14 @@ export function FreeformCanvas({
         drag.lastT = now;
         drag.currentBlockX = newX;
         drag.currentBlockY = newY;
-
-        if (now - dragPersistThrottleRef.current >= 200) {
-          dragPersistThrottleRef.current = now;
-          onSetPos(drag.blockId, { x: newX, y: newY });
-        }
+        writeLiveBlockGeom({
+          id: drag.blockId,
+          x: newX,
+          y: newY,
+          w: drag.startBlockW ?? 340,
+          h: drag.startBlockH ?? 200,
+          kind: 'move',
+        });
 
       } else if (drag.type === 'block-resize' && drag.blockId != null) {
         const worldDx = dx / zoom;
@@ -1341,21 +1401,16 @@ export function FreeformCanvas({
         const baseH = drag.currentBlockH ?? (drag.startBlockH ?? 200);
         const newW = Math.max(200, baseW + (targetW - baseW) * RESIZE_SMOOTHING);
         const newH = Math.max(80,  baseH + (targetH - baseH) * RESIZE_SMOOTHING);
-        // Write directly to DOM — skip React state during resize drag
-        const resizeEl = worldRef.current?.querySelector<HTMLElement>(
-          `[data-freeform-block="${drag.blockId}"]`
-        );
-        if (resizeEl) {
-          resizeEl.style.width  = `${newW}px`;
-          resizeEl.style.height = `${newH}px`;
-        }
         drag.currentBlockW = newW;
         drag.currentBlockH = newH;
-
-        if (now - dragPersistThrottleRef.current >= 200) {
-          dragPersistThrottleRef.current = now;
-          onSetPos(drag.blockId, { w: newW, h: newH });
-        }
+        writeLiveBlockGeom({
+          id: drag.blockId,
+          x: drag.startBlockX ?? 0,
+          y: drag.startBlockY ?? 0,
+          w: newW,
+          h: newH,
+          kind: 'resize',
+        });
       }
     };
 
@@ -1379,16 +1434,49 @@ export function FreeformCanvas({
       setDraggingId(null);
       setActiveDragKind(null);
 
-      // Commit block position/size to React state (was written directly to DOM during drag)
+      // Block geometry stays on live DOM/refs during drag. React setPos commits
+      // once at pointerup or after momentum.
       if (drag?.type === 'block-move' && drag.blockId != null && drag.moveStarted) {
         const finalX = drag.currentBlockX ?? drag.startBlockX ?? 0;
         const finalY = drag.currentBlockY ?? drag.startBlockY ?? 0;
-        onSetPos(drag.blockId, { x: finalX, y: finalY });
+        const finalW = drag.startBlockW ?? 340;
+        const finalH = drag.startBlockH ?? 200;
+        writeLiveBlockGeom({
+          id: drag.blockId,
+          x: finalX,
+          y: finalY,
+          w: finalW,
+          h: finalH,
+          kind: 'move',
+        });
       }
       if (drag?.type === 'block-resize' && drag.blockId != null && drag.resizeStarted) {
         const finalW = drag.currentBlockW ?? drag.startBlockW ?? 340;
         const finalH = drag.currentBlockH ?? drag.startBlockH ?? 200;
-        onSetPos(drag.blockId, { w: finalW, h: finalH });
+        writeLiveBlockGeom({
+          id: drag.blockId,
+          x: drag.startBlockX ?? 0,
+          y: drag.startBlockY ?? 0,
+          w: finalW,
+          h: finalH,
+          kind: 'resize',
+        });
+        if (snapToGrid) {
+          const live = liveBlockGeomRef.current;
+          if (live) {
+            live.w = snap(live.w);
+            live.h = snap(live.h);
+            writeLiveBlockGeom(live);
+          }
+        }
+        commitLiveBlockGeom();
+      }
+
+      if (
+        (drag?.type === 'block-move' && drag.blockId != null && !drag.moveStarted) ||
+        (drag?.type === 'block-resize' && drag.blockId != null && !drag.resizeStarted)
+      ) {
+        setFreeSpaceGeometryActive(drag.blockId, false);
       }
 
       // Commit pan to React once. If momentum will run, wait until it stops so
@@ -1447,16 +1535,22 @@ export function FreeformCanvas({
         const { vx, vy } = velRef.current;
         const cvx = Math.sign(vx) * Math.min(Math.abs(vx), BLOCK_VELOCITY_CLAMP);
         const cvy = Math.sign(vy) * Math.min(Math.abs(vy), BLOCK_VELOCITY_CLAMP);
+        const blockId = drag.blockId;
+        const geomW = drag.startBlockW ?? 340;
+        const geomH = drag.startBlockH ?? 200;
 
         if (Math.abs(cvx) > 0.1 || Math.abs(cvy) > 0.1) {
-          const blockId = drag.blockId;
           let bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
           let by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
           let mvx = cvx / zoom;
           let mvy = cvy / zoom;
           let lastTs = performance.now();
 
-          cancelAnimationFrame(rafRef.current);
+          stopBlockMomentum(false);
+          stopCanvasPanMomentum(false);
+          cancelAnimationFrame(zoomRafRef.current);
+          zoomRafRef.current = 0;
+          blockMomentumActiveRef.current = true;
           const step = (ts: number) => {
             const dtMs = Math.min(40, Math.max(0.5, ts - lastTs));
             const dtSec = dtMs / 1000;
@@ -1465,25 +1559,48 @@ export function FreeformCanvas({
             mvx *= decay;
             mvy *= decay;
             if (Math.abs(mvx) < 0.01 && Math.abs(mvy) < 0.01) {
-              if (snapToGrid) onSetPos(blockId, { x: snap(bx), y: snap(by) });
+              blockMomentumActiveRef.current = false;
+              rafRef.current = 0;
+              if (snapToGrid) {
+                bx = snap(bx);
+                by = snap(by);
+              }
+              writeLiveBlockGeom({
+                id: blockId,
+                x: bx,
+                y: by,
+                w: geomW,
+                h: geomH,
+                kind: 'move',
+              });
+              commitLiveBlockGeom();
               return;
             }
             bx += mvx * dtMs;
             by += mvy * dtMs;
-            onSetPos(blockId, { x: bx, y: by });
+            writeLiveBlockGeom({
+              id: blockId,
+              x: bx,
+              y: by,
+              w: geomW,
+              h: geomH,
+              kind: 'move',
+            });
             rafRef.current = requestAnimationFrame(step);
           };
           rafRef.current = requestAnimationFrame(step);
-        } else if (snapToGrid) {
-          const bx = drag.currentBlockX ?? (drag.startBlockX ?? 0);
-          const by = drag.currentBlockY ?? (drag.startBlockY ?? 0);
-          onSetPos(drag.blockId, { x: snap(bx), y: snap(by) });
+        } else {
+          if (snapToGrid) {
+            const live = liveBlockGeomRef.current;
+            if (live) {
+              live.x = snap(live.x);
+              live.y = snap(live.y);
+              writeLiveBlockGeom(live);
+            }
+          }
+          commitLiveBlockGeom();
         }
         velRef.current = { vx: 0, vy: 0 };
-      } else if (drag?.type === 'block-resize' && drag.blockId && drag.resizeStarted) {
-        const bw = drag.currentBlockW ?? (drag.startBlockW ?? 340);
-        const bh = drag.currentBlockH ?? (drag.startBlockH ?? 200);
-        if (snapToGrid) onSetPos(drag.blockId, { w: snap(bw), h: snap(bh) });
       }
     };
 
@@ -1505,7 +1622,7 @@ export function FreeformCanvas({
       window.removeEventListener('pointerup', onPointerUpEnd);
       window.removeEventListener('pointercancel', onPointerUpEnd);
     };
-  }, [zoom, snap, onSetPos, applyWorldTransform, syncDotGridVars, commitLiveViewport, stopCanvasPanMomentum]);
+  }, [zoom, snap, onSetPos, applyWorldTransform, syncDotGridVars, commitLiveViewport, stopCanvasPanMomentum, writeLiveBlockGeom, commitLiveBlockGeom, stopBlockMomentum]);
 
   // ── Smooth zoom interpolation ─────────────────────────────────────────────
   // Wheel events write to targetViewRef; a separate RAF loop smoothly lerps
@@ -2053,7 +2170,12 @@ export function FreeformCanvas({
         })()}
 
         {allItems.map(item => {
-          const pos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
+          const storedPos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
+          const liveGeom = liveBlockGeomRef.current;
+          const pos =
+            liveGeom?.id === item.id
+              ? { ...storedPos, x: liveGeom.x, y: liveGeom.y, w: liveGeom.w, h: liveGeom.h }
+              : storedPos;
           const blockW = pos.w > 0 ? pos.w : 340;
           const blockH = pos.h > 0 ? pos.h : 220;
           const focusSurfaceActive = !hasDeepFocus || focusEditingId === item.id;
@@ -2276,6 +2398,11 @@ export function FreeformCanvas({
                 <FreeformBlock
                   id={item.id}
                   pos={pos}
+                  liveGeomRef={
+                    draggingId === item.id || liveBlockGeomRef.current?.id === item.id
+                      ? liveBlockGeomRef
+                      : undefined
+                  }
                   label={getLabel(item.id)}
                   tokens={tokens}
                   selected={selectedIdSet.has(item.id)}

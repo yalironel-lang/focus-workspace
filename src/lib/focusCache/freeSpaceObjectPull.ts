@@ -2,9 +2,10 @@
  * PR7: Free Space initial pull — mounted-board-only apply.
  *
  * Fetch may be section-scoped; apply writes localStorage / React only for the
- * currently mounted board. Protected entities (dirty, undurable delete, pending
- * create/update, tombstones) are never overwritten. Cloud wins only when
- * unprotected and cloud.updatedAt > local.updatedAt. Cloud absence never deletes
+ * currently mounted board. Content/object fields are never overwritten when
+ * protected (dirty, undurable delete, pending create/update, tombstones) or when
+ * cloud.updatedAt is not strictly newer. Geometry is merged independently via
+ * geometry.updatedAt (see freeSpaceObjectGeometryLww). Cloud absence never deletes
  * local objects. Does not change mergeFreeSpaceObjects tie semantics.
  *
  * C1/C2: provisional winners must be re-validated immediately before LS write and
@@ -25,7 +26,14 @@ import {
   type FreeSpaceObjectCloudRow,
 } from './freeSpaceObjectCloud';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
+import {
+  incomingHasAnyFieldWin,
+  mergeIncomingFreeSpaceObject,
+  overlayBestLocalGeometry,
+} from './freeSpaceObjectGeometryLww';
+import { getActiveFreeSpaceGeometryIds } from '../freeSpaceActiveGeometry';
 import { listPendingOperations } from './pendingOperations';
+export { shouldAcceptCloudObject } from './freeSpaceObjectGeometryLww';
 
 export type FreeSpacePullScope = {
   sectionId: string;
@@ -89,6 +97,30 @@ export function buildProtectedEntityIds(parts: {
 }
 
 /**
+ * Geometry apply is independent of content dirty / pending UPDATE.
+ * Tombstones, pending deletes, pending CREATE, and active local geometry
+ * (drag / resize / momentum) still block incoming geometry.
+ */
+export function buildGeometryBlockedIds(parts: {
+  pendingDeletedIds?: Iterable<string>;
+  pendingCreateEntityIds?: Iterable<string>;
+  tombstoneObjectIds?: Iterable<string>;
+  activeGeometryIds?: Iterable<string>;
+}): Set<string> {
+  const out = buildProtectedEntityIds({
+    pendingDeletedIds: parts.pendingDeletedIds,
+    pendingCreateEntityIds: parts.pendingCreateEntityIds,
+    tombstoneObjectIds: parts.tombstoneObjectIds,
+  });
+  if (parts.activeGeometryIds) {
+    for (const id of parts.activeGeometryIds) {
+      if (isExactNonEmptyId(id)) out.add(id);
+    }
+  }
+  return out;
+}
+
+/**
  * Local comparison source for the mounted board:
  * prefer the higher updatedAt between React and durable (covers Case H React-newer
  * and C2 concurrent durable-newer). Missing side falls back to the other.
@@ -114,21 +146,17 @@ export function parseCloudObjectForPull(
   return objects[0] ?? null;
 }
 
-/**
- * PR7 LWW: cloud may win only when unprotected and cloud.updatedAt > local.updatedAt.
- * Equal or older → local wins (no-op).
- */
-export function shouldAcceptCloudObject(input: {
-  cloud: ProjectSpaceObject;
-  local: ProjectSpaceObject | undefined;
-  protectedEntityIds: ReadonlySet<string>;
-}): boolean {
-  const id = input.cloud.id;
-  if (!id || input.protectedEntityIds.has(id)) return false;
-  if (!input.local) return true;
-  const cloudAt = input.cloud.updatedAt ?? 0;
-  const localAt = input.local.updatedAt ?? 0;
-  return cloudAt > localAt;
+function localForIncomingCompare(
+  id: string,
+  reactObjects: readonly ProjectSpaceObject[],
+  durableObjects: readonly ProjectSpaceObject[],
+): ProjectSpaceObject | undefined {
+  return overlayBestLocalGeometry(
+    id,
+    resolveLocalObjectForCompare(id, reactObjects, durableObjects),
+    reactObjects,
+    durableObjects,
+  );
 }
 
 /** Upsert accepted winners into a local list without removing other locals. */
@@ -154,24 +182,23 @@ export function filterStillValidCloudWinners(input: {
   reactObjects: readonly ProjectSpaceObject[];
   durableObjects: readonly ProjectSpaceObject[];
   protectedEntityIds: ReadonlySet<string>;
+  geometryBlockedIds?: ReadonlySet<string>;
 }): ProjectSpaceObject[] {
   const out: ProjectSpaceObject[] = [];
   for (const cloud of input.candidates) {
     if (!cloud?.id) continue;
-    const local = resolveLocalObjectForCompare(
+    const local = localForIncomingCompare(
       cloud.id,
       input.reactObjects,
       input.durableObjects,
     );
-    if (
-      shouldAcceptCloudObject({
-        cloud,
-        local,
-        protectedEntityIds: input.protectedEntityIds,
-      })
-    ) {
-      out.push(cloud);
-    }
+    const merged = mergeIncomingFreeSpaceObject({
+      local,
+      cloud,
+      protectedEntityIds: input.protectedEntityIds,
+      geometryBlockedIds: input.geometryBlockedIds,
+    });
+    if (incomingHasAnyFieldWin(merged)) out.push(merged.nextObject);
   }
   return out;
 }
@@ -185,12 +212,14 @@ export function buildFreshMountedBoardPersistPlan(input: {
   reactObjects: readonly ProjectSpaceObject[];
   freshDurableObjects: readonly ProjectSpaceObject[];
   protectedEntityIds: ReadonlySet<string>;
+  geometryBlockedIds?: ReadonlySet<string>;
 }): { finalAccepted: ProjectSpaceObject[]; nextDurableObjects: ProjectSpaceObject[] } | null {
   const finalAccepted = filterStillValidCloudWinners({
     candidates: input.provisionalAccepted,
     reactObjects: input.reactObjects,
     durableObjects: input.freshDurableObjects,
     protectedEntityIds: input.protectedEntityIds,
+    geometryBlockedIds: input.geometryBlockedIds,
   });
   if (finalAccepted.length === 0) return null;
   return {
@@ -207,22 +236,19 @@ export function filterCloudWinnersForReactPatch(input: {
   candidates: readonly ProjectSpaceObject[];
   prevReactObjects: readonly ProjectSpaceObject[];
   protectedEntityIds: ReadonlySet<string>;
+  geometryBlockedIds?: ReadonlySet<string>;
 }): ProjectSpaceObject[] {
   const out: ProjectSpaceObject[] = [];
   for (const cloud of input.candidates) {
     if (!cloud?.id) continue;
-    if (input.protectedEntityIds.has(cloud.id)) continue;
     const local = input.prevReactObjects.find(o => o.id === cloud.id);
-    if (
-      !shouldAcceptCloudObject({
-        cloud,
-        local,
-        protectedEntityIds: input.protectedEntityIds,
-      })
-    ) {
-      continue;
-    }
-    out.push(cloud);
+    const merged = mergeIncomingFreeSpaceObject({
+      local,
+      cloud,
+      protectedEntityIds: input.protectedEntityIds,
+      geometryBlockedIds: input.geometryBlockedIds,
+    });
+    if (incomingHasAnyFieldWin(merged)) out.push(merged.nextObject);
   }
   return out;
 }
@@ -240,6 +266,7 @@ export function computeMountedBoardPullApply(input: {
   reactObjects: readonly ProjectSpaceObject[];
   durableObjects: readonly ProjectSpaceObject[];
   protectedEntityIds: ReadonlySet<string>;
+  geometryBlockedIds?: ReadonlySet<string>;
 }): FreeSpacePullComputeResult {
   const mounted = normalizeBoardId(input.mountedBoardId);
   const accepted: ProjectSpaceObject[] = [];
@@ -270,7 +297,7 @@ export function computeMountedBoardPullApply(input: {
         ? { ...parsed, id: row.id }
         : parsed;
 
-    const local = resolveLocalObjectForCompare(
+    const local = localForIncomingCompare(
       cloudObj.id,
       input.reactObjects,
       input.durableObjects,
@@ -278,14 +305,15 @@ export function computeMountedBoardPullApply(input: {
 
     if (input.protectedEntityIds.has(cloudObj.id)) {
       skippedProtectedIds.push(cloudObj.id);
-      continue;
     }
 
-    if (!shouldAcceptCloudObject({
-      cloud: cloudObj,
+    const merged = mergeIncomingFreeSpaceObject({
       local,
+      cloud: cloudObj,
       protectedEntityIds: input.protectedEntityIds,
-    })) {
+      geometryBlockedIds: input.geometryBlockedIds,
+    });
+    if (!incomingHasAnyFieldWin(merged)) {
       if (local) skippedLocalWinsIds.push(cloudObj.id);
       continue;
     }
@@ -418,6 +446,7 @@ export type ApplyMountedBoardCloudRowsResult =
       pendingCreateEntityIds: readonly string[];
       pendingUpdateEntityIds: readonly string[];
       tombstoneObjectIds: readonly string[];
+      geometryBlockedIds: readonly string[];
     }
   | { ok: false; reason: string };
 
@@ -462,6 +491,14 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
     tombstoneObjectIds: [...guards.tombstoneObjectIds],
   };
 
+  const geometryBlockedIds = buildGeometryBlockedIds({
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: guards.pendingCreateEntityIds,
+    tombstoneObjectIds: guards.tombstoneObjectIds,
+    activeGeometryIds: getActiveFreeSpaceGeometryIds(),
+  });
+  const geometryBlockedSnapshot = [...geometryBlockedIds];
+
   const protectedEntityIds = buildProtectedEntityIds({
     dirtyIds: input.getDirtyIds(),
     pendingDeletedIds: input.getPendingDeletedIds(),
@@ -480,6 +517,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
     reactObjects: input.getReactObjects(),
     durableObjects,
     protectedEntityIds,
+    geometryBlockedIds,
   });
 
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
@@ -489,6 +527,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
       acceptedCount: 0,
       persisted: false,
       reactWinners: [],
+      geometryBlockedIds: geometryBlockedSnapshot,
       ...guardSnapshot,
     };
   }
@@ -501,12 +540,19 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
     pendingUpdateEntityIds: guards.pendingUpdateEntityIds,
     tombstoneObjectIds: guards.tombstoneObjectIds,
   });
+  const geometryBlockedAtPersist = buildGeometryBlockedIds({
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: guards.pendingCreateEntityIds,
+    tombstoneObjectIds: guards.tombstoneObjectIds,
+    activeGeometryIds: getActiveFreeSpaceGeometryIds(),
+  });
   const freshDurableObjects = input.loadDurableObjects();
   const persistPlan = buildFreshMountedBoardPersistPlan({
     provisionalAccepted: computed.accepted,
     reactObjects: input.getReactObjects(),
     freshDurableObjects,
     protectedEntityIds: protectedAtPersist,
+    geometryBlockedIds: geometryBlockedAtPersist,
   });
   if (!persistPlan) {
     return {
@@ -514,6 +560,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
       acceptedCount: 0,
       persisted: false,
       reactWinners: [],
+      geometryBlockedIds: [...geometryBlockedAtPersist],
       ...guardSnapshot,
     };
   }
@@ -537,6 +584,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
     acceptedCount: persistPlan.finalAccepted.length,
     persisted: true,
     reactWinners: persistPlan.finalAccepted,
+    geometryBlockedIds: [...geometryBlockedAtPersist],
     ...guardSnapshot,
   };
 }
@@ -550,6 +598,7 @@ export function applyCloudWinnersToReactState(input: {
   pendingCreateEntityIds: Iterable<string>;
   pendingUpdateEntityIds: Iterable<string>;
   tombstoneObjectIds: Iterable<string>;
+  geometryBlockedIds?: Iterable<string>;
 }): ProjectSpaceObject[] {
   const protectedAtReact = buildProtectedEntityIds({
     dirtyIds: input.getDirtyIds(),
@@ -558,10 +607,20 @@ export function applyCloudWinnersToReactState(input: {
     pendingUpdateEntityIds: input.pendingUpdateEntityIds,
     tombstoneObjectIds: input.tombstoneObjectIds,
   });
+  const geometryBlockedAtReact = buildGeometryBlockedIds({
+    pendingDeletedIds: input.getPendingDeletedIds(),
+    pendingCreateEntityIds: input.pendingCreateEntityIds,
+    tombstoneObjectIds: input.tombstoneObjectIds,
+    activeGeometryIds: [
+      ...(input.geometryBlockedIds ?? []),
+      ...getActiveFreeSpaceGeometryIds(),
+    ],
+  });
   const stillValid = filterCloudWinnersForReactPatch({
     candidates: input.candidates,
     prevReactObjects: input.prev,
     protectedEntityIds: protectedAtReact,
+    geometryBlockedIds: geometryBlockedAtReact,
   });
   if (stillValid.length === 0) return [...input.prev];
   return mergeAcceptedIntoObjectList(input.prev, stillValid);

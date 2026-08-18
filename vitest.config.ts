@@ -19,6 +19,10 @@ export default defineConfig({
       'src/lib/focusCache/flushPendingFreeSpaceCreates.test.ts',
       'src/lib/focusCache/freeSpaceObjectAutoFlush.test.ts',
       'src/lib/sync/**/*.test.ts',
+      'src/lib/freeSpaceObjectGeometry.test.ts',
+      'src/lib/freeSpaceLocalGeometryCommit.test.ts',
+      'src/lib/focusCache/freeSpaceObjectGeometryLww.test.ts',
+      'src/lib/focusCache/freeSpaceVisibilityResumeCatchUp.test.ts',
     ],
   },
 });
