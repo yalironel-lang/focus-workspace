@@ -36,6 +36,13 @@ import {
   runFreeSpaceSectionPullCatchUp,
 } from '../lib/focusCache/freeSpaceObjectPull';
 import { subscribeFreeSpaceObjectsRealtime } from '../lib/focusCache/freeSpaceObjectRealtime';
+import { collectAcceptedGeometryPatches } from '../lib/focusCache/freeSpaceObjectGeometryLww';
+import { getActiveFreeSpaceGeometryIds } from '../lib/freeSpaceActiveGeometry';
+import { applyFreeSpaceRemotePositions } from '../lib/freeSpaceRemotePositionApply';
+import {
+  attachFreeSpaceVisibilityResumeCatchUp,
+  createCoalescedVisibilityResumeCatchUp,
+} from '../lib/focusCache/freeSpaceVisibilityResumeCatchUp';
 import {
   invalidateFreeSpaceAutoFlushScope,
   registerFreeSpaceAutoFlushScope,
@@ -983,6 +990,7 @@ export function useSectionFreeSpaceObjects(
     if (dirty.size === 0) return;
 
     const byId = new Map(objs.map(o => [o.id, o]));
+    const liveById = new Map(objectsRef.current.map(o => [o.id, o]));
     const toEnqueue: ProjectSpaceObject[] = [];
     for (const id of [...dirty]) {
       if (pendingDeletedIdsRef.current.has(id) || !byId.has(id)) {
@@ -994,7 +1002,12 @@ export function useSectionFreeSpaceObjects(
         dirty.delete(id);
         continue;
       }
-      toEnqueue.push(obj);
+      const live = liveById.get(id);
+      toEnqueue.push(
+        live
+          ? { ...obj, geometry: live.geometry ?? obj.geometry }
+          : obj,
+      );
       dirty.delete(id);
     }
     if (toEnqueue.length === 0) return;
@@ -1171,7 +1184,9 @@ export function useSectionFreeSpaceObjects(
   /**
    * PR7b: Realtime thin delivery + mandatory PR7 pull catch-up on SUBSCRIBED.
    * Lifecycle: local hydrate (above) → subscribe → SUBSCRIBED → pull catch-up → live INSERT/UPDATE.
-   * DELETE events ignored. All applies use shared PR7 mounted-board pipeline (C1/C2).
+   * Hidden-tab resume: visibility hidden → visible runs the same catch-up pull
+   * (no second geometry bus). DELETE events ignored. All applies use shared
+   * PR7 mounted-board pipeline (C1/C2).
    */
   useEffect(() => {
     if (!sectionId || !userId) return;
@@ -1215,17 +1230,26 @@ export function useSectionFreeSpaceObjects(
       const pendingCreateEntityIds = result.pendingCreateEntityIds;
       const pendingUpdateEntityIds = result.pendingUpdateEntityIds;
       const tombstoneObjectIds = result.tombstoneObjectIds;
-      setObjects(prev =>
+      const geometryBlockedIds = result.geometryBlockedIds;
+      const prev = objectsRef.current;
+      const patches = collectAcceptedGeometryPatches(
+        prev,
+        winners,
+        new Set([...geometryBlockedIds, ...getActiveFreeSpaceGeometryIds()]),
+      );
+      setObjects(prevObjects =>
         applyCloudWinnersToReactState({
-          prev,
+          prev: prevObjects,
           candidates: winners,
           getDirtyIds: () => dirtyIdsRef.current,
           getPendingDeletedIds: () => pendingDeletedIdsRef.current,
           pendingCreateEntityIds,
           pendingUpdateEntityIds,
           tombstoneObjectIds,
+          geometryBlockedIds,
         }),
       );
+      applyFreeSpaceRemotePositions(patches);
     };
 
     const enqueueApply = (task: () => Promise<void>) => {
@@ -1239,12 +1263,35 @@ export function useSectionFreeSpaceObjects(
         });
     };
 
-    const runCatchUpPull = () => {
-      enqueueApply(async () => {
-        const result = await runFreeSpaceSectionPullCatchUp(applyContext());
-        patchReactFromApply(result);
-      });
+    const executeCatchUpPull = async () => {
+      const result = await runFreeSpaceSectionPullCatchUp(applyContext());
+      patchReactFromApply(result);
     };
+
+    const runCatchUpPull = () => {
+      enqueueApply(executeCatchUpPull);
+    };
+
+    const resumeCatchUp = createCoalescedVisibilityResumeCatchUp(() => {
+      applyChain = applyChain
+        .then(async () => {
+          try {
+            if (!isCurrent()) return;
+            await executeCatchUpPull();
+          } finally {
+            resumeCatchUp.end();
+          }
+        })
+        .catch(err => {
+          resumeCatchUp.end();
+          fwPersistWarn(`Free Space cloud apply queue failed: ${String(err)}`);
+        });
+    });
+
+    const detachVisibilityResumeCatchUp = attachFreeSpaceVisibilityResumeCatchUp({
+      isCurrent,
+      runCatchUp: () => resumeCatchUp.request(),
+    });
 
     const subscription = subscribeFreeSpaceObjectsRealtime({
       sectionId: captured.sectionId,
@@ -1289,6 +1336,8 @@ export function useSectionFreeSpaceObjects(
 
     return () => {
       cancelled = true;
+      resumeCatchUp.end();
+      detachVisibilityResumeCatchUp();
       subscription.unsubscribe();
     };
   }, [sectionId, boardId, userId]);

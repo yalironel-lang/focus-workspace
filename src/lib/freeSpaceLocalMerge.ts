@@ -37,7 +37,28 @@ export function freeSpaceStorageKey(
 }
 
 /**
+ * Content may come from a sibling-tab storage event. Geometry must not:
+ * this window's ProjectSpaceObject.geometry is only advanced by the
+ * authoritative path (cloud LWW → applyExternalPositions). Shared LS
+ * geometry would make React look current while PositionMap is still old.
+ */
+function withThisWindowGeometry(
+  contentWinner: ProjectSpaceObject,
+  local: ProjectSpaceObject,
+): ProjectSpaceObject {
+  const localGeom = local.geometry;
+  if (localGeom === undefined) {
+    if (contentWinner.geometry === undefined) return contentWinner;
+    const rest = { ...contentWinner };
+    delete rest.geometry;
+    return rest;
+  }
+  return { ...contentWinner, geometry: localGeom };
+}
+
+/**
  * Union objects by id; prefer higher updatedAt; tie → incoming wins.
+ * Geometry is field-level: existing local geometry is preserved.
  * `deletedIds` (ids explicitly deleted in this tab, not yet committed) are
  * excluded from both sides so a stale disk copy cannot resurrect a delete.
  */
@@ -62,12 +83,15 @@ export function mergeFreeSpaceObjects(
     const prevAt = prev.updatedAt ?? 0;
     const nextAt = o.updatedAt ?? 0;
     if (nextAt > prevAt) {
-      byId.set(o.id, o);
+      byId.set(o.id, withThisWindowGeometry(o, prev));
     } else if (nextAt < prevAt) {
       conflicts.push(`object "${o.id}": kept older tab copy (updatedAt ${prevAt} > ${nextAt})`);
     } else if (JSON.stringify(prev) !== JSON.stringify(o)) {
-      byId.set(o.id, o);
-      conflicts.push(`object "${o.id}": same updatedAt — applied latest merge`);
+      const next = withThisWindowGeometry(o, prev);
+      if (JSON.stringify(next) !== JSON.stringify(prev)) {
+        byId.set(o.id, next);
+        conflicts.push(`object "${o.id}": same updatedAt — applied latest merge`);
+      }
     }
   }
 

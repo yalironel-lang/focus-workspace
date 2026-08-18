@@ -6,6 +6,7 @@ import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
 import { mergePositionMaps, parseFreeSpaceStorageKey, persistWithPendingDeletes } from '../lib/freeSpaceLocalMerge';
 import { tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
 import { markSavePending, recordStorageConflict } from '../lib/saveStatus';
+import { registerFreeSpaceRemotePositionApply } from '../lib/freeSpaceRemotePositionApply';
 
 function key(sectionId: string, boardId = ''): string {
   return boardScopedFreeSpaceKeys(sectionId, boardId).positions;
@@ -58,6 +59,11 @@ export interface SectionBlockPositionsState {
   positions: PositionMap;
   setPos: (id: string, pos: Partial<BlockPos>) => void;
   applyPositions: (patches: Record<string, BlockPos> | null | undefined) => void;
+  /**
+   * PR C: cloud/realtime geometry → PositionMap. Persists for reload.
+   * Must not go through setPos (that path stamps geometry.updatedAt and enqueues UPDATE).
+   */
+  applyExternalPositions: (patches: Record<string, BlockPos> | null | undefined) => void;
   initPos: (id: string, hint?: Partial<BlockPos>) => void;
   seedMissingPositions: (ids: string[]) => void;
   removePos: (id: string) => void;
@@ -132,6 +138,10 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
         const parsed: unknown = JSON.parse(e.newValue);
         const { map } = sanitizePositionMap(parsed, sectionId);
         setPositions(prev => {
+          // PR C: keep local-wins merge. Cloud Realtime/pull is geometry SOT;
+          // storage events do not fire in the writer tab. Local keys winning
+          // prevents a sibling tab's persist from clobbering a cloud-applied
+          // position in this tab. Do not treat positions LS as cross-tab sync.
           const merged = { ...map, ...prev };
           pendingPersistRef.current = { sectionId, boardId, positions: merged };
           return merged;
@@ -173,6 +183,40 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
       return next;
     });
   }, [writePositions, sectionId, boardId]);
+
+  const applyExternalPositions = useCallback((patches: Record<string, BlockPos> | null | undefined) => {
+    if (!patches || typeof patches !== 'object') return;
+    setPositions((prev) => {
+      let changed = false;
+      const next: PositionMap = { ...prev };
+      for (const [id, pos] of Object.entries(patches)) {
+        if (!id || !pos || typeof pos !== 'object') continue;
+        const merged = sanitizeBlockPos({ ...(prev[id] ?? makeDefault()), ...pos });
+        const cur = prev[id];
+        if (
+          cur &&
+          cur.x === merged.x &&
+          cur.y === merged.y &&
+          cur.w === merged.w &&
+          cur.h === merged.h
+        ) {
+          continue;
+        }
+        next[id] = merged;
+        changed = true;
+      }
+      if (!changed) return prev;
+      writePositions(next, sectionId, boardId, true);
+      return next;
+    });
+  }, [writePositions, sectionId, boardId]);
+
+  useEffect(() => {
+    registerFreeSpaceRemotePositionApply(applyExternalPositions);
+    return () => {
+      registerFreeSpaceRemotePositionApply(null);
+    };
+  }, [applyExternalPositions, sectionId, boardId]);
 
   const initPos = useCallback((id: string, hint?: Partial<BlockPos>) => {
     setPositions(prev => {
@@ -236,6 +280,15 @@ export function useSectionBlockPositions(sectionId: string, boardId = ''): Secti
     return { x, y };
   }, [positions]);
 
-  return useMemo(() => ({ positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos }),
-    [positions, setPos, applyPositions, initPos, seedMissingPositions, removePos, nextFreePos]);
+  return useMemo(() => ({
+    positions,
+    setPos,
+    applyPositions,
+    applyExternalPositions,
+    initPos,
+    seedMissingPositions,
+    removePos,
+    nextFreePos,
+  }),
+    [positions, setPos, applyPositions, applyExternalPositions, initPos, seedMissingPositions, removePos, nextFreePos]);
 }

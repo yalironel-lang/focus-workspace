@@ -18,11 +18,13 @@ import {
   shouldAcceptCloudObject,
 } from './freeSpaceObjectPull';
 import { mergeFreeSpaceObjects } from '../freeSpaceLocalMerge';
+import { collectAcceptedGeometryPatches } from './freeSpaceObjectGeometryLww';
 
 function note(
   id: string,
   updatedAt: number,
   body = 'x',
+  geometry?: ProjectSpaceObject['geometry'],
 ): ProjectSpaceObject {
   return {
     id,
@@ -31,6 +33,7 @@ function note(
     content: { type: 'note', body },
     createdAt: 1,
     updatedAt,
+    ...(geometry ? { geometry } : {}),
   };
 }
 
@@ -517,5 +520,99 @@ describe('C1/C2 apply-window revalidation', () => {
     // Hook short-circuits before persist when stale — no LS mutation in this path
     const key = boardScopedFreeSpaceKeys('s1', 'main').objects;
     expect(localStorage.getItem(key)).toBeNull();
+  });
+});
+
+describe('PR C geometry field LWW on pull compute', () => {
+  const sectionId = 'section-1';
+  const g = (x: number, y: number, w: number, h: number, updatedAt: number) => ({
+    x, y, w, h, updatedAt,
+  });
+
+  it('A. newer remote geometry with older content is still accepted as a candidate', () => {
+    const local = note('a', 200, 'new title', g(1, 1, 10, 10, 100));
+    const result = computeMountedBoardPullApply({
+      sectionId,
+      mountedBoardId: 'main',
+      rows: [cloudRow({ id: 'a', board_id: 'main', object: note('a', 150, 'old title', g(9, 9, 40, 40, 300)) })],
+      reactObjects: [local],
+      durableObjects: [local],
+      protectedEntityIds: new Set(),
+    });
+    expect(result.accepted).toHaveLength(1);
+    const plan = buildFreshMountedBoardPersistPlan({
+      provisionalAccepted: result.accepted,
+      reactObjects: [local],
+      freshDurableObjects: [local],
+      protectedEntityIds: new Set(),
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.finalAccepted[0]?.content).toEqual({ type: 'note', body: 'new title' });
+    expect(plan!.finalAccepted[0]?.geometry).toEqual(g(9, 9, 40, 40, 300));
+  });
+
+  it('B. newer remote content with older geometry keeps local geometry', () => {
+    const local = note('a', 150, 'old title', g(1, 1, 10, 10, 300));
+    const result = computeMountedBoardPullApply({
+      sectionId,
+      mountedBoardId: 'main',
+      rows: [cloudRow({ id: 'a', board_id: 'main', object: note('a', 200, 'new title', g(9, 9, 40, 40, 100)) })],
+      reactObjects: [local],
+      durableObjects: [local],
+      protectedEntityIds: new Set(),
+    });
+    const plan = buildFreshMountedBoardPersistPlan({
+      provisionalAccepted: result.accepted,
+      reactObjects: [local],
+      freshDurableObjects: [local],
+      protectedEntityIds: new Set(),
+    });
+    expect(plan!.finalAccepted[0]?.content).toEqual({ type: 'note', body: 'new title' });
+    expect(plan!.finalAccepted[0]?.geometry).toEqual(g(1, 1, 10, 10, 300));
+  });
+
+  it('L. other-board geometry is ignored for the mounted board', () => {
+    const local = [note('a', 100, 'a', g(1, 1, 10, 10, 10))];
+    const result = computeMountedBoardPullApply({
+      sectionId,
+      mountedBoardId: 'board-a',
+      rows: [
+        cloudRow({ id: 'a', board_id: 'board-a', object: note('a', 100, 'a', g(2, 2, 20, 20, 20)) }),
+        cloudRow({ id: 'b', board_id: 'board-b', object: note('b', 999, 'b', g(9, 9, 90, 90, 999)) }),
+      ],
+      reactObjects: local,
+      durableObjects: local,
+      protectedEntityIds: new Set(),
+    });
+    expect(result.ignoredOtherBoardRows).toBe(1);
+    expect(result.accepted.map(o => o.id)).toEqual(['a']);
+    expect(collectAcceptedGeometryPatches(local, result.accepted)).toEqual({
+      a: { x: 2, y: 2, w: 20, h: 20 },
+    });
+  });
+
+  it('P. durable LS G2 does not cause cloud G2 rejection against React G1', () => {
+    const react = [note('a', 100, 'a', g(10, 10, 200, 80, 1))];
+    const durable = [note('a', 100, 'a', g(400, 300, 200, 80, 50))];
+    const result = computeMountedBoardPullApply({
+      sectionId,
+      mountedBoardId: 'main',
+      rows: [cloudRow({ id: 'a', board_id: 'main', object: note('a', 100, 'a', g(400, 300, 200, 80, 50)) })],
+      reactObjects: react,
+      durableObjects: durable,
+      protectedEntityIds: new Set(),
+    });
+    expect(result.accepted).toHaveLength(1);
+    const plan = buildFreshMountedBoardPersistPlan({
+      provisionalAccepted: result.accepted,
+      reactObjects: react,
+      freshDurableObjects: durable,
+      protectedEntityIds: new Set(),
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.finalAccepted[0]?.geometry).toEqual(g(400, 300, 200, 80, 50));
+    expect(collectAcceptedGeometryPatches(react, plan!.finalAccepted)).toEqual({
+      a: { x: 400, y: 300, w: 200, h: 80 },
+    });
   });
 });
