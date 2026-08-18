@@ -81,6 +81,7 @@ import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBo
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 import { clientToWorld, readDisplayedViewport, zoomViewportTowardPoint } from '../../lib/canvasCoordinates';
+import { WHEEL_PAN_SETTLE_MS, liveWheelPanFromDeltas } from '../../lib/viewportPersist';
 import { useFreeSpaceTouchNavigation } from '../../hooks/useFreeSpaceTouchNavigation';
 import {
   dropPlacementDebugEnabled,
@@ -173,6 +174,8 @@ interface Props {
     resetView: () => void;
     centerView: (contentW: number, contentH: number, vpW: number, vpH: number) => void;
     toggleSnap: () => void;
+    beginLocalNavigation?: () => void;
+    endLocalNavigation?: () => void;
   };
   designMode:   boolean;
   selectedId:   string | null;
@@ -487,6 +490,10 @@ export function FreeformCanvas({
   const zoomRafRef = useRef(0);                   // zoom lerp RAF handle
   /** True only while mouse-canvas pan momentum owns rafRef (not touch/block). */
   const canvasPanMomentumActiveRef = useRef(false);
+  const wheelNavActiveRef = useRef(false);
+  const zoomLerpActiveRef = useRef(false);
+  const wheelSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveNavHeldRef = useRef(false);
 
   // Smooth zoom target — wheel events write here; a RAF loop lerps toward it
   // This gives the cinematic "camera settling" feel instead of instant snaps.
@@ -588,7 +595,22 @@ export function FreeformCanvas({
     return () => clearTimeout(timer);
   }, [pulseObjectId]);
 
-  const { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap } = canvasState;
+  const {
+    zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap,
+    beginLocalNavigation, endLocalNavigation,
+  } = canvasState;
+
+  const holdLiveNav = useCallback(() => {
+    if (liveNavHeldRef.current) return;
+    liveNavHeldRef.current = true;
+    beginLocalNavigation?.();
+  }, [beginLocalNavigation]);
+
+  const releaseLiveNav = useCallback(() => {
+    if (!liveNavHeldRef.current) return;
+    liveNavHeldRef.current = false;
+    endLocalNavigation?.();
+  }, [endLocalNavigation]);
 
   const safeZoom =
     typeof zoom === 'number' && Number.isFinite(zoom) && zoom > 0
@@ -616,7 +638,11 @@ export function FreeformCanvas({
   // Live viewport — RAF/drag write here; do not overwrite while follow-pan is active.
   const liveViewRef = useRef({ panX, panY, zoom });
   const panDragActive = dragRef.current?.type === 'canvas' && dragRef.current.panStarted;
-  const canvasPanLive = panDragActive || canvasPanMomentumActiveRef.current;
+  const canvasPanLive =
+    panDragActive ||
+    canvasPanMomentumActiveRef.current ||
+    wheelNavActiveRef.current ||
+    zoomLerpActiveRef.current;
   if (!followPanActiveRef.current && !canvasPanLive && !touchPanActive) {
     liveViewRef.current = { panX: safePanX, panY: safePanY, zoom: safeZoom };
   } else if (!followPanActiveRef.current) {
@@ -660,7 +686,8 @@ export function FreeformCanvas({
     targetViewRef.current = { zoom: z, panX: px, panY: py };
     applyWorldTransform(px, py, z);
     syncDotGridVars(px, py, z);
-  }, [setPan, applyWorldTransform, syncDotGridVars]);
+    releaseLiveNav();
+  }, [setPan, applyWorldTransform, syncDotGridVars, releaseLiveNav]);
 
   const applyLiveBlockDom = useCallback((geom: LiveBlockGeom) => {
     const el = worldRef.current?.querySelector<HTMLElement>(
@@ -706,6 +733,13 @@ export function FreeformCanvas({
   }, [commitLiveViewport]);
 
   const cancelViewportAnimations = useCallback(() => {
+    if (wheelSettleTimerRef.current) {
+      clearTimeout(wheelSettleTimerRef.current);
+      wheelSettleTimerRef.current = null;
+    }
+    const liveWheel = wheelNavActiveRef.current || zoomLerpActiveRef.current;
+    wheelNavActiveRef.current = false;
+    zoomLerpActiveRef.current = false;
     stopCanvasPanMomentum(true);
     stopBlockMomentum(true);
     cancelAnimationFrame(rafRef.current);
@@ -713,7 +747,8 @@ export function FreeformCanvas({
     cancelAnimationFrame(zoomRafRef.current);
     zoomRafRef.current = 0;
     velRef.current = { vx: 0, vy: 0 };
-  }, [stopCanvasPanMomentum, stopBlockMomentum]);
+    if (liveWheel) commitLiveViewport();
+  }, [stopCanvasPanMomentum, stopBlockMomentum, commitLiveViewport]);
 
   const stopFollowPan = useCallback(() => {
     if (!followPanActiveRef.current) return;
@@ -755,7 +790,8 @@ export function FreeformCanvas({
   const handleTouchNavigationStart = useCallback(() => {
     if (followPanActiveRef.current) stopFollowPan();
     cancelViewportAnimations();
-  }, [stopFollowPan, cancelViewportAnimations]);
+    holdLiveNav();
+  }, [stopFollowPan, cancelViewportAnimations, holdLiveNav]);
 
   useFreeSpaceTouchNavigation({
     enabled: touchNavigation,
@@ -771,6 +807,7 @@ export function FreeformCanvas({
     setViewport,
     setPan,
     onNavigationStart: handleTouchNavigationStart,
+    onNavigationEnd: releaseLiveNav,
     onDeselect: () => onSelect(null),
     momentumRafRef: rafRef,
   });
@@ -871,6 +908,8 @@ export function FreeformCanvas({
   useLayoutEffect(() => {
     const mouseCanvasPanLive =
       canvasPanMomentumActiveRef.current ||
+      wheelNavActiveRef.current ||
+      zoomLerpActiveRef.current ||
       (dragRef.current?.type === 'canvas' && dragRef.current.panStarted);
     if (followPanActiveRef.current || touchPanActiveRef.current || mouseCanvasPanLive) {
       const { panX: px, panY: py, zoom: z } = liveViewRef.current;
@@ -1152,6 +1191,7 @@ export function FreeformCanvas({
         startPanY: liveViewRef.current.panY,
         panStarted: true,
       };
+      holdLiveNav();
       return;
     }
     e.preventDefault();
@@ -1207,6 +1247,7 @@ export function FreeformCanvas({
     onConnectPairComplete,
     stopFollowPan,
     cancelViewportAnimations,
+    holdLiveNav,
   ]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
@@ -1230,7 +1271,8 @@ export function FreeformCanvas({
       startPanY:   liveViewRef.current.panY,
       panStarted:  forcePan ? true : false,
     };
-  }, [onSelect, onCancelConnectMode, stopFollowPan, cancelViewportAnimations]);
+    holdLiveNav();
+  }, [onSelect, onCancelConnectMode, stopFollowPan, cancelViewportAnimations, holdLiveNav]);
 
   useEffect(() => {
     const isEditingTarget = (el: EventTarget | null): boolean => {
@@ -1531,6 +1573,8 @@ export function FreeformCanvas({
         }
         velRef.current = { vx: 0, vy: 0 };
 
+      } else if (drag?.type === 'canvas') {
+        releaseLiveNav();
       } else if (drag?.type === 'block-move' && drag.blockId && drag.moveStarted) {
         const { vx, vy } = velRef.current;
         const cvx = Math.sign(vx) * Math.min(Math.abs(vx), BLOCK_VELOCITY_CLAMP);
@@ -1622,7 +1666,7 @@ export function FreeformCanvas({
       window.removeEventListener('pointerup', onPointerUpEnd);
       window.removeEventListener('pointercancel', onPointerUpEnd);
     };
-  }, [zoom, snap, onSetPos, applyWorldTransform, syncDotGridVars, commitLiveViewport, stopCanvasPanMomentum, writeLiveBlockGeom, commitLiveBlockGeom, stopBlockMomentum]);
+  }, [zoom, snap, onSetPos, applyWorldTransform, syncDotGridVars, commitLiveViewport, stopCanvasPanMomentum, writeLiveBlockGeom, commitLiveBlockGeom, stopBlockMomentum, releaseLiveNav]);
 
   // ── Smooth zoom interpolation ─────────────────────────────────────────────
   // Wheel events write to targetViewRef; a separate RAF loop smoothly lerps
@@ -1632,6 +1676,30 @@ export function FreeformCanvas({
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+
+    const clearWheelSettle = () => {
+      if (wheelSettleTimerRef.current) {
+        clearTimeout(wheelSettleTimerRef.current);
+        wheelSettleTimerRef.current = null;
+      }
+    };
+
+    const writeLive = (px: number, py: number, z: number) => {
+      liveViewRef.current.panX = px;
+      liveViewRef.current.panY = py;
+      liveViewRef.current.zoom = z;
+      applyWorldTransform(px, py, z);
+      syncDotGridVars(px, py, z);
+    };
+
+    const scheduleWheelPanCommit = () => {
+      clearWheelSettle();
+      wheelSettleTimerRef.current = setTimeout(() => {
+        wheelSettleTimerRef.current = null;
+        wheelNavActiveRef.current = false;
+        commitLiveViewport();
+      }, WHEEL_PAN_SETTLE_MS);
+    };
 
     const onWheel = (e: WheelEvent) => {
       if (followPanActiveRef.current) stopFollowPan();
@@ -1656,11 +1724,16 @@ export function FreeformCanvas({
 
       if (!isZoomIntent) {
         if (Math.abs(rawDeltaY) < WHEEL_PAN_DEADZONE && Math.abs(rawDeltaX) < WHEEL_PAN_DEADZONE) return;
+        cancelAnimationFrame(zoomRafRef.current);
+        zoomRafRef.current = 0;
+        zoomLerpActiveRef.current = false;
+        holdLiveNav();
+        wheelNavActiveRef.current = true;
         const cur = liveViewRef.current;
-        const nextPanX = cur.panX - rawDeltaX * WHEEL_PAN_SPEED;
-        const nextPanY = cur.panY - rawDeltaY * WHEEL_PAN_SPEED;
-        setPan(nextPanX, nextPanY);
-        targetViewRef.current = { zoom: cur.zoom, panX: nextPanX, panY: nextPanY };
+        const next = liveWheelPanFromDeltas(cur, rawDeltaX, rawDeltaY, WHEEL_PAN_SPEED);
+        writeLive(next.panX, next.panY, cur.zoom);
+        targetViewRef.current = { zoom: cur.zoom, panX: next.panX, panY: next.panY };
+        scheduleWheelPanCommit();
         return;
       }
 
@@ -1668,6 +1741,8 @@ export function FreeformCanvas({
       // Accumulating toward the target means rapid pinch/wheel zoom
       // compounds into smooth continuous zoom.
       if (Math.abs(rawDeltaY) < WHEEL_DEADZONE) return;
+      clearWheelSettle();
+      wheelNavActiveRef.current = false;
       const wheelDelta = Math.max(-MAX_WHEEL_DELTA, Math.min(MAX_WHEEL_DELTA, rawDeltaY));
       const factor = Math.exp(-wheelDelta * WHEEL_SENSITIVITY);
       const prevZ  = targetViewRef.current.zoom;
@@ -1680,6 +1755,8 @@ export function FreeformCanvas({
         newZ,
       );
       targetViewRef.current = zoomed;
+      holdLiveNav();
+      zoomLerpActiveRef.current = true;
 
       // Kick off lerp loop if not already running
       if (!zoomRafRef.current) {
@@ -1697,15 +1774,18 @@ export function FreeformCanvas({
 
           // Stop when close enough — imperceptible difference
           if (Math.abs(dz) < 0.0008 && Math.abs(dpx) < 0.15 && Math.abs(dpy) < 0.15) {
-            setViewport(tgt.zoom, tgt.panX, tgt.panY);
+            writeLive(tgt.panX, tgt.panY, tgt.zoom);
+            zoomLerpActiveRef.current = false;
             zoomRafRef.current = 0;
+            setViewport(tgt.zoom, tgt.panX, tgt.panY);
+            releaseLiveNav();
             return;
           }
 
-          setViewport(
-            cur.zoom + dz  * alpha,
+          writeLive(
             cur.panX + dpx * alpha,
             cur.panY + dpy * alpha,
+            cur.zoom + dz * alpha,
           );
           zoomRafRef.current = requestAnimationFrame(lerpStep);
         };
@@ -1716,12 +1796,27 @@ export function FreeformCanvas({
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
+      clearWheelSettle();
       cancelAnimationFrame(zoomRafRef.current);
       zoomRafRef.current = 0;
+      if (wheelNavActiveRef.current || zoomLerpActiveRef.current) {
+        wheelNavActiveRef.current = false;
+        zoomLerpActiveRef.current = false;
+        commitLiveViewport();
+      }
     };
     // Stable dependencies only — the lerp loop reads liveViewRef/targetViewRef
     // via refs to avoid stale closures, so zoom/panX/panY are NOT needed here
-  }, [setViewport, stopFollowPan, stopCanvasPanMomentum]);
+  }, [
+    setViewport,
+    stopFollowPan,
+    stopCanvasPanMomentum,
+    applyWorldTransform,
+    syncDotGridVars,
+    commitLiveViewport,
+    holdLiveNav,
+    releaseLiveNav,
+  ]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 

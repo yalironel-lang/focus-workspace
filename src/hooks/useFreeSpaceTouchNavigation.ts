@@ -153,6 +153,7 @@ export interface FreeSpaceTouchNavigationOptions {
   setViewport: (zoom: number, panX: number, panY: number) => void;
   setPan: (panX: number, panY: number) => void;
   onNavigationStart?: () => void;
+  onNavigationEnd?: () => void;
   onDeselect?: () => void;
   momentumRafRef: MutableRefObject<number>;
 }
@@ -175,6 +176,7 @@ export function useFreeSpaceTouchNavigation({
   setViewport,
   setPan,
   onNavigationStart,
+  onNavigationEnd,
   onDeselect,
   momentumRafRef,
 }: FreeSpaceTouchNavigationOptions): void {
@@ -225,10 +227,10 @@ export function useFreeSpaceTouchNavigation({
       targetViewRef.current = { ...v };
     };
 
-    const launchPanMomentum = (vx: number, vy: number) => {
+    const launchPanMomentum = (vx: number, vy: number): boolean => {
       const cvx = Math.sign(vx) * Math.min(Math.abs(vx), PAN_VELOCITY_CLAMP);
       const cvy = Math.sign(vy) * Math.min(Math.abs(vy), PAN_VELOCITY_CLAMP);
-      if (Math.abs(cvx) < TOUCH_MOMENTUM_MIN_V && Math.abs(cvy) < TOUCH_MOMENTUM_MIN_V) return;
+      if (Math.abs(cvx) < TOUCH_MOMENTUM_MIN_V && Math.abs(cvy) < TOUCH_MOMENTUM_MIN_V) return false;
 
       let px = liveViewRef.current.panX;
       let py = liveViewRef.current.panY;
@@ -248,6 +250,7 @@ export function useFreeSpaceTouchNavigation({
           momentumRafRef.current = 0;
           setPan(px, py);
           targetViewRef.current = { zoom: liveViewRef.current.zoom, panX: px, panY: py };
+          onNavigationEnd?.();
           return;
         }
         px += mvx * dtMs;
@@ -259,6 +262,7 @@ export function useFreeSpaceTouchNavigation({
         momentumRafRef.current = requestAnimationFrame(step);
       };
       momentumRafRef.current = requestAnimationFrame(step);
+      return true;
     };
 
     const clearTouchPanActive = () => {
@@ -271,6 +275,7 @@ export function useFreeSpaceTouchNavigation({
       clearTouchPanActive();
       if (!hadPan) {
         panState = null;
+        onNavigationEnd?.();
         return;
       }
       onDeselect?.();
@@ -286,7 +291,8 @@ export function useFreeSpaceTouchNavigation({
         { panX: final.panX, panY: final.panY, zoom: final.zoom },
         'H4',
       );
-      launchPanMomentum(panState!.vx, panState!.vy);
+      const coasting = launchPanMomentum(panState!.vx, panState!.vy);
+      if (!coasting) onNavigationEnd?.();
       panState = null;
     };
 
@@ -446,6 +452,7 @@ export function useFreeSpaceTouchNavigation({
       if (pointers.size < 2 && pinchState) {
         pinchState = null;
         commitViewport();
+        onNavigationEnd?.();
       }
 
       if (pointers.size === 0) {
@@ -483,6 +490,7 @@ export function useFreeSpaceTouchNavigation({
       cancelMomentum();
       pointers.clear();
       clearTouchPanActive();
+      onNavigationEnd?.();
       panState = null;
       pinchState = null;
     };
@@ -498,6 +506,7 @@ export function useFreeSpaceTouchNavigation({
     setViewport,
     setPan,
     onNavigationStart,
+    onNavigationEnd,
     onDeselect,
     momentumRafRef,
     touchPanActiveRef,

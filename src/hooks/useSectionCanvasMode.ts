@@ -2,9 +2,16 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { ZOOM_MIN, ZOOM_MAX } from './useCanvasMode';
 import { fwPersistWarn, sanitizePrefs, sanitizeViewport, boardScopedFreeSpaceKeys } from '../lib/freeSpacePersistence';
 import { registerFreeSpacePersistFlush } from '../lib/freeSpacePersistFlush';
-import { mergeViewport, parseFreeSpaceStorageKey, type PersistedViewport } from '../lib/freeSpaceLocalMerge';
+import { parseFreeSpaceStorageKey, type PersistedViewport } from '../lib/freeSpaceLocalMerge';
 import { tryPersistLocalStorage } from '../lib/freeSpacePersistWrite';
 import { markSavePending, recordStorageConflict } from '../lib/saveStatus';
+import {
+  VIEWPORT_PERSIST_DEBOUNCE_MS,
+  decideRemoteViewportApply,
+  persistMergedViewport,
+  shouldScheduleViewportPersist,
+  type ViewportWriteSource,
+} from '../lib/viewportPersist';
 
 export const SECTION_ZOOM_STEP = 0.1;
 export const SECTION_DEFAULT_GRID_SIZE = 24;
@@ -25,6 +32,9 @@ export interface SectionCanvasState {
   resetView: () => void;
   centerView: (contentW: number, contentH: number, vpW: number, vpH: number) => void;
   toggleSnap: () => void;
+  beginLocalNavigation: () => void;
+  endLocalNavigation: () => void;
+  isLocalNavigationActive: () => boolean;
 }
 
 function viewportKey(sectionId: string, boardId = ''): string {
@@ -78,9 +88,8 @@ function loadPrefs(sectionId: string, boardId = ''): PersistedPrefs {
 
 function persistViewportMerged(sectionId: string, boardId: string, pending: PersistedViewport): boolean {
   if (!sectionId) return false;
-  const disk = loadViewport(sectionId, boardId);
-  const merged = mergeViewport(disk, pending);
-  return tryPersistLocalStorage(viewportKey(sectionId, boardId), JSON.stringify(merged), 'freeSpaceViewport');
+  const { result } = persistMergedViewport(viewportKey(sectionId, boardId), loadViewport(sectionId, boardId), pending);
+  return result !== 'failed';
 }
 
 function savePrefs(sectionId: string, boardId: string, p: PersistedPrefs): void {
@@ -96,6 +105,8 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
   const [panY, setPanYRaw] = useState(initialViewport.panY);
   const [snapToGrid, setSnapToGrid] = useState(initialPrefs.snapToGrid);
   const [gridSize, setGridSize] = useState(initialPrefs.gridSize);
+  const reactViewportRef = useRef({ zoom: initialViewport.zoom, panX: initialViewport.panX, panY: initialViewport.panY });
+  reactViewportRef.current = { zoom, panX, panY };
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPersistRef = useRef<{
@@ -103,6 +114,8 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
     boardId: string;
     viewport: PersistedViewport;
   } | null>(null);
+  const writeSourceRef = useRef<ViewportWriteSource>('hydrate');
+  const navDepthRef = useRef(0);
 
   const flushViewport = useCallback(() => {
     if (saveTimerRef.current) {
@@ -128,11 +141,26 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
       if (persistViewportMerged(pending.sectionId, pending.boardId, pending.viewport)) {
         pendingPersistRef.current = null;
       }
-    }, 300);
+    }, VIEWPORT_PERSIST_DEBOUNCE_MS);
+  }, []);
+
+  const beginLocalNavigation = useCallback(() => {
+    navDepthRef.current += 1;
+  }, []);
+
+  const endLocalNavigation = useCallback(() => {
+    navDepthRef.current = Math.max(0, navDepthRef.current - 1);
+  }, []);
+
+  const isLocalNavigationActive = useCallback(() => navDepthRef.current > 0, []);
+
+  const markLocalWrite = useCallback(() => {
+    writeSourceRef.current = 'local';
   }, []);
 
   useEffect(() => {
     flushViewport();
+    writeSourceRef.current = 'hydrate';
     const v = loadViewport(sectionId, boardId);
     const p = loadPrefs(sectionId, boardId);
     setZoomRaw(v.zoom);
@@ -152,10 +180,18 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
         const parsed: unknown = JSON.parse(e.newValue);
         const s = sanitizeViewport(parsed, sectionId, VIEW_DEFAULTS);
         const remote = { zoom: s.zoom, panX: s.panX, panY: s.panY };
+        const cur = reactViewportRef.current;
+        const equal =
+          remote.zoom === cur.zoom && remote.panX === cur.panX && remote.panY === cur.panY;
+        const decision = decideRemoteViewportApply({
+          localNavigationActive: navDepthRef.current > 0,
+          localPersistPending: pendingPersistRef.current != null,
+        });
+        if (decision !== 'apply' || equal) return;
+        writeSourceRef.current = 'remote-storage';
         setZoomRaw(prev => remote.zoom ?? prev);
         setPanXRaw(prev => remote.panX ?? prev);
         setPanYRaw(prev => remote.panY ?? prev);
-        pendingPersistRef.current = { sectionId, boardId, viewport: remote };
       } catch {
         recordStorageConflict(`Could not merge viewport from storage event for "${storageKey}"`);
       }
@@ -165,9 +201,13 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
   }, [sectionId, boardId]);
 
   useEffect(() => {
+    if (!shouldScheduleViewportPersist(writeSourceRef.current)) return;
     scheduleViewportPersist({ zoom, panX, panY }, sectionId, boardId);
+  }, [sectionId, boardId, zoom, panX, panY, scheduleViewportPersist]);
+
+  useEffect(() => {
     return () => flushViewport();
-  }, [sectionId, boardId, zoom, panX, panY, scheduleViewportPersist, flushViewport]);
+  }, [flushViewport]);
 
   useEffect(() => registerFreeSpacePersistFlush(flushViewport), [flushViewport]);
 
@@ -178,32 +218,50 @@ export function useSectionCanvasMode(sectionId: string, boardId = ''): SectionCa
   const clampZoom = (z: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
   const setViewport = useCallback((z: number, px: number, py: number) => {
+    markLocalWrite();
     setZoomRaw(clampZoom(z));
     setPanXRaw(px);
     setPanYRaw(py);
-  }, []);
+  }, [markLocalWrite]);
 
   const setPan = useCallback((x: number, y: number) => {
+    markLocalWrite();
     setPanXRaw(x);
     setPanYRaw(y);
-  }, []);
+  }, [markLocalWrite]);
 
   const resetView = useCallback(() => {
+    markLocalWrite();
     setZoomRaw(1);
     setPanXRaw(40);
     setPanYRaw(40);
-  }, []);
+  }, [markLocalWrite]);
 
   const centerView = useCallback((cw: number, ch: number, vw: number, vh: number) => {
     const z = clampZoom(Math.min(0.9, vw / (cw + 120), vh / (ch + 120)));
     const px = (vw - cw * z) / 2;
     const py = (vh - ch * z) / 2;
+    markLocalWrite();
     setZoomRaw(z);
     setPanXRaw(px);
     setPanYRaw(py);
-  }, []);
+  }, [markLocalWrite]);
 
   const toggleSnap = useCallback(() => setSnapToGrid(v => !v), []);
 
-  return { zoom, panX, panY, snapToGrid, gridSize, setViewport, setPan, resetView, centerView, toggleSnap };
+  return {
+    zoom,
+    panX,
+    panY,
+    snapToGrid,
+    gridSize,
+    setViewport,
+    setPan,
+    resetView,
+    centerView,
+    toggleSnap,
+    beginLocalNavigation,
+    endLocalNavigation,
+    isLocalNavigationActive,
+  };
 }
