@@ -23,6 +23,8 @@ export default defineConfig({
       'src/lib/freeSpaceLocalGeometryCommit.test.ts',
       'src/lib/focusCache/freeSpaceObjectGeometryLww.test.ts',
       'src/lib/focusCache/freeSpaceVisibilityResumeCatchUp.test.ts',
+      'src/lib/viewportPersist.test.ts',
+      'src/hooks/useSectionCanvasMode.test.ts',
     ],
   },
 });
