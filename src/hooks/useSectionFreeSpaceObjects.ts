@@ -27,10 +27,11 @@ import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCach
 import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
 import {
   cancelOrphanPendingFreeSpaceObjectWrites,
-  cancelPendingFreeSpaceObjectWritesAfterLocalDelete,
 } from '../lib/focusCache/freeSpaceObjectDeleteCancel';
+import { enqueueFreeSpaceObjectDeletesAfterLocalDelete } from '../lib/focusCache/freeSpaceObjectDeleteEnqueue';
 import {
   applyCloudWinnersToReactState,
+  applyFreeSpaceCloudDeleteToMountedBoard,
   applyFreeSpaceCloudRowsToMountedBoard,
   isFreeSpacePullScopeCurrent,
   runFreeSpaceSectionPullCatchUp,
@@ -1028,25 +1029,24 @@ export function useSectionFreeSpaceObjects(
   }, []);
 
   /**
-   * PR6: retry pending CREATE/UPDATE cancellation for soft-deleted entities.
+   * Durable delete queue: cancel create/update and enqueue cloud DELETE when needed.
    * Never throws into persist. Does not undo local deletion on failure.
    */
   const drainPendingCancels = useCallback(() => {
     const ids = [...pendingCancelIdsRef.current];
     if (ids.length === 0) return;
-    const { sectionId: sid } = scopeRef.current;
+    const { sectionId: sid, boardId: bid } = scopeRef.current;
     if (!sid) return;
-    cancelPendingFreeSpaceObjectWritesAfterLocalDelete(
+    enqueueFreeSpaceObjectDeletesAfterLocalDelete(
       true,
       {
         userId: userIdRef.current,
         sectionId: sid,
+        boardId: bid,
         entityIds: ids,
       },
-      result => {
-        for (const id of result.succeededEntityIds) {
-          pendingCancelIdsRef.current.delete(id);
-        }
+      (entityId, result) => {
+        if (result.ok) pendingCancelIdsRef.current.delete(entityId);
       },
     );
   }, []);
@@ -1183,10 +1183,9 @@ export function useSectionFreeSpaceObjects(
 
   /**
    * PR7b: Realtime thin delivery + mandatory PR7 pull catch-up on SUBSCRIBED.
-   * Lifecycle: local hydrate (above) → subscribe → SUBSCRIBED → pull catch-up → live INSERT/UPDATE.
-   * Hidden-tab resume: visibility hidden → visible runs the same catch-up pull
-   * (no second geometry bus). DELETE events ignored. All applies use shared
-   * PR7 mounted-board pipeline (C1/C2).
+   * Lifecycle: local hydrate → subscribe → SUBSCRIBED → pull catch-up → live INSERT/UPDATE/DELETE.
+   * Hidden-tab resume: visibility hidden → visible runs the same catch-up pull.
+   * Full catch-up prunes cloud-absent objects. All applies use shared PR7 pipeline (C1/C2).
    */
   useEffect(() => {
     if (!sectionId || !userId) return;
@@ -1224,9 +1223,12 @@ export function useSectionFreeSpaceObjects(
     const patchReactFromApply = (
       result: Awaited<ReturnType<typeof applyFreeSpaceCloudRowsToMountedBoard>>,
     ) => {
-      if (!result.ok || !result.persisted || result.reactWinners.length === 0) return;
+      if (!result.ok || !result.persisted) return;
       if (!isCurrent()) return;
+      const removedSet = new Set(result.removedObjectIds);
       const winners = result.reactWinners;
+      if (winners.length === 0 && removedSet.size === 0) return;
+
       const pendingCreateEntityIds = result.pendingCreateEntityIds;
       const pendingUpdateEntityIds = result.pendingUpdateEntityIds;
       const tombstoneObjectIds = result.tombstoneObjectIds;
@@ -1237,9 +1239,20 @@ export function useSectionFreeSpaceObjects(
         winners,
         new Set([...geometryBlockedIds, ...getActiveFreeSpaceGeometryIds()]),
       );
-      setObjects(prevObjects =>
-        applyCloudWinnersToReactState({
-          prev: prevObjects,
+      setObjects(prevObjects => {
+        let next = prevObjects;
+        if (removedSet.size > 0) {
+          for (const id of removedSet) {
+            next = pruneConnectionsFromObjects(
+              next.filter(o => o.id !== id),
+              id,
+            );
+            dirtyIdsRef.current.delete(id);
+          }
+        }
+        if (winners.length === 0) return next;
+        return applyCloudWinnersToReactState({
+          prev: next,
           candidates: winners,
           getDirtyIds: () => dirtyIdsRef.current,
           getPendingDeletedIds: () => pendingDeletedIdsRef.current,
@@ -1247,8 +1260,8 @@ export function useSectionFreeSpaceObjects(
           pendingUpdateEntityIds,
           tombstoneObjectIds,
           geometryBlockedIds,
-        }),
-      );
+        });
+      });
       applyFreeSpaceRemotePositions(patches);
     };
 
@@ -1298,7 +1311,7 @@ export function useSectionFreeSpaceObjects(
       onEvent: event => {
         if (!isCurrent()) return;
         if (event.ignored || !event.row) {
-          if (event.ignoreReason === 'malformed_payload') {
+          if (event.ignoreReason === 'malformed_payload' || event.ignoreReason === 'malformed_delete') {
             fwPersistWarn(
               `Free Space realtime ignored malformed ${event.eventType} for section "${captured.sectionId}"`,
             );
@@ -1306,6 +1319,29 @@ export function useSectionFreeSpaceObjects(
           return;
         }
         const row = event.row;
+        if (event.eventType === 'DELETE') {
+          enqueueApply(async () => {
+            const result = await applyFreeSpaceCloudDeleteToMountedBoard({
+              ...applyContext(),
+              objectId: row.id,
+            });
+            if (!result.ok || result.removedObjectIds.length === 0) return;
+            if (!isCurrent()) return;
+            const removedSet = new Set(result.removedObjectIds);
+            setObjects(prevObjects => {
+              let next = prevObjects;
+              for (const id of removedSet) {
+                next = pruneConnectionsFromObjects(
+                  next.filter(o => o.id !== id),
+                  id,
+                );
+                dirtyIdsRef.current.delete(id);
+              }
+              return next;
+            });
+          });
+          return;
+        }
         enqueueApply(async () => {
           const result = await applyFreeSpaceCloudRowsToMountedBoard({
             ...applyContext(),

@@ -1,16 +1,14 @@
 /**
- * Drain consumer for pending Free Space object CREATE + UPDATE writes.
+ * Drain consumer for pending Free Space object CREATE / UPDATE / DELETE writes.
  *
  * - Production auto-flush is scheduled by freeSpaceObjectAutoFlush (enqueue /
  *   online / remount). This function remains the only cloud writer and the
  *   manual/diagnostic API.
- * - Processes entityType=free_space_object + operationType=create|update.
+ * - Processes entityType=free_space_object + operationType=create|update|delete.
  * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
  *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
- * - Upserts by entityId; removes queue row only after confirmed cloud success.
- * - Queue presence after upsert does not prove cloud absence if remove failed (crash window).
- * - Soft-delete (PR6) cancels pending create|update locally; does NOT cloud-delete rows
- *   (deferred until permanent purge). In-flight upsert after soft-delete is acceptable.
+ * - CREATE/UPDATE upsert by entityId; DELETE removes the cloud row.
+ * - Removes queue row only after confirmed cloud success.
  * - Leaves unknown / malformed / failed ops queued.
  * - Does not change local Free Space SOT.
  * - Reports cloud queue/flush lifecycle to cloudSyncStatus (UI honesty).
@@ -28,7 +26,10 @@ import {
   reconcileCloudPendingOps,
 } from '../sync/cloudSyncStatus';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
-import { upsertFreeSpaceObjectFromCreatePayload } from './freeSpaceObjectCloud';
+import {
+  deleteFreeSpaceObjectFromCloud,
+  upsertFreeSpaceObjectFromCreatePayload,
+} from './freeSpaceObjectCloud';
 import {
   listPendingOperations,
   removePendingOperation,
@@ -77,15 +78,36 @@ function readObjectUpdatedAt(object: JsonValue): number | null {
 function isSupportedWrite(op: PendingOperation): boolean {
   return (
     op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE &&
-    (op.operationType === 'create' || op.operationType === 'update')
+    (op.operationType === 'create' ||
+      op.operationType === 'update' ||
+      op.operationType === 'delete')
   );
 }
 
+async function removeFlushedOp(
+  namespace: CacheNamespace,
+  opId: string,
+  result: FlushPendingFreeSpaceCreatesResult,
+): Promise<'ok' | 'remove_failed'> {
+  const removed = await removePendingOperation(namespace, opId);
+  if (!removed.ok || !removed.value.removed) {
+    fwPersistWarn(
+      `pending free-space flush remove failed after cloud success: opId=${opId}`,
+    );
+    noteCloudWriteFailed('remove_failed');
+    return 'remove_failed';
+  }
+  noteCloudOpResolved(opId);
+  result.removed += 1;
+  return 'ok';
+}
+
 /**
- * Drain create+update ops for one namespace in `seq` order (drain order only).
- * Newer snapshot is determined only by object.updatedAt — stale duplicate ops for the
- * same entityId are removed without cloud write once a newer version has been upserted
- * earlier in this flush pass.
+ * Drain create/update/delete ops for one namespace in `seq` order (drain order only).
+ * Newer snapshot is determined only by object.updatedAt — stale duplicate create/update
+ * ops for the same entityId are removed without cloud write once a newer version has been
+ * upserted earlier in this flush pass.
+ * DELETE ops always call cloud delete (idempotent).
  * Stops on cloud failure or remove failure (remaining ops stay queued).
  * Must be invoked via freeSpaceObjectAutoFlush or manually for diagnostics.
  */
@@ -118,6 +140,8 @@ export async function flushPendingFreeSpaceCreates(
 
   /** Highest object.updatedAt successfully upserted this pass, per entityId. */
   const latestWrittenUpdatedAt = new Map<string, number>();
+  /** Entity ids successfully deleted in this pass (skip superseded upserts). */
+  const deletedEntityIds = new Set<string>();
 
   try {
     for (const op of listed.value) {
@@ -127,6 +151,49 @@ export async function flushPendingFreeSpaceCreates(
       }
 
       result.processed += 1;
+
+      if (op.operationType === 'delete') {
+        if (deletedEntityIds.has(op.entityId)) {
+          const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+          if (removeStatus === 'remove_failed') {
+            return { ...result, stoppedReason: 'remove_failed' };
+          }
+          continue;
+        }
+
+        const cloud = await deleteFreeSpaceObjectFromCloud({
+          userId: ns.namespace.userId,
+          sectionId: ns.namespace.workspaceId,
+          objectId: op.entityId,
+        });
+
+        if (!cloud.ok) {
+          result.failedCloud += 1;
+          fwPersistWarn(
+            `pending free-space flush cloud delete failed: reason=${cloud.reason}` +
+              (cloud.message ? ` message=${cloud.message}` : ''),
+          );
+          noteCloudWriteFailed(cloud.reason);
+          return { ...result, stoppedReason: 'cloud_write_failed' };
+        }
+
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        deletedEntityIds.add(op.entityId);
+        continue;
+      }
+
+      // create | update
+      if (deletedEntityIds.has(op.entityId)) {
+        // DELETE earlier in this pass wins — drop stale upsert without cloud write.
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        continue;
+      }
 
       const parsed = parseWritePayload(op.payload);
       if (!parsed) {
@@ -145,16 +212,10 @@ export async function flushPendingFreeSpaceCreates(
         version < alreadyWritten
       ) {
         // Stale duplicate relative to a newer snapshot already flushed this pass.
-        const removed = await removePendingOperation(ns.namespace, op.id);
-        if (!removed.ok || !removed.value.removed) {
-          fwPersistWarn(
-            `pending free-space flush remove failed for superseded op: opId=${op.id}`,
-          );
-          noteCloudWriteFailed('remove_failed');
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
           return { ...result, stoppedReason: 'remove_failed' };
         }
-        noteCloudOpResolved(op.id);
-        result.removed += 1;
         continue;
       }
 
@@ -176,17 +237,10 @@ export async function flushPendingFreeSpaceCreates(
         return { ...result, stoppedReason: 'cloud_write_failed' };
       }
 
-      const removed = await removePendingOperation(ns.namespace, op.id);
-      if (!removed.ok || !removed.value.removed) {
-        fwPersistWarn(
-          `pending free-space flush remove failed after cloud success: opId=${op.id}`,
-        );
-        noteCloudWriteFailed('remove_failed');
+      const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+      if (removeStatus === 'remove_failed') {
         return { ...result, stoppedReason: 'remove_failed' };
       }
-
-      noteCloudOpResolved(op.id);
-      result.removed += 1;
       if (version != null) {
         const prev = latestWrittenUpdatedAt.get(op.entityId);
         if (prev == null || version >= prev) {

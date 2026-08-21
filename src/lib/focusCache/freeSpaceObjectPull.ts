@@ -5,8 +5,11 @@
  * currently mounted board. Content/object fields are never overwritten when
  * protected (dirty, undurable delete, pending create/update, tombstones) or when
  * cloud.updatedAt is not strictly newer. Geometry is merged independently via
- * geometry.updatedAt (see freeSpaceObjectGeometryLww). Cloud absence never deletes
- * local objects. Does not change mergeFreeSpaceObjects tie semantics.
+ * geometry.updatedAt (see freeSpaceObjectGeometryLww).
+ *
+ * Full section catch-up may prune local objects absent from cloud for the mounted
+ * board (delete-wins), except pending CREATE (not yet in cloud) and pending DELETE
+ * entity ids. Single-row realtime INSERT/UPDATE must not prune.
  *
  * C1/C2: provisional winners must be re-validated immediately before LS write and
  * again inside the React patch; LS write always merges into a freshly loaded
@@ -171,6 +174,45 @@ export function mergeAcceptedIntoObjectList(
     byId.set(obj.id, obj);
   }
   return [...byId.values()];
+}
+
+/**
+ * Full catch-up only: remove local objects that are absent from the cloud board
+ * snapshot. Retains pending CREATE (never reached cloud) and pending DELETE ids.
+ * Delete wins over dirty / pending UPDATE (V1: cloud absence is authoritative).
+ */
+export function computeCloudAbsenceRemovals(input: {
+  localObjects: readonly ProjectSpaceObject[];
+  cloudRows: readonly FreeSpaceObjectCloudRow[];
+  mountedBoardId: string;
+  retainEntityIds: ReadonlySet<string>;
+}): string[] {
+  const mounted = normalizeBoardId(input.mountedBoardId);
+  const cloudIds = new Set<string>();
+  for (const row of input.cloudRows) {
+    const rowBoard = normalizeBoardId(
+      typeof row.board_id === 'string' ? row.board_id : 'main',
+    );
+    if (rowBoard !== mounted) continue;
+    if (isExactNonEmptyId(row.id)) cloudIds.add(row.id);
+  }
+
+  const removed: string[] = [];
+  for (const obj of input.localObjects) {
+    if (!isExactNonEmptyId(obj.id)) continue;
+    if (input.retainEntityIds.has(obj.id)) continue;
+    if (cloudIds.has(obj.id)) continue;
+    removed.push(obj.id);
+  }
+  return removed;
+}
+
+export function removeObjectsById(
+  localObjects: readonly ProjectSpaceObject[],
+  removeIds: ReadonlySet<string>,
+): ProjectSpaceObject[] {
+  if (removeIds.size === 0) return [...localObjects];
+  return localObjects.filter(o => !removeIds.has(o.id));
 }
 
 /**
@@ -366,6 +408,7 @@ export type CollectPullGuardsResult =
       ok: true;
       pendingCreateEntityIds: Set<string>;
       pendingUpdateEntityIds: Set<string>;
+      pendingDeleteEntityIds: Set<string>;
       tombstoneObjectIds: Set<string>;
     }
   | {
@@ -374,7 +417,7 @@ export type CollectPullGuardsResult =
     };
 
 /**
- * Load IDB pending create/update entity ids + non-expired free_space_object tombstones.
+ * Load IDB pending create/update/delete entity ids + non-expired free_space_object tombstones.
  * Fail-closed: any guard-read failure aborts the pull (caller must not apply cloud).
  */
 export async function collectFreeSpacePullGuardIds(input: {
@@ -384,6 +427,7 @@ export async function collectFreeSpacePullGuardIds(input: {
 }): Promise<CollectPullGuardsResult> {
   const pendingCreateEntityIds = new Set<string>();
   const pendingUpdateEntityIds = new Set<string>();
+  const pendingDeleteEntityIds = new Set<string>();
   const tombstoneObjectIds = new Set<string>();
   const now = input.now ?? Date.now();
 
@@ -405,6 +449,7 @@ export async function collectFreeSpacePullGuardIds(input: {
       if (!isExactNonEmptyId(op.entityId)) continue;
       if (op.operationType === 'create') pendingCreateEntityIds.add(op.entityId);
       else if (op.operationType === 'update') pendingUpdateEntityIds.add(op.entityId);
+      else if (op.operationType === 'delete') pendingDeleteEntityIds.add(op.entityId);
     }
   } catch (e) {
     fwPersistWarn(`Free Space pull aborted: pending-ops guard threw: ${String(e)}`);
@@ -432,6 +477,7 @@ export async function collectFreeSpacePullGuardIds(input: {
     ok: true,
     pendingCreateEntityIds,
     pendingUpdateEntityIds,
+    pendingDeleteEntityIds,
     tombstoneObjectIds,
   };
 }
@@ -441,10 +487,13 @@ export type ApplyMountedBoardCloudRowsResult =
       ok: true;
       acceptedCount: number;
       persisted: boolean;
-      /** Final LS winners; empty when nothing persisted. Re-validate again before React patch. */
+      /** Final LS winners; empty when nothing content-accepted. Re-validate again before React patch. */
       reactWinners: ProjectSpaceObject[];
+      /** Object ids removed due to cloud absence (full catch-up) or realtime DELETE. */
+      removedObjectIds: readonly string[];
       pendingCreateEntityIds: readonly string[];
       pendingUpdateEntityIds: readonly string[];
+      pendingDeleteEntityIds: readonly string[];
       tombstoneObjectIds: readonly string[];
       geometryBlockedIds: readonly string[];
     }
@@ -461,12 +510,18 @@ export type ApplyMountedBoardCloudRowsInput = {
   loadDurableObjects: () => ProjectSpaceObject[];
   /** False when cancelled or section/board generation is stale. */
   isCurrent: () => boolean;
+  /**
+   * When true (section catch-up only), prune local objects absent from `rows`
+   * for the mounted board. Never set for single-row realtime INSERT/UPDATE.
+   */
+  pruneCloudAbsences?: boolean;
 };
 
 /**
  * Shared PR7/PR7b mounted-board apply orchestration (guards + C1/C2).
  * Used by section pull catch-up and realtime INSERT/UPDATE.
- * Does not patch React — caller must call {@link applyCloudWinnersToReactState}.
+ * Does not patch React — caller must call {@link applyCloudWinnersToReactState}
+ * and apply {@link ApplyMountedBoardCloudRowsResult.removedObjectIds}.
  */
 export async function applyFreeSpaceCloudRowsToMountedBoard(
   input: ApplyMountedBoardCloudRowsInput,
@@ -488,6 +543,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
   const guardSnapshot = {
     pendingCreateEntityIds: [...guards.pendingCreateEntityIds],
     pendingUpdateEntityIds: [...guards.pendingUpdateEntityIds],
+    pendingDeleteEntityIds: [...guards.pendingDeleteEntityIds],
     tombstoneObjectIds: [...guards.tombstoneObjectIds],
   };
 
@@ -521,12 +577,30 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
   });
 
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
-  if (computed.accepted.length === 0) {
+
+  const retainForAbsence = new Set<string>([
+    ...guards.pendingCreateEntityIds,
+    ...guards.pendingDeleteEntityIds,
+    ...input.getPendingDeletedIds(),
+  ]);
+
+  const absenceRemoveIds = input.pruneCloudAbsences
+    ? computeCloudAbsenceRemovals({
+        localObjects: durableObjects,
+        cloudRows: input.rows,
+        mountedBoardId: input.boardId,
+        retainEntityIds: retainForAbsence,
+      })
+    : [];
+  const absenceRemoveSet = new Set(absenceRemoveIds);
+
+  if (computed.accepted.length === 0 && absenceRemoveIds.length === 0) {
     return {
       ok: true,
       acceptedCount: 0,
       persisted: false,
       reactWinners: [],
+      removedObjectIds: [],
       geometryBlockedIds: geometryBlockedSnapshot,
       ...guardSnapshot,
     };
@@ -547,29 +621,69 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
     activeGeometryIds: getActiveFreeSpaceGeometryIds(),
   });
   const freshDurableObjects = input.loadDurableObjects();
-  const persistPlan = buildFreshMountedBoardPersistPlan({
-    provisionalAccepted: computed.accepted,
-    reactObjects: input.getReactObjects(),
-    freshDurableObjects,
-    protectedEntityIds: protectedAtPersist,
-    geometryBlockedIds: geometryBlockedAtPersist,
-  });
-  if (!persistPlan) {
+
+  let nextDurableObjects = freshDurableObjects;
+  let finalAccepted: ProjectSpaceObject[] = [];
+
+  if (computed.accepted.length > 0) {
+    const persistPlan = buildFreshMountedBoardPersistPlan({
+      provisionalAccepted: computed.accepted,
+      reactObjects: input.getReactObjects(),
+      freshDurableObjects,
+      protectedEntityIds: protectedAtPersist,
+      geometryBlockedIds: geometryBlockedAtPersist,
+    });
+    if (persistPlan) {
+      finalAccepted = persistPlan.finalAccepted;
+      nextDurableObjects = persistPlan.nextDurableObjects;
+    } else if (absenceRemoveIds.length === 0) {
+      return {
+        ok: true,
+        acceptedCount: 0,
+        persisted: false,
+        reactWinners: [],
+        removedObjectIds: [],
+        geometryBlockedIds: [...geometryBlockedAtPersist],
+        ...guardSnapshot,
+      };
+    }
+  }
+
+  // Recompute absence against the post-merge durable snapshot (full catch-up).
+  const finalAbsenceIds = input.pruneCloudAbsences
+    ? computeCloudAbsenceRemovals({
+        localObjects: nextDurableObjects,
+        cloudRows: input.rows,
+        mountedBoardId: input.boardId,
+        retainEntityIds: retainForAbsence,
+      })
+    : [...absenceRemoveSet];
+  const finalAbsenceSet = new Set(finalAbsenceIds);
+
+  if (finalAbsenceSet.size > 0) {
+    nextDurableObjects = removeObjectsById(nextDurableObjects, finalAbsenceSet);
+    // Drop accepted winners that were also absent-pruned (should not happen).
+    finalAccepted = finalAccepted.filter(o => !finalAbsenceSet.has(o.id));
+  }
+
+  if (finalAccepted.length === 0 && finalAbsenceSet.size === 0) {
     return {
       ok: true,
       acceptedCount: 0,
       persisted: false,
       reactWinners: [],
+      removedObjectIds: [],
       geometryBlockedIds: [...geometryBlockedAtPersist],
       ...guardSnapshot,
     };
   }
+
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
 
   const persisted = persistMountedBoardPullWinners({
     sectionId: input.sectionId,
     boardId: input.boardId,
-    nextDurableObjects: persistPlan.nextDurableObjects,
+    nextDurableObjects,
   });
   if (!persisted) {
     fwPersistWarn(
@@ -579,11 +693,31 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
   }
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope_after_persist' };
 
+  if (finalAbsenceSet.size > 0) {
+    const { cancelPendingFreeSpaceObjectWrites } = await import(
+      './freeSpaceObjectDeleteCancel'
+    );
+    void cancelPendingFreeSpaceObjectWrites({
+      userId: input.userId,
+      sectionId: input.sectionId,
+      entityIds: [...finalAbsenceSet],
+    });
+    const victims = freshDurableObjects.filter(o => finalAbsenceSet.has(o.id));
+    if (victims.length > 0) {
+      void import('../knowledge/tombstoneStore').then(({ writeFreeSpaceObjectTombstone }) => {
+        for (const victim of victims) {
+          void writeFreeSpaceObjectTombstone(input.sectionId, input.boardId, victim);
+        }
+      });
+    }
+  }
+
   return {
     ok: true,
-    acceptedCount: persistPlan.finalAccepted.length,
+    acceptedCount: finalAccepted.length,
     persisted: true,
-    reactWinners: persistPlan.finalAccepted,
+    reactWinners: finalAccepted,
+    removedObjectIds: [...finalAbsenceSet],
     geometryBlockedIds: [...geometryBlockedAtPersist],
     ...guardSnapshot,
   };
@@ -627,10 +761,98 @@ export function applyCloudWinnersToReactState(input: {
 }
 
 /**
+ * Apply a realtime/cloud DELETE to the mounted board: durable remove + cancel writes.
+ * Tombstone blocks stale INSERT/UPDATE. Does not enqueue another cloud DELETE.
+ */
+export async function applyFreeSpaceCloudDeleteToMountedBoard(input: {
+  sectionId: string;
+  boardId: string;
+  userId: string | null | undefined;
+  objectId: string;
+  getReactObjects: () => readonly ProjectSpaceObject[];
+  loadDurableObjects: () => ProjectSpaceObject[];
+  isCurrent: () => boolean;
+}): Promise<
+  | { ok: true; removed: boolean; removedObjectIds: readonly string[] }
+  | { ok: false; reason: string }
+> {
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+  if (!isExactNonEmptyId(input.objectId)) {
+    return { ok: false, reason: 'invalid_object_id' };
+  }
+
+  const { cancelPendingFreeSpaceObjectWrites } = await import(
+    './freeSpaceObjectDeleteCancel'
+  );
+  void cancelPendingFreeSpaceObjectWrites({
+    userId: input.userId,
+    sectionId: input.sectionId,
+    entityIds: [input.objectId],
+  });
+
+  // Drop a pending DELETE for this id — cloud already deleted.
+  try {
+    const ns = resolveCacheNamespace(input.userId, input.sectionId);
+    if (ns.ok) {
+      const listed = await listPendingOperations(ns.namespace);
+      if (listed.ok) {
+        const { removePendingOperation } = await import('./pendingOperations');
+        const { noteCloudOpResolved } = await import('../sync/cloudSyncStatus');
+        for (const op of listed.value) {
+          if (
+            op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE &&
+            op.operationType === 'delete' &&
+            op.entityId === input.objectId
+          ) {
+            const removed = await removePendingOperation(ns.namespace, op.id);
+            if (removed.ok && removed.value.removed) noteCloudOpResolved(op.id);
+          }
+        }
+      }
+    }
+  } catch {
+    // warn-only; local apply still proceeds
+  }
+
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
+
+  const durable = input.loadDurableObjects();
+  const victim =
+    durable.find(o => o.id === input.objectId) ??
+    input.getReactObjects().find(o => o.id === input.objectId);
+  const nextDurable = durable.filter(o => o.id !== input.objectId);
+  const changed = nextDurable.length !== durable.length;
+
+  if (changed) {
+    const persisted = persistMountedBoardPullWinners({
+      sectionId: input.sectionId,
+      boardId: input.boardId,
+      nextDurableObjects: nextDurable,
+    });
+    if (!persisted) return { ok: false, reason: 'persist_failed' };
+  }
+
+  if (victim) {
+    void import('../knowledge/tombstoneStore').then(({ writeFreeSpaceObjectTombstone }) =>
+      writeFreeSpaceObjectTombstone(input.sectionId, input.boardId, victim),
+    );
+  }
+
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope_after_persist' };
+
+  return {
+    ok: true,
+    removed: changed || Boolean(victim),
+    removedObjectIds: changed || victim ? [input.objectId] : [],
+  };
+}
+
+/**
  * PR7 section SELECT + shared mounted-board apply (catch-up after Realtime SUBSCRIBED).
+ * Enables cloud-absence prune so peer deletes stick across reload/offline.
  */
 export async function runFreeSpaceSectionPullCatchUp(
-  input: Omit<ApplyMountedBoardCloudRowsInput, 'rows'>,
+  input: Omit<ApplyMountedBoardCloudRowsInput, 'rows' | 'pruneCloudAbsences'>,
 ): Promise<ApplyMountedBoardCloudRowsResult> {
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
 
@@ -646,5 +868,6 @@ export async function runFreeSpaceSectionPullCatchUp(
   return applyFreeSpaceCloudRowsToMountedBoard({
     ...input,
     rows: fetched.rows,
+    pruneCloudAbsences: true,
   });
 }
