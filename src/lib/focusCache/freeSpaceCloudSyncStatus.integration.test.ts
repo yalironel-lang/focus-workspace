@@ -8,7 +8,6 @@ import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects'
 import { resetFocusCacheDbForTests } from './db';
 import { flushPendingFreeSpaceCreates } from './flushPendingFreeSpaceCreates';
 import { enqueueFreeSpaceObjectCreate } from './freeSpaceObjectCreateEnqueue';
-import { cancelPendingFreeSpaceObjectWrites } from './freeSpaceObjectDeleteCancel';
 import { enqueueFreeSpaceObjectUpdate } from './freeSpaceObjectUpdateEnqueue';
 import {
   getCloudSyncSnapshot,
@@ -20,15 +19,18 @@ import { FOCUS_CACHE_DB_NAME } from './types';
 
 vi.mock('./freeSpaceObjectCloud', () => ({
   upsertFreeSpaceObjectFromCreatePayload: vi.fn(),
+  deleteFreeSpaceObjectFromCloud: vi.fn(),
 }));
 
 vi.mock('./freeSpacePendingFlushTrigger', () => ({
   notifyFreeSpacePendingEnqueue: vi.fn(),
 }));
 
-import { upsertFreeSpaceObjectFromCreatePayload } from './freeSpaceObjectCloud';
+import { upsertFreeSpaceObjectFromCreatePayload, deleteFreeSpaceObjectFromCloud } from './freeSpaceObjectCloud';
+import { enqueueFreeSpaceObjectDelete } from './freeSpaceObjectDeleteEnqueue';
 
 const upsertMock = vi.mocked(upsertFreeSpaceObjectFromCreatePayload);
+const deleteMock = vi.mocked(deleteFreeSpaceObjectFromCloud);
 
 const USER = 'user-status-1';
 const SECTION = 'section-status-1';
@@ -60,7 +62,9 @@ beforeEach(async () => {
   resetCloudSyncStatusForTests();
   resetSaveStatusForTests();
   upsertMock.mockReset();
+  deleteMock.mockReset();
   upsertMock.mockResolvedValue({ ok: true });
+  deleteMock.mockResolvedValue({ ok: true });
 });
 
 afterEach(async () => {
@@ -116,7 +120,7 @@ describe('Free Space cloud status integration', () => {
     expect(getCloudSyncSnapshot().pendingCount).toBe(0);
   });
 
-  it('O delete path: soft-delete cancel resolves pending without cloud DELETE', async () => {
+  it('O create-then-delete before cloud: CREATE canceled, no DELETE queued', async () => {
     await enqueueFreeSpaceObjectCreate({
       userId: USER,
       sectionId: SECTION,
@@ -125,15 +129,77 @@ describe('Free Space cloud status integration', () => {
     });
     expect(getCloudSyncSnapshot().pendingCount).toBe(1);
 
-    const cancel = await cancelPendingFreeSpaceObjectWrites({
+    const del = await enqueueFreeSpaceObjectDelete({
       userId: USER,
       sectionId: SECTION,
-      entityIds: ['d1'],
+      boardId: BOARD,
+      entityId: 'd1',
     });
-    expect(cancel.ok).toBe(true);
-    expect(cancel.removedOps).toBe(1);
+    expect(del.ok).toBe(true);
+    if (del.ok) expect(del.action).toBe('create_canceled_no_delete');
     expect(getCloudSyncSnapshot().pendingCount).toBe(0);
+    expect(deleteMock).not.toHaveBeenCalled();
     expect(upsertMock).not.toHaveBeenCalled();
+  });
+
+  it('O2 delete path: enqueue DELETE → pending UI; flush → Saved-ready', async () => {
+    const del = await enqueueFreeSpaceObjectDelete({
+      userId: USER,
+      sectionId: SECTION,
+      boardId: BOARD,
+      entityId: 'cloud-obj',
+    });
+    expect(del.ok).toBe(true);
+    expect(getCloudSyncSnapshot().pendingCount).toBe(1);
+    expect(
+      deriveSyncUiStatus(getSaveStatusSnapshot(), {
+        online: true,
+        cloud: getCloudSyncSnapshot(),
+        showSaved: true,
+      }).phase,
+    ).toBe('sync_pending');
+
+    await flushPendingFreeSpaceCreates({ userId: USER, workspaceId: SECTION });
+    expect(deleteMock).toHaveBeenCalledWith({
+      userId: USER,
+      sectionId: SECTION,
+      objectId: 'cloud-obj',
+    });
+    expect(getCloudSyncSnapshot().pendingCount).toBe(0);
+    expect(
+      deriveSyncUiStatus(getSaveStatusSnapshot(), {
+        online: true,
+        cloud: getCloudSyncSnapshot(),
+        showSaved: true,
+      }).phase,
+    ).toBe('saved');
+  });
+
+  it('O3 delete failure: Sync failed, retry drains', async () => {
+    await enqueueFreeSpaceObjectDelete({
+      userId: USER,
+      sectionId: SECTION,
+      boardId: BOARD,
+      entityId: 'cloud-obj',
+    });
+    deleteMock.mockResolvedValueOnce({ ok: false, reason: 'cloud_write_failed' });
+    const flush = await flushPendingFreeSpaceCreates({
+      userId: USER,
+      workspaceId: SECTION,
+    });
+    expect(flush.stoppedReason).toBe('cloud_write_failed');
+    expect(getCloudSyncSnapshot().pendingCount).toBe(1);
+    expect(
+      deriveSyncUiStatus(getSaveStatusSnapshot(), {
+        online: true,
+        cloud: getCloudSyncSnapshot(),
+        showSaved: true,
+      }).phase,
+    ).toBe('sync_failed');
+
+    deleteMock.mockResolvedValue({ ok: true });
+    await flushPendingFreeSpaceCreates({ userId: USER, workspaceId: SECTION });
+    expect(getCloudSyncSnapshot().pendingCount).toBe(0);
   });
 
   it('D/E: first of two ops succeeding does not clear pending', async () => {

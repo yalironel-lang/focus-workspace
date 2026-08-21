@@ -108,15 +108,33 @@ beforeEach(() => {
 });
 
 describe('normalizeFreeSpaceRealtimePayload', () => {
-  it('15. DELETE event ignored', () => {
-    const n = normalizeFreeSpaceRealtimePayload({
-      eventType: 'DELETE',
-      new: {},
-      old: { id: 'a' },
-    });
-    expect(n.ignored).toBe(true);
-    expect(n.ignoreReason).toBe('delete_ignored_pr6');
-    expect(n.row).toBeNull();
+  it('15. DELETE event normalizes from old row', () => {
+    const n = normalizeFreeSpaceRealtimePayload(
+      {
+        eventType: 'DELETE',
+        new: {},
+        old: { id: 'a', section_id: 'section-1', board_id: 'main' },
+      },
+      'section-1',
+    );
+    expect(n.ignored).toBe(false);
+    expect(n.eventType).toBe('DELETE');
+    expect(n.row?.id).toBe('a');
+    expect(n.row?.section_id).toBe('section-1');
+  });
+
+  it('15b. DELETE with id-only old uses fallback sectionId', () => {
+    const n = normalizeFreeSpaceRealtimePayload(
+      {
+        eventType: 'DELETE',
+        new: {},
+        old: { id: 'a' },
+      },
+      'section-1',
+    );
+    expect(n.ignored).toBe(false);
+    expect(n.row?.id).toBe('a');
+    expect(n.row?.section_id).toBe('section-1');
   });
 
   it('16. malformed payload ignored safely', () => {

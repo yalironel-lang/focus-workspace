@@ -11,7 +11,7 @@
  *
  * Authoritative snapshot version: object.updatedAt (not queue seq / flush order).
  * Soft-delete (PR6) cancels pending create|update via freeSpaceObjectDeleteCancel
- * after durable local delete — does not enqueue cloud DELETE.
+ * after durable local delete; cloud DELETE is enqueued by freeSpaceObjectDeleteEnqueue.
  * Future optimization (not implemented): entityId → pendingOperationId lookup map.
  *
  * Temporary mapping: workspaceId := sectionId. Queue failure is warn-only.
@@ -113,6 +113,19 @@ export async function enqueueFreeSpaceObjectUpdate(
     }
 
     const entityId = input.object.id;
+    const pendingDelete = listed.value.find(
+      op =>
+        op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE &&
+        op.entityId === entityId &&
+        op.operationType === 'delete',
+    );
+    if (pendingDelete) {
+      fwPersistWarn(
+        `pending update enqueue skipped: delete already queued for entityId=${entityId}`,
+      );
+      return { ok: false, reason: 'invalid_operation' };
+    }
+
     const pendingCreate = findMatchingWriteOp(listed.value, entityId, 'create');
     if (pendingCreate) {
       const replaced = await replacePendingOperationPayload(

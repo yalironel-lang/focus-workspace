@@ -1,5 +1,5 @@
 /**
- * Cloud repository for Free Space object CREATE upserts and PR7 section SELECT.
+ * Cloud repository for Free Space object CREATE upserts, DELETE, and PR7 section SELECT.
  * Does not touch the local queue or local Free Space SOT (except callers of pull apply).
  */
 
@@ -83,6 +83,48 @@ export async function upsertFreeSpaceObjectFromCreatePayload(
     };
   }
 
+  return { ok: true };
+}
+
+export type DeleteFreeSpaceObjectInput = {
+  userId: string;
+  sectionId: string;
+  /** Local object id (= cloud row id / queue entityId). */
+  objectId: string;
+};
+
+/**
+ * Idempotent DELETE by primary key `id`, scoped to user + section.
+ * Missing row is success (already deleted / never existed).
+ */
+export async function deleteFreeSpaceObjectFromCloud(
+  input: DeleteFreeSpaceObjectInput,
+): Promise<FreeSpaceObjectCloudResult> {
+  if (
+    !isExactNonEmptyId(input.userId) ||
+    !isExactNonEmptyId(input.sectionId) ||
+    !isExactNonEmptyId(input.objectId)
+  ) {
+    return { ok: false, reason: 'invalid_payload' };
+  }
+
+  const { error, count } = await supabase
+    .from('free_space_objects')
+    .delete({ count: 'exact' })
+    .eq('id', input.objectId)
+    .eq('user_id', input.userId)
+    .eq('section_id', input.sectionId);
+
+  if (error) {
+    return {
+      ok: false,
+      reason: 'cloud_write_failed',
+      message: error.message,
+    };
+  }
+
+  // count may be null depending on client config; absence of error is enough.
+  void count;
   return { ok: true };
 }
 

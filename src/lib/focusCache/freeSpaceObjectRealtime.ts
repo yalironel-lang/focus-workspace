@@ -2,8 +2,7 @@
  * PR7b: Free Space Realtime thin delivery layer.
  *
  * Subscribes to section-scoped postgres_changes on free_space_objects and forwards
- * INSERT/UPDATE payloads into the shared PR7 mounted-board apply path.
- * DELETE events are ignored (PR6 deferred cloud DELETE).
+ * INSERT/UPDATE/DELETE payloads into the shared PR7 mounted-board apply path.
  *
  * Lifecycle (mandatory): subscribe → on SUBSCRIBED run PR7 pull catch-up → stay live.
  */
@@ -20,7 +19,10 @@ export type FreeSpaceRealtimeEventType = 'INSERT' | 'UPDATE' | 'DELETE';
 
 export type FreeSpaceRealtimeNormalizedEvent = {
   eventType: FreeSpaceRealtimeEventType;
-  /** Null for DELETE (ignored) or malformed INSERT/UPDATE. */
+  /**
+   * INSERT/UPDATE: full row from `new`.
+   * DELETE: best-effort row from `old` (id required; board/section when replica identity allows).
+   */
   row: FreeSpaceObjectCloudRow | null;
   ignored: boolean;
   ignoreReason?: string;
@@ -28,7 +30,7 @@ export type FreeSpaceRealtimeNormalizedEvent = {
 
 export type FreeSpaceRealtimeSubscribeInput = {
   sectionId: string;
-  /** Called for every postgres_changes payload after normalize / DELETE ignore. */
+  /** Called for every postgres_changes payload after normalize. */
   onEvent: (event: FreeSpaceRealtimeNormalizedEvent) => void;
   /**
    * Realtime subscribe status callback.
@@ -47,21 +49,55 @@ function isExactNonEmptyId(value: unknown): value is string {
 }
 
 /**
+ * Best-effort DELETE row from realtime `old` record.
+ * Replica identity DEFAULT may only include `id`; section filter already scoped the event.
+ */
+export function normalizeFreeSpaceRealtimeDeleteRow(
+  raw: unknown,
+  fallbackSectionId?: string,
+): FreeSpaceObjectCloudRow | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (!isExactNonEmptyId(r.id)) return null;
+  const sectionId =
+    typeof r.section_id === 'string' && r.section_id.trim()
+      ? r.section_id
+      : fallbackSectionId && isExactNonEmptyId(fallbackSectionId)
+        ? fallbackSectionId
+        : null;
+  if (!sectionId) return null;
+  return {
+    id: r.id,
+    user_id: typeof r.user_id === 'string' ? r.user_id : '',
+    section_id: sectionId,
+    board_id: typeof r.board_id === 'string' ? r.board_id : 'main',
+    object: null,
+    created_at: typeof r.created_at === 'string' ? r.created_at : '',
+    updated_at: typeof r.updated_at === 'string' ? r.updated_at : '',
+  };
+}
+
+/**
  * Normalize a Realtime postgres_changes payload.
- * DELETE → ignored (no local apply). Malformed INSERT/UPDATE → ignored.
+ * Malformed INSERT/UPDATE/DELETE → ignored.
  */
 export function normalizeFreeSpaceRealtimePayload(
   payload: Pick<RealtimePostgresChangesPayload<Record<string, unknown>>, 'eventType' | 'new' | 'old'>,
+  fallbackSectionId?: string,
 ): FreeSpaceRealtimeNormalizedEvent {
   const eventType = payload.eventType as FreeSpaceRealtimeEventType;
 
   if (eventType === 'DELETE') {
-    return {
-      eventType: 'DELETE',
-      row: null,
-      ignored: true,
-      ignoreReason: 'delete_ignored_pr6',
-    };
+    const row = normalizeFreeSpaceRealtimeDeleteRow(payload.old, fallbackSectionId);
+    if (!row) {
+      return {
+        eventType: 'DELETE',
+        row: null,
+        ignored: true,
+        ignoreReason: 'malformed_delete',
+      };
+    }
+    return { eventType: 'DELETE', row, ignored: false };
   }
 
   if (eventType !== 'INSERT' && eventType !== 'UPDATE') {
@@ -125,7 +161,7 @@ export function subscribeFreeSpaceObjectsRealtime(
       },
       (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
         try {
-          const normalized = normalizeFreeSpaceRealtimePayload(payload);
+          const normalized = normalizeFreeSpaceRealtimePayload(payload, sectionId);
           input.onEvent(normalized);
         } catch (e) {
           fwPersistWarn(`Free Space realtime event handler failed: ${String(e)}`);

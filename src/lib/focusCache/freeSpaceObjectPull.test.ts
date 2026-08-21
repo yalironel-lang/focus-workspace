@@ -8,6 +8,7 @@ import {
   buildFreshMountedBoardPersistPlan,
   buildProtectedEntityIds,
   collectFreeSpacePullGuardIds,
+  computeCloudAbsenceRemovals,
   computeMountedBoardPullApply,
   filterCloudWinnersForReactPatch,
   filterStillValidCloudWinners,
@@ -614,5 +615,47 @@ describe('PR C geometry field LWW on pull compute', () => {
     expect(collectAcceptedGeometryPatches(react, plan!.finalAccepted)).toEqual({
       a: { x: 400, y: 300, w: 200, h: 80 },
     });
+  });
+});
+
+describe('computeCloudAbsenceRemovals (delete-wins catch-up)', () => {
+  it('G: removes local object absent from cloud', () => {
+    const removed = computeCloudAbsenceRemovals({
+      localObjects: [note('gone', 1), note('keep', 1)],
+      cloudRows: [cloudRow({ id: 'keep', board_id: 'main', object: note('keep', 1) })],
+      mountedBoardId: 'main',
+      retainEntityIds: new Set(),
+    });
+    expect(removed).toEqual(['gone']);
+  });
+
+  it('retains pending CREATE (never reached cloud)', () => {
+    const removed = computeCloudAbsenceRemovals({
+      localObjects: [note('local-only', 1)],
+      cloudRows: [],
+      mountedBoardId: 'main',
+      retainEntityIds: new Set(['local-only']),
+    });
+    expect(removed).toEqual([]);
+  });
+
+  it('J: ignores other-board cloud rows when pruning mounted board', () => {
+    const removed = computeCloudAbsenceRemovals({
+      localObjects: [note('a', 1)],
+      cloudRows: [cloudRow({ id: 'a', board_id: 'other', object: note('a', 1) })],
+      mountedBoardId: 'main',
+      retainEntityIds: new Set(),
+    });
+    expect(removed).toEqual(['a']);
+  });
+
+  it('I: delete wins — dirty/update not retained by default', () => {
+    const removed = computeCloudAbsenceRemovals({
+      localObjects: [note('edited', 200)],
+      cloudRows: [],
+      mountedBoardId: 'main',
+      retainEntityIds: new Set(),
+    });
+    expect(removed).toEqual(['edited']);
   });
 });

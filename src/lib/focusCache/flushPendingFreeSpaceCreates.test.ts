@@ -10,6 +10,7 @@ vi.mock('./pendingOperations', () => ({
 
 vi.mock('./freeSpaceObjectCloud', () => ({
   upsertFreeSpaceObjectFromCreatePayload: vi.fn(),
+  deleteFreeSpaceObjectFromCloud: vi.fn(),
 }));
 
 vi.mock('../freeSpacePersistence', async (importOriginal) => {
@@ -17,7 +18,7 @@ vi.mock('../freeSpacePersistence', async (importOriginal) => {
   return { ...actual, fwPersistWarn: vi.fn() };
 });
 
-import { upsertFreeSpaceObjectFromCreatePayload } from './freeSpaceObjectCloud';
+import { upsertFreeSpaceObjectFromCreatePayload, deleteFreeSpaceObjectFromCloud } from './freeSpaceObjectCloud';
 import { flushPendingFreeSpaceCreates } from './flushPendingFreeSpaceCreates';
 import {
   listPendingOperations,
@@ -27,6 +28,7 @@ import {
 const listMock = vi.mocked(listPendingOperations);
 const removeMock = vi.mocked(removePendingOperation);
 const upsertMock = vi.mocked(upsertFreeSpaceObjectFromCreatePayload);
+const deleteMock = vi.mocked(deleteFreeSpaceObjectFromCloud);
 
 const ns: CacheNamespace = {
   userId: 'user-1',
@@ -61,7 +63,9 @@ beforeEach(() => {
   listMock.mockReset();
   removeMock.mockReset();
   upsertMock.mockReset();
+  deleteMock.mockReset();
   upsertMock.mockResolvedValue({ ok: true });
+  deleteMock.mockResolvedValue({ ok: true });
   removeMock.mockResolvedValue({ ok: true, value: { removed: true } });
 });
 
@@ -142,17 +146,12 @@ describe('flushPendingFreeSpaceCreates', () => {
     expect(removeMock).toHaveBeenCalledWith(ns, 'op-upd');
   });
 
-  it('leaves unsupported ops queued without upsert or remove', async () => {
+  it('leaves unsupported entity types queued without upsert or remove', async () => {
     listMock.mockResolvedValue({
       ok: true,
       value: [
         createOp({
           seq: 1,
-          id: 'op-del',
-          operationType: 'delete',
-        }),
-        createOp({
-          seq: 2,
           id: 'op-other',
           entityType: 'other_thing',
         }),
@@ -161,9 +160,58 @@ describe('flushPendingFreeSpaceCreates', () => {
 
     const result = await flushPendingFreeSpaceCreates(ns);
     expect(result.processed).toBe(0);
-    expect(result.skippedUnsupported).toBe(2);
+    expect(result.skippedUnsupported).toBe(1);
     expect(result.removed).toBe(0);
     expect(upsertMock).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it('cloud DELETE succeeds and removes queue op', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        createOp({
+          seq: 1,
+          id: 'op-del',
+          entityId: 'gone',
+          operationType: 'delete',
+          payload: { boardId: 'main' },
+        }),
+      ],
+    });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result.processed).toBe(1);
+    expect(result.removed).toBe(1);
+    expect(deleteMock).toHaveBeenCalledWith({
+      userId: ns.userId,
+      sectionId: ns.workspaceId,
+      objectId: 'gone',
+    });
+    expect(upsertMock).not.toHaveBeenCalled();
+    expect(removeMock).toHaveBeenCalledWith(ns, 'op-del');
+  });
+
+  it('D: failed DELETE retains op and stops', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        createOp({
+          seq: 1,
+          id: 'op-del',
+          entityId: 'gone',
+          operationType: 'delete',
+          payload: { boardId: 'main' },
+        }),
+      ],
+    });
+    deleteMock.mockResolvedValue({ ok: false, reason: 'cloud_write_failed' });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result.removed).toBe(0);
+    expect(result.failedCloud).toBe(1);
+    expect(result.stoppedReason).toBe('cloud_write_failed');
     expect(removeMock).not.toHaveBeenCalled();
   });
 

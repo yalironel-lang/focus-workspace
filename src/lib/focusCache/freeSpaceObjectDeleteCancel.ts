@@ -1,9 +1,8 @@
 /**
- * PR 6: cancel pending Free Space CREATE/UPDATE ops after durable local soft-delete.
+ * PR 6: cancel pending Free Space CREATE/UPDATE ops (orphan cleanup + peer delete apply).
  *
- * Deferred cloud DELETE: does NOT enqueue operationType=delete and does NOT call Supabase.delete().
- * Queue presence does not prove cloud absence (upsert may have succeeded before queue ack).
- * Canceling queued writes only prevents a future flush from applying them.
+ * Local user delete uses freeSpaceObjectDeleteEnqueue (cancel writes + durable DELETE).
+ * This module remains for orphan cancel and inbound cloud-delete apply.
  *
  * Temporary mapping: workspaceId := sectionId. Failures are warn-only; never throw into persist.
  */
