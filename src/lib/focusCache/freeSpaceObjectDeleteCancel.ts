@@ -10,6 +10,7 @@
 
 import { resolveCacheNamespace } from '../focusCacheNamespace';
 import { fwPersistWarn } from '../freeSpacePersistence';
+import { noteCloudOpResolved } from '../sync/cloudSyncStatus';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
 import {
   listPendingOperations,
@@ -112,6 +113,7 @@ export async function cancelPendingFreeSpaceObjectWrites(
           );
           break;
         }
+        noteCloudOpResolved(op.id);
         removedOps += 1;
       }
       // No matching ops (or all removed) counts as success for this entityId.

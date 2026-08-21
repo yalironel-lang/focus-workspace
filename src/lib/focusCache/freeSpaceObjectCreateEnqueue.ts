@@ -12,6 +12,7 @@ import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects'
 import { resolveCacheNamespace } from '../focusCacheNamespace';
 import { stripPdfThumbnailsFromObjects } from '../freeSpacePdfThumbIdb';
 import { fwPersistWarn } from '../freeSpacePersistence';
+import { noteCloudOpEnqueued } from '../sync/cloudSyncStatus';
 import { enqueuePendingOperation } from './pendingOperations';
 import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { JsonValue, PendingQueueFailureReason } from './types';
@@ -84,6 +85,7 @@ export async function enqueueFreeSpaceObjectCreate(
       return { ok: false, reason: result.reason };
     }
 
+    noteCloudOpEnqueued(result.value.id);
     notifyFreeSpacePendingEnqueue(ns.namespace);
     return { ok: true };
   } catch {

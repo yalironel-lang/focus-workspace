@@ -9,6 +9,16 @@ import {
   resetSaveStatusForTests,
   subscribeSaveStatus,
 } from '../saveStatus';
+import {
+  getCloudSyncSnapshot,
+  noteCloudFlushEnded,
+  noteCloudFlushStarted,
+  noteCloudOpEnqueued,
+  noteCloudOpResolved,
+  noteCloudWriteFailed,
+  reconcileCloudPendingOps,
+  resetCloudSyncStatusForTests,
+} from './cloudSyncStatus';
 import { deriveSyncUiStatus } from './deriveSyncUiStatus';
 import {
   clearSyncTimelineForTests,
@@ -18,10 +28,162 @@ import {
   recordSyncTimelineEvent,
 } from './syncEventTimeline';
 
+function emptyCloud() {
+  return getCloudSyncSnapshot();
+}
+
+describe('cloudSyncStatus ledger', () => {
+  beforeEach(() => {
+    resetCloudSyncStatusForTests();
+  });
+
+  it('tracks overlapping ops without clearing early', () => {
+    noteCloudOpEnqueued('a');
+    noteCloudOpEnqueued('b');
+    expect(getCloudSyncSnapshot().pendingCount).toBe(2);
+    noteCloudOpResolved('a');
+    expect(getCloudSyncSnapshot().pendingCount).toBe(1);
+    expect(getCloudSyncSnapshot().anyCloudPending).toBe(true);
+    noteCloudOpResolved('b');
+    expect(getCloudSyncSnapshot().pendingCount).toBe(0);
+    expect(getCloudSyncSnapshot().anyCloudPending).toBe(false);
+  });
+
+  it('keeps failure sticky only while pending remains', () => {
+    noteCloudOpEnqueued('a');
+    noteCloudWriteFailed('cloud_write_failed');
+    expect(getCloudSyncSnapshot().anyCloudFailure).toBe(true);
+    noteCloudOpResolved('a');
+    expect(getCloudSyncSnapshot().anyCloudFailure).toBe(false);
+    expect(getCloudSyncSnapshot().lastFailureAt).toBeNull();
+  });
+
+  it('reconcile replaces drift with authoritative ids', () => {
+    noteCloudOpEnqueued('stale');
+    reconcileCloudPendingOps(['live-1', 'live-2']);
+    expect(getCloudSyncSnapshot().pendingOpIds.sort()).toEqual(['live-1', 'live-2']);
+  });
+
+  it('flushInFlight counts as cloud pending', () => {
+    noteCloudFlushStarted();
+    expect(getCloudSyncSnapshot().anyCloudPending).toBe(true);
+    noteCloudFlushEnded();
+    expect(getCloudSyncSnapshot().anyCloudPending).toBe(false);
+  });
+});
+
 describe('deriveSyncUiStatus', () => {
   beforeEach(() => {
     resetSaveStatusForTests();
+    resetCloudSyncStatusForTests();
     clearSyncTimelineForTests();
+  });
+
+  it('A: local pending maps to Saving…', () => {
+    markSavePending('freeSpaceObjects');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: emptyCloud(),
+    });
+    expect(ui.phase).toBe('saving_local');
+    expect(ui.label).toBe('Saving…');
+  });
+
+  it('B: local durable + cloud pending → Waiting to sync', () => {
+    markSaveOk('freeSpaceObjects');
+    noteCloudOpEnqueued('op-1');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    });
+    expect(ui.phase).toBe('sync_pending');
+    expect(ui.label).toBe('Waiting to sync');
+  });
+
+  it('C: cloud drained + showSaved → Saved', () => {
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: emptyCloud(),
+      showSaved: true,
+    });
+    expect(ui.phase).toBe('saved');
+    expect(ui.label).toBe('Saved');
+  });
+
+  it('D/E: one cloud success while another remains → NOT Saved', () => {
+    noteCloudOpEnqueued('a');
+    noteCloudOpEnqueued('b');
+    noteCloudOpResolved('a');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+      showSaved: true,
+    });
+    expect(ui.phase).toBe('sync_pending');
+    expect(ui.label).not.toBe('Saved');
+  });
+
+  it('F: cloud failure → Sync failed', () => {
+    noteCloudOpEnqueued('a');
+    noteCloudWriteFailed('cloud_write_failed');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    });
+    expect(ui.phase).toBe('sync_failed');
+    expect(ui.label).toBe('Sync failed');
+  });
+
+  it('H: after failure, pending without sticky failure display uses Waiting when failure cleared by drain path mid-retry', () => {
+    noteCloudOpEnqueued('a');
+    noteCloudWriteFailed('cloud_write_failed');
+    expect(deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    }).phase).toBe('sync_failed');
+    // Retry in flight still has pending; failure stays until drain
+    noteCloudFlushStarted();
+    expect(deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    }).phase).toBe('sync_failed');
+    noteCloudFlushEnded();
+    noteCloudOpResolved('a');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+      showSaved: true,
+    });
+    expect(ui.phase).toBe('saved');
+  });
+
+  it('J: offline with queued work → Offline', () => {
+    noteCloudOpEnqueued('a');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: false,
+      cloud: getCloudSyncSnapshot(),
+    });
+    expect(ui.phase).toBe('offline');
+    expect(ui.label).toBe('Offline');
+  });
+
+  it('K: reconnect with pending queue → Waiting to sync', () => {
+    noteCloudOpEnqueued('a');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    });
+    expect(ui.phase).toBe('sync_pending');
+  });
+
+  it('L: quiet / no cloud work does not fabricate Saved', () => {
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: emptyCloud(),
+      showSaved: false,
+    });
+    expect(ui.phase).toBe('idle');
+    expect(ui.label).toBe('');
   });
 
   it('maps local error to local_failed over pending', () => {
@@ -29,54 +191,27 @@ describe('deriveSyncUiStatus', () => {
     const snap = getSaveStatusSnapshot();
     expect(snap.anyPending).toBe(true);
     expect(snap.anyError).toBe(true);
-    const ui = deriveSyncUiStatus(snap, { online: true });
+    const ui = deriveSyncUiStatus(snap, { online: true, cloud: emptyCloud() });
     expect(ui.phase).toBe('local_failed');
     expect(ui.label).toBe('Save failed');
   });
 
-  it('maps offline over saving when no error', () => {
+  it('local pending beats cloud pending', () => {
     markSavePending('freeSpaceObjects');
-    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), { online: false });
-    expect(ui.phase).toBe('offline');
-    expect(ui.label).toBe('Offline');
-  });
-
-  it('maps pending to saving_local when online', () => {
-    markSavePending('freeSpacePositions');
-    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true });
+    noteCloudOpEnqueued('op-1');
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: getCloudSyncSnapshot(),
+    });
     expect(ui.phase).toBe('saving_local');
-    expect(ui.label).toBe('Saving');
-  });
-
-  it('maps showSavedLocal to saved_local', () => {
-    markSaveOk('freeSpaceObjects');
-    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true, showSavedLocal: true });
-    expect(ui.phase).toBe('saved_local');
-    expect(ui.label).toBe('Saved locally');
-  });
-
-  it('returns idle when quiet', () => {
-    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true, showSavedLocal: false });
-    expect(ui.phase).toBe('idle');
-    expect(ui.label).toBe('');
-  });
-
-  it('never emits sync_pending or sync_failed as phase', () => {
-    const phases = [
-      deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true }).phase,
-      deriveSyncUiStatus(getSaveStatusSnapshot(), { online: false }).phase,
-    ];
-    markSavePending('handwriting');
-    phases.push(deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true }).phase);
-    markSaveError('handwriting', 'fail');
-    phases.push(deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true }).phase);
-    expect(phases).not.toContain('sync_pending');
-    expect(phases).not.toContain('sync_failed');
   });
 
   it('keeps multi-tab conflicts diagnostics-only (not user phase)', () => {
     recordStorageConflict('merge test');
-    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), { online: true });
+    const ui = deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: true,
+      cloud: emptyCloud(),
+    });
     expect(ui.conflictCount).toBe(1);
     expect(ui.phase).toBe('idle');
     expect(ui.label).not.toMatch(/conflict/i);
@@ -113,7 +248,6 @@ describe('syncEventTimeline gating', () => {
 
   it('records metadata-only events when enabled', () => {
     recordSyncTimelineEvent('saving_started', { channel: 'freeSpaceObjects' });
-    // May or may not record depending on env; force-enable via direct push path by mocking
     const enabled = isSyncTimelineEnabled({
       dev: true,
       search: '',
@@ -122,10 +256,7 @@ describe('syncEventTimeline gating', () => {
     expect(enabled).toBe(true);
 
     clearSyncTimelineForTests();
-    // Call through mark path when DEV — use direct record after confirming gate
     if (isSyncTimelineEnabled({ dev: true, search: '', storage: { getItem: () => null } })) {
-      // recordSyncTimelineEvent uses runtime import.meta.env.DEV; call with enabled check bypass:
-      // re-record by temporarily relying on vitest DEV
       recordSyncTimelineEvent('local_save_completed', { channel: 'handwriting' });
     }
 
@@ -148,7 +279,6 @@ describe('syncEventTimeline gating', () => {
   });
 
   it('is enabled when QA storage flag set', () => {
-    // Production gate reads window before applying QA storage; stub only for this assertion.
     vi.stubGlobal('window', { location: { search: '' } });
     expect(
       isSyncTimelineEnabled({

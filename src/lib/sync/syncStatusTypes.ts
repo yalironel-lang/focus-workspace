@@ -1,22 +1,20 @@
 /**
- * Sync UI status types for PR 0.
+ * Sync UI status types.
  *
- * `sync_pending` and `sync_failed` are reserved for future cloud sync PRs.
- * PR 0 must never emit or render them.
+ * Local ledger (saveStatus) + cloud ledger (cloudSyncStatus) drive the indicator.
+ * `conflict` remains diagnostics-only and must never be the user-facing phase.
  */
 
 export type SyncUiPhase =
   | 'idle'
   | 'saving_local'
-  | 'saved_local'
+  | 'saved'
   | 'offline'
   | 'local_failed'
-  /** Reserved — forward compatibility only; never emitted in PR 0. */
   | 'sync_pending'
-  /** Reserved — forward compatibility only; never emitted in PR 0. */
   | 'sync_failed'
   /**
-   * Internal / diagnostics only in PR 0.
+   * Internal / diagnostics only.
    * User-facing indicator must not show conflict (multi-tab merge stays diagnostics-only).
    */
   | 'conflict';
@@ -24,18 +22,21 @@ export type SyncUiPhase =
 export type UserFacingSyncPhase =
   | 'idle'
   | 'saving_local'
-  | 'saved_local'
+  | 'saved'
   | 'offline'
-  | 'local_failed';
+  | 'local_failed'
+  | 'sync_pending'
+  | 'sync_failed';
 
 export interface SyncUiStatus {
-  /** User-facing phase — never sync_* or conflict in PR 0. */
   phase: UserFacingSyncPhase;
   label: string;
   scope: { sectionId: string | null; boardId: string | null };
   online: boolean;
   anyLocalPending: boolean;
   anyLocalError: boolean;
+  anyCloudPending: boolean;
+  anyCloudFailure: boolean;
   /** Diagnostics-only count; not shown in the user indicator. */
   conflictCount: number;
   updatedAt: number;

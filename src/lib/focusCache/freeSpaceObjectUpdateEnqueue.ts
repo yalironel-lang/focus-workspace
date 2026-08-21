@@ -20,6 +20,7 @@
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { resolveCacheNamespace } from '../focusCacheNamespace';
 import { fwPersistWarn } from '../freeSpacePersistence';
+import { noteCloudOpEnqueued, noteCloudOpResolved } from '../sync/cloudSyncStatus';
 import {
   FREE_SPACE_OBJECT_ENTITY_TYPE,
   buildFreeSpaceObjectWritePayload,
@@ -129,7 +130,8 @@ export async function enqueueFreeSpaceObjectUpdate(
       }
       // Drop sibling UPDATEs so a later flush cannot overwrite the refreshed CREATE.
       for (const sibling of listMatchingWriteOps(listed.value, entityId, 'update')) {
-        await removePendingOperation(ns.namespace, sibling.id);
+        const removed = await removePendingOperation(ns.namespace, sibling.id);
+        if (removed.ok && removed.value.removed) noteCloudOpResolved(sibling.id);
       }
       notifyFreeSpacePendingEnqueue(ns.namespace);
       return { ok: true, action: 'create_payload_replaced' };
@@ -152,7 +154,8 @@ export async function enqueueFreeSpaceObjectUpdate(
         return { ok: false, reason: 'transaction_failed' };
       }
       for (const extra of pendingUpdates.slice(1)) {
-        await removePendingOperation(ns.namespace, extra.id);
+        const removed = await removePendingOperation(ns.namespace, extra.id);
+        if (removed.ok && removed.value.removed) noteCloudOpResolved(extra.id);
       }
       notifyFreeSpacePendingEnqueue(ns.namespace);
       return { ok: true, action: 'update_payload_replaced' };
@@ -169,6 +172,7 @@ export async function enqueueFreeSpaceObjectUpdate(
       fwPersistWarn(`pending update enqueue failed: reason=${enqueued.reason}`);
       return { ok: false, reason: enqueued.reason };
     }
+    noteCloudOpEnqueued(enqueued.value.id);
     notifyFreeSpacePendingEnqueue(ns.namespace);
     return { ok: true, action: 'update_enqueued' };
   } catch {

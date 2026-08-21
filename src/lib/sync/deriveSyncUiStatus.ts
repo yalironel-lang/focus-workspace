@@ -1,40 +1,45 @@
 /**
- * Pure mapper: saveStatus snapshot + online → user-facing SyncUiStatus.
- * Never emits sync_pending / sync_failed / conflict as the UI phase.
+ * Pure mapper: local saveStatus + cloudSyncStatus + online → SyncUiStatus.
  */
 
 import type { getSaveStatusSnapshot } from '../saveStatus';
+import type { CloudSyncSnapshot } from './cloudSyncStatus';
 import type { SyncUiStatus, UserFacingSyncPhase } from './syncStatusTypes';
 
 export type SaveStatusSnapshot = ReturnType<typeof getSaveStatusSnapshot>;
 
 const LABELS: Record<UserFacingSyncPhase, string> = {
   idle: '',
-  saving_local: 'Saving',
-  saved_local: 'Saved locally',
+  saving_local: 'Saving…',
+  saved: 'Saved',
   offline: 'Offline',
   local_failed: 'Save failed',
+  sync_pending: 'Waiting to sync',
+  sync_failed: 'Sync failed',
 };
 
 export interface DeriveSyncUiOptions {
   online: boolean;
-  /** When true and nothing pending/errored/offline, show brief Saved locally. */
-  showSavedLocal?: boolean;
+  cloud: CloudSyncSnapshot;
+  /** Brief dwell after cloud queue drain + confirmation. */
+  showSaved?: boolean;
   now?: number;
 }
 
 /**
- * Priority: local_failed → offline → saving_local → saved_local → idle.
- * Multi-tab conflicts are exposed only via conflictCount (diagnostics), not phase.
+ * Priority:
+ * local_failed → offline → saving_local → sync_failed → sync_pending → saved → idle
  */
 export function deriveSyncUiStatus(
   snapshot: SaveStatusSnapshot,
   opts: DeriveSyncUiOptions,
 ): SyncUiStatus {
-  const { online, showSavedLocal = false, now = Date.now() } = opts;
+  const { online, cloud, showSaved = false, now = Date.now() } = opts;
   const anyLocalError = snapshot.anyError;
   const anyLocalPending = snapshot.anyPending;
   const conflictCount = snapshot.storageConflicts.length;
+  const anyCloudPending = cloud.anyCloudPending;
+  const anyCloudFailure = cloud.anyCloudFailure;
 
   let phase: UserFacingSyncPhase = 'idle';
   if (anyLocalError) {
@@ -43,13 +48,12 @@ export function deriveSyncUiStatus(
     phase = 'offline';
   } else if (anyLocalPending) {
     phase = 'saving_local';
-  } else if (showSavedLocal) {
-    phase = 'saved_local';
-  }
-
-  // Hard guard: reserved / non-user phases must never leave this function as phase.
-  if (phase === ('sync_pending' as UserFacingSyncPhase) || phase === ('sync_failed' as UserFacingSyncPhase)) {
-    phase = 'idle';
+  } else if (anyCloudFailure) {
+    phase = 'sync_failed';
+  } else if (anyCloudPending) {
+    phase = 'sync_pending';
+  } else if (showSaved) {
+    phase = 'saved';
   }
 
   return {
@@ -59,6 +63,8 @@ export function deriveSyncUiStatus(
     online,
     anyLocalPending,
     anyLocalError,
+    anyCloudPending,
+    anyCloudFailure,
     conflictCount,
     updatedAt: now,
   };
