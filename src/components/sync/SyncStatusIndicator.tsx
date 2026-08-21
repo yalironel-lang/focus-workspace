@@ -1,6 +1,5 @@
 /**
- * Minimal local-save status indicator for authenticated workspace shell.
- * Copy is local-only — never claims cloud sync.
+ * Global sync status indicator — local + Free Space cloud honesty.
  */
 
 import { useSyncUiStatus } from '../../lib/sync/useSyncUiStatus';
@@ -18,7 +17,7 @@ function SyncStatusIndicatorInner() {
   if (status.phase === 'idle' || !status.label) return null;
 
   const tone =
-    status.phase === 'local_failed'
+    status.phase === 'local_failed' || status.phase === 'sync_failed'
       ? { color: '#fecaca', border: 'rgba(248,113,113,0.35)', bg: 'rgba(127,29,29,0.88)' }
       : status.phase === 'offline'
         ? { color: '#e2e8f0', border: 'rgba(148,163,184,0.35)', bg: 'rgba(30,41,59,0.92)' }

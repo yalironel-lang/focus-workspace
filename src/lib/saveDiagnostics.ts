@@ -8,6 +8,7 @@ import { pdfUploadDiagDump } from './pdfUploadDiag';
 import { getSaveScope, getSaveStatusSnapshot } from './saveStatus';
 import { isSupabaseConfigured, supabase } from './supabase';
 import { deriveSyncUiStatus } from './sync/deriveSyncUiStatus';
+import { getCloudSyncSnapshot } from './sync/cloudSyncStatus';
 import {
   formatSyncTimelineLines,
   getSyncTimelineEvents,
@@ -144,7 +145,11 @@ export async function buildSaveDiagSnapshot(): Promise<SaveDiagSnapshot> {
   const serviceWorker = await serviceWorkerSnapshot();
 
   const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  const syncUi = deriveSyncUiStatus(saveStatus, { online, showSavedLocal: false });
+  const syncUi = deriveSyncUiStatus(saveStatus, {
+    online,
+    cloud: getCloudSyncSnapshot(),
+    showSaved: false,
+  });
   const syncTimelineEnabled = isSyncTimelineEnabled();
   const snapshot: SaveDiagSnapshot = {
     scope,

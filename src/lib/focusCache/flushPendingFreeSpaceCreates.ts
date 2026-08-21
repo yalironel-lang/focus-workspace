@@ -12,13 +12,21 @@
  * - Soft-delete (PR6) cancels pending create|update locally; does NOT cloud-delete rows
  *   (deferred until permanent purge). In-flight upsert after soft-delete is acceptable.
  * - Leaves unknown / malformed / failed ops queued.
- * - Does not change local Free Space SOT or saveStatus UI.
+ * - Does not change local Free Space SOT.
+ * - Reports cloud queue/flush lifecycle to cloudSyncStatus (UI honesty).
  * - No server-side reject-if-older (blind upsert; version carried in object jsonb).
  */
 
 import type { CacheNamespace } from '../focusCacheNamespace';
 import { assertCacheNamespace } from '../focusCacheNamespace';
 import { fwPersistWarn } from '../freeSpacePersistence';
+import {
+  noteCloudFlushEnded,
+  noteCloudFlushStarted,
+  noteCloudOpResolved,
+  noteCloudWriteFailed,
+  reconcileCloudPendingOps,
+} from '../sync/cloudSyncStatus';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
 import { upsertFreeSpaceObjectFromCreatePayload } from './freeSpaceObjectCloud';
 import {
@@ -104,78 +112,91 @@ export async function flushPendingFreeSpaceCreates(
     return { ...result, stoppedReason: 'list_failed' };
   }
 
+  const supported = listed.value.filter(isSupportedWrite);
+  reconcileCloudPendingOps(supported.map(op => op.id));
+  noteCloudFlushStarted();
+
   /** Highest object.updatedAt successfully upserted this pass, per entityId. */
   const latestWrittenUpdatedAt = new Map<string, number>();
 
-  for (const op of listed.value) {
-    if (!isSupportedWrite(op)) {
-      result.skippedUnsupported += 1;
-      continue;
-    }
+  try {
+    for (const op of listed.value) {
+      if (!isSupportedWrite(op)) {
+        result.skippedUnsupported += 1;
+        continue;
+      }
 
-    result.processed += 1;
+      result.processed += 1;
 
-    const parsed = parseWritePayload(op.payload);
-    if (!parsed) {
-      result.skippedMalformed += 1;
-      fwPersistWarn(
-        `pending free-space flush left malformed op queued: entityId=${op.entityId}`,
-      );
-      continue;
-    }
+      const parsed = parseWritePayload(op.payload);
+      if (!parsed) {
+        result.skippedMalformed += 1;
+        fwPersistWarn(
+          `pending free-space flush left malformed op queued: entityId=${op.entityId}`,
+        );
+        continue;
+      }
 
-    const version = readObjectUpdatedAt(parsed.object);
-    const alreadyWritten = latestWrittenUpdatedAt.get(op.entityId);
-    if (
-      version != null &&
-      alreadyWritten != null &&
-      version < alreadyWritten
-    ) {
-      // Stale duplicate relative to a newer snapshot already flushed this pass.
+      const version = readObjectUpdatedAt(parsed.object);
+      const alreadyWritten = latestWrittenUpdatedAt.get(op.entityId);
+      if (
+        version != null &&
+        alreadyWritten != null &&
+        version < alreadyWritten
+      ) {
+        // Stale duplicate relative to a newer snapshot already flushed this pass.
+        const removed = await removePendingOperation(ns.namespace, op.id);
+        if (!removed.ok || !removed.value.removed) {
+          fwPersistWarn(
+            `pending free-space flush remove failed for superseded op: opId=${op.id}`,
+          );
+          noteCloudWriteFailed('remove_failed');
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        noteCloudOpResolved(op.id);
+        result.removed += 1;
+        continue;
+      }
+
+      const cloud = await upsertFreeSpaceObjectFromCreatePayload({
+        userId: ns.namespace.userId,
+        sectionId: ns.namespace.workspaceId,
+        boardId: parsed.boardId,
+        objectId: op.entityId,
+        object: parsed.object,
+      });
+
+      if (!cloud.ok) {
+        result.failedCloud += 1;
+        fwPersistWarn(
+          `pending free-space flush cloud write failed: reason=${cloud.reason}` +
+            (cloud.message ? ` message=${cloud.message}` : ''),
+        );
+        noteCloudWriteFailed(cloud.reason);
+        return { ...result, stoppedReason: 'cloud_write_failed' };
+      }
+
       const removed = await removePendingOperation(ns.namespace, op.id);
       if (!removed.ok || !removed.value.removed) {
         fwPersistWarn(
-          `pending free-space flush remove failed for superseded op: opId=${op.id}`,
+          `pending free-space flush remove failed after cloud success: opId=${op.id}`,
         );
+        noteCloudWriteFailed('remove_failed');
         return { ...result, stoppedReason: 'remove_failed' };
       }
+
+      noteCloudOpResolved(op.id);
       result.removed += 1;
-      continue;
-    }
-
-    const cloud = await upsertFreeSpaceObjectFromCreatePayload({
-      userId: ns.namespace.userId,
-      sectionId: ns.namespace.workspaceId,
-      boardId: parsed.boardId,
-      objectId: op.entityId,
-      object: parsed.object,
-    });
-
-    if (!cloud.ok) {
-      result.failedCloud += 1;
-      fwPersistWarn(
-        `pending free-space flush cloud write failed: reason=${cloud.reason}` +
-          (cloud.message ? ` message=${cloud.message}` : ''),
-      );
-      return { ...result, stoppedReason: 'cloud_write_failed' };
-    }
-
-    const removed = await removePendingOperation(ns.namespace, op.id);
-    if (!removed.ok || !removed.value.removed) {
-      fwPersistWarn(
-        `pending free-space flush remove failed after cloud success: opId=${op.id}`,
-      );
-      return { ...result, stoppedReason: 'remove_failed' };
-    }
-
-    result.removed += 1;
-    if (version != null) {
-      const prev = latestWrittenUpdatedAt.get(op.entityId);
-      if (prev == null || version >= prev) {
-        latestWrittenUpdatedAt.set(op.entityId, version);
+      if (version != null) {
+        const prev = latestWrittenUpdatedAt.get(op.entityId);
+        if (prev == null || version >= prev) {
+          latestWrittenUpdatedAt.set(op.entityId, version);
+        }
       }
     }
-  }
 
-  return result;
+    return result;
+  } finally {
+    noteCloudFlushEnded();
+  }
 }

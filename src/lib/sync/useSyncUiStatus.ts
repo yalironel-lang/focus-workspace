@@ -1,15 +1,22 @@
 /**
- * React hook: subscribe to saveStatus + online/offline, derive SyncUiStatus.
+ * React hook: subscribe to local saveStatus + cloudSyncStatus + online/offline.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { getSaveStatusSnapshot, subscribeSaveStatus } from '../saveStatus';
+import {
+  getCloudSyncSnapshot,
+  subscribeCloudSyncStatus,
+} from './cloudSyncStatus';
 import { deriveSyncUiStatus } from './deriveSyncUiStatus';
 import { recordSyncTimelineEvent } from './syncEventTimeline';
 import type { SyncUiStatus } from './syncStatusTypes';
 import { isSyncStatusUiEnabled } from './syncStatusTypes';
 
-export const SAVED_LOCAL_DWELL_MS = 2500;
+export const SAVED_DWELL_MS = 2500;
+
+/** @deprecated Use SAVED_DWELL_MS */
+export const SAVED_LOCAL_DWELL_MS = SAVED_DWELL_MS;
 
 function readOnline(): boolean {
   return typeof navigator === 'undefined' ? true : navigator.onLine;
@@ -17,10 +24,14 @@ function readOnline(): boolean {
 
 export function useSyncUiStatus(): SyncUiStatus {
   const [status, setStatus] = useState<SyncUiStatus>(() =>
-    deriveSyncUiStatus(getSaveStatusSnapshot(), { online: readOnline(), showSavedLocal: false }),
+    deriveSyncUiStatus(getSaveStatusSnapshot(), {
+      online: readOnline(),
+      cloud: getCloudSyncSnapshot(),
+      showSaved: false,
+    }),
   );
   const showSavedRef = useRef(false);
-  const wasPendingRef = useRef(false);
+  const wasCloudPendingRef = useRef(false);
   const dwellRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastOnlineRef = useRef(readOnline());
 
@@ -29,6 +40,7 @@ export function useSyncUiStatus(): SyncUiStatus {
 
     const apply = () => {
       const snap = getSaveStatusSnapshot();
+      const cloud = getCloudSyncSnapshot();
       const online = readOnline();
 
       if (online !== lastOnlineRef.current) {
@@ -36,15 +48,22 @@ export function useSyncUiStatus(): SyncUiStatus {
         lastOnlineRef.current = online;
       }
 
-      if (snap.anyPending) {
-        wasPendingRef.current = true;
+      const cloudBusy = cloud.anyCloudPending;
+      if (cloudBusy) {
+        wasCloudPendingRef.current = true;
         showSavedRef.current = false;
         if (dwellRef.current) {
           clearTimeout(dwellRef.current);
           dwellRef.current = null;
         }
-      } else if (wasPendingRef.current && !snap.anyError && online) {
-        wasPendingRef.current = false;
+      } else if (
+        wasCloudPendingRef.current &&
+        !cloud.anyCloudFailure &&
+        !snap.anyPending &&
+        !snap.anyError &&
+        online
+      ) {
+        wasCloudPendingRef.current = false;
         showSavedRef.current = true;
         if (dwellRef.current) clearTimeout(dwellRef.current);
         dwellRef.current = setTimeout(() => {
@@ -53,27 +72,37 @@ export function useSyncUiStatus(): SyncUiStatus {
           setStatus(
             deriveSyncUiStatus(getSaveStatusSnapshot(), {
               online: readOnline(),
-              showSavedLocal: false,
+              cloud: getCloudSyncSnapshot(),
+              showSaved: false,
             }),
           );
-        }, SAVED_LOCAL_DWELL_MS);
+        }, SAVED_DWELL_MS);
       }
 
       setStatus(
         deriveSyncUiStatus(snap, {
           online,
-          showSavedLocal: showSavedRef.current && !snap.anyPending && !snap.anyError && online,
+          cloud,
+          showSaved:
+            showSavedRef.current &&
+            !cloud.anyCloudPending &&
+            !cloud.anyCloudFailure &&
+            !snap.anyPending &&
+            !snap.anyError &&
+            online,
         }),
       );
     };
 
-    const unsub = subscribeSaveStatus(apply);
+    const unsubLocal = subscribeSaveStatus(apply);
+    const unsubCloud = subscribeCloudSyncStatus(apply);
     window.addEventListener('online', apply);
     window.addEventListener('offline', apply);
     apply();
 
     return () => {
-      unsub();
+      unsubLocal();
+      unsubCloud();
       window.removeEventListener('online', apply);
       window.removeEventListener('offline', apply);
       if (dwellRef.current) clearTimeout(dwellRef.current);
