@@ -6,16 +6,18 @@ import { boardScopedFreeSpaceKeys } from '../freeSpacePersistence';
 import type { FreeSpaceObjectCloudRow } from './freeSpaceObjectCloud';
 import { normalizeFreeSpaceObjectCloudRow } from './freeSpaceObjectCloud';
 import {
+  buildFreeSpaceRealtimePostgresBindings,
+  normalizeFreeSpaceRealtimePayload,
+  subscribeFreeSpaceObjectsRealtime,
+} from './freeSpaceObjectRealtime';
+import {
   applyCloudWinnersToReactState,
+  applyFreeSpaceCloudDeleteToMountedBoard,
   applyFreeSpaceCloudRowsToMountedBoard,
   buildProtectedEntityIds,
   isFreeSpacePullScopeCurrent,
   runFreeSpaceSectionPullCatchUp,
 } from './freeSpaceObjectPull';
-import {
-  normalizeFreeSpaceRealtimePayload,
-  subscribeFreeSpaceObjectsRealtime,
-} from './freeSpaceObjectRealtime';
 
 const listPendingMock = vi.fn();
 const idbGetByIndexMock = vi.fn();
@@ -27,6 +29,7 @@ const channelSubscribeMock = vi.fn();
 
 vi.mock('./pendingOperations', () => ({
   listPendingOperations: (...args: unknown[]) => listPendingMock(...args),
+  removePendingOperation: vi.fn(async () => ({ ok: true, value: { removed: true } })),
 }));
 
 vi.mock('../knowledge/knowledgeJournalIdb', () => ({
@@ -108,12 +111,12 @@ beforeEach(() => {
 });
 
 describe('normalizeFreeSpaceRealtimePayload', () => {
-  it('15. DELETE event normalizes from old row', () => {
+  it('A: DELETE event normalizes from full old row', () => {
     const n = normalizeFreeSpaceRealtimePayload(
       {
         eventType: 'DELETE',
         new: {},
-        old: { id: 'a', section_id: 'section-1', board_id: 'main' },
+        old: { id: 'a', section_id: 'section-1', board_id: 'main', user_id: 'u' },
       },
       'section-1',
     );
@@ -121,9 +124,10 @@ describe('normalizeFreeSpaceRealtimePayload', () => {
     expect(n.eventType).toBe('DELETE');
     expect(n.row?.id).toBe('a');
     expect(n.row?.section_id).toBe('section-1');
+    expect(n.row?.board_id).toBe('main');
   });
 
-  it('15b. DELETE with id-only old uses fallback sectionId', () => {
+  it('B: DELETE with id-only old uses fallback sectionId (DEFAULT replica identity)', () => {
     const n = normalizeFreeSpaceRealtimePayload(
       {
         eventType: 'DELETE',
@@ -137,6 +141,20 @@ describe('normalizeFreeSpaceRealtimePayload', () => {
     expect(n.row?.section_id).toBe('section-1');
   });
 
+  it('G: DELETE with explicit other section_id is ignored (section isolation)', () => {
+    const n = normalizeFreeSpaceRealtimePayload(
+      {
+        eventType: 'DELETE',
+        new: {},
+        old: { id: 'a', section_id: 'other-section' },
+      },
+      'section-1',
+    );
+    expect(n.ignored).toBe(true);
+    expect(n.ignoreReason).toBe('other_section');
+    expect(n.row).toBeNull();
+  });
+
   it('16. malformed payload ignored safely', () => {
     const n = normalizeFreeSpaceRealtimePayload({
       eventType: 'INSERT',
@@ -145,6 +163,19 @@ describe('normalizeFreeSpaceRealtimePayload', () => {
     });
     expect(n.ignored).toBe(true);
     expect(n.ignoreReason).toBe('malformed_payload');
+  });
+
+  it('DELETE without id is malformed', () => {
+    const n = normalizeFreeSpaceRealtimePayload(
+      {
+        eventType: 'DELETE',
+        new: {},
+        old: { section_id: 'section-1' },
+      },
+      'section-1',
+    );
+    expect(n.ignored).toBe(true);
+    expect(n.ignoreReason).toBe('malformed_delete');
   });
 
   it('1. INSERT newer cloud object normalizes', () => {
@@ -448,6 +479,43 @@ describe('applyCloudWinnersToReactState', () => {
 });
 
 describe('subscribeFreeSpaceObjectsRealtime lifecycle', () => {
+  it('DELETE binding has no section_id filter; INSERT/UPDATE stay filtered', () => {
+    const bindings = buildFreeSpaceRealtimePostgresBindings('section-1');
+    expect(bindings).toEqual([
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'free_space_objects',
+        filter: 'section_id=eq.section-1',
+      },
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'free_space_objects',
+        filter: 'section_id=eq.section-1',
+      },
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'free_space_objects',
+      },
+    ]);
+    expect(bindings[2]).not.toHaveProperty('filter');
+
+    subscribeFreeSpaceObjectsRealtime({
+      sectionId: 'section-1',
+      onEvent: () => undefined,
+      onStatus: () => undefined,
+    });
+    expect(channelOnMock).toHaveBeenCalledTimes(3);
+    const events = channelOnMock.mock.calls.map(c => (c[1] as { event: string }).event);
+    expect(events).toEqual(['INSERT', 'UPDATE', 'DELETE']);
+    const deleteCfg = channelOnMock.mock.calls.find(
+      c => (c[1] as { event: string }).event === 'DELETE',
+    )?.[1] as { filter?: string };
+    expect(deleteCfg.filter).toBeUndefined();
+  });
+
   it('19/20. SUBSCRIBED triggers status callback for catch-up pull', () => {
     const onStatus = vi.fn();
     const onEvent = vi.fn();
@@ -484,6 +552,40 @@ describe('subscribeFreeSpaceObjectsRealtime lifecycle', () => {
     });
     sub.unsubscribe();
     expect(removeChannelMock).toHaveBeenCalled();
+  });
+});
+
+describe('applyFreeSpaceCloudDeleteToMountedBoard (inbound Realtime DELETE)', () => {
+  it('C/D/E: removes durable object; does not call cloud upsert/delete APIs', async () => {
+    const key = boardScopedFreeSpaceKeys('section-1', 'main').objects;
+    localStorage.setItem(key, JSON.stringify([note('gone', 10)]));
+
+    const result = await applyFreeSpaceCloudDeleteToMountedBoard({
+      sectionId: 'section-1',
+      boardId: 'main',
+      userId: 'user-1',
+      objectId: 'gone',
+      getReactObjects: () => [note('gone', 10)],
+      loadDurableObjects: () => [note('gone', 10)],
+      isCurrent: () => true,
+    });
+    expect(result).toEqual({
+      ok: true,
+      removed: true,
+      removedObjectIds: ['gone'],
+    });
+    const stored = JSON.parse(localStorage.getItem(key) ?? '[]') as ProjectSpaceObject[];
+    expect(stored.find(o => o.id === 'gone')).toBeUndefined();
+    // Inbound apply must not re-enter cloud write path (mocked cloud module has no delete calls from pull).
+    expect(fetchSectionMock).not.toHaveBeenCalled();
+  });
+
+  it('F: tombstone / pendingDeleted blocks stale cloud INSERT after delete', () => {
+    const protectedIds = buildProtectedEntityIds({
+      tombstoneObjectIds: ['gone'],
+      pendingDeletedIds: ['gone'],
+    });
+    expect(protectedIds.has('gone')).toBe(true);
   });
 });
 

@@ -1,8 +1,16 @@
 /**
  * PR7b: Free Space Realtime thin delivery layer.
  *
- * Subscribes to section-scoped postgres_changes on free_space_objects and forwards
- * INSERT/UPDATE/DELETE payloads into the shared PR7 mounted-board apply path.
+ * Subscribes to postgres_changes on free_space_objects and forwards
+ * INSERT/UPDATE/DELETE into the shared PR7 mounted-board apply path.
+ *
+ * INSERT/UPDATE use section_id server filter.
+ * DELETE is subscribed WITHOUT section_id filter: under DEFAULT replica identity
+ * (and often with RLS), DELETE old_record may contain only the primary key `id`,
+ * so a section_id=eq.* filter drops DELETE events before they reach the client.
+ * Cross-section DELETE noise is ignored client-side when old.section_id is present
+ * and mismatches; id-only deletes are scoped via fallbackSectionId and no-op apply
+ * when the object is not on the mounted board.
  *
  * Lifecycle (mandatory): subscribe → on SUBSCRIBED run PR7 pull catch-up → stay live.
  */
@@ -21,7 +29,7 @@ export type FreeSpaceRealtimeNormalizedEvent = {
   eventType: FreeSpaceRealtimeEventType;
   /**
    * INSERT/UPDATE: full row from `new`.
-   * DELETE: best-effort row from `old` (id required; board/section when replica identity allows).
+   * DELETE: best-effort row from `old` (id required; board/section when available).
    */
   row: FreeSpaceObjectCloudRow | null;
   ignored: boolean;
@@ -50,7 +58,8 @@ function isExactNonEmptyId(value: unknown): value is string {
 
 /**
  * Best-effort DELETE row from realtime `old` record.
- * Replica identity DEFAULT may only include `id`; section filter already scoped the event.
+ * Replica identity DEFAULT (and RLS-limited old_record) may only include `id`.
+ * Callers pass mounted sectionId as fallbackSectionId.
  */
 export function normalizeFreeSpaceRealtimeDeleteRow(
   raw: unknown,
@@ -78,6 +87,21 @@ export function normalizeFreeSpaceRealtimeDeleteRow(
 }
 
 /**
+ * True when a DELETE old row's explicit section_id (if any) matches this mount.
+ * Id-only old rows have no explicit section — allowed through (apply no-ops if absent).
+ */
+export function isFreeSpaceRealtimeDeleteInSectionScope(
+  oldRaw: unknown,
+  mountedSectionId: string,
+): boolean {
+  if (!isExactNonEmptyId(mountedSectionId)) return false;
+  if (!oldRaw || typeof oldRaw !== 'object' || Array.isArray(oldRaw)) return false;
+  const section = (oldRaw as Record<string, unknown>).section_id;
+  if (typeof section !== 'string' || !section.trim()) return true;
+  return section === mountedSectionId;
+}
+
+/**
  * Normalize a Realtime postgres_changes payload.
  * Malformed INSERT/UPDATE/DELETE → ignored.
  */
@@ -88,6 +112,17 @@ export function normalizeFreeSpaceRealtimePayload(
   const eventType = payload.eventType as FreeSpaceRealtimeEventType;
 
   if (eventType === 'DELETE') {
+    if (
+      fallbackSectionId &&
+      !isFreeSpaceRealtimeDeleteInSectionScope(payload.old, fallbackSectionId)
+    ) {
+      return {
+        eventType: 'DELETE',
+        row: null,
+        ignored: true,
+        ignoreReason: 'other_section',
+      };
+    }
     const row = normalizeFreeSpaceRealtimeDeleteRow(payload.old, fallbackSectionId);
     if (!row) {
       return {
@@ -122,8 +157,43 @@ export function normalizeFreeSpaceRealtimePayload(
   return { eventType, row, ignored: false };
 }
 
+type PostgresChangesConfig = {
+  event: 'INSERT' | 'UPDATE' | 'DELETE' | '*';
+  schema: string;
+  table: string;
+  filter?: string;
+};
+
 /**
- * Subscribe to section-scoped free_space_objects changes.
+ * Channel bindings: filtered INSERT/UPDATE + unfiltered DELETE.
+ * Exported for tests — documents the delivery fix for section-filtered DELETE drop.
+ */
+export function buildFreeSpaceRealtimePostgresBindings(sectionId: string): PostgresChangesConfig[] {
+  const filter = `section_id=eq.${sectionId}`;
+  return [
+    {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'free_space_objects',
+      filter,
+    },
+    {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'free_space_objects',
+      filter,
+    },
+    {
+      event: 'DELETE',
+      schema: 'public',
+      table: 'free_space_objects',
+      // Intentionally no filter — see file header.
+    },
+  ];
+}
+
+/**
+ * Subscribe to free_space_objects changes for one mounted section.
  * Does not apply rows — caller owns shared PR7 apply + catch-up pull.
  */
 export function subscribeFreeSpaceObjectsRealtime(
@@ -148,26 +218,23 @@ export function subscribeFreeSpaceObjectsRealtime(
     };
   }
 
+  const onPayload = (
+    payload: RealtimePostgresChangesPayload<Record<string, unknown>>,
+  ) => {
+    try {
+      const normalized = normalizeFreeSpaceRealtimePayload(payload, sectionId);
+      input.onEvent(normalized);
+    } catch (e) {
+      fwPersistWarn(`Free Space realtime event handler failed: ${String(e)}`);
+    }
+  };
+
   const channelName = `free_space_objects:section:${sectionId}`;
-  let channel: RealtimeChannel | null = supabase
-    .channel(channelName)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'free_space_objects',
-        filter: `section_id=eq.${sectionId}`,
-      },
-      (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
-        try {
-          const normalized = normalizeFreeSpaceRealtimePayload(payload, sectionId);
-          input.onEvent(normalized);
-        } catch (e) {
-          fwPersistWarn(`Free Space realtime event handler failed: ${String(e)}`);
-        }
-      },
-    );
+  let channel: RealtimeChannel | null = supabase.channel(channelName);
+
+  for (const binding of buildFreeSpaceRealtimePostgresBindings(sectionId)) {
+    channel = channel.on('postgres_changes', binding, onPayload);
+  }
 
   channel.subscribe(status => {
     input.onStatus(status);
