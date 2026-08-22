@@ -120,7 +120,7 @@ describe('Free Space cloud status integration', () => {
     expect(getCloudSyncSnapshot().pendingCount).toBe(0);
   });
 
-  it('O create-then-delete before cloud: CREATE canceled, no DELETE queued', async () => {
+  it('O create-then-delete before flush: CREATE canceled, DELETE queued and flushed', async () => {
     await enqueueFreeSpaceObjectCreate({
       userId: USER,
       sectionId: SECTION,
@@ -136,10 +136,25 @@ describe('Free Space cloud status integration', () => {
       entityId: 'd1',
     });
     expect(del.ok).toBe(true);
-    if (del.ok) expect(del.action).toBe('create_canceled_no_delete');
-    expect(getCloudSyncSnapshot().pendingCount).toBe(0);
-    expect(deleteMock).not.toHaveBeenCalled();
+    if (del.ok) expect(del.action).toBe('create_canceled_delete_enqueued');
+    expect(getCloudSyncSnapshot().pendingCount).toBe(1);
     expect(upsertMock).not.toHaveBeenCalled();
+
+    await flushPendingFreeSpaceCreates({ userId: USER, workspaceId: SECTION });
+    expect(deleteMock).toHaveBeenCalledWith({
+      userId: USER,
+      sectionId: SECTION,
+      objectId: 'd1',
+    });
+    expect(upsertMock).not.toHaveBeenCalled();
+    expect(getCloudSyncSnapshot().pendingCount).toBe(0);
+    expect(
+      deriveSyncUiStatus(getSaveStatusSnapshot(), {
+        online: true,
+        cloud: getCloudSyncSnapshot(),
+        showSaved: true,
+      }).phase,
+    ).toBe('saved');
   });
 
   it('O2 delete path: enqueue DELETE → pending UI; flush → Saved-ready', async () => {

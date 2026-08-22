@@ -88,7 +88,7 @@ describe('enqueueFreeSpaceObjectDelete', () => {
     expect(notifyMock).toHaveBeenCalled();
   });
 
-  it('B: pending CREATE only → cancel CREATE, no DELETE', async () => {
+  it('B: pending CREATE only → cancel CREATE and enqueue DELETE', async () => {
     listMock.mockResolvedValue({
       ok: true,
       value: [op({ id: 'c1', entityId: 'obj-1', operationType: 'create' })],
@@ -101,7 +101,7 @@ describe('enqueueFreeSpaceObjectDelete', () => {
     });
     expect(result).toEqual({
       ok: true,
-      action: 'create_canceled_no_delete',
+      action: 'create_canceled_delete_enqueued',
       removedWriteOps: 1,
     });
     expect(removeMock).toHaveBeenCalledWith(
@@ -109,7 +109,15 @@ describe('enqueueFreeSpaceObjectDelete', () => {
       'c1',
     );
     expect(resolvedNote).toHaveBeenCalledWith('c1');
-    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: 'obj-1',
+        operationType: 'delete',
+        payload: { boardId: BOARD },
+      }),
+    );
+    expect(enqueuedNote).toHaveBeenCalled();
+    expect(notifyMock).toHaveBeenCalled();
   });
 
   it('C: pending UPDATE → cancel UPDATE, enqueue DELETE', async () => {

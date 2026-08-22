@@ -5,10 +5,12 @@
  *
  * Precedence (per entityId):
  * 1. Cancel pending CREATE|UPDATE for the entity.
- * 2. If a pending CREATE was present → object never left the queue for cloud;
- *    do NOT enqueue DELETE (no unnecessary cloud round-trip).
- * 3. Else if DELETE already queued → no-op.
- * 4. Else enqueue operationType=delete (cloud row may exist).
+ * 2. If DELETE already queued → no-op.
+ * 3. Else enqueue operationType=delete.
+ *
+ * Pending CREATE does NOT skip cloud DELETE: upsert may already have reached
+ * Supabase while the CREATE op is still queued (flush/remove race). Cloud
+ * DELETE is idempotent when the row was never created.
  *
  * Tombstones remain a separate local resurrection guard (knowledge/tombstoneStore).
  * Temporary mapping: workspaceId := sectionId. Failures are warn-only.
@@ -30,7 +32,7 @@ export type FreeSpaceObjectDeleteEnqueueResult =
   | {
       ok: true;
       action:
-        | 'create_canceled_no_delete'
+        | 'create_canceled_delete_enqueued'
         | 'delete_already_queued'
         | 'delete_enqueued'
         | 'writes_canceled_delete_enqueued';
@@ -120,20 +122,12 @@ export async function enqueueFreeSpaceObjectDelete(
       op => isFreeSpaceDeleteOp(op) && op.entityId === entityId,
     );
 
+    const hadPendingCreate = creates.length > 0;
+
     const cancel = await removeMatchingOps(ns.namespace, writes);
     removedWriteOps = cancel.removed;
     if (cancel.failed) {
       return { ok: false, reason: 'transaction_failed', removedWriteOps };
-    }
-
-    // Pending CREATE still present ⇒ create never confirmed-removed after upsert.
-    // Spec: cancel CREATE only — no cloud DELETE.
-    if (creates.length > 0) {
-      return {
-        ok: true,
-        action: 'create_canceled_no_delete',
-        removedWriteOps,
-      };
     }
 
     if (existingDelete) {
@@ -162,8 +156,9 @@ export async function enqueueFreeSpaceObjectDelete(
 
     return {
       ok: true,
-      action:
-        removedWriteOps > 0
+      action: hadPendingCreate
+        ? 'create_canceled_delete_enqueued'
+        : removedWriteOps > 0
           ? 'writes_canceled_delete_enqueued'
           : 'delete_enqueued',
       removedWriteOps,

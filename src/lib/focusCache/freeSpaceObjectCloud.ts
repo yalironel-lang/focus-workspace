@@ -94,8 +94,38 @@ export type DeleteFreeSpaceObjectInput = {
 };
 
 /**
- * Idempotent DELETE by primary key `id`, scoped to user + section.
- * Missing row is success (already deleted / never existed).
+ * Scoped existence probe after DELETE when PostgREST reports zero rows removed.
+ * Exported for tests.
+ */
+export async function freeSpaceObjectExistsInCloud(
+  input: DeleteFreeSpaceObjectInput,
+): Promise<
+  | { ok: true; exists: boolean }
+  | { ok: false; reason: 'cloud_read_failed'; message?: string }
+> {
+  const { data, error } = await supabase
+    .from('free_space_objects')
+    .select('id')
+    .eq('id', input.objectId)
+    .eq('user_id', input.userId)
+    .eq('section_id', input.sectionId)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      ok: false,
+      reason: 'cloud_read_failed',
+      message: error.message,
+    };
+  }
+
+  return { ok: true, exists: data != null };
+}
+
+/**
+ * DELETE by primary key `id`, scoped to user + section.
+ * Idempotent when the row is confirmed absent. Zero-row DELETE without verified
+ * absence is failure (retry) — avoids Saved while an orphan row remains.
  */
 export async function deleteFreeSpaceObjectFromCloud(
   input: DeleteFreeSpaceObjectInput,
@@ -123,8 +153,24 @@ export async function deleteFreeSpaceObjectFromCloud(
     };
   }
 
-  // count may be null depending on client config; absence of error is enough.
-  void count;
+  if (count == null || count === 0) {
+    const verified = await freeSpaceObjectExistsInCloud(input);
+    if (!verified.ok) {
+      return {
+        ok: false,
+        reason: 'cloud_write_failed',
+        message: verified.message ?? verified.reason,
+      };
+    }
+    if (verified.exists) {
+      return {
+        ok: false,
+        reason: 'cloud_write_failed',
+        message: 'delete_matched_zero_rows',
+      };
+    }
+  }
+
   return { ok: true };
 }
 
