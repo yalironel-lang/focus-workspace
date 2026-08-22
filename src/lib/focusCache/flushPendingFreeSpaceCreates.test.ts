@@ -13,12 +13,21 @@ vi.mock('./freeSpaceObjectCloud', () => ({
   deleteFreeSpaceObjectFromCloud: vi.fn(),
 }));
 
+vi.mock('./freeSpaceBoardCloud', () => ({
+  upsertFreeSpaceBoardFromPayload: vi.fn(),
+  deleteFreeSpaceBoardFromCloud: vi.fn(),
+}));
+
 vi.mock('../freeSpacePersistence', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../freeSpacePersistence')>();
   return { ...actual, fwPersistWarn: vi.fn() };
 });
 
 import { upsertFreeSpaceObjectFromCreatePayload, deleteFreeSpaceObjectFromCloud } from './freeSpaceObjectCloud';
+import {
+  upsertFreeSpaceBoardFromPayload,
+  deleteFreeSpaceBoardFromCloud,
+} from './freeSpaceBoardCloud';
 import { flushPendingFreeSpaceCreates } from './flushPendingFreeSpaceCreates';
 import {
   listPendingOperations,
@@ -29,6 +38,8 @@ const listMock = vi.mocked(listPendingOperations);
 const removeMock = vi.mocked(removePendingOperation);
 const upsertMock = vi.mocked(upsertFreeSpaceObjectFromCreatePayload);
 const deleteMock = vi.mocked(deleteFreeSpaceObjectFromCloud);
+const upsertBoardMock = vi.mocked(upsertFreeSpaceBoardFromPayload);
+const deleteBoardMock = vi.mocked(deleteFreeSpaceBoardFromCloud);
 
 const ns: CacheNamespace = {
   userId: 'user-1',
@@ -64,8 +75,12 @@ beforeEach(() => {
   removeMock.mockReset();
   upsertMock.mockReset();
   deleteMock.mockReset();
+  upsertBoardMock.mockReset();
+  deleteBoardMock.mockReset();
   upsertMock.mockResolvedValue({ ok: true });
   deleteMock.mockResolvedValue({ ok: true });
+  upsertBoardMock.mockResolvedValue({ ok: true });
+  deleteBoardMock.mockResolvedValue({ ok: true });
   removeMock.mockResolvedValue({ ok: true, value: { removed: true } });
 });
 
@@ -347,5 +362,47 @@ describe('flushPendingFreeSpaceCreates', () => {
     });
     expect(result.stoppedReason).toBe('namespace_invalid');
     expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it('upserts free_space_board create ops and deletes board rows', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          seq: 1,
+          id: 'board-op-create',
+          userId: ns.userId,
+          workspaceId: ns.workspaceId,
+          entityType: 'free_space_board',
+          entityId: 'board-x',
+          operationType: 'create',
+          payload: { name: 'Space X', createdAt: 1, updatedAt: 10 },
+        } satisfies PendingOperation,
+        {
+          seq: 2,
+          id: 'board-op-delete',
+          userId: ns.userId,
+          workspaceId: ns.workspaceId,
+          entityType: 'free_space_board',
+          entityId: 'board-y',
+          operationType: 'delete',
+          payload: {},
+        } satisfies PendingOperation,
+      ],
+    });
+
+    const result = await flushPendingFreeSpaceCreates(ns);
+    expect(result.removed).toBe(2);
+    expect(upsertBoardMock).toHaveBeenCalledWith({
+      userId: ns.userId,
+      sectionId: ns.workspaceId,
+      boardId: 'board-x',
+      name: 'Space X',
+    });
+    expect(deleteBoardMock).toHaveBeenCalledWith({
+      userId: ns.userId,
+      sectionId: ns.workspaceId,
+      boardId: 'board-y',
+    });
   });
 });

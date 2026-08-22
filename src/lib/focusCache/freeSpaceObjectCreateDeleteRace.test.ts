@@ -1,7 +1,7 @@
 /**
  * CREATE→DELETE race: outbound delete must not orphan cloud rows.
  */
-// @vitest-environment node
+// @vitest-environment happy-dom
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';

@@ -794,7 +794,7 @@ export function SectionPage() {
   const tokens = useMemo(() => mergeAccent(atmTokens, design), [atmTokens, design]);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
-  const sectionBoards = useSectionFreeSpaceBoards(sectionId);
+  const sectionBoards = useSectionFreeSpaceBoards(sectionId, user?.id ?? null);
   const sectionCanvas = useSectionCanvasMode(sectionId, sectionBoards.activeBoardId);
   const sectionCanvasRef = useRef(sectionCanvas);
   sectionCanvasRef.current = sectionCanvas;

@@ -4,7 +4,7 @@
  * - Production auto-flush is scheduled by freeSpaceObjectAutoFlush (enqueue /
  *   online / remount). This function remains the only cloud writer and the
  *   manual/diagnostic API.
- * - Processes entityType=free_space_object + operationType=create|update|delete.
+ * - Processes entityType=free_space_object|free_space_board + create|update|delete.
  * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
  *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
  * - CREATE/UPDATE upsert by entityId; DELETE removes the cloud row.
@@ -25,6 +25,11 @@ import {
   noteCloudWriteFailed,
   reconcileCloudPendingOps,
 } from '../sync/cloudSyncStatus';
+import { FREE_SPACE_BOARD_ENTITY_TYPE } from './freeSpaceBoardCreateEnqueue';
+import {
+  deleteFreeSpaceBoardFromCloud,
+  upsertFreeSpaceBoardFromPayload,
+} from './freeSpaceBoardCloud';
 import { FREE_SPACE_OBJECT_ENTITY_TYPE } from './freeSpaceObjectCreateEnqueue';
 import {
   deleteFreeSpaceObjectFromCloud,
@@ -75,13 +80,39 @@ function readObjectUpdatedAt(object: JsonValue): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function isSupportedWrite(op: PendingOperation): boolean {
+type BoardWritePayload = {
+  name: string;
+  updatedAt: number;
+};
+
+function parseBoardWritePayload(payload: JsonValue | null): BoardWritePayload | null {
+  if (!isPlainObject(payload)) return null;
+  if (typeof payload.name !== 'string' || !payload.name.trim()) return null;
+  const updatedAt = payload.updatedAt;
+  if (typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) return null;
+  return { name: payload.name.trim(), updatedAt };
+}
+
+function isSupportedObjectWrite(op: PendingOperation): boolean {
   return (
     op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE &&
     (op.operationType === 'create' ||
       op.operationType === 'update' ||
       op.operationType === 'delete')
   );
+}
+
+function isSupportedBoardWrite(op: PendingOperation): boolean {
+  return (
+    op.entityType === FREE_SPACE_BOARD_ENTITY_TYPE &&
+    (op.operationType === 'create' ||
+      op.operationType === 'update' ||
+      op.operationType === 'delete')
+  );
+}
+
+function isSupportedWrite(op: PendingOperation): boolean {
+  return isSupportedObjectWrite(op) || isSupportedBoardWrite(op);
 }
 
 async function removeFlushedOp(
@@ -140,8 +171,11 @@ export async function flushPendingFreeSpaceCreates(
 
   /** Highest object.updatedAt successfully upserted this pass, per entityId. */
   const latestWrittenUpdatedAt = new Map<string, number>();
+  /** Highest board payload.updatedAt successfully upserted this pass. */
+  const latestWrittenBoardUpdatedAt = new Map<string, number>();
   /** Entity ids successfully deleted in this pass (skip superseded upserts). */
   const deletedEntityIds = new Set<string>();
+  const deletedBoardIds = new Set<string>();
 
   try {
     for (const op of listed.value) {
@@ -151,6 +185,97 @@ export async function flushPendingFreeSpaceCreates(
       }
 
       result.processed += 1;
+
+      if (op.entityType === FREE_SPACE_BOARD_ENTITY_TYPE) {
+        if (op.operationType === 'delete') {
+          if (deletedBoardIds.has(op.entityId)) {
+            const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+            if (removeStatus === 'remove_failed') {
+              return { ...result, stoppedReason: 'remove_failed' };
+            }
+            continue;
+          }
+
+          const cloud = await deleteFreeSpaceBoardFromCloud({
+            userId: ns.namespace.userId,
+            sectionId: ns.namespace.workspaceId,
+            boardId: op.entityId,
+          });
+
+          if (!cloud.ok) {
+            result.failedCloud += 1;
+            fwPersistWarn(
+              `pending board flush cloud delete failed: reason=${cloud.reason}` +
+                (cloud.message ? ` message=${cloud.message}` : ''),
+            );
+            noteCloudWriteFailed(cloud.reason);
+            return { ...result, stoppedReason: 'cloud_write_failed' };
+          }
+
+          const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+          if (removeStatus === 'remove_failed') {
+            return { ...result, stoppedReason: 'remove_failed' };
+          }
+          deletedBoardIds.add(op.entityId);
+          continue;
+        }
+
+        if (deletedBoardIds.has(op.entityId)) {
+          const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+          if (removeStatus === 'remove_failed') {
+            return { ...result, stoppedReason: 'remove_failed' };
+          }
+          continue;
+        }
+
+        const boardParsed = parseBoardWritePayload(op.payload);
+        if (!boardParsed) {
+          result.skippedMalformed += 1;
+          fwPersistWarn(
+            `pending board flush left malformed op queued: entityId=${op.entityId}`,
+          );
+          continue;
+        }
+
+        const boardAlreadyWritten = latestWrittenBoardUpdatedAt.get(op.entityId);
+        if (
+          boardAlreadyWritten != null &&
+          boardParsed.updatedAt < boardAlreadyWritten
+        ) {
+          const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+          if (removeStatus === 'remove_failed') {
+            return { ...result, stoppedReason: 'remove_failed' };
+          }
+          continue;
+        }
+
+        const boardCloud = await upsertFreeSpaceBoardFromPayload({
+          userId: ns.namespace.userId,
+          sectionId: ns.namespace.workspaceId,
+          boardId: op.entityId,
+          name: boardParsed.name,
+        });
+
+        if (!boardCloud.ok) {
+          result.failedCloud += 1;
+          fwPersistWarn(
+            `pending board flush cloud write failed: reason=${boardCloud.reason}` +
+              (boardCloud.message ? ` message=${boardCloud.message}` : ''),
+          );
+          noteCloudWriteFailed(boardCloud.reason);
+          return { ...result, stoppedReason: 'cloud_write_failed' };
+        }
+
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        const prevBoard = latestWrittenBoardUpdatedAt.get(op.entityId);
+        if (prevBoard == null || boardParsed.updatedAt >= prevBoard) {
+          latestWrittenBoardUpdatedAt.set(op.entityId, boardParsed.updatedAt);
+        }
+        continue;
+      }
 
       if (op.operationType === 'delete') {
         if (deletedEntityIds.has(op.entityId)) {
