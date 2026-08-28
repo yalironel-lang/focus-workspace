@@ -28,15 +28,27 @@ import {
   getNotebookWorkspaceBreadcrumb,
   inkPageKeyForNotebookPage,
   isNotebookV1PagesEnabled,
+  loadNotebookActivePage,
+  migrateLegacyNotebook,
+  notebookManifestChanged,
+  notebookManifestFingerprint,
   pageDisplayTitle,
+  prepareNotebookForCloudPersist,
   renameNotebookPage,
   renameNotebookSection,
+  resolveDefaultNavigation,
+  saveNotebookActivePage,
   saveNotebookPageBody,
   setActiveNotebookSection,
   setNotebookPageLinkedPdf,
   switchNotebookPage,
+  type NotebookContentWithPages,
   type NotebookPageKind,
 } from '../../lib/notebookPages';
+import {
+  nbSyncDiagLog,
+  nbSyncDiagSummarizeContent,
+} from '../../lib/notebookPages/nbSyncDiag';
 import { NotebookWorkspaceLayout } from '../notebook/NotebookWorkspaceLayout';
 import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigator';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
@@ -67,6 +79,13 @@ import {
   nbImageSet,
   subscribeNotebookImages,
 } from '../../lib/notebookImageStore';
+import {
+  onNotebookImageSaved,
+  deleteNotebookImageAsset,
+  gcOrphanNotebookImages,
+  hydrateNotebookImagesWithCloud,
+} from '../../lib/notebookImageCloud';
+import { referencedNotebookImageKeys } from '../../lib/notebookImageRefs';
 import {
   gcOrphanHandwriting,
   gcOrphanHandwritingKeys,
@@ -1221,20 +1240,52 @@ export function ProjectNotebookBlock({
 }: Props) {
   const { user } = useAuth();
   const handwritingUserId = user?.id;
-  const persistNotebookContent = useCallback(
-    (next: NotebookContent) => emitContentChange(applyNotebookPersist(next)),
-    [emitContentChange],
-  );
   const v1PagesShell = isNotebookV1PagesEnabled();
+  /** Device-local active page — avoids cloud LWW fights from passive navigation. */
+  const navigationActivePageIdRef = useRef<string | null>(null);
+  const [navigationOverlay, setNavigationOverlay] = useState<Partial<NotebookContent> | null>(
+    null,
+  );
+  const effectiveContent = useMemo(
+    () => (navigationOverlay ? ({ ...content, ...navigationOverlay } as NotebookContent) : content),
+    [content, navigationOverlay],
+  );
+  const persistNotebookContent = useCallback(
+    (next: NotebookContent, activePageIdOverride?: string | null) => {
+      const persisted = applyNotebookPersist(next);
+      const forCloud = v1PagesShell
+        ? prepareNotebookForCloudPersist(
+            persisted,
+            activePageIdOverride ?? navigationActivePageIdRef.current ?? persisted.activePageId,
+          )
+        : persisted;
+      nbSyncDiagLog('A_before_updateObjectContent', {
+        sectionId: freeSpaceSectionId,
+        boardId: freeSpaceBoardId,
+        objectId,
+      }, {
+        stage: 'persistNotebookContent',
+        forCloud: nbSyncDiagSummarizeContent(forCloud as NotebookContentWithPages),
+      });
+      emitContentChange(forCloud as NotebookContent);
+    },
+    [emitContentChange, v1PagesShell, freeSpaceSectionId, freeSpaceBoardId, objectId],
+  );
   const contentRef = useRef(content);
-  contentRef.current = content;
+  contentRef.current = effectiveContent;
   const isDeskPresentation = presentation === 'desk';
   const isWorkspacePresentation = presentation === 'workspace';
   const showCardChrome = !isDeskPresentation && !isWorkspacePresentation;
   const activeNotebookPage = useMemo(() => {
-    if (!v1PagesShell || !content.activePageId) return null;
-    return (content.pages ?? []).find(p => p.id === content.activePageId) ?? null;
-  }, [v1PagesShell, content.activePageId, content.pages]);
+    if (!v1PagesShell) return null;
+    const pageId =
+      navigationOverlay?.activePageId ??
+      effectiveContent.activePageId ??
+      resolveDefaultNavigation(effectiveContent)?.activePageId ??
+      null;
+    if (!pageId) return null;
+    return (effectiveContent.pages ?? []).find(p => p.id === pageId) ?? null;
+  }, [v1PagesShell, effectiveContent, navigationOverlay?.activePageId]);
   const activePageKind: NotebookPageKind = activeNotebookPage?.kind ?? 'document';
   const activeInkBlockKey =
     activeNotebookPage?.kind === 'write'
@@ -1264,11 +1315,39 @@ export function ProjectNotebookBlock({
   useEffect(() => subscribeNotebookImages(() => bumpNotebookImageCache(n => n + 1)), []);
 
   useEffect(() => {
-    const keys = blocks
+    const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
       .map(b => b.key);
+    const fromBody = referencedNotebookImageKeys(content.body ?? '');
+    const keys = [...new Set([...fromBlocks, ...fromBody])];
     void hydrateNotebookImages(keys);
-  }, [blocks]);
+    if (handwritingUserId && freeSpaceSectionId && objectId) {
+      void hydrateNotebookImagesWithCloud({
+        userId: handwritingUserId,
+        sectionId: freeSpaceSectionId,
+        objectId,
+        imageKeys: keys,
+      });
+    }
+  }, [blocks, content.body, handwritingUserId, freeSpaceSectionId, objectId]);
+
+  useEffect(() => {
+    if (!objectId || !handwritingUserId || !freeSpaceSectionId) return;
+    const fromBlocks = blocks
+      .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
+      .map(b => b.key);
+    const fromBody = referencedNotebookImageKeys(content.body ?? '');
+    const imageKeys = [...new Set([...fromBlocks, ...fromBody])];
+    const timer = window.setTimeout(() => {
+      void gcOrphanNotebookImages({
+        userId: handwritingUserId,
+        sectionId: freeSpaceSectionId,
+        objectId,
+        referencedKeys: imageKeys,
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [blocks, content.body, objectId, handwritingUserId, freeSpaceSectionId]);
 
   useEffect(() => {
     if (!objectId) return;
@@ -1587,11 +1666,85 @@ export function ProjectNotebookBlock({
     return () => sc.removeEventListener('scroll', onScroll);
   }, [context, schedulePosePersist, surfaceFocusBlockId]);
 
+  const contentManifestRef = useRef('');
+  useEffect(() => {
+    if (!v1PagesShell) return;
+    const migrated = migrateLegacyNotebook(content);
+    const fp = notebookManifestFingerprint(migrated);
+    const manifestChanged = Boolean(contentManifestRef.current && contentManifestRef.current !== fp);
+    contentManifestRef.current = fp;
+
+    const applyNavigationOverlay = (
+      activeSectionId: string,
+      activePageId: string,
+      pages: NotebookContent['pages'],
+    ) => {
+      const page = pages?.find(p => p.id === activePageId);
+      if (!page) return;
+      navigationActivePageIdRef.current = activePageId;
+      const body = page.kind === 'document' ? page.documentBody ?? '' : migrated.body ?? '';
+      setNavigationOverlay({ activeSectionId, activePageId, body, pages });
+    };
+
+    if (freeSpaceSectionId && objectId) {
+      const local = loadNotebookActivePage(freeSpaceSectionId, freeSpaceBoardId ?? '', objectId);
+      if (local && migrated.pages?.some(p => p.id === local.activePageId)) {
+        applyNavigationOverlay(local.activeSectionId, local.activePageId, migrated.pages);
+        return;
+      }
+    }
+
+    if (manifestChanged) {
+      setNavigationOverlay(null);
+      navigationActivePageIdRef.current = null;
+    }
+
+    if (migrated.activePageId && migrated.activeSectionId) {
+      applyNavigationOverlay(migrated.activeSectionId, migrated.activePageId, migrated.pages);
+      return;
+    }
+
+    if ((migrated.pages?.length ?? 0) > 0) {
+      const nav = resolveDefaultNavigation(migrated);
+      if (nav) applyNavigationOverlay(nav.activeSectionId, nav.activePageId, migrated.pages);
+    }
+  }, [
+    v1PagesShell,
+    content,
+    freeSpaceSectionId,
+    freeSpaceBoardId,
+    objectId,
+  ]);
+
   const pushContent = useCallback(
     (next: NotebookContent) => {
-      if (next.body === content.body) {
+      // Anchor editor writes on effectiveContent (overlay + pages), never stale parent prop.
+      const merged: NotebookContent = {
+        ...contentRef.current,
+        body: next.body ?? contentRef.current.body ?? '',
+      };
+      const persistedNext = applyNotebookPersist(merged);
+      const manifestChanged = v1PagesShell
+        ? notebookManifestChanged(
+            migrateLegacyNotebook(contentRef.current),
+            migrateLegacyNotebook(persistedNext),
+          )
+        : persistedNext.body !== (effectiveContent.body ?? '');
+
+      nbSyncDiagLog('A_before_updateObjectContent', {
+        sectionId: freeSpaceSectionId,
+        boardId: freeSpaceBoardId,
+        objectId,
+      }, {
+        merged: nbSyncDiagSummarizeContent(merged),
+        persisted: nbSyncDiagSummarizeContent(persistedNext),
+        manifestChanged,
+        parentPropPages: (content.pages ?? []).length,
+        effectivePages: (contentRef.current.pages ?? []).length,
+      });
+
+      if (!manifestChanged) {
         flushNotebookPersist();
-        onChangeRef.current(next);
         return;
       }
       notebookEditCountRef.current += 1;
@@ -1602,20 +1755,31 @@ export function ProjectNotebookBlock({
             boardId: freeSpaceBoardId,
             objectId,
             objectTitle: objectTitle ?? 'Notebook',
-            body: next.body ?? '',
+            body: persistedNext.body ?? '',
             editGeneration: notebookEditCountRef.current,
           });
         });
       }
       pendingNotebookContentRef.current = {
         objectId: persistObjectIdRef.current,
-        content: next,
-        commit: onChangeRef.current,
+        content: persistedNext,
+        commit: c =>
+          persistNotebookContent(c, navigationActivePageIdRef.current ?? navigationOverlay?.activePageId ?? null),
       };
       if (notebookPersistTimerRef.current) clearTimeout(notebookPersistTimerRef.current);
       notebookPersistTimerRef.current = setTimeout(flushNotebookPersist, 420);
     },
-    [content.body, flushNotebookPersist, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle],
+    [
+      v1PagesShell,
+      effectiveContent.body,
+      flushNotebookPersist,
+      freeSpaceSectionId,
+      freeSpaceBoardId,
+      objectId,
+      objectTitle,
+      persistNotebookContent,
+      navigationOverlay?.activePageId,
+    ],
   );
 
   useEffect(() => () => flushNotebookPersist(), [flushNotebookPersist]);
@@ -1625,31 +1789,78 @@ export function ProjectNotebookBlock({
   }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
 
   const applyShellMutation = useCallback(
-    (mutate: (current: NotebookContent, body: string) => NotebookContent) => {
+    (
+      mutate: (current: NotebookContent, body: string) => NotebookContent,
+      opts?: { navigationOnly?: boolean },
+    ) => {
       void (async () => {
         await flushHandwritingBeforeTransition();
         flushNotebookPersist();
         const body = serializeBlocks(blocksRef.current);
-        persistNotebookContent(applyNotebookPersist(mutate(contentRef.current, body)));
+        const before = migrateLegacyNotebook(contentRef.current);
+        const next = applyNotebookPersist(mutate(contentRef.current, body));
+        const migratedNext = migrateLegacyNotebook(next);
+        const manifestChanged = notebookManifestChanged(before, migratedNext);
+
+        if (next.activePageId && next.activeSectionId && freeSpaceSectionId && objectId) {
+          saveNotebookActivePage(
+            freeSpaceSectionId,
+            freeSpaceBoardId ?? '',
+            objectId,
+            next.activeSectionId,
+            next.activePageId,
+          );
+          navigationActivePageIdRef.current = next.activePageId;
+        }
+
+        if (opts?.navigationOnly && !manifestChanged) {
+          setNavigationOverlay({
+            activeSectionId: next.activeSectionId,
+            activePageId: next.activePageId,
+            body: next.body,
+            pages: next.pages,
+          });
+          setBlocks(parseBodyToBlocks(next.body ?? ''));
+          return;
+        }
+
+        persistNotebookContent(next, next.activePageId ?? null);
+        setNavigationOverlay(null);
+        setBlocks(parseBodyToBlocks(next.body ?? ''));
       })();
     },
-    [flushHandwritingBeforeTransition, flushNotebookPersist, persistNotebookContent],
+    [
+      flushHandwritingBeforeTransition,
+      flushNotebookPersist,
+      persistNotebookContent,
+      freeSpaceSectionId,
+      freeSpaceBoardId,
+      objectId,
+    ],
   );
 
   const handleShellSwitchPage = useCallback(
     (pageId: string) => {
-      if (pageId === contentRef.current.activePageId) return;
-      applyShellMutation((current, body) => switchNotebookPage(current, pageId, body));
+      const currentActive =
+        navigationOverlay?.activePageId ?? contentRef.current.activePageId;
+      if (pageId === currentActive) return;
+      applyShellMutation((current, body) => switchNotebookPage(current, pageId, body), {
+        navigationOnly: true,
+      });
     },
-    [applyShellMutation],
+    [applyShellMutation, navigationOverlay?.activePageId],
   );
 
   const handleShellSwitchSection = useCallback(
     (sectionId: string) => {
-      if (sectionId === contentRef.current.activeSectionId) return;
-      applyShellMutation((current, body) => setActiveNotebookSection(current, sectionId, body));
+      const currentSection =
+        navigationOverlay?.activeSectionId ?? contentRef.current.activeSectionId;
+      if (sectionId === currentSection) return;
+      applyShellMutation((current, body) => setActiveNotebookSection(current, sectionId, body), {
+        navigationOnly: true,
+      });
     },
-    [applyShellMutation],
+    [applyShellMutation, navigationOverlay?.activeSectionId],
   );
 
   const handleShellAddSection = useCallback(() => {
@@ -1767,11 +1978,19 @@ export function ProjectNotebookBlock({
           toast.error('Could not save image — storage may be full.');
           return;
         }
+        if (handwritingUserId && freeSpaceSectionId && objectId) {
+          onNotebookImageSaved({
+            userId: handwritingUserId,
+            sectionId: freeSpaceSectionId,
+            objectId,
+            imageKey: key,
+          });
+        }
         insertImageBlock(key, '');
       })();
     };
     reader.readAsDataURL(file);
-  }, [insertImageBlock]);
+  }, [insertImageBlock, handwritingUserId, freeSpaceSectionId, objectId]);
 
   const handleWritingAreaDrop = useCallback((e: React.DragEvent) => {
     const file = e.dataTransfer.files?.[0];
@@ -1788,12 +2007,20 @@ export function ProjectNotebookBlock({
           toast.error('Could not save image — storage may be full.');
           return;
         }
+        if (handwritingUserId && freeSpaceSectionId && objectId) {
+          onNotebookImageSaved({
+            userId: handwritingUserId,
+            sectionId: freeSpaceSectionId,
+            objectId,
+            imageKey: key,
+          });
+        }
         const cleanName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
         insertImageBlock(key, cleanName);
       })();
     };
     reader.readAsDataURL(file);
-  }, [insertImageBlock]);
+  }, [insertImageBlock, handwritingUserId, freeSpaceSectionId, objectId]);
 
   const persist = useCallback(
     (next: Block[]) => {
@@ -1867,14 +2094,14 @@ export function ProjectNotebookBlock({
   );
 
   useEffect(() => {
-    const body = content.body ?? '';
+    const body = effectiveContent.body ?? '';
     setBlocks((prev) => {
       if (serializeBlocks(prev) === body) return prev;
       if (isNotebookEditorFocused()) return prev;
       if (isDomTextCommitLocked()) return prev;
       return parseBodyToBlocks(body, prev);
     });
-  }, [content.body, isNotebookEditorFocused, isDomTextCommitLocked]);
+  }, [effectiveContent.body, isNotebookEditorFocused, isDomTextCommitLocked]);
 
   useEffect(() => {
     if (!morphPulseId) return;
@@ -3422,6 +3649,14 @@ export function ProjectNotebookBlock({
           });
         }
       }
+      if (removed?.kind === 'image-ref' && handwritingUserId && freeSpaceSectionId && objectId) {
+        void deleteNotebookImageAsset({
+          userId: handwritingUserId,
+          sectionId: freeSpaceSectionId,
+          objectId,
+          imageKey: removed.key,
+        });
+      }
       const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
       const filled = next.length === 0 ? parseBodyToBlocks('') : next;
       const nextBody = serializeBlocks(filled);
@@ -4846,11 +5081,11 @@ export function ProjectNotebookBlock({
       <NotebookWorkspaceLayout
         enabled={v1PagesShell && isWorkspacePresentation}
         tokens={tokens}
-        breadcrumb={getNotebookWorkspaceBreadcrumb(content)}
+        breadcrumb={getNotebookWorkspaceBreadcrumb(effectiveContent)}
         navigator={
-          (content.sections?.length ?? 0) > 0 ? (
+          (effectiveContent.sections?.length ?? 0) > 0 ? (
             <NotebookWorkspaceNavigator
-              content={content}
+              content={effectiveContent}
               tokens={tokens}
               onSwitchSection={handleShellSwitchSection}
               onSwitchPage={handleShellSwitchPage}

@@ -23,6 +23,10 @@ import {
   type FreeSpaceObjectGeometry,
   stampLocalObjectGeometry,
 } from '../lib/freeSpaceObjectGeometry';
+import {
+  fsObjectSyncDiagLog,
+  fsObjectSyncDiagSummarizeObject,
+} from '../lib/freeSpaceObject.fsObjectSyncDiag';
 import { enqueueFreeSpaceObjectCreatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectCreateEnqueue';
 import { enqueueFreeSpaceObjectUpdatesAfterLocalPersist } from '../lib/focusCache/freeSpaceObjectUpdateEnqueue';
 import {
@@ -71,6 +75,7 @@ import {
   sanitizeNotebookPagesFields,
   type NotebookPagesFields,
 } from '../lib/notebookPages';
+import { nbSyncDiagLog, nbSyncDiagSummarizeContent } from '../lib/notebookPages/nbSyncDiag';
 
 export type { DeskFormulaItem, DeskLayoutState, DeskComputeHistoryEntry, DeskZoneId } from '../lib/mathDesk/types';
 
@@ -439,7 +444,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ...(writingMode !== undefined ? { writingMode } : {}),
         ...pagesFields,
       };
-      return hydrateNotebookPages(base) as Extract<ProjectObjectContent, { type: 'notebook' }>;
+      return hydrateNotebookPages(base, { objectId: undefined }) as Extract<ProjectObjectContent, { type: 'notebook' }>;
     }
     case 'note':
       return { type: 'note', body: typeof r.body === 'string' ? r.body : '' };
@@ -908,6 +913,16 @@ export interface SectionFreeSpaceObjectsState {
   /** Single persist write; use for workspace starters and batched inserts. */
   appendObjects: (incoming: ProjectSpaceObject[]) => void;
   addObject: (type: ProjectObjectType) => ProjectSpaceObject;
+  /** One persist + CREATE with full image metadata (avoids empty CREATE + debounced UPDATE race). */
+  addSpatialImageObject: (input: {
+    title: string;
+    content: Extract<ProjectObjectContent, { type: 'image' }>;
+  }) => ProjectSpaceObject;
+  /** One persist + CREATE with PDF file metadata (avoids empty CREATE + debounced UPDATE race). */
+  addSpatialPdfObject: (input: {
+    title: string;
+    content: Extract<ProjectObjectContent, { type: 'pdf' }>;
+  }) => ProjectSpaceObject;
   /** One persist write: new note with title + body (avoids batched add+patch races). */
   addQuickCaptureNote: (body: string) => ProjectSpaceObject;
   /** Fast mistake capture: title from first line, body maps to “what went wrong”. */
@@ -1437,6 +1452,88 @@ export function useSectionFreeSpaceObjects(
     return obj;
   }, [persistCreates, enqueueCreatesIfPersisted]);
 
+  const addSpatialImageObject = useCallback(
+    (input: {
+      title: string;
+      content: Extract<ProjectObjectContent, { type: 'image' }>;
+    }): ProjectSpaceObject => {
+      const now = Date.now();
+      const obj: ProjectSpaceObject = {
+        id: uid('image'),
+        type: 'image',
+        title: input.title,
+        content: input.content,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { sectionId: sid, boardId: bid } = scopeRef.current;
+      fsObjectSyncDiagLog('A_handle_image_create', {
+        sectionId: sid,
+        boardId: bid,
+        objectId: obj.id,
+      }, {
+        object: fsObjectSyncDiagSummarizeObject(obj),
+      });
+      let persisted = false;
+      setObjects(prev => {
+        const next = [...prev, obj];
+        persisted = persistCreates(next);
+        return next;
+      });
+      if (persisted) {
+        fsObjectSyncDiagLog('B_local_object_persist', {
+          sectionId: sid,
+          boardId: bid,
+          objectId: obj.id,
+        }, { ok: true });
+      }
+      enqueueCreatesIfPersisted(persisted, [obj]);
+      return obj;
+    },
+    [persistCreates, enqueueCreatesIfPersisted],
+  );
+
+  const addSpatialPdfObject = useCallback(
+    (input: {
+      title: string;
+      content: Extract<ProjectObjectContent, { type: 'pdf' }>;
+    }): ProjectSpaceObject => {
+      const now = Date.now();
+      const obj: ProjectSpaceObject = {
+        id: uid('pdf'),
+        type: 'pdf',
+        title: input.title,
+        content: input.content,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const { sectionId: sid, boardId: bid } = scopeRef.current;
+      fsObjectSyncDiagLog('A_handle_image_create', {
+        sectionId: sid,
+        boardId: bid,
+        objectId: obj.id,
+      }, {
+        object: fsObjectSyncDiagSummarizeObject(obj),
+      });
+      let persisted = false;
+      setObjects(prev => {
+        const next = [...prev, obj];
+        persisted = persistCreates(next);
+        return next;
+      });
+      if (persisted) {
+        fsObjectSyncDiagLog('B_local_object_persist', {
+          sectionId: sid,
+          boardId: bid,
+          objectId: obj.id,
+        }, { ok: true });
+      }
+      enqueueCreatesIfPersisted(persisted, [obj]);
+      return obj;
+    },
+    [persistCreates, enqueueCreatesIfPersisted],
+  );
+
   const addQuickCaptureNote = useCallback((rawBody: string): ProjectSpaceObject => {
     const trimmed = rawBody.trim();
     const firstLine = trimmed.split(/\n/)[0]?.trim() ?? trimmed;
@@ -1593,13 +1690,23 @@ export function useSectionFreeSpaceObjects(
   }, [schedulePersist, markObjectDirty]);
 
   const updateObjectContent = useCallback((id: string, content: ProjectObjectContent) => {
+    if (content.type === 'notebook') {
+      nbSyncDiagLog('B_updateObjectContent_local', {
+        sectionId,
+        boardId,
+        objectId: id,
+        objectUpdatedAt: Date.now(),
+      }, {
+        content: nbSyncDiagSummarizeContent(content),
+      });
+    }
     setObjects(prev => {
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
       markObjectDirty(id);
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, markObjectDirty]);
+  }, [schedulePersist, markObjectDirty, sectionId, boardId]);
 
   const updateObjectFields = useCallback(
     (
@@ -1696,6 +1803,42 @@ export function useSectionFreeSpaceObjects(
         void import('../lib/knowledge/tombstoneStore').then(({ writeFreeSpaceObjectTombstone }) =>
           writeFreeSpaceObjectTombstone(sectionId, boardId, victim),
         );
+        if (userId && (victim.type === 'image' || victim.type === 'pdf')) {
+          void import('../lib/spatialAssetCloud').then(({ enqueueSpatialAssetCloudDelete, deleteSpatialAssetLocal }) => {
+            void deleteSpatialAssetLocal({
+              userId,
+              sectionId,
+              objectId: victim.id,
+              assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
+            });
+            return enqueueSpatialAssetCloudDelete({
+              userId,
+              sectionId,
+              objectId: victim.id,
+              assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
+            });
+          });
+          void import('../lib/deleteGcDiag').then(({ deleteGcDiagMarkLatest }) => {
+            deleteGcDiagMarkLatest({
+              surface: victim.type === 'pdf' ? 'free_space_pdf' : 'free_space_image',
+              userId,
+              sectionId,
+              boardId,
+              objectId: victim.id,
+              assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
+            });
+          });
+        }
+        if (userId && victim.type === 'notebook') {
+          void import('../lib/notebookDeleteCascade').then(({ cascadeDeleteNotebookAssets }) =>
+            cascadeDeleteNotebookAssets({
+              userId,
+              sectionId,
+              objectId: victim.id,
+              content: victim.content,
+            }),
+          );
+        }
       }
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
@@ -1706,7 +1849,7 @@ export function useSectionFreeSpaceObjects(
       schedulePersist(next);
       return next;
     });
-  }, [schedulePersist, markObjectDirty, sectionId, boardId]);
+  }, [schedulePersist, markObjectDirty, sectionId, boardId, userId]);
 
   const duplicateObject = useCallback((id: string): ProjectSpaceObject | null => {
     const source = objects.find(o => o.id === id);
@@ -1768,6 +1911,8 @@ export function useSectionFreeSpaceObjects(
     objects,
     appendObjects,
     addObject,
+    addSpatialImageObject,
+    addSpatialPdfObject,
     addQuickCaptureNote,
     addQuickCaptureMistake,
     addRecallItem,
@@ -1784,6 +1929,8 @@ export function useSectionFreeSpaceObjects(
     objects,
     appendObjects,
     addObject,
+    addSpatialImageObject,
+    addSpatialPdfObject,
     addQuickCaptureNote,
     addQuickCaptureMistake,
     addRecallItem,

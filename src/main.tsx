@@ -13,6 +13,10 @@ import './lib/focusCache/freeSpaceObjectAutoFlush'
 import './lib/saveDiagnostics'
 import './lib/indexedDbEnvironment'
 import './lib/pdfUploadDiag'
+import './lib/spatialAssetCloud.fsImageSyncDiag'
+import './lib/spatialAssetCloud.fsPdfSyncDiag'
+import './lib/deleteGcDiag'
+import './lib/freeSpaceObject.fsObjectSyncDiag'
 import { initPerformanceSafeModeListeners } from './lib/performanceSafeMode'
 import {
   initServiceWorkerUpdateChecks,

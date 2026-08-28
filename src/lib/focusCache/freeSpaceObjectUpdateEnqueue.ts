@@ -33,6 +33,10 @@ import {
 } from './pendingOperations';
 import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { PendingOperation, PendingQueueFailureReason } from './types';
+import {
+  fsObjectSyncDiagLog,
+  fsObjectSyncDiagSummarizeObject,
+} from '../freeSpaceObject.fsObjectSyncDiag';
 
 export type FreeSpaceObjectUpdateEnqueueResult =
   | { ok: true; action: 'create_payload_replaced' | 'update_payload_replaced' | 'update_enqueued' }
@@ -104,6 +108,29 @@ export async function enqueueFreeSpaceObjectUpdate(
     if (payload == null) {
       fwPersistWarn('pending update enqueue skipped: reason=invalid_operation');
       return { ok: false, reason: 'invalid_operation' };
+    }
+
+    const obj = input.object;
+    if (obj.type === 'notebook' && obj.content?.type === 'notebook') {
+      const { nbSyncDiagLog, nbSyncDiagSummarizeContent } = await import('../notebookPages/nbSyncDiag');
+      nbSyncDiagLog('C_pending_enqueue', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: obj.id,
+        objectUpdatedAt: obj.updatedAt,
+      }, {
+        payloadObject: nbSyncDiagSummarizeContent(obj.content),
+      });
+    }
+    if (obj.type === 'image') {
+      fsObjectSyncDiagLog('C_structured_enqueue', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: obj.id,
+      }, {
+        operationType: 'update',
+        object: fsObjectSyncDiagSummarizeObject(obj),
+      });
     }
 
     const listed = await listPendingOperations(ns.namespace);

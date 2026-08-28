@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:staging": "bash scripts/deploy-staging.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",

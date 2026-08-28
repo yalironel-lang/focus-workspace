@@ -78,6 +78,20 @@ import {
   coerceFreeSpaceConnectionIds,
 } from '../hooks/useSectionFreeSpaceObjects';
 import { useSectionFreeSpaceBoards } from '../hooks/useSectionFreeSpaceBoards';
+import { useMathZoneCloudHydrate } from '../lib/mathZone/useMathZoneCloudHydrate';
+import {
+  onSpatialImageSaved,
+  onSpatialPdfSaved,
+} from '../lib/spatialAssetCloud';
+import {
+  fsImageSyncDiagAssetId,
+  fsImageSyncDiagLog,
+} from '../lib/spatialAssetCloud.fsImageSyncDiag';
+import {
+  fsPdfSyncDiagAssetId,
+  fsPdfSyncDiagLog,
+  fsPdfSyncDiagMarkLatest,
+} from '../lib/spatialAssetCloud.fsPdfSyncDiag';
 import { useAuth } from '../hooks/useAuth';
 import { GroupComponent } from '../components/GroupComponent';
 import { AddDeadlineModal } from '../components/AddDeadlineModal';
@@ -778,6 +792,7 @@ export function SectionPage() {
   }, []);
 
   const sectionId = id ?? '';
+  useMathZoneCloudHydrate(user?.id ?? null, sectionId);
 
   useEffect(() => {
     if (!sectionId || loading || !notFound) return;
@@ -1365,7 +1380,8 @@ export function SectionPage() {
 
   // Destructure ALL stable callbacks from the hook return objects so that
   // useCallback dep arrays never hold the unstable plain-object reference.
-  const { addObject: addSpaceObject, addConnection: addSpaceConnection,
+  const { addObject: addSpaceObject, addSpatialImageObject: addSpaceImageObject,
+          addSpatialPdfObject: addSpacePdfObject, addConnection: addSpaceConnection,
           addRecallItem, addQuickCaptureNote, addQuickCaptureMistake,
           updateObjectFields: updateSpaceObjectFields,
           updateObjectContent: updateSpaceObjectContent,
@@ -1705,12 +1721,26 @@ export function SectionPage() {
         return;
       }
 
-      const obj = addSpaceObject('pdf');
       const w = 520;
       const h = 460;
       const x = Math.max(20, Math.round(worldX - w / 2));
       const y = Math.max(20, Math.round(worldY - h / 2));
       const stored = { x, y, w, h };
+
+      const safeTitle = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
+      const obj = addSpacePdfObject({
+        title: safeTitle,
+        content: {
+          type: 'pdf',
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: file.size,
+          lastOpenedAt: Date.now(),
+          page: 1,
+          zoom: 1,
+          ingestionPhase: 'materializing',
+        },
+      });
       setSpacePos(obj.id, stored);
       if (dropPlacementDebugEnabled()) {
         logDropSpawn({
@@ -1723,20 +1753,22 @@ export function SectionPage() {
       }
       setSpaceSelectedId(obj.id);
 
-      const safeTitle = file.name.length > 80 ? `${file.name.slice(0, 78)}…` : file.name;
-      updateSpaceObjectFields(obj.id, {
-        title: safeTitle,
-        content: {
-          type: 'pdf',
-          fileName: '',
-          fileType: '',
-          fileSize: 0,
-          lastOpenedAt: Date.now(),
-          page: 1,
-          zoom: 1,
-          ingestionPhase: 'materializing',
-        },
+      fsPdfSyncDiagLog('A_pdf_insert', {
+        userId: user?.id,
+        sectionId,
+        objectId: obj.id,
+        assetId: fsPdfSyncDiagAssetId(obj.id),
+      }, {
+        fileName: file.name,
+        fileSize: file.size,
       });
+      if (user?.id) {
+        fsPdfSyncDiagMarkLatest({
+          userId: user.id,
+          sectionId,
+          objectId: obj.id,
+        });
+      }
 
       let storageFailed = false;
       let spatial: Awaited<ReturnType<typeof extractPdfSpatialData>> | null = null;
@@ -1760,6 +1792,27 @@ export function SectionPage() {
         if (saveResult.status === 'rejected') {
           storageFailed = true;
           toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
+        } else {
+          fsPdfSyncDiagLog('C_local_blob_write', {
+            userId: user?.id,
+            sectionId,
+            objectId: obj.id,
+            assetId: fsPdfSyncDiagAssetId(obj.id),
+          }, { ok: true, byteLength: persistedBlobSize, contentType: file.type || null });
+          if (user?.id) {
+            await onSpatialPdfSaved({
+              userId: user.id,
+              sectionId,
+              objectId: obj.id,
+              assetType: 'pdf',
+            });
+          } else {
+            fsPdfSyncDiagLog('F_user_content_enqueue', {
+              sectionId,
+              objectId: obj.id,
+              assetId: fsPdfSyncDiagAssetId(obj.id),
+            }, { skipped: true, reason: 'missing_user_id' });
+          }
         }
         spatial = spatialResult.status === 'fulfilled' ? spatialResult.value : null;
       } catch {
@@ -1784,7 +1837,6 @@ export function SectionPage() {
       }
 
       if (storageFailed) {
-        // Keep object + position; card shows recover/reconnect when blob is missing.
         updateSpaceObjectFields(obj.id, {
           ...(spatial?.documentTitle && spatial.documentTitle !== file.name
             ? { title: spatial.documentTitle.length > 80 ? `${spatial.documentTitle.slice(0, 78)}…` : spatial.documentTitle }
@@ -1803,7 +1855,7 @@ export function SectionPage() {
 
       applyStudyLinksForObject(obj.id, 'pdf');
     },
-    [sectionId, addSpaceObject, setSpacePos, updateSpaceObjectFields, removeSpaceObject, removePos, applyStudyLinksForObject],
+    [sectionId, user?.id, addSpacePdfObject, setSpacePos, updateSpaceObjectFields, applyStudyLinksForObject],
   );
 
   const handleImageDroppedOnCanvas = useCallback(
@@ -1818,7 +1870,20 @@ export function SectionPage() {
       const x = Math.max(20, Math.round(worldX - frame.w / 2));
       const y = Math.max(20, Math.round(worldY - frame.h / 2));
 
-      const obj = addSpaceObject('image');
+      const safeTitle = file.name.length > 64 ? `${file.name.slice(0, 62)}…` : file.name;
+      const imageContent = {
+        type: 'image' as const,
+        url: '',
+        fileName: file.name,
+        fileSize: file.size,
+        naturalWidth: dims.w,
+        naturalHeight: dims.h,
+      };
+
+      const obj = addSpaceImageObject({
+        title: safeTitle,
+        content: imageContent,
+      });
       const stored = { x, y, w: frame.w, h: frame.h };
       setSpacePos(obj.id, stored);
       if (dropPlacementDebugEnabled()) {
@@ -1832,21 +1897,38 @@ export function SectionPage() {
       }
       setSpaceSelectedId(obj.id);
 
-      const safeTitle = file.name.length > 64 ? `${file.name.slice(0, 62)}…` : file.name;
-      updateSpaceObjectFields(obj.id, {
-        title: safeTitle,
-        content: {
-          type: 'image',
-          url: '',
-          fileName: file.name,
-          fileSize: file.size,
-          naturalWidth: dims.w,
-          naturalHeight: dims.h,
-        },
+      fsImageSyncDiagLog('A_image_insert', {
+        userId: user?.id,
+        sectionId,
+        objectId: obj.id,
+        assetId: fsImageSyncDiagAssetId(obj.id),
+      }, {
+        fileName: file.name,
+        fileSize: file.size,
       });
 
       try {
         await saveImageBlob(sectionId, obj.id, file);
+        fsImageSyncDiagLog('C_local_blob_write', {
+          userId: user?.id,
+          sectionId,
+          objectId: obj.id,
+          assetId: fsImageSyncDiagAssetId(obj.id),
+        }, { ok: true, byteLength: file.size, contentType: file.type || null });
+        if (user?.id) {
+          await onSpatialImageSaved({
+            userId: user.id,
+            sectionId,
+            objectId: obj.id,
+            assetType: 'spatial-image',
+          });
+        } else {
+          fsImageSyncDiagLog('F_user_content_enqueue', {
+            sectionId,
+            objectId: obj.id,
+            assetId: fsImageSyncDiagAssetId(obj.id),
+          }, { skipped: true, reason: 'missing_user_id' });
+        }
         applyStudyLinksForObject(obj.id, 'image');
       } catch {
         toast.error('Could not store this image on this device.');
@@ -1856,9 +1938,9 @@ export function SectionPage() {
     },
     [
       sectionId,
-      addSpaceObject,
+      user?.id,
+      addSpaceImageObject,
       setSpacePos,
-      updateSpaceObjectFields,
       removeSpaceObject,
       removePos,
       applyStudyLinksForObject,
@@ -4579,6 +4661,7 @@ export function SectionPage() {
           tokens={tokens}
           sectionId={sectionId}
           sectionTitle={section.title}
+          userId={user?.id ?? null}
           paddingTop={WORKSPACE_SHELL_TOP_INSET}
           controlsOpen={notebookControlsOpen}
           onControlsOpenChange={setNotebookControlsOpen}

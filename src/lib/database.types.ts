@@ -301,6 +301,30 @@ export interface Database {
           },
         ];
       };
+      user_workspace_state: {
+        Row: {
+          user_id: string;
+          scope: string;
+          workspace_id: string;
+          state: Json;
+          updated_at_ms: number;
+        };
+        Insert: {
+          user_id: string;
+          scope: string;
+          workspace_id: string;
+          state?: Json;
+          updated_at_ms?: number;
+        };
+        Update: {
+          user_id?: string;
+          scope?: string;
+          workspace_id?: string;
+          state?: Json;
+          updated_at_ms?: number;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;

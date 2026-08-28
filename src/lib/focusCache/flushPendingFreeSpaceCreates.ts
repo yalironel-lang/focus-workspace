@@ -48,6 +48,13 @@ import {
   processUserContentAssetOp,
 } from '../userContentAssetFlush';
 import { USER_CONTENT_ASSET_ENTITY_TYPE } from '../userContentAssetDescriptor';
+import {
+  upsertWorkspaceState,
+} from './userWorkspaceStateCloud';
+import {
+  USER_WORKSPACE_STATE_ENTITY_TYPE,
+  type UserWorkspaceStatePayload,
+} from './userWorkspaceStateTypes';
 
 export type FlushPendingFreeSpaceCreatesResult = {
   processed: number;
@@ -119,11 +126,33 @@ function isSupportedBoardWrite(op: PendingOperation): boolean {
   );
 }
 
+function parseWorkspaceStatePayload(payload: JsonValue | null): UserWorkspaceStatePayload | null {
+  if (!isPlainObject(payload)) return null;
+  const scope = payload.scope;
+  if (scope !== 'desk' && scope !== 'math_zone') return null;
+  if (!isPlainObject(payload.state)) return null;
+  const updatedAt = payload.updatedAt;
+  if (typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) return null;
+  return {
+    scope,
+    state: payload.state as Record<string, unknown>,
+    updatedAt,
+  };
+}
+
+function isSupportedWorkspaceStateWrite(op: PendingOperation): boolean {
+  return (
+    op.entityType === USER_WORKSPACE_STATE_ENTITY_TYPE &&
+    (op.operationType === 'create' || op.operationType === 'update')
+  );
+}
+
 function isSupportedWrite(op: PendingOperation): boolean {
   return (
     isSupportedObjectWrite(op) ||
     isSupportedBoardWrite(op) ||
-    isUserContentAssetWrite(op)
+    isUserContentAssetWrite(op) ||
+    isSupportedWorkspaceStateWrite(op)
   );
 }
 
@@ -185,6 +214,8 @@ export async function flushPendingFreeSpaceCreates(
   const latestWrittenUpdatedAt = new Map<string, number>();
   /** Highest board payload.updatedAt successfully upserted this pass. */
   const latestWrittenBoardUpdatedAt = new Map<string, number>();
+  /** Highest workspace-state payload.updatedAt successfully upserted this pass. */
+  const latestWrittenWorkspaceStateUpdatedAt = new Map<string, number>();
   /** Entity ids successfully deleted in this pass (skip superseded upserts). */
   const deletedEntityIds = new Set<string>();
   const deletedBoardIds = new Set<string>();
@@ -197,6 +228,54 @@ export async function flushPendingFreeSpaceCreates(
       }
 
       result.processed += 1;
+
+      if (op.entityType === USER_WORKSPACE_STATE_ENTITY_TYPE) {
+        const wsParsed = parseWorkspaceStatePayload(op.payload);
+        if (!wsParsed) {
+          result.skippedMalformed += 1;
+          fwPersistWarn(
+            `pending workspace-state flush left malformed op queued: entityId=${op.entityId}`,
+          );
+          continue;
+        }
+
+        const wsAlreadyWritten = latestWrittenWorkspaceStateUpdatedAt.get(op.entityId);
+        if (wsAlreadyWritten != null && wsParsed.updatedAt < wsAlreadyWritten) {
+          const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+          if (removeStatus === 'remove_failed') {
+            return { ...result, stoppedReason: 'remove_failed' };
+          }
+          continue;
+        }
+
+        const wsCloud = await upsertWorkspaceState({
+          userId: ns.namespace.userId,
+          scope: wsParsed.scope,
+          workspaceId: ns.namespace.workspaceId,
+          state: wsParsed.state,
+          updatedAt: wsParsed.updatedAt,
+        });
+
+        if (!wsCloud.ok) {
+          result.failedCloud += 1;
+          fwPersistWarn(
+            `pending workspace-state flush cloud write failed: reason=${wsCloud.reason}` +
+              (wsCloud.message ? ` message=${wsCloud.message}` : ''),
+          );
+          noteCloudWriteFailed(wsCloud.reason);
+          return { ...result, stoppedReason: 'cloud_write_failed' };
+        }
+
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        const prevWs = latestWrittenWorkspaceStateUpdatedAt.get(op.entityId);
+        if (prevWs == null || wsParsed.updatedAt >= prevWs) {
+          latestWrittenWorkspaceStateUpdatedAt.set(op.entityId, wsParsed.updatedAt);
+        }
+        continue;
+      }
 
       if (op.entityType === USER_CONTENT_ASSET_ENTITY_TYPE) {
         const asset = await processUserContentAssetOp(ns.namespace, op);
@@ -372,6 +451,35 @@ export async function flushPendingFreeSpaceCreates(
           return { ...result, stoppedReason: 'remove_failed' };
         }
         continue;
+      }
+
+      const objRecord = parsed.object as Record<string, unknown>;
+      const nbContent = (objRecord?.content ?? null) as Record<string, unknown> | null;
+      if (objRecord?.type === 'notebook' && nbContent?.type === 'notebook') {
+        const { nbSyncDiagLog, nbSyncDiagSummarizeContent } = await import('../notebookPages/nbSyncDiag');
+        nbSyncDiagLog('D_flush_payload', {
+          sectionId: ns.namespace.workspaceId,
+          boardId: parsed.boardId,
+          objectId: op.entityId,
+          objectUpdatedAt: version ?? undefined,
+        }, {
+          operationType: op.operationType,
+          notebook: nbSyncDiagSummarizeContent(nbContent as unknown as import('../notebookPages/types').NotebookContentWithPages),
+        });
+      }
+      if (objRecord?.type === 'image') {
+        const { fsObjectSyncDiagLog, fsObjectSyncDiagSummarizeObject } = await import('../freeSpaceObject.fsObjectSyncDiag');
+        fsObjectSyncDiagLog('E_flush_dispatch', {
+          sectionId: ns.namespace.workspaceId,
+          boardId: parsed.boardId,
+          objectId: op.entityId,
+        }, {
+          operationType: op.operationType,
+          operationId: op.id,
+          object: fsObjectSyncDiagSummarizeObject(
+            parsed.object as unknown as import('../../hooks/useSectionFreeSpaceObjects').ProjectSpaceObject,
+          ),
+        });
       }
 
       const cloud = await upsertFreeSpaceObjectFromCreatePayload({

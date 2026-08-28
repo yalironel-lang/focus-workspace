@@ -4,6 +4,15 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { loadImageBlob } from '../../lib/freeSpaceImageIdb';
+import { useAuth } from '../../hooks/useAuth';
+import {
+  hydrateSpatialImageWithCloud,
+} from '../../lib/spatialAssetCloud';
+import {
+  fsImageSyncDiagAssetId,
+  fsImageSyncDiagLog,
+  fsImageSyncDiagSummarizeImageContent,
+} from '../../lib/spatialAssetCloud.fsImageSyncDiag';
 
 interface FreeSpaceImageCardProps {
   objectId: string;
@@ -20,11 +29,13 @@ export function FreeSpaceImageCard({
   sectionId,
   onChange: _onChange,
 }: FreeSpaceImageCardProps) {
+  const { user } = useAuth();
   const content = ensureProjectObjectContent('image', rawContent);
   if (content.type !== 'image') return null;
 
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [hydrateGeneration, setHydrateGeneration] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const mounted = useRef(true);
 
@@ -45,12 +56,21 @@ export function FreeSpaceImageCard({
 
     const run = async () => {
       if (content.url) {
-        setLoadState('ready');
-        setObjectUrl((prev) => {
-          revokeIf(prev);
-          return content.url;
-        });
-        return;
+        if (content.url.startsWith('blob:')) {
+          fsImageSyncDiagLog('N_renderer_source', {
+            userId: user?.id,
+            sectionId,
+            objectId,
+            assetId: fsImageSyncDiagAssetId(objectId),
+          }, { source: 'ephemeral_blob_url', rejected: true });
+        } else {
+          setLoadState('ready');
+          setObjectUrl((prev) => {
+            revokeIf(prev);
+            return content.url;
+          });
+          return;
+        }
       }
       if (!content.fileName && !content.fileSize) {
         setLoadState('idle');
@@ -60,12 +80,38 @@ export function FreeSpaceImageCard({
         });
         return;
       }
+      fsImageSyncDiagLog('K_image_ref_extract', {
+        userId: user?.id,
+        sectionId,
+        objectId,
+        assetId: fsImageSyncDiagAssetId(objectId),
+      }, {
+        content: fsImageSyncDiagSummarizeImageContent(content),
+      });
       setLoadState('loading');
       try {
-        const blob = await loadImageBlob(sectionId, objectId);
+        let blob = await loadImageBlob(sectionId, objectId);
+        if ((!blob || blob.size === 0) && user?.id) {
+          const hydrateResult = await hydrateSpatialImageWithCloud({
+            userId: user.id,
+            sectionId,
+            objectId,
+            assetType: 'spatial-image',
+          });
+          fsImageSyncDiagLog('L_spatial_hydrate', {
+            userId: user.id,
+            sectionId,
+            objectId,
+            assetId: fsImageSyncDiagAssetId(objectId),
+          }, { result: hydrateResult });
+          if (hydrateResult === 'cloud_hit') {
+            setHydrateGeneration(n => n + 1);
+          }
+          blob = await loadImageBlob(sectionId, objectId);
+        }
         if (cancelled || !mounted.current) return;
-        if (!blob) {
-          setLoadState('error');
+        if (!blob || blob.size === 0) {
+          setLoadState(user?.id ? 'error' : 'loading');
           setObjectUrl((prev) => {
             revokeIf(prev);
             return null;
@@ -73,6 +119,16 @@ export function FreeSpaceImageCard({
           return;
         }
         url = URL.createObjectURL(blob);
+        fsImageSyncDiagLog('N_renderer_source', {
+          userId: user?.id,
+          sectionId,
+          objectId,
+          assetId: fsImageSyncDiagAssetId(objectId),
+        }, {
+          source: 'local_blob_object_url',
+          byteLength: blob.size,
+          contentType: blob.type || null,
+        });
         setObjectUrl((prev) => {
           revokeIf(prev);
           return url;
@@ -88,7 +144,7 @@ export function FreeSpaceImageCard({
       cancelled = true;
       if (url) revokeIf(url);
     };
-  }, [content.url, content.fileName, content.fileSize, objectId, sectionId, revokeIf]);
+  }, [content.url, content.fileName, content.fileSize, objectId, sectionId, revokeIf, user?.id, hydrateGeneration]);
 
   useEffect(
     () => () => {

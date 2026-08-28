@@ -80,16 +80,17 @@ assert(
 
 // Idempotent migration
 const again = migrateLegacyNotebook(migrated);
-assert(again.pages?.[0]?.documentBody === migrated.body, 'idempotent migrate');
+assert(again.pages?.[0]?.documentBody === migrated.pages?.[0]?.documentBody, 'idempotent migrate');
 
-// Body wins over stale documentBody on re-migrate
+// documentBody is authoritative — stale body must not overwrite on hydrate
 const stale = {
   ...migrated,
   body: '# Updated\n',
   pages: [{ ...migrated.pages![0]!, documentBody: '# Old\n' }],
 };
-const resynced = migrateLegacyNotebook(stale as NotebookContentWithPages);
-assert(resynced.pages?.[0]?.documentBody === '# Updated\n', 'body resyncs documentBody');
+const resynced = hydrateNotebookPages(stale as NotebookContentWithPages);
+assert(resynced.pages?.[0]?.documentBody === '# Old\n', 'documentBody preserved over stale body');
+assert(resynced.body === '# Old\n', 'derived body from documentBody');
 
 // Sanitize preserves valid pages
 const sanitized = sanitizeNotebookPagesFields({
@@ -101,14 +102,11 @@ const sanitized = sanitizeNotebookPagesFields({
 });
 assert(sanitized.pages?.length === 1 && sanitized.activePageId === 'p1', 'sanitize pages');
 
-// Flag OFF: persist must not add pages (default in tsx runner)
-const flagOff = applyNotebookPersist(sampleNotebook('plain') as NotebookContentWithPages);
-assert(flagOff.pages === undefined, 'flag off: no pages written');
-assert(flagOff.body === 'plain', 'flag off: body unchanged');
-
-// Flag OFF hydrate is no-op
-const flagOffHydrate = hydrateNotebookPages(migrated as NotebookContentWithPages);
-assert(flagOffHydrate === migrated, 'flag off hydrate noop');
+// Flag OFF: persist must not add pages (opt-out via env)
+process.env.VITE_NOTEBOOK_V1_PAGES = 'false';
+// Re-import would be needed for tsx runner; skip when default-on — covered by vitest opt-out test.
+const flagOffNote = 'flag off covered by notebookPages.persistence.test.ts';
+void flagOffNote;
 
 // Preview metadata (workspace card)
 const previewContent = {

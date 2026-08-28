@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { notifyDeskMutation } from '../lib/desk/deskPersistence';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -140,24 +141,33 @@ function load(): ModuleConfig[] {
   }
 }
 
-function persist(modules: ModuleConfig[]) {
+function persist(modules: ModuleConfig[], syncUserId?: string | null) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
+  notifyDeskMutation(syncUserId);
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useWorkspaceLayout() {
+export function useWorkspaceLayout(syncUserId?: string | null) {
+  const syncRef = useRef(syncUserId);
+  syncRef.current = syncUserId;
   const [modules, setModules] = useState<ModuleConfig[]>(load);
+
+  useEffect(() => {
+    const onCloud = () => setModules(load());
+    window.addEventListener('fw-desk-cloud-applied', onCloud);
+    return () => window.removeEventListener('fw-desk-cloud-applied', onCloud);
+  }, []);
 
   const mutate = useCallback((next: ModuleConfig[]) => {
     setModules(next);
-    persist(next);
+    persist(next, syncRef.current);
   }, []);
 
   const toggleModule = useCallback((id: string) => {
     setModules(prev => {
       const next = prev.map(m => m.id === id ? { ...m, enabled: !m.enabled } : m);
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -171,7 +181,7 @@ export function useWorkspaceLayout() {
       const [moved] = arr.splice(fi, 1);
       arr.splice(ti, 0, moved);
       const next = arr.map((m, i) => ({ ...m, order: i }));
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -179,7 +189,7 @@ export function useWorkspaceLayout() {
   const setSize = useCallback((id: string, size: ModuleSize) => {
     setModules(prev => {
       const next = prev.map(m => m.id === id ? { ...m, size } : m);
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -192,7 +202,7 @@ export function useWorkspaceLayout() {
       if (!src) return prev;
       const maxOrder = prev.length > 0 ? Math.max(...prev.map(m => m.order)) : 0;
       const next = [...prev, { id: copyId, enabled: true, size: src.size, order: maxOrder + 1 }];
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
     return copyId;

@@ -20,6 +20,10 @@ export {
   hydrateNotebookPages,
   dualWriteNotebookPages,
   applyNotebookPersist,
+  deriveBodyFromActivePage,
+  findActivePage,
+  resolveDefaultNavigation,
+  resolvePageForBodyProjection,
 } from './hydrate';
 export {
   newNotebookSectionId,
@@ -34,6 +38,8 @@ export {
   setNotebookPageLinkedPdf,
   renameNotebookSection,
   renameNotebookPage,
+  deleteNotebookPage,
+  reorderNotebookPagesInSection,
 } from './operations';
 export {
   inkPageKeyForNotebookPage,
@@ -45,3 +51,14 @@ export {
   getNotebookWorkspaceBreadcrumb,
   type NotebookPreviewMeta,
 } from './previewMeta';
+export {
+  notebookManifestFingerprint,
+  notebookManifestChanged,
+  prepareNotebookForCloudPersist,
+} from './persist';
+export {
+  saveNotebookActivePage,
+  loadNotebookActivePage,
+  clearNotebookActivePage,
+  type NotebookActivePageState,
+} from './notebookActivePage';

@@ -16,6 +16,11 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlobFromFile } from '../../lib/freeSpacePdfIdb';
+import { useAuth } from '../../hooks/useAuth';
+import {
+  hydrateSpatialPdfWithCloud,
+  onSpatialPdfSaved,
+} from '../../lib/spatialAssetCloud';
 import { loadPdfThumbnail } from '../../lib/freeSpacePdfThumbIdb';
 import { pdfUploadDiag, pdfUploadDiagDump } from '../../lib/pdfUploadDiag';
 import { flickerDebugLog } from '../../lib/flickerDebug';
@@ -91,6 +96,7 @@ export function FreeSpacePdfCard({
   suppressExternalTabLink = false,
   onStudyMarksChromeChange,
 }: FreeSpacePdfCardProps) {
+  const { user } = useAuth();
   const content = ensureProjectObjectContent('pdf', rawContent);
   if (content.type !== 'pdf') return null;
 
@@ -161,7 +167,18 @@ export function FreeSpacePdfCard({
       });
       setLoadState('loading');
       try {
-        const blob = await loadPdfBlob(sectionId, objectId);
+        let blob = await loadPdfBlob(sectionId, objectId);
+        if (!blob && user?.id) {
+          const hydrateResult = await hydrateSpatialPdfWithCloud({
+            userId: user.id,
+            sectionId,
+            objectId,
+            assetType: 'pdf',
+          });
+          if (hydrateResult === 'cloud_hit') {
+            blob = await loadPdfBlob(sectionId, objectId);
+          }
+        }
         if (cancelled || !mounted.current) return;
         if (!blob) {
           pdfUploadDiag('loadEffect:recover', { sectionId, objectId, key, fileName: content.fileName });
@@ -243,6 +260,14 @@ export function FreeSpacePdfCard({
       setLoadState('loading');
       try {
         const { blobSize } = await savePdfBlobFromFile(sectionId, objectId, file);
+        if (user?.id) {
+          await onSpatialPdfSaved({
+            userId: user.id,
+            sectionId,
+            objectId,
+            assetType: 'pdf',
+          });
+        }
         const next: ProjectObjectContent = {
           type: 'pdf',
           fileName: file.name,

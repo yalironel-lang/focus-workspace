@@ -8,7 +8,8 @@
  * Freeform mode reads/writes positions here exclusively.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { notifyDeskMutation } from '../lib/desk/deskPersistence';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -40,8 +41,11 @@ function load(): PositionMap {
   }
 }
 
-function persist(m: PositionMap): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(m)); } catch { /* quota */ }
+function persist(m: PositionMap, syncUserId?: string | null): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(m));
+    notifyDeskMutation(syncUserId);
+  } catch { /* quota */ }
 }
 
 const makeDefault = (hint?: Partial<BlockPos>): BlockPos => ({
@@ -72,8 +76,16 @@ export interface BlockPositionsState {
   nextFreePos: (existingMap?: PositionMap) => { x: number; y: number };
 }
 
-export function useBlockPositions(): BlockPositionsState {
+export function useBlockPositions(syncUserId?: string | null): BlockPositionsState {
+  const syncRef = useRef(syncUserId);
+  syncRef.current = syncUserId;
   const [positions, setPositions] = useState<PositionMap>(load);
+
+  useEffect(() => {
+    const onCloud = () => setPositions(load());
+    window.addEventListener('fw-desk-cloud-applied', onCloud);
+    return () => window.removeEventListener('fw-desk-cloud-applied', onCloud);
+  }, []);
 
   const getPos = useCallback((id: string): BlockPos => {
     return positions[id] ?? makeDefault();
@@ -85,7 +97,7 @@ export function useBlockPositions(): BlockPositionsState {
         ...prev,
         [id]: { ...(prev[id] ?? makeDefault()), ...patch },
       };
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -97,7 +109,7 @@ export function useBlockPositions(): BlockPositionsState {
         ...prev,
         [id]: makeDefault(hint),
       };
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -105,7 +117,7 @@ export function useBlockPositions(): BlockPositionsState {
   const removePos = useCallback((id: string) => {
     setPositions(prev => {
       const { [id]: _removed, ...rest } = prev;
-      persist(rest);
+      persist(rest, syncRef.current);
       return rest;
     });
   }, []);

@@ -50,6 +50,7 @@ import { computeIntelligence, getGreeting } from '../utils/workspaceIntelligence
 import { useSessionContinuity }     from '../hooks/useSessionContinuity';
 import { StartHerePanel }       from '../components/canvas/StartHerePanel';
 import { Loader2, Plus, X }     from 'lucide-react';
+import { useDeskCloudHydrate } from '../lib/desk/useDeskCloudHydrate';
 import toast from 'react-hot-toast';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -72,11 +73,12 @@ export function DeskPage() {
   const navigate = useNavigate();
   const { openSessionModal } = useCommandPalette();
   const { user, signOut }                                       = useAuth();
+  useDeskCloudHydrate(user?.id ?? null);
   const { sections, loading, createSection, deleteSection }     = useSections();
   const { deadlines, addDeadline }                              = useDeadlines();
   const { modules, toggleModule, reorder, setSize,
           applyPreset: applyLayoutPreset, applyModules,
-          reset, presets, duplicateModule }                      = useWorkspaceLayout();
+          reset, presets, duplicateModule }                      = useWorkspaceLayout(user?.id ?? null);
   const { tokens: atmTokens, atmosphereId, setAtmosphere }      = useAtmosphere();
 
   // ── Theme system ─────────────────────────────────────────────────────────────
@@ -91,13 +93,13 @@ export function DeskPage() {
     blocks, addBlock, addBlockWithContent, clearAllBlocks,
     updateContent, updateTheme: updateBlockTheme,
     setBlockSize, deleteBlock, duplicateBlock, reorderBlocks,
-  } = useCustomBlocks();
+  } = useCustomBlocks(user?.id ?? null);
 
   const tokens = mergeAccent(atmTokens, design);
 
   // ── Freeform canvas ──────────────────────────────────────────────────────
   const canvasMode   = useCanvasMode();
-  const blockPos     = useBlockPositions();
+  const blockPos     = useBlockPositions(user?.id ?? null);
   const customTools  = useCustomTools();
   const [createToolOpen, setCreateToolOpen] = useState(false);
 

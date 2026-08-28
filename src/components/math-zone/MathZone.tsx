@@ -43,6 +43,7 @@ import {
 import { TiptapFormatBubbleMenu, tiptapToolbarBusyRef } from './TiptapFormatBubbleMenu';
 import '../notebook/notebookToolbar.css';
 import { touchMathZoneActivity } from '../../lib/mathZoneActivity';
+import { notifyMathZoneMutation } from '../../lib/mathZone/mathZoneCloudSync';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -111,6 +112,7 @@ export interface MathZoneProps {
   tokens:       AtmosphereTokens;
   sectionId:    string;
   sectionTitle: string;
+  userId?:      string | null;
   paddingTop?:  number;
   controlsOpen?: boolean;
   onControlsOpenChange?: (open: boolean) => void;
@@ -285,12 +287,24 @@ function saveNbData(sectionId: string, nbId: string, data: MathZoneData) {
 
 // ── useNotebooks ──────────────────────────────────────────────────────────────
 
-function useNotebooks(sectionId: string) {
+function useNotebooks(sectionId: string, syncUserId?: string | null) {
   const [index, setIndex] = useState<NotebooksIndex>(() => loadIndex(sectionId));
   const [data,  setData]  = useState<MathZoneData>(() => {
     const idx = loadIndex(sectionId);
     return loadNbData(sectionId, idx.activeId);
   });
+
+  useEffect(() => {
+    const onCloud = (e: Event) => {
+      const detail = (e as CustomEvent<{ sectionId?: string }>).detail;
+      if (detail?.sectionId && detail.sectionId !== sectionId) return;
+      const idx = loadIndex(sectionId);
+      setIndex(idx);
+      setData(loadNbData(sectionId, idx.activeId));
+    };
+    window.addEventListener('fw-math-zone-cloud-applied', onCloud);
+    return () => window.removeEventListener('fw-math-zone-cloud-applied', onCloud);
+  }, [sectionId]);
 
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dataRef      = useRef<MathZoneData>(data);
@@ -306,6 +320,7 @@ function useNotebooks(sectionId: string) {
         notebooks: index.notebooks.map(nb => nb.id === index.activeId ? { ...nb, updatedAt: now } : nb),
       };
       saveIndex(sectionId, updatedIndex);
+      notifyMathZoneMutation(syncUserId, sectionId);
       setIndex(updatedIndex);
     }, 300);
     return () => { if (persistTimer.current) clearTimeout(persistTimer.current); };
@@ -1524,12 +1539,12 @@ function EdgeTab({ side, label, open, tokens, onClick }: {
 // ── MathZone ──────────────────────────────────────────────────────────────────
 
 export function MathZone({
-  tokens, sectionId, sectionTitle: _st, paddingTop = 52, controlsOpen = false, onControlsOpenChange,
+  tokens, sectionId, sectionTitle: _st, userId, paddingTop = 52, controlsOpen = false, onControlsOpenChange,
 }: MathZoneProps) {
   const {
     index, data, activeNotebook,
     updateNotebookData, createNotebook, switchNotebook, renameNotebook, duplicateNotebook,
-  } = useNotebooks(sectionId);
+  } = useNotebooks(sectionId, userId);
   const [showShelf, setShowShelf] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const writingSurfaceRef = useRef<HTMLDivElement>(null);

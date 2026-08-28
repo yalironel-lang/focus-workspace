@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { ModuleSize } from './useWorkspaceLayout';
 import type { AccentPreset, SurfaceStyle, BorderStyle } from './useWorkspaceTheme';
+import { notifyDeskMutation } from '../lib/desk/deskPersistence';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -90,14 +91,23 @@ function load(): CustomBlock[] {
   } catch { return []; }
 }
 
-function persist(blocks: CustomBlock[]) {
+function persist(blocks: CustomBlock[], syncUserId?: string | null) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(blocks));
+  notifyDeskMutation(syncUserId);
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useCustomBlocks() {
+export function useCustomBlocks(syncUserId?: string | null) {
+  const syncRef = useRef(syncUserId);
+  syncRef.current = syncUserId;
   const [blocks, setBlocks] = useState<CustomBlock[]>(load);
+
+  useEffect(() => {
+    const onCloud = () => setBlocks(load());
+    window.addEventListener('fw-desk-cloud-applied', onCloud);
+    return () => window.removeEventListener('fw-desk-cloud-applied', onCloud);
+  }, []);
 
   const addBlock = useCallback((type: BlockType): string => {
     const id = `block-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -113,7 +123,7 @@ export function useCustomBlocks() {
         createdAt: Date.now(),
       };
       const next = [...prev, block];
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
     return id;
@@ -163,7 +173,7 @@ export function useCustomBlocks() {
         createdAt: Date.now(),
       };
       const next = [...prev, block];
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
     return id;
@@ -178,7 +188,7 @@ export function useCustomBlocks() {
   const updateContent = useCallback((id: string, content: BlockContent) => {
     setBlocks(prev => {
       const next = prev.map(b => b.id === id ? { ...b, content } : b);
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -188,7 +198,7 @@ export function useCustomBlocks() {
       const next = prev.map(b =>
         b.id === id ? { ...b, theme: { ...b.theme, ...patch } } : b
       );
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -196,7 +206,7 @@ export function useCustomBlocks() {
   const setBlockSize = useCallback((id: string, size: ModuleSize) => {
     setBlocks(prev => {
       const next = prev.map(b => b.id === id ? { ...b, size } : b);
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -204,7 +214,7 @@ export function useCustomBlocks() {
   const deleteBlock = useCallback((id: string) => {
     setBlocks(prev => {
       const next = prev.filter(b => b.id !== id);
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);
@@ -217,7 +227,7 @@ export function useCustomBlocks() {
       const maxOrder = prev.length > 0 ? Math.max(...prev.map(b => b.order)) : 0;
       const copy: CustomBlock = { ...src, id: newId, order: maxOrder + 1, createdAt: Date.now() };
       const next = [...prev, copy];
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
     return newId;
@@ -232,7 +242,7 @@ export function useCustomBlocks() {
       const [moved] = arr.splice(fi, 1);
       arr.splice(ti, 0, moved);
       const next = arr.map((b, i) => ({ ...b, order: i }));
-      persist(next);
+      persist(next, syncRef.current);
       return next;
     });
   }, []);

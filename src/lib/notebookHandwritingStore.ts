@@ -867,6 +867,16 @@ export async function hydrateHandwritingBlocks(
   if (changed) notify();
 }
 
+export async function listHandwritingBlockKeysForObject(objectId: string): Promise<string[]> {
+  if (!objectId) return [];
+  try {
+    const storageKeys = await persistListKeysForObject(objectId);
+    return storageKeys.map(k => k.slice(objectId.length + 1)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export async function gcOrphanHandwritingKeys(
   objectId: string,
   referencedKeys: string[],

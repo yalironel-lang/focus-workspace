@@ -709,6 +709,18 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
           void writeFreeSpaceObjectTombstone(input.sectionId, input.boardId, victim);
         }
       });
+      void import('../spatialAssetCloud').then(async ({ suppressSpatialAssetAfterPeerDelete }) => {
+        if (!input.userId) return;
+        for (const victim of victims) {
+          if (victim.type !== 'image' && victim.type !== 'pdf') continue;
+          await suppressSpatialAssetAfterPeerDelete({
+            userId: input.userId,
+            sectionId: input.sectionId,
+            objectId: victim.id,
+            assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
+          });
+        }
+      });
     }
   }
 
@@ -836,6 +848,18 @@ export async function applyFreeSpaceCloudDeleteToMountedBoard(input: {
     void import('../knowledge/tombstoneStore').then(({ writeFreeSpaceObjectTombstone }) =>
       writeFreeSpaceObjectTombstone(input.sectionId, input.boardId, victim),
     );
+    if (
+      input.userId &&
+      (victim.type === 'image' || victim.type === 'pdf')
+    ) {
+      const { suppressSpatialAssetAfterPeerDelete } = await import('../spatialAssetCloud');
+      await suppressSpatialAssetAfterPeerDelete({
+        userId: input.userId,
+        sectionId: input.sectionId,
+        objectId: victim.id,
+        assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
+      });
+    }
   }
 
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope_after_persist' };

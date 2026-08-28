@@ -1,6 +1,7 @@
 import { PAGE_INK_BLOCK_KEY } from '../handwritingTypes';
 import { inkPageKeyForNotebookPage } from './inkPageKey';
 import { isNotebookV1PagesEnabled } from './featureFlag';
+import { nbSyncDiagLog, nbSyncDiagSummarizeContent } from './nbSyncDiag';
 import {
   LEGACY_DEFAULT_PAGE_ID,
   LEGACY_DEFAULT_PAGE_TITLE,
@@ -85,17 +86,42 @@ function hasValidV1Pages(content: NotebookPagesFields): boolean {
   const sections = content.sections ?? [];
   const pages = content.pages ?? [];
   if (sections.length === 0 || pages.length === 0) return false;
-  if (!content.activeSectionId || !content.activePageId) return false;
-  const section = sections.find(s => s.id === content.activeSectionId);
-  const page = pages.find(p => p.id === content.activePageId);
-  if (!section || !page) return false;
-  if (page.sectionId !== section.id) return false;
-  return section.pageIds.includes(page.id);
+  if (content.schemaVersion !== NOTEBOOK_SCHEMA_VERSION_V1) return false;
+  for (const section of sections) {
+    for (const pageId of section.pageIds) {
+      const page = pages.find(p => p.id === pageId);
+      if (!page || page.sectionId !== section.id) return false;
+    }
+  }
+  return true;
 }
 
-function findActivePage(content: NotebookPagesFields): NotebookPage | null {
+export function findActivePage(content: NotebookPagesFields): NotebookPage | null {
   if (!content.activePageId) return null;
   return (content.pages ?? []).find(p => p.id === content.activePageId) ?? null;
+}
+
+/** First page in first section — used when cloud omits device-local navigation fields. */
+export function resolveDefaultNavigation(content: NotebookPagesFields): {
+  activeSectionId: string;
+  activePageId: string;
+} | null {
+  const sections = content.sections ?? [];
+  if (sections.length === 0) return null;
+  const section = sections[0]!;
+  const pageId = section.pageIds[0];
+  if (!pageId) return null;
+  const page = (content.pages ?? []).find(p => p.id === pageId);
+  if (!page) return null;
+  return { activeSectionId: section.id, activePageId: pageId };
+}
+
+export function resolvePageForBodyProjection(content: NotebookPagesFields): NotebookPage | null {
+  const direct = findActivePage(content);
+  if (direct) return direct;
+  const nav = resolveDefaultNavigation(content);
+  if (!nav) return null;
+  return (content.pages ?? []).find(p => p.id === nav.activePageId) ?? null;
 }
 
 function withPageDocumentBody(
@@ -109,7 +135,7 @@ function withPageDocumentBody(
   return { ...content, pages };
 }
 
-/** Map a page record to the legacy `body` string the UI reads in Phase 1. */
+/** Map a page record to the legacy `body` string the UI reads. */
 export function serializePageToBody(page: NotebookPage, legacyBody = ''): string {
   if (page.kind === 'document') return page.documentBody ?? legacyBody;
   return legacyBody;
@@ -167,46 +193,67 @@ function ensureWritePageInkKeys<T extends NotebookContentWithPages>(content: T):
   return { ...content, pages: nextPages } as T;
 }
 
+/** Derive legacy `body` from active (or first) document page — never overwrites documentBody. */
+export function deriveBodyFromActivePage<T extends NotebookContentWithPages>(content: T): T {
+  const page = resolvePageForBodyProjection(content);
+  if (!page) return content;
+  const body = serializePageToBody(page, content.body ?? '');
+  if (body === (content.body ?? '')) return content;
+  return { ...content, body } as T;
+}
+
 /** One-time legacy shape → Section "Notes" / Page 1. Idempotent when V1 pages already valid. */
 export function migrateLegacyNotebook<T extends NotebookContentWithPages>(content: T): T {
   if (hasValidV1Pages(content)) {
-    return syncBodyOntoActiveDocumentPage(ensureWritePageInkKeys(content));
+    return deriveBodyFromActivePage(ensureWritePageInkKeys(content));
   }
-  return syncBodyOntoActiveDocumentPage(ensureWritePageInkKeys(buildLegacyDefaultPages(content) as T));
+  const migrated = buildLegacyDefaultPages(content) as T;
+  return deriveBodyFromActivePage(ensureWritePageInkKeys(migrated));
 }
 
-/** Phase 1: legacy `body` is UI source of truth; mirror onto active document page. */
-function syncBodyOntoActiveDocumentPage<T extends NotebookContentWithPages>(content: T): T {
-  const activePage = findActivePage(content);
-  if (!activePage || activePage.kind !== 'document') return content;
-  const body = content.body ?? '';
-  if ((activePage.documentBody ?? '') === body) return content;
-  return withPageDocumentBody(content, activePage.id, body) as T;
-}
-
-/** Dual-read: ensure pages exist and `body` reflects the active page (document pages only). */
-export function hydrateNotebookPages<T extends NotebookContentWithPages>(content: T): T {
+/** Dual-read: ensure pages exist; derive `body` from active document page. */
+export function hydrateNotebookPages<T extends NotebookContentWithPages>(
+  content: T,
+  ctx?: { objectId?: string; sectionId?: string; boardId?: string },
+): T {
   if (!isNotebookV1PagesEnabled()) return content;
-  const migrated = migrateLegacyNotebook(content);
-  const activePage = findActivePage(migrated);
-  if (!activePage) return migrated;
-  const body = serializePageToBody(activePage, migrated.body ?? '');
-  if (body === (migrated.body ?? '')) return migrated;
-  return { ...migrated, body } as T;
+  nbSyncDiagLog('I_hydrate_input', {
+    objectId: ctx?.objectId,
+    sectionId: ctx?.sectionId,
+    boardId: ctx?.boardId,
+  }, { content: nbSyncDiagSummarizeContent(content) });
+  const out = migrateLegacyNotebook(content);
+  nbSyncDiagLog('J_hydrate_output', {
+    objectId: ctx?.objectId,
+    sectionId: ctx?.sectionId,
+    boardId: ctx?.boardId,
+  }, { content: nbSyncDiagSummarizeContent(out) });
+  return out;
 }
 
-/** Dual-write: persist `body` onto active document page while keeping legacy body field. */
+/**
+ * Write editor body onto active document page; documentBody is authoritative.
+ * `body` is a derived projection for the active page editor.
+ */
 export function dualWriteNotebookPages<T extends NotebookContentWithPages>(content: T): T {
   if (!isNotebookV1PagesEnabled()) return content;
   const migrated = migrateLegacyNotebook(content);
-  return syncBodyOntoActiveDocumentPage({
-    ...migrated,
+  const editorPage = findActivePage(migrated) ?? resolvePageForBodyProjection(migrated);
+  if (!editorPage || editorPage.kind !== 'document') {
+    return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1 } as T;
+  }
+  const editorBody = content.body ?? '';
+  if ((editorPage.documentBody ?? '') === editorBody) {
+    return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1, body: editorBody } as T;
+  }
+  return {
+    ...withPageDocumentBody(migrated, editorPage.id, editorBody),
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
-    body: content.body ?? '',
-  }) as T;
+    body: editorBody,
+  } as T;
 }
 
-/** Persist hook for notebook editors — applies dual-write when the flag is on. */
+/** Persist hook for notebook editors — dual-write when V1 pages enabled. */
 export function applyNotebookPersist<T extends NotebookContentWithPages>(content: T): T {
   return dualWriteNotebookPages(content);
 }

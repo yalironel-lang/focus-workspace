@@ -164,6 +164,18 @@ function cacheBlob(key: string, blob: Blob): void {
   urlCache.set(key, URL.createObjectURL(blob));
 }
 
+/** Load raw blob from IDB (for cloud resolver / hydrate). */
+export async function nbImageLoadBlob(key: string): Promise<Blob | undefined> {
+  return loadBlob(key);
+}
+
+/** Save raw blob to IDB (for cloud hydrate). */
+export async function nbImageSaveBlob(key: string, blob: Blob): Promise<void> {
+  await saveBlob(key, blob);
+  cacheBlob(key, blob);
+  notify();
+}
+
 /** Sync read from in-memory cache (populate via hydrateNotebookImages). */
 export function nbImageGet(key: string): string | null {
   return urlCache.get(key) ?? null;

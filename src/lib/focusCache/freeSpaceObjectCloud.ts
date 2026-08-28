@@ -76,11 +76,54 @@ export async function upsertFreeSpaceObjectFromCreatePayload(
   );
 
   if (error) {
+    void import('../notebookPages/nbSyncDiag').then(({ nbSyncDiagLog, nbSyncDiagSummarizeContent }) => {
+      const obj = input.object as Record<string, unknown>;
+      const content = obj?.content as Record<string, unknown> | undefined;
+      nbSyncDiagLog('E_supabase_response', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: input.objectId,
+      }, {
+        ok: false,
+        message: error.message,
+        payloadType: obj?.type ?? null,
+        notebook: content?.type === 'notebook' ? nbSyncDiagSummarizeContent(content as unknown as import('../notebookPages/types').NotebookContentWithPages) : null,
+      });
+    });
     return {
       ok: false,
       reason: 'cloud_write_failed',
       message: error.message,
     };
+  }
+
+  void import('../notebookPages/nbSyncDiag').then(({ nbSyncDiagLog, nbSyncDiagSummarizeContent }) => {
+    const obj = input.object as Record<string, unknown>;
+    const content = obj?.content as Record<string, unknown> | undefined;
+    if (content?.type === 'notebook') {
+      nbSyncDiagLog('E_supabase_response', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: input.objectId,
+      }, {
+        ok: true,
+        notebook: nbSyncDiagSummarizeContent(content as unknown as import('../notebookPages/types').NotebookContentWithPages),
+      });
+    }
+  });
+  if ((input.object as Record<string, unknown>)?.type === 'image') {
+    void import('../freeSpaceObject.fsObjectSyncDiag').then(({ fsObjectSyncDiagLog, fsObjectSyncDiagSummarizeObject }) => {
+      fsObjectSyncDiagLog('F_supabase_upsert', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: input.objectId,
+      }, {
+        ok: true,
+        object: fsObjectSyncDiagSummarizeObject(
+          input.object as unknown as import('../../hooks/useSectionFreeSpaceObjects').ProjectSpaceObject,
+        ),
+      });
+    });
   }
 
   return { ok: true };

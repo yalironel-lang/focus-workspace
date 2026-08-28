@@ -56,7 +56,27 @@ export function shouldAcceptCloudObject(input: {
   if (!input.local) return true;
   const cloudAt = input.cloud.updatedAt ?? 0;
   const localAt = input.local.updatedAt ?? 0;
-  return cloudAt > localAt;
+  const accept = cloudAt > localAt;
+  if (
+    input.cloud.type === 'notebook' &&
+    input.cloud.content?.type === 'notebook'
+  ) {
+    void import('../notebookPages/nbSyncDiag').then(({ nbSyncDiagLog, nbSyncDiagSummarizeContent }) => {
+      nbSyncDiagLog('G_shouldAcceptCloud', { objectId: id, objectUpdatedAt: cloudAt }, {
+        localUpdatedAt: localAt,
+        cloudUpdatedAt: cloudAt,
+        decision: accept ? 'accept_cloud' : 'keep_local',
+        reason: accept ? 'cloud_newer' : localAt === cloudAt ? 'equal_ts' : 'local_newer',
+        cloudContent: input.cloud.content.type === 'notebook'
+          ? nbSyncDiagSummarizeContent(input.cloud.content)
+          : null,
+        localContent: input.local?.content?.type === 'notebook'
+          ? nbSyncDiagSummarizeContent(input.local.content)
+          : null,
+      });
+    });
+  }
+  return accept;
 }
 
 /**

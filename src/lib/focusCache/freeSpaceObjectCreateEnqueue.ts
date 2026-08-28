@@ -16,6 +16,10 @@ import { noteCloudOpEnqueued } from '../sync/cloudSyncStatus';
 import { enqueuePendingOperation } from './pendingOperations';
 import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import type { JsonValue, PendingQueueFailureReason } from './types';
+import {
+  fsObjectSyncDiagLog,
+  fsObjectSyncDiagSummarizeObject,
+} from '../freeSpaceObject.fsObjectSyncDiag';
 
 export const FREE_SPACE_OBJECT_ENTITY_TYPE = 'free_space_object' as const;
 
@@ -83,6 +87,18 @@ export async function enqueueFreeSpaceObjectCreate(
     if (!result.ok) {
       fwPersistWarn(`pending queue enqueue failed: reason=${result.reason}`);
       return { ok: false, reason: result.reason };
+    }
+
+    if (input.object.type === 'image' || input.object.type === 'pdf') {
+      fsObjectSyncDiagLog('C_structured_enqueue', {
+        sectionId: input.sectionId,
+        boardId: input.boardId,
+        objectId: input.object.id,
+      }, {
+        operationType: 'create',
+        operationId: result.value.id,
+        object: fsObjectSyncDiagSummarizeObject(input.object),
+      });
     }
 
     noteCloudOpEnqueued(result.value.id);
