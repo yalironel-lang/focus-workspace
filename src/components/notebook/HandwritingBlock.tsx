@@ -87,13 +87,18 @@ import {
   recordPageInkRenderState,
 } from '../../lib/handwritingPageInkDebug';
 import {
-  hwLoadBlock,
   hwLoadErrorMessage,
   hwLoadRecoveryGuidance,
   hwSet,
   type HwGetResult,
   type HwSetResult,
 } from '../../lib/notebookHandwritingStore';
+import {
+  flushHandwritingCloudEnqueueNow,
+  hydrateHandwritingWithCloud,
+  reconcileHandwritingWithCloud,
+  scheduleHandwritingCloudUpload,
+} from '../../lib/notebookHandwritingCloud';
 import {
   CANVAS_HEIGHT_MAX,
   CANVAS_HEIGHT_MIN,
@@ -114,6 +119,10 @@ export type HandwritingTool = 'pen' | 'eraser';
 type Props = {
   objectId: string;
   blockKey: string;
+  /** Authenticated user — required for Free Space cloud sync. */
+  userId?: string;
+  /** Workspace / section id — required for Free Space cloud sync. */
+  sectionId?: string;
   tokens: AtmosphereTokens;
   readOnly?: boolean;
   surfaceChrome?: CSSProperties;
@@ -207,6 +216,8 @@ function afterLayoutSettle(run: () => void): void {
 export function HandwritingBlock({
   objectId,
   blockKey,
+  userId,
+  sectionId,
   tokens,
   readOnly = false,
   surfaceChrome,
@@ -240,6 +251,8 @@ export function HandwritingBlock({
     scrollEl: HTMLElement | null;
   } | null>(null);
   const unmountFlushDoneRef = useRef(false);
+  /** Avoid wiping hydrated strokes when only cloud ids (userId/sectionId) change. */
+  const hydrateIdentityRef = useRef<{ objectId: string; blockKey: string } | null>(null);
   const flushSaveRef = useRef<
     (reason?: 'registry' | 'unmount' | 'stroke' | 'debounce' | 'visibility') => Promise<boolean>
   >(() => Promise.resolve(true));
@@ -570,6 +583,12 @@ export function HandwritingBlock({
       });
       if (result.ok) {
         setSaveError(result.verifyMismatch ? saveVerifyWarningMessage() : null);
+        const cloudIds = { userId, sectionId, objectId, blockKey };
+        scheduleHandwritingCloudUpload(cloudIds, payload.updatedAt);
+        // Lifecycle flushes must persist the pending op before the tab can die.
+        if (reason === 'unmount' || reason === 'visibility' || reason === 'registry') {
+          await flushHandwritingCloudEnqueueNow(cloudIds);
+        }
         return true;
       }
       const message = saveErrorMessage(result);
@@ -581,7 +600,7 @@ export function HandwritingBlock({
       toast.error(message);
       return false;
     },
-    [objectId, blockKey, isPageInkBlock],
+    [objectId, blockKey, userId, sectionId, isPageInkBlock],
   );
 
   const flushSave = useCallback(
@@ -685,41 +704,61 @@ export function HandwritingBlock({
   useEffect(() => {
     let cancelled = false;
     unmountFlushDoneRef.current = false;
-    dataRef.current = null;
-    draftRef.current = null;
-    pendingSaveRef.current = null;
-    undoRef.current = [];
-    commitCacheValidRef.current = false;
-    commitCacheStrokeCountRef.current = -1;
-    draftPaintedCountRef.current = 0;
-    setLoaded(false);
-    setLoadError(null);
+    const storageIdentityChanged =
+      hydrateIdentityRef.current?.objectId !== objectId ||
+      hydrateIdentityRef.current?.blockKey !== blockKey;
+    if (storageIdentityChanged) {
+      dataRef.current = null;
+      draftRef.current = null;
+      pendingSaveRef.current = null;
+      undoRef.current = [];
+      commitCacheValidRef.current = false;
+      commitCacheStrokeCountRef.current = -1;
+      draftPaintedCountRef.current = 0;
+      hydrateIdentityRef.current =
+        objectId && blockKey ? { objectId, blockKey } : null;
+      setLoaded(false);
+      setLoadError(null);
+    }
     void (async () => {
       if (!objectId || !blockKey) {
         setLoaded(true);
         setMissing(true);
         return;
       }
-      const loadResult = await hwLoadBlock(objectId, blockKey);
+      const hydrate = await hydrateHandwritingWithCloud({
+        userId,
+        sectionId,
+        objectId,
+        blockKey,
+      });
       if (cancelled) return;
       const isPageInk = isNotebookPageInkKey(blockKey);
-      if (loadResult.status === 'error') {
-        setLoadError(loadResult);
+
+      if (hydrate.status === 'local_error') {
+        setLoadError({
+          status: 'error',
+          data: null,
+          failureStage: hydrate.failureStage,
+          errorName: hydrate.errorName,
+        });
         setMissing(false);
         setStrokeCount(0);
         const canvas = canvasRef.current;
         const rect = canvas?.getBoundingClientRect();
         const w = rect && rect.width >= 1 ? rect.width : 600;
         const defaultMinH = pageLayout ? PAGE_INK_INITIAL_HEIGHT : CANVAS_HEIGHT_MIN;
-        const h = clampCanvasHeight(pageLayout ? PAGE_INK_INITIAL_HEIGHT : (rect && rect.height >= 1 ? rect.height : defaultMinH));
+        const h = clampCanvasHeight(
+          pageLayout ? PAGE_INK_INITIAL_HEIGHT : (rect && rect.height >= 1 ? rect.height : defaultMinH),
+        );
         dataRef.current = emptyHandwritingData(w, h);
         setDisplayHeight(h);
         if (isPageInk) {
           hwDiagLog('HandwritingBlock.tsx:mount', 'page-ink load failed', {
             objectId,
             blockKey,
-            failureStage: loadResult.failureStage,
-            errorName: loadResult.errorName,
+            failureStage: hydrate.failureStage,
+            errorName: hydrate.errorName,
           });
           recordPageInkHydrate(objectId, false, 0);
         }
@@ -728,7 +767,10 @@ export function HandwritingBlock({
         setLoaded(true);
         return;
       }
-      const existing = loadResult.status === 'loaded' ? loadResult.data : null;
+
+      const existing =
+        hydrate.status === 'local_hit' || hydrate.status === 'cloud_hit' ? hydrate.data : null;
+
       if (isPageInk) {
         hwDiagLog('HandwritingBlock.tsx:mount', 'page-ink hydrate', {
           objectId,
@@ -739,7 +781,7 @@ export function HandwritingBlock({
           height: existing?.canvas.height ?? null,
           pageLayout,
           readOnly,
-          loadStatus: loadResult.status,
+          hydrateStatus: hydrate.status,
         });
         recordPageInkHydrate(objectId, Boolean(existing), existing?.strokes.length ?? 0);
       }
@@ -765,6 +807,28 @@ export function HandwritingBlock({
             canvasSizeAtHydrate: formatCanvasSize(canvas),
           });
         }
+      } else if (!userId || !sectionId) {
+        // Cloud ids not ready — never clobber cloud-hydrated strokes with a
+        // placeholder empty canvas; re-run when userId/sectionId settle.
+        if (dataRef.current && dataRef.current.strokes.length > 0) {
+          setDisplayHeight(
+            clampCanvasHeight(
+              dataRef.current.canvas.height ??
+                (pageLayout ? PAGE_INK_INITIAL_HEIGHT : defaultMinH),
+            ),
+          );
+          setStrokeCount(dataRef.current.strokes.length);
+          setMissing(false);
+          if (isPageInk) {
+            recordPageInkMemory(objectId, dataRef.current.strokes.length);
+          }
+          setLoaded(true);
+          afterLayoutSettle(() => {
+            if (cancelled) return;
+            redrawAfterHydrate('mount');
+          });
+        }
+        return;
       } else {
         dataRef.current = emptyHandwritingData(w, h);
         setDisplayHeight(h);
@@ -778,12 +842,43 @@ export function HandwritingBlock({
         if (cancelled) return;
         redrawAfterHydrate('mount');
       });
+
+      // LWW: local paint first; online reconcile may replace with newer remote.
+      if (hydrate.status === 'local_hit' && userId && sectionId) {
+        void reconcileHandwritingWithCloud(
+          { userId, sectionId, objectId, blockKey },
+          hydrate.data,
+        ).then(result => {
+          if (cancelled) return;
+          if (result.action !== 'apply_remote') return;
+          const remote = result.data;
+          const nextH = pageLayout
+            ? clampCanvasHeight(remote.canvas.height ?? PAGE_INK_INITIAL_HEIGHT)
+            : clampCanvasHeight(remote.canvas.height);
+          dataRef.current = { ...remote, canvas: { ...remote.canvas, height: nextH } };
+          setDisplayHeight(nextH);
+          setStrokeCount(remote.strokes.length);
+          setMissing(false);
+          invalidateCommitCache();
+          afterLayoutSettle(() => {
+            if (cancelled) return;
+            redrawAfterHydrate('mount');
+          });
+        });
+      }
     })();
     return () => {
       cancelled = true;
+      // Skip persisting placeholder empty canvas when cloud ids were never wired.
+      if (
+        (!userId || !sectionId) &&
+        (dataRef.current?.strokes.length ?? 0) === 0
+      ) {
+        return;
+      }
       void flushSaveRef.current('unmount');
     };
-  }, [objectId, blockKey, pageLayout, redrawAfterHydrate, reloadToken]);
+  }, [objectId, blockKey, userId, sectionId, pageLayout, redrawAfterHydrate, reloadToken, invalidateCommitCache]);
 
   const retryLoad = useCallback(() => {
     setReloadToken(t => t + 1);

@@ -651,6 +651,7 @@ export async function hwSet(
   objectId: string,
   blockKey: string,
   data: HandwritingBlockData,
+  opts?: { preserveUpdatedAt?: boolean },
 ): Promise<HwSetResult> {
   if (!objectId || !blockKey) {
     hwDiagLog('notebookHandwritingStore.ts:hwSet', 'missing objectId or blockKey', {
@@ -691,7 +692,10 @@ export async function hwSet(
     return { ok: false, failureStage: 'sanitize', reachedIdb: false };
   }
 
-  const toStore = { ...sanitized, updatedAt: Date.now() };
+  // User edits restamp; cloud hydration must preserve remote updatedAt for LWW.
+  const toStore = opts?.preserveUpdatedAt
+    ? sanitized
+    : { ...sanitized, updatedAt: Date.now() };
   let payloadBytes: number | null = null;
   try {
     payloadBytes = JSON.stringify(toStore).length;
@@ -823,6 +827,24 @@ export async function hwDeleteAllForObject(objectId: string): Promise<void> {
   if (keys.length) notify();
 }
 
+/** Test-only: drop in-memory cache + IDB handle so fake-idb can reset cleanly. */
+export function resetNotebookHandwritingStoreForTests(): void {
+  cache.clear();
+  recentWrites.clear();
+  listeners.clear();
+  idbChain = Promise.resolve();
+  if (activeDb) {
+    try {
+      activeDb.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  activeDb = null;
+  dbPromise = null;
+  activePersistBackend = 'none';
+}
+
 export async function hydrateHandwritingBlocks(
   objectId: string,
   blockKeys: string[],
@@ -848,16 +870,17 @@ export async function hydrateHandwritingBlocks(
 export async function gcOrphanHandwritingKeys(
   objectId: string,
   referencedKeys: string[],
-): Promise<void> {
-  if (!objectId) return;
+): Promise<string[]> {
+  if (!objectId) return [];
   const referenced = new Set(referencedKeys.filter(Boolean));
   let existing: string[] = [];
   try {
     existing = await persistListKeysForObject(objectId);
   } catch {
-    return;
+    return [];
   }
   const now = Date.now();
+  const deletedBlockKeys: string[] = [];
   for (const storageKey of existing) {
     const blockKey = storageKey.slice(objectId.length + 1);
     if (referenced.has(blockKey)) continue;
@@ -878,10 +901,12 @@ export async function gcOrphanHandwritingKeys(
     cache.delete(storageKey);
     recentWrites.delete(storageKey);
     await persistDelete(storageKey).catch(() => undefined);
+    deletedBlockKeys.push(blockKey);
   }
+  return deletedBlockKeys;
 }
 
-export async function gcOrphanHandwriting(objectId: string, body: string): Promise<void> {
+export async function gcOrphanHandwriting(objectId: string, body: string): Promise<string[]> {
   const referenced = [...new Set([...referencedHandwritingKeys(body), PAGE_INK_BLOCK_KEY])];
   return gcOrphanHandwritingKeys(objectId, referenced);
 }

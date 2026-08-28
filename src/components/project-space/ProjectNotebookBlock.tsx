@@ -42,6 +42,10 @@ import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigat
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
+import { useAuth } from '../../hooks/useAuth';
+import {
+  enqueueHandwritingCloudDelete,
+} from '../../lib/notebookHandwritingCloud';
 import { StepBlockRenderer } from '../notebook/StepBlockRenderer';
 import {
   CompositionCoachSlot,
@@ -1215,6 +1219,8 @@ export function ProjectNotebookBlock({
   compositionChromeSuppressed = false,
   onOpenBinderStudy,
 }: Props) {
+  const { user } = useAuth();
+  const handwritingUserId = user?.id;
   const persistNotebookContent = useCallback(
     (next: NotebookContent) => emitContentChange(applyNotebookPersist(next)),
     [emitContentChange],
@@ -1283,10 +1289,28 @@ export function ProjectNotebookBlock({
       : [PAGE_INK_BLOCK_KEY];
     const hwKeys = [...new Set([...fromBlocks, ...fromBody, ...pageInkKeys])];
     const timer = window.setTimeout(() => {
-      void gcOrphanHandwritingKeys(objectId, hwKeys);
+      void gcOrphanHandwritingKeys(objectId, hwKeys).then(deleted => {
+        if (!handwritingUserId || !freeSpaceSectionId || deleted.length === 0) return;
+        for (const blockKey of deleted) {
+          void enqueueHandwritingCloudDelete({
+            userId: handwritingUserId,
+            sectionId: freeSpaceSectionId,
+            objectId,
+            blockKey,
+          });
+        }
+      });
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [objectId, blocks, content.body, content.pages, workspaceBinderMode]);
+  }, [
+    objectId,
+    blocks,
+    content.body,
+    content.pages,
+    workspaceBinderMode,
+    handwritingUserId,
+    freeSpaceSectionId,
+  ]);
 
   useEffect(() => {
     if (!sessionRestoreBlockId || !isDeskPresentation || sessionRestoreAppliedRef.current) return;
@@ -3389,13 +3413,33 @@ export function ProjectNotebookBlock({
       }
       if (removed?.kind === 'handwriting' && objectId) {
         void hwDelete(objectId, removed.key);
+        if (handwritingUserId && freeSpaceSectionId) {
+          void enqueueHandwritingCloudDelete({
+            userId: handwritingUserId,
+            sectionId: freeSpaceSectionId,
+            objectId,
+            blockKey: removed.key,
+          });
+        }
       }
       const next = [...prev.slice(0, index), ...prev.slice(index + 1)];
       const filled = next.length === 0 ? parseBodyToBlocks('') : next;
       const nextBody = serializeBlocks(filled);
       setBlocks(filled);
       pushContent({ ...content, body: nextBody });
-      if (objectId) void gcOrphanHandwriting(objectId, nextBody);
+      if (objectId) {
+        void gcOrphanHandwriting(objectId, nextBody).then(deleted => {
+          if (!handwritingUserId || !freeSpaceSectionId) return;
+          for (const blockKey of deleted) {
+            void enqueueHandwritingCloudDelete({
+              userId: handwritingUserId,
+              sectionId: freeSpaceSectionId,
+              objectId,
+              blockKey,
+            });
+          }
+        });
+      }
       const focusIdx = Math.max(0, index - 1);
       const focusBlock = filled[focusIdx];
       if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref' && focusBlock.kind !== 'handwriting') {
@@ -3406,7 +3450,7 @@ export function ProjectNotebookBlock({
         };
       }
     },
-    [content, pushContent, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle],
+    [content, pushContent, freeSpaceSectionId, freeSpaceBoardId, objectId, objectTitle, handwritingUserId],
   );
 
   const focusEditableBlock = useCallback((root: HTMLElement, block: Block, offset: number) => {
@@ -4285,6 +4329,8 @@ export function ProjectNotebookBlock({
             blockId={block.id}
             objectId={objectId ?? ''}
             blockKey={block.key}
+            userId={handwritingUserId}
+            sectionId={freeSpaceSectionId}
             tokens={tokens}
             readOnly
           />
@@ -5176,6 +5222,8 @@ export function ProjectNotebookBlock({
                   blockId={`__page-ink-${activeInkBlockKey}__`}
                   objectId={objectId}
                   blockKey={activeInkBlockKey}
+                  userId={handwritingUserId}
+                  sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   pageLayout
                   surfaceChrome={{
@@ -5193,6 +5241,8 @@ export function ProjectNotebookBlock({
                   blockId="__page-ink__"
                   objectId={objectId}
                   blockKey={PAGE_INK_BLOCK_KEY}
+                  userId={handwritingUserId}
+                  sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   pageLayout
                   surfaceChrome={{
@@ -5824,6 +5874,8 @@ export function ProjectNotebookBlock({
                   blockId={block.id}
                   objectId={objectId ?? ''}
                   blockKey={block.key}
+                  userId={handwritingUserId}
+                  sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   surfaceChrome={blockSurfaceChrome(block.id)}
                   onFocus={() => setSurfaceFocusBlockId(block.id)}
@@ -6457,6 +6509,8 @@ export function ProjectNotebookBlock({
                   blockId={`preview-hw-${line.key}`}
                   objectId={objectId ?? ''}
                   blockKey={line.key}
+                  userId={handwritingUserId}
+                  sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   readOnly
                 />

@@ -32,6 +32,11 @@ export default defineConfig({
       'src/lib/focusCache/freeSpaceVisibilityResumeCatchUp.test.ts',
       'src/lib/viewportPersist.test.ts',
       'src/hooks/useSectionCanvasMode.test.ts',
+      'src/lib/userContentStorage.test.ts',
+      'src/lib/userContentAssetDescriptor.test.ts',
+      'src/lib/userContentAssetFlush.test.ts',
+      'src/lib/notebookHandwritingCloud.test.ts',
+      'src/components/notebook/HandwritingBlock.cloudHydrate.test.tsx',
     ],
   },
 });

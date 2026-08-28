@@ -1,13 +1,16 @@
 /**
- * Drain consumer for pending Free Space object CREATE / UPDATE / DELETE writes.
+ * Drain consumer for pending Free Space object CREATE / UPDATE / DELETE writes
+ * and user_content_asset upload / delete jobs.
  *
  * - Production auto-flush is scheduled by freeSpaceObjectAutoFlush (enqueue /
  *   online / remount). This function remains the only cloud writer and the
  *   manual/diagnostic API.
- * - Processes entityType=free_space_object|free_space_board + create|update|delete.
+ * - Processes entityType=free_space_object|free_space_board|user_content_asset
+ *   + create|update|delete.
  * - Drains in `seq` order for processing stability only — `seq` is NOT the version.
  *   Authoritative snapshot version is payload.object.updatedAt (never queue/flush order).
  * - CREATE/UPDATE upsert by entityId; DELETE removes the cloud row.
+ * - user_content_asset: resolve local bytes → Supabase Storage upload/remove.
  * - Removes queue row only after confirmed cloud success.
  * - Leaves unknown / malformed / failed ops queued.
  * - Does not change local Free Space SOT.
@@ -40,6 +43,11 @@ import {
   removePendingOperation,
 } from './pendingOperations';
 import type { JsonValue, PendingOperation } from './types';
+import {
+  isUserContentAssetWrite,
+  processUserContentAssetOp,
+} from '../userContentAssetFlush';
+import { USER_CONTENT_ASSET_ENTITY_TYPE } from '../userContentAssetDescriptor';
 
 export type FlushPendingFreeSpaceCreatesResult = {
   processed: number;
@@ -112,7 +120,11 @@ function isSupportedBoardWrite(op: PendingOperation): boolean {
 }
 
 function isSupportedWrite(op: PendingOperation): boolean {
-  return isSupportedObjectWrite(op) || isSupportedBoardWrite(op);
+  return (
+    isSupportedObjectWrite(op) ||
+    isSupportedBoardWrite(op) ||
+    isUserContentAssetWrite(op)
+  );
 }
 
 async function removeFlushedOp(
@@ -185,6 +197,24 @@ export async function flushPendingFreeSpaceCreates(
       }
 
       result.processed += 1;
+
+      if (op.entityType === USER_CONTENT_ASSET_ENTITY_TYPE) {
+        const asset = await processUserContentAssetOp(ns.namespace, op);
+        if (!asset.ok) {
+          if (asset.reason === 'malformed' || asset.reason === 'unsupported') {
+            result.skippedMalformed += 1;
+            continue;
+          }
+          result.failedCloud += 1;
+          noteCloudWriteFailed(asset.reason);
+          return { ...result, stoppedReason: 'cloud_write_failed' };
+        }
+        const removeStatus = await removeFlushedOp(ns.namespace, op.id, result);
+        if (removeStatus === 'remove_failed') {
+          return { ...result, stoppedReason: 'remove_failed' };
+        }
+        continue;
+      }
 
       if (op.entityType === FREE_SPACE_BOARD_ENTITY_TYPE) {
         if (op.operationType === 'delete') {

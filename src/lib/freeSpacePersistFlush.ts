@@ -4,6 +4,7 @@
 
 import { commitAllInFlightDragPan } from './freeSpaceDragCommit';
 import { flushAllRegisteredHandwriting } from './handwritingFlushRegistry';
+import { flushAllPendingHandwritingCloudEnqueues } from './notebookHandwritingCloud';
 
 const flushers = new Set<() => void>();
 let handwritingFlushInFlight: Promise<boolean> | null = null;
@@ -26,14 +27,19 @@ export function flushAllFreeSpacePersistence(): void {
   }
 }
 
-/** Best-effort async flush including handwriting IDB writes. */
+/** Best-effort async flush including handwriting IDB writes + cloud enqueue intents. */
 export function flushAllPersistenceBeforeUnload(): void {
   commitAllInFlightDragPan();
   flushAllFreeSpacePersistence();
   if (!handwritingFlushInFlight) {
-    handwritingFlushInFlight = flushAllRegisteredHandwriting().finally(() => {
-      handwritingFlushInFlight = null;
-    });
+    handwritingFlushInFlight = flushAllRegisteredHandwriting()
+      .then(async ok => {
+        await flushAllPendingHandwritingCloudEnqueues();
+        return ok;
+      })
+      .finally(() => {
+        handwritingFlushInFlight = null;
+      });
   }
 }
 
@@ -41,5 +47,7 @@ export function awaitAllPersistenceFlush(): Promise<void> {
   commitAllInFlightDragPan();
   flushAllFreeSpacePersistence();
   const hw = handwritingFlushInFlight ?? flushAllRegisteredHandwriting();
-  return hw.then(() => undefined);
+  return hw
+    .then(() => flushAllPendingHandwritingCloudEnqueues())
+    .then(() => undefined);
 }

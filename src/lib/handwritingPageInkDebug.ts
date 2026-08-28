@@ -98,6 +98,45 @@ export function getPageInkDebugSnapshot(): PageInkDebugSnapshot {
   return { ...state, objectIdHistory: [...state.objectIdHistory] };
 }
 
+/** Test-only: reset module-level page-ink diagnostic snapshot. */
+export function resetPageInkDebugForTests(): void {
+  state.gitCommit = getGitCommit();
+  state.objectId = null;
+  state.blockKey = PAGE_INK_BLOCK_KEY;
+  state.storageKey = null;
+  state.memoryStrokeCount = 0;
+  state.lastHwSetStrokeCount = null;
+  state.lastHwSetOk = null;
+  state.lastHwSetStage = null;
+  state.lastHwSetAt = null;
+  state.lastPostSaveVerifyStrokeCount = null;
+  state.lastHwGetStrokeCount = null;
+  state.lastHwGetSource = null;
+  state.lastHwGetAt = null;
+  state.persistBackend = 'unknown';
+  state.hydratedStrokeCount = null;
+  state.dataRefStrokeCountAfterHydrate = null;
+  state.redrawCalledAfterHydrate = false;
+  state.canvasSizeAtHydrate = null;
+  state.canvasSizeAtRedraw = null;
+  state.lastPaintStatus = null;
+  state.lastSaveStatus = '—';
+  state.lastHydrateStatus = '—';
+  state.lastHydrateStrokeCount = null;
+  state.lastFlushReason = null;
+  state.lastFlushPayloadStrokes = null;
+  state.lastFlushOk = null;
+  state.objectIdHistory = [];
+  state.lastIdbErrorName = null;
+  state.lastIdbErrorMessage = null;
+  state.lastIdbErrorOp = null;
+  state.lastIdbTxState = null;
+  state.dbState = 'unknown';
+  state.idbResolved = false;
+  state.idbPrivateHint = 'unknown';
+  state.idbDisplayMode = 'unknown';
+}
+
 export function recordPageInkMemory(objectId: string, strokeCount: number): void {
   trackObjectId(objectId);
   state.memoryStrokeCount = strokeCount;
