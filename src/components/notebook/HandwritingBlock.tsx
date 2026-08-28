@@ -251,6 +251,8 @@ export function HandwritingBlock({
     scrollEl: HTMLElement | null;
   } | null>(null);
   const unmountFlushDoneRef = useRef(false);
+  /** True only after a user edit (commitData) until durably persisted. */
+  const contentDirtyRef = useRef(false);
   /** Avoid wiping hydrated strokes when only cloud ids (userId/sectionId) change. */
   const hydrateIdentityRef = useRef<{ objectId: string; blockKey: string } | null>(null);
   const flushSaveRef = useRef<
@@ -562,7 +564,8 @@ export function HandwritingBlock({
         });
         return false;
       }
-      const result = await hwSet(objectId, blockKey, payload);
+      // commitData stamps updatedAt on user edits; hydration/reconcile preserve it.
+      const result = await hwSet(objectId, blockKey, payload, { preserveUpdatedAt: true });
       if (isPageInkBlock) {
         recordPageInkPersist(
           objectId,
@@ -584,9 +587,17 @@ export function HandwritingBlock({
       if (result.ok) {
         setSaveError(result.verifyMismatch ? saveVerifyWarningMessage() : null);
         const cloudIds = { userId, sectionId, objectId, blockKey };
-        scheduleHandwritingCloudUpload(cloudIds, payload.updatedAt);
-        // Lifecycle flushes must persist the pending op before the tab can die.
-        if (reason === 'unmount' || reason === 'visibility' || reason === 'registry') {
+        const userEdit = reason === 'debounce' || reason === 'stroke';
+        const hadPendingContent = contentDirtyRef.current;
+        contentDirtyRef.current = false;
+        if (userEdit) {
+          scheduleHandwritingCloudUpload(cloudIds, payload.updatedAt);
+          await flushHandwritingCloudEnqueueNow(cloudIds);
+        } else if (
+          (reason === 'unmount' || reason === 'visibility' || reason === 'registry') &&
+          hadPendingContent
+        ) {
+          scheduleHandwritingCloudUpload(cloudIds, payload.updatedAt);
           await flushHandwritingCloudEnqueueNow(cloudIds);
         }
         return true;
@@ -608,6 +619,16 @@ export function HandwritingBlock({
       if (reason === 'unmount') {
         if (unmountFlushDoneRef.current) return saveChainRef.current;
         unmountFlushDoneRef.current = true;
+      }
+      // Opening/hydrating/reconciling must not restamp updatedAt or enqueue stale uploads.
+      if (
+        (reason === 'unmount' || reason === 'visibility') &&
+        !contentDirtyRef.current &&
+        !pendingSaveRef.current &&
+        !draftRef.current
+      ) {
+        if (isPageInkBlock) recordPageInkFlush(objectId, reason, null, true);
+        return Promise.resolve(true);
       }
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
@@ -673,6 +694,7 @@ export function HandwritingBlock({
         invalidateCommitCache();
       }
       dataRef.current = { ...next, updatedAt: Date.now() };
+      contentDirtyRef.current = true;
       setStrokeCount(next.strokes.length);
       setMissing(false);
       if (isPageInkBlock && objectId) recordPageInkMemory(objectId, next.strokes.length);
@@ -715,6 +737,7 @@ export function HandwritingBlock({
       commitCacheValidRef.current = false;
       commitCacheStrokeCountRef.current = -1;
       draftPaintedCountRef.current = 0;
+      contentDirtyRef.current = false;
       hydrateIdentityRef.current =
         objectId && blockKey ? { objectId, blockKey } : null;
       setLoaded(false);
@@ -844,10 +867,14 @@ export function HandwritingBlock({
       });
 
       // LWW: local paint first; online reconcile may replace with newer remote.
-      if (hydrate.status === 'local_hit' && userId && sectionId) {
+      const shouldReconcile =
+        (hydrate.status === 'local_hit' || hydrate.status === 'cloud_hit') &&
+        userId &&
+        sectionId;
+      if (shouldReconcile) {
         void reconcileHandwritingWithCloud(
           { userId, sectionId, objectId, blockKey },
-          hydrate.data,
+          hydrate.status === 'local_hit' ? hydrate.data : undefined,
         ).then(result => {
           if (cancelled) return;
           if (result.action !== 'apply_remote') return;
@@ -859,6 +886,9 @@ export function HandwritingBlock({
           setDisplayHeight(nextH);
           setStrokeCount(remote.strokes.length);
           setMissing(false);
+          if (isPageInk) {
+            recordPageInkMemory(objectId, remote.strokes.length);
+          }
           invalidateCommitCache();
           afterLayoutSettle(() => {
             if (cancelled) return;

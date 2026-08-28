@@ -406,4 +406,74 @@ describe('notebook handwriting cloud LWW', () => {
   it('empty local handwriting data still serializes', () => {
     expect(() => JSON.stringify(emptyHandwritingData(400, 360))).not.toThrow();
   });
+
+  it('J: two-device sequential — B local T1/3 strokes, A cloud T2/8 strokes, B reopen remote wins', async () => {
+    const T1 = 1_000;
+    const T2 = 2_000;
+
+    function multiStrokeData(count: number, updatedAt: number, prefix: string): HandwritingBlockData {
+      return {
+        type: 'handwriting',
+        strokes: Array.from({ length: count }, (_, i) => ({
+          id: `${prefix}-${i}`,
+          tool: 'pen' as const,
+          color: '#111',
+          width: 2,
+          points: [
+            { x: 0.1, y: 0.2 },
+            { x: 0.3, y: 0.4 },
+          ],
+        })),
+        canvas: { width: 600, height: 480 },
+        updatedAt,
+      };
+    }
+
+    await hwSet(ids.objectId, ids.blockKey, multiStrokeData(3, T1, 'local-b'), {
+      preserveUpdatedAt: true,
+    });
+
+    const hydrate = await hydrateHandwritingWithCloud(ids);
+    expect(hydrate.status).toBe('local_hit');
+    if (hydrate.status !== 'local_hit') return;
+    expect(hydrate.data.strokes).toHaveLength(3);
+    expect(hydrate.data.updatedAt).toBe(T1);
+
+    vi.spyOn(storage, 'downloadUserContentAsset').mockResolvedValue({
+      ok: true,
+      value: new Blob([JSON.stringify(multiStrokeData(8, T2, 'remote-a'))], {
+        type: 'application/json',
+      }),
+    });
+    const uploadSpy = vi.spyOn(storage, 'uploadUserContentAsset');
+
+    const result = await reconcileHandwritingWithCloud(ids, hydrate.data);
+    expect(result.action).toBe('apply_remote');
+    if (result.action !== 'apply_remote') return;
+    expect(result.data.strokes).toHaveLength(8);
+    expect(result.data.updatedAt).toBe(T2);
+
+    const stored = await hwGet(ids.objectId, ids.blockKey);
+    expect(stored?.strokes).toHaveLength(8);
+    expect(stored?.updatedAt).toBe(T2);
+
+    await flushAllPendingHandwritingCloudEnqueues();
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(await listUploads()).toHaveLength(0);
+  });
+
+  it('K: reopen hydrate + preserveUpdatedAt persist must not restamp updatedAt', async () => {
+    const T1 = 1_700_000_000_000;
+    await hwSet(ids.objectId, ids.blockKey, sampleData(T1), { preserveUpdatedAt: true });
+
+    const hydrate = await hydrateHandwritingWithCloud(ids);
+    expect(hydrate.status).toBe('local_hit');
+    if (hydrate.status !== 'local_hit') return;
+
+    const before = Date.now();
+    await hwSet(ids.objectId, ids.blockKey, hydrate.data, { preserveUpdatedAt: true });
+    const stored = await hwGet(ids.objectId, ids.blockKey);
+    expect(stored?.updatedAt).toBe(T1);
+    expect(stored!.updatedAt).toBeLessThan(before);
+  });
 });

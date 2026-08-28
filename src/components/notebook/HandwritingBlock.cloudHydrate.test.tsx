@@ -181,4 +181,40 @@ describe('HandwritingBlock cloud hydrate render race', () => {
     expect(getPageInkDebugSnapshot().memoryStrokeCount).toBe(1);
     expect(getPageInkDebugSnapshot().hydratedStrokeCount).toBe(1);
   });
+
+  it('applies newer remote on remount reconcile and repaints updated strokes', async () => {
+    const T1 = 1_000;
+    const T2 = 2_000;
+    const localData = { ...oneStrokeData(), updatedAt: T1 };
+    const remoteData: HandwritingBlockData = {
+      ...oneStrokeData(),
+      strokes: [
+        ...oneStrokeData().strokes,
+        {
+          id: 'st-2',
+          tool: 'pen',
+          color: '#111',
+          width: 2,
+          points: [
+            { x: 0.5, y: 0.6 },
+            { x: 0.7, y: 0.8 },
+          ],
+        },
+      ],
+      updatedAt: T2,
+    };
+
+    hydrateHandwritingWithCloud.mockResolvedValueOnce({ status: 'local_hit', data: localData });
+    reconcileHandwritingWithCloud.mockResolvedValueOnce({
+      action: 'apply_remote',
+      data: remoteData,
+    });
+
+    mountBlock({ userId: ids.userId, sectionId: ids.sectionId });
+    await flushHydrateAndPaint();
+
+    expect(hydrateHandwritingWithCloud).toHaveBeenCalledTimes(1);
+    expect(reconcileHandwritingWithCloud).toHaveBeenCalledTimes(1);
+    expect(getPageInkDebugSnapshot().memoryStrokeCount).toBe(2);
+  });
 });
