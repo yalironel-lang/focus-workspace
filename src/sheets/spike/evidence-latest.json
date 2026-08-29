@@ -1,0 +1,166 @@
+{
+  "generatedAt": "2026-08-29T11:52:17.930Z",
+  "statusAfterMount": "DEV-only. No Free Space / persistence / math-sheet. Status: Mounted (1389ms)",
+  "sizeTable": "Fixture\tBytes\tMount ms\tExport ms\tError\nempty\t889\t38\t0\t\ncells100\t2359\t36\t0\t\ncells1k\t16664\t45\t0\t\ncells10k\t169671\t39\t4\t",
+  "logText": "[11:52:11] resizeHint dispatched (container 640x400)\n[11:52:08] Remounted from export in 59ms\n[11:52:08] Disposed adapter\n[11:52:07] Exported 190835 bytes\n[11:51:23] Serialize cells10k: 169671 bytes (mount 39ms, export 4ms)\n[11:51:22] Serialize cells1k: 16664 bytes (mount 45ms, export 0ms)\n[11:51:22] Serialize cells100: 2359 bytes (mount 36ms, export 0ms)\n[11:51:22] Serialize empty: 889 bytes (mount 38ms, export 0ms)\n[11:51:21] resizeHint dispatched (container 900x520)\n[11:51:17] Formula probe after A1=100: {\"C1\":{\"value\":120,\"formula\":\"=A1+B1\"},\"A1\":{\"value\":100,\"formula\":\"\"}}\n[11:51:16] Formula probe before: {\"C1\":{\"value\":30,\"formula\":\"=A1+B1\"},\"D2\":{\"value\":12,\"formula\":\"=B2*C2\"},\"A8\":{\"value\":15,\"formula\":\"=SUM(A3:A7)\"},\"A9\":{\"value\":\"#DIV/0!\",\"formula\":\"=1/0\"},\"B9\":{\"value\":\"#VALUE!\",\"formula\":\"=NOTAFORMULA(\"},\"A1\":{\"value\":10,\"formula\":\"\"}}\n[11:51:14] Mounted fixture=empty in 1389ms",
+  "matrixScrape": {
+    "rows": [
+      {
+        "label": "React 19 compatibility",
+        "verdict": "PASS",
+        "notes": "Mount succeeded under React 19 in 1389ms"
+      },
+      {
+        "label": "Editable grid",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Range selection",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Keyboard navigation",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Copy/paste",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Multi-cell paste",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Formula evaluation",
+        "verdict": "PASS",
+        "notes": "probe C1=30 D2=12 A8=15. Expected 30 / 12 / 15. Full={\"C1\":{\"value\":30,\"formula\":\"=A1+B1\"},\"D2\":{\"value\":12,\"formula\":\"=B2*C2\"},\"A8\":{\"value\":15,\"formula\":\"=SUM(A3:A7)\"},\"A9\":{\"value\":\"#DIV/0!\",\"formula\":\"=1/0\"},\"B9\":{\"value\":\"#VALUE!\",\"formula\":\"=NOTAFORMULA(\"},\"A1\":{\"value\":10,\"formula\":\"\"}}"
+      },
+      {
+        "label": "Dependency recalculation",
+        "verdict": "PASS",
+        "notes": "After setCellValue(A1,100), C1=120 (expect 120). {\"C1\":{\"value\":120,\"formula\":\"=A1+B1\"},\"A1\":{\"value\":100,\"formula\":\"\"}}"
+      },
+      {
+        "label": "Undo/redo",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Container resize",
+        "verdict": "CONDITIONAL",
+        "notes": "resizeHint/window resize fired. Visually confirm grid reflows after width/height slider changes; mark PASS if usable."
+      },
+      {
+        "label": "Mount/unmount restore",
+        "verdict": "PASS",
+        "notes": "export → dispose → mount(state) completed in 59ms. Verify formulas/values visually still match."
+      },
+      {
+        "label": "Serializable state",
+        "verdict": "PASS",
+        "notes": "save() JSON sparse. empty=889B, 100=2359B, 1k=16664B. See size table."
+      },
+      {
+        "label": "Reasonable 1k-cell performance",
+        "verdict": "PASS",
+        "notes": "1k mount 45ms, export 0ms, payload 16664 bytes"
+      },
+      {
+        "label": "Keyboard isolation feasibility",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "License acceptable (OSS, no Pro required)",
+        "verdict": "PASS",
+        "notes": "Direct deps: @univerjs/core@0.25.1, @univerjs/preset-sheets-core@0.25.1, rxjs@7.8.2 (Apache-2.0). Rejected @univerjs/presets meta-package because it pulls @univerjs-pro/*. No @univerjs-pro in lockfile after remediation. @univerjs/telemetry has undefined license field (OSS package)."
+      },
+      {
+        "label": "Transformed-parent (scale)",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "10k-cell performance",
+        "verdict": "CONDITIONAL",
+        "notes": "10k mount 39ms, export 4ms, payload 169671 bytes"
+      },
+      {
+        "label": "CSS isolation",
+        "verdict": "UNTESTED",
+        "notes": ""
+      },
+      {
+        "label": "Lazy-loading effectiveness",
+        "verdict": "CONDITIONAL",
+        "notes": "Route is import.meta.env.DEV + React.lazy. Confirm in Network tab / build stats that dashboard does not fetch Univer chunk."
+      }
+    ]
+  },
+  "consoleMsgs": [
+    "[error] Failed to load resource: net::ERR_CONNECTION_REFUSED",
+    "[error] Failed to load resource: net::ERR_CONNECTION_REFUSED"
+  ],
+  "univerRelatedResponses": [
+    {
+      "url": "http://127.0.0.1:5179/src/components/universe/ProjectPortalBlock.tsx",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/src/sheets/spike/SheetEngineSpikePage.tsx",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/node_modules/.vite/deps/@univerjs_core_facade.js?v=55294e1b",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/node_modules/.vite/deps/@univerjs_core.js?v=55294e1b",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/node_modules/.vite/deps/@univerjs_preset-sheets-core_locales_en-US.js?v=55294e1b",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/node_modules/.vite/deps/@univerjs_preset-sheets-core.js?v=55294e1b",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/node_modules/@univerjs/preset-sheets-core/lib/index.css",
+      "status": 200,
+      "contentType": "text/javascript"
+    },
+    {
+      "url": "http://127.0.0.1:5179/src/components/universe/ProjectPortalBlock.tsx",
+      "status": 200,
+      "contentType": "text/javascript"
+    }
+  ],
+  "dashboardUniverFetches": [
+    "http://127.0.0.1:5179/src/components/universe/ProjectPortalBlock.tsx"
+  ],
+  "interaction": {
+    "paletteVisibleAfterMetaK": false,
+    "note": "paletteVisibleAfterMetaK should be false when data-fw-cmd-ignore=1"
+  },
+  "buildNotes": {
+    "productionBuildContainsUniver": false,
+    "productionBuildNote": "npm run build dist/assets JS has no @univerjs / SheetEngineSpike strings (DEV tree-shaken)"
+  },
+  "notes": {
+    "clipboardExternal": "MANUAL_REQUIRED — see SheetEngineSpikePage manual steps for Excel/Google Sheets",
+    "clipboardInternal": "MANUAL_REQUIRED — confirm multi-cell copy/paste inside grid visually"
+  }
+}

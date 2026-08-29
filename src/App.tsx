@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { CommandPaletteProvider } from './command/CommandPaletteContext';
 import { GlobalCommandPalette } from './command/GlobalCommandPalette';
@@ -15,6 +15,11 @@ import { SessionPage } from './pages/SessionPage';
 import { Toaster } from 'react-hot-toast';
 import { AppConnectivityBanner } from './components/AppConnectivityBanner';
 import { SyncStatusIndicator } from './components/sync/SyncStatusIndicator';
+
+/** DEV-only Focus Sheets / Univer feasibility spike — not a production route. */
+const SheetEngineSpikePage = import.meta.env.DEV
+  ? lazy(() => import('./sheets/spike/SheetEngineSpikePage'))
+  : null;
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -102,6 +107,22 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
+      {import.meta.env.DEV && SheetEngineSpikePage ? (
+        <Route
+          path="/debug/sheet-spike"
+          element={
+            <Suspense
+              fallback={
+                <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
+                  Loading sheet spike…
+                </div>
+              }
+            >
+              <SheetEngineSpikePage />
+            </Suspense>
+          }
+        />
+      ) : null}
     </Routes>
   );
 }
