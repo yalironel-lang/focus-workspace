@@ -38,6 +38,7 @@ function objectLabel(obj: ProjectSpaceObject): string {
     case 'companion': return 'Companion';
     case 'studyfile': return 'Study file';
     case 'calculator': return 'Calculator';
+    case 'sheet': return 'Sheet';
     default: return 'Object';
   }
 }
