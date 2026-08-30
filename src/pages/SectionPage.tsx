@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, type ReactNode } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useFocusMode } from '../hooks/useFocusMode';
 import { useWorkspaceContinuity } from '../hooks/useWorkspaceContinuity';
@@ -310,24 +310,46 @@ const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
 
 
 
-type FreeSpacePaletteItemId =
-  | ProjectObjectType
-  | 'recall'
-  | 'tutor'
-  | 'quick-review'
-  | 'math-notebook'
-  | 'math-setup';
+import {
+  FREE_SPACE_TOOL_PALETTE_GROUPS,
+  type FreeSpacePaletteIconKey,
+  type FreeSpacePaletteItemId,
+} from '../lib/freeSpaceToolPaletteRegistry';
 
-type FreeSpacePaletteGroup = {
-  label: string;
-  items: Array<{
-    id: FreeSpacePaletteItemId;
-    title: string;
-    description: string;
-    icon: React.ReactNode;
-  }>;
-};
-
+function freeSpacePaletteIcon(iconKey: FreeSpacePaletteIconKey): ReactNode {
+  switch (iconKey) {
+    case 'note':
+      return <FileText className="w-4 h-4" />;
+    case 'notebook':
+      return <BookOpen className="w-4 h-4" />;
+    case 'math-notebook':
+      return <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span>;
+    case 'pdf':
+      return <FileUp className="w-4 h-4" />;
+    case 'checklist':
+      return <ListChecks className="w-4 h-4" />;
+    case 'mistake':
+      return <AlertTriangle className="w-4 h-4" />;
+    case 'recall':
+      return <Brain className="w-4 h-4" />;
+    case 'tutor':
+      return <MessageCircle className="w-4 h-4" />;
+    case 'quick-review':
+      return <RotateCcw className="w-4 h-4" />;
+    case 'math-setup':
+      return <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>⊞</span>;
+    case 'calculator':
+      return <Calculator className="w-4 h-4" />;
+    case 'graph':
+      return <LineChart className="w-4 h-4" />;
+    case 'sheet':
+      return <Table2 className="w-4 h-4" />;
+    case 'link':
+      return <Link2 className="w-4 h-4" />;
+    case 'image':
+      return <Image className="w-4 h-4" />;
+  }
+}
 
 function FreeSpaceToolPalette({
   tokens,
@@ -338,38 +360,13 @@ function FreeSpaceToolPalette({
   onClose: () => void;
   onPick: (id: FreeSpacePaletteItemId) => void;
 }) {
-  const groups: FreeSpacePaletteGroup[] = [
-    {
-      label: 'Core',
-      items: [
-        { id: 'note', title: 'Note', description: 'Capture a quick idea or summary.', icon: <FileText className="w-4 h-4" /> },
-        { id: 'notebook', title: 'Notebook', description: 'A larger writing surface for study.', icon: <BookOpen className="w-4 h-4" /> },
-        { id: 'math-notebook', title: 'Math notebook', description: 'Formulas, steps, and derivations — math lives in notebooks.', icon: <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>∑</span> },
-        { id: 'pdf', title: 'PDF / Source', description: 'Add source material to read beside notes.', icon: <FileUp className="w-4 h-4" /> },
-        { id: 'checklist', title: 'Checklist', description: 'Break work into small steps.', icon: <ListChecks className="w-4 h-4" /> },
-      ],
-    },
-    {
-      label: 'Study',
-      items: [
-        { id: 'mistake', title: 'Mistake', description: 'Track slips and corrections.', icon: <AlertTriangle className="w-4 h-4" /> },
-        { id: 'recall', title: 'Flashcard / Recall', description: 'Create a prompt to review later.', icon: <Brain className="w-4 h-4" /> },
-        { id: 'tutor', title: 'Tutor', description: 'Open a companion tutor panel.', icon: <MessageCircle className="w-4 h-4" /> },
-        { id: 'quick-review', title: 'Quick Review', description: 'Review mistakes and recall cards.', icon: <RotateCcw className="w-4 h-4" /> },
-        { id: 'math-setup', title: 'Problem layout', description: 'Problem card + derivation + scratch notebooks on the canvas.', icon: <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1, color: 'inherit' }}>⊞</span> },
-      ],
-    },
-    {
-      label: 'Tools',
-      items: [
-        { id: 'calculator', title: 'Calculator', description: 'Use a math scratchpad.', icon: <Calculator className="w-4 h-4" /> },
-        { id: 'graph', title: 'Graph', description: 'Plot and inspect an equation.', icon: <LineChart className="w-4 h-4" /> },
-        { id: 'sheet', title: 'Sheet', description: 'A spreadsheet for tables and formulas.', icon: <Table2 className="w-4 h-4" /> },
-        { id: 'link', title: 'Link', description: 'Save a reference URL.', icon: <Link2 className="w-4 h-4" /> },
-        { id: 'image', title: 'Image', description: 'Place a visual reference.', icon: <Image className="w-4 h-4" /> },
-      ],
-    },
-  ];
+  const groups = FREE_SPACE_TOOL_PALETTE_GROUPS.map(group => ({
+    label: group.label,
+    items: group.items.map(item => ({
+      ...item,
+      icon: freeSpacePaletteIcon(item.iconKey),
+    })),
+  }));
 
   return (
     <div
@@ -2330,6 +2327,7 @@ export function SectionPage() {
       addMistake: () => requestFreeSpaceAdd('mistake'),
       addCalculator: () => requestFreeSpaceAdd('calculator'),
       addGraph: () => requestFreeSpaceAdd('graph'),
+      addSheet: () => requestFreeSpaceAdd('sheet'),
       addPdf: () => requestFreeSpaceAdd('pdf'),
       getFreeSpaceSelectedId: () => spaceSelectedIdRef.current,
       startConnectFromSelected,

@@ -14,6 +14,7 @@ import {
   StickyNote,
   Calculator,
   LineChart,
+  Table2,
   Link2,
   Unlink,
   X,
@@ -637,6 +638,24 @@ export function GlobalCommandPalette() {
             if (!h?.addGraph) return;
             closePalette();
             h.addGraph();
+          },
+        },
+        {
+          id: 'fs-sheet',
+          group: 'free-space',
+          groupLabel: 'Free Space',
+          label: 'Add sheet',
+          subtitle: 'Spreadsheet for data and calculations',
+          keywords: ['sheet', 'spreadsheet', 'table', 'excel', 'grid'],
+          icon: Table2,
+          priority: 15.1,
+          disabled: !hasFs || !fs?.addSheet,
+          disabledHint: 'Open Free Space in a workspace',
+          run: () => {
+            const h = getFreeSpaceHandlersSnapshot();
+            if (!h?.addSheet) return;
+            closePalette();
+            h.addSheet();
           },
         },
         {
