@@ -84,14 +84,14 @@ async function main() {
   page.on('pageerror', (err) => errors.push(err.message.slice(0, 240)));
 
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.evaluate(() => {
     for (const k of Object.keys(localStorage)) {
       if (k.includes('debug-sheet-pr3a')) localStorage.removeItem(k);
     }
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
 
   // CSS isolation snapshots before sheet
   const cssBefore = await page.evaluate(() => {
@@ -187,7 +187,7 @@ async function main() {
 
   // Persistence refresh
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.waitForTimeout(1500);
   const afterReload = await page.evaluate(() => window.__focusSheetFs?.sheets ?? []);
   const afterReloadDoc = await page.evaluate(() => {

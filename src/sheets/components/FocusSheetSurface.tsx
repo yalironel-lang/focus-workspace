@@ -8,6 +8,13 @@ import { createUniverSpreadsheetEngine } from '../engine/UniverSpreadsheetEngine
 import type { SpreadsheetEngineAdapter } from '../engine/SpreadsheetEngineAdapter';
 import { FocusSheetInvalidState } from './FocusSheetInvalidState';
 import {
+  getActiveSheetEngineCount,
+  noteSheetEngineDisposed,
+  noteSheetEngineMounted,
+  setSheetCellEditing,
+} from './sheetEngineLifecycle';
+import { registerSheetFlush } from './sheetFlushRegistry';
+import {
   createSheetExportScheduler,
   SHEET_EXPORT_DEBOUNCE_MS,
 } from './sheetExportScheduler';
@@ -54,9 +61,17 @@ export function FocusSheetSurface({
 
   useLayoutEffect(() => {
     aliveRef.current = true;
+    return registerSheetFlush(objectId, () => {
+      schedulerRef.current.flush();
+    });
+  }, [objectId]);
+
+  useLayoutEffect(() => {
+    aliveRef.current = true;
     return () => {
       schedulerRef.current.flush();
       aliveRef.current = false;
+      setSheetCellEditing(objectId, false);
       engineRef.current?.dispose();
       engineRef.current = null;
     };
@@ -82,10 +97,14 @@ export function FocusSheetSurface({
     let cancelled = false;
     const engine = createUniverSpreadsheetEngine();
     engineRef.current = engine;
+    noteSheetEngineMounted(objectId);
     setPhase('loading');
 
     const unsub = engine.onDocumentChanged(() => {
       schedulerRef.current.schedule();
+    });
+    const unsubEdit = engine.onCellEditingChanged?.((editing) => {
+      setSheetCellEditing(objectId, editing);
     });
 
     void engine
@@ -98,7 +117,15 @@ export function FocusSheetSurface({
         setPhase('ready');
         engine.resize();
         if (import.meta.env.DEV) {
-          (window as unknown as { __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter }).__focusSheetSurfaceEngine = engine;
+          const w = window as unknown as {
+            __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter;
+            __focusSheetEnginesByObject?: Map<string, SpreadsheetEngineAdapter>;
+            __focusSheetActiveEngineCount?: (id?: string) => number;
+          };
+          w.__focusSheetSurfaceEngine = engine;
+          w.__focusSheetEnginesByObject = w.__focusSheetEnginesByObject ?? new Map();
+          w.__focusSheetEnginesByObject.set(objectId, engine);
+          w.__focusSheetActiveEngineCount = getActiveSheetEngineCount;
         }
       })
       .catch((err: unknown) => {
@@ -115,17 +142,24 @@ export function FocusSheetSurface({
     return () => {
       cancelled = true;
       unsub();
+      unsubEdit?.();
       schedulerRef.current.flush();
+      setSheetCellEditing(objectId, false);
       if (engineRef.current === engine) {
         engine.dispose();
         engineRef.current = null;
         if (import.meta.env.DEV) {
-          const w = window as unknown as { __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter };
+          const w = window as unknown as {
+            __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter;
+            __focusSheetEnginesByObject?: Map<string, SpreadsheetEngineAdapter>;
+          };
           if (w.__focusSheetSurfaceEngine === engine) w.__focusSheetSurfaceEngine = undefined;
+          w.__focusSheetEnginesByObject?.delete(objectId);
         }
       } else {
         engine.dispose();
       }
+      noteSheetEngineDisposed(objectId);
     };
   }, [objectId, parsed.ok]);
 

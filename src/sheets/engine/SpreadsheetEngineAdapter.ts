@@ -25,6 +25,10 @@ export interface SpreadsheetEngineAdapter {
    */
   onDocumentChanged(cb: () => void): SpreadsheetUnsubscribe;
 
+  /** Optional — used by UOV Escape handoff when the engine tracks cell edit UI. */
+  isCellEditing?(): boolean;
+  onCellEditingChanged?(cb: (editing: boolean) => void): SpreadsheetUnsubscribe;
+
   /** Future Calculate UX / tests. */
   setCellValue(a1: string, value: SpreadsheetCellValue): void;
   setCellFormula(a1: string, formula: string): void;

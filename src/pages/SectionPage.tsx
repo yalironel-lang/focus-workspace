@@ -53,6 +53,7 @@ import {
 } from '../lib/notebookSearchIndex';
 import { panViewportToBlock } from '../lib/notebookCanvasFocus';
 import { flushAllHandwritingForObject } from '../lib/handwritingFlushRegistry';
+import { flushSheetForObject } from '../sheets/components/sheetFlushRegistry';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -3357,6 +3358,7 @@ export function SectionPage() {
     || o.type === 'image'
     || o.type === 'note'
     || o.type === 'checklist'
+    || o.type === 'sheet'
   ), []);
 
   const isStudySessionObject = useCallback(
@@ -3395,6 +3397,10 @@ export function SectionPage() {
     if (target.type === 'notebook') {
       await flushAllHandwritingForObject(objectId);
     }
+    // Sync Sheet export into canonical object content BEFORE viewMode remount.
+    if (target.type === 'sheet') {
+      flushSheetForObject(objectId);
+    }
 
     if (mode === 'split') {
       const side = splitSide ?? target.splitSide ?? 'right';
@@ -3402,6 +3408,7 @@ export function SectionPage() {
         if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
         if (isStudySessionObject(o.id)) continue;
         if ((o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === side) {
+          if (o.type === 'sheet') flushSheetForObject(o.id);
           store.updateObjectFields(o.id, { viewMode: 'floating' });
         }
       }
@@ -3410,6 +3417,7 @@ export function SectionPage() {
       for (const o of store.objects) {
         if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
         if ((o.viewMode ?? 'floating') === 'fullscreen') {
+          if (o.type === 'sheet') flushSheetForObject(o.id);
           store.updateObjectFields(o.id, { viewMode: 'floating' });
         }
       }

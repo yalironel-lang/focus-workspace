@@ -22,7 +22,7 @@ const COMMAND_TYPE_MUTATION = 2;
 /** Univer CommandType.OPERATION — not saved to snapshot (selection, scroll). */
 const COMMAND_TYPE_OPERATION = 1;
 
-type CommandInfo = { id?: string; type?: number };
+type CommandInfo = { id?: string; type?: number; params?: { visible?: boolean } };
 
 type UniverRange = {
   getValue: () => unknown;
@@ -90,6 +90,20 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   lastMutationCommands: DocumentChangedTrace[] = [];
   /** All observed commands including operations. */
   lastObservedCommands: DocumentChangedTrace[] = [];
+  /** True while Univer cell / formula editor is visible. */
+  private cellEditing = false;
+  private cellEditingListeners = new Set<(editing: boolean) => void>();
+
+  isCellEditing(): boolean {
+    return this.cellEditing;
+  }
+
+  onCellEditingChanged(cb: (editing: boolean) => void): SpreadsheetUnsubscribe {
+    this.cellEditingListeners.add(cb);
+    return () => {
+      this.cellEditingListeners.delete(cb);
+    };
+  }
 
   async mount(container: HTMLElement, document: FocusSheetDocument): Promise<void> {
     this.dispose();
@@ -179,6 +193,8 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
 
   dispose(): void {
     this.unbindCommandListeners();
+    this.setCellEditing(false);
+    this.cellEditingListeners.clear();
     try {
       this.univerAPI?.dispose();
     } catch {
@@ -383,11 +399,27 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     return this.requireWorkbook().getActiveSheet().getRange(a1);
   }
 
+  private setCellEditing(editing: boolean): void {
+    if (this.cellEditing === editing) return;
+    this.cellEditing = editing;
+    for (const cb of this.cellEditingListeners) cb(editing);
+  }
+
   private bindCommandListeners(): void {
     this.unbindCommandListeners();
     const emitIfMutation = (info: CommandInfo) => {
-      const trace: DocumentChangedTrace = { id: String(info?.id ?? ''), type: info?.type };
+      const id = String(info?.id ?? '');
+      const trace: DocumentChangedTrace = { id, type: info?.type };
       this.lastObservedCommands = [...this.lastObservedCommands.slice(-80), trace];
+
+      if (
+        id === 'sheet.operation.set-cell-edit-visible'
+        || id === 'sheet.operation.set-cell-edit-visible-f2'
+        || id === 'sheet.operation.set-cell-edit-visible-arrow'
+      ) {
+        this.setCellEditing(Boolean(info?.params?.visible));
+      }
+
       // Univer: MUTATION is snapshot-persisted; OPERATION is not (selection/scroll).
       if (info?.type === COMMAND_TYPE_MUTATION) {
         this.lastMutationCommands = [...this.lastMutationCommands.slice(-80), trace];

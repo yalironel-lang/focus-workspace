@@ -188,14 +188,14 @@ async function openHarness(browser, { dpr = 1, port }) {
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err).slice(0, 240)));
   await page.goto(`http://127.0.0.1:${port}/debug/sheet-fs`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.evaluate(() => {
     for (const k of Object.keys(localStorage)) {
       if (k.includes('debug-sheet-pr3a')) localStorage.removeItem(k);
     }
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await ensureOneSheet(page);
   return { context, page, errors };
 }

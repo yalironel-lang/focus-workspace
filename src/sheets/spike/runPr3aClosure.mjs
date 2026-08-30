@@ -44,7 +44,7 @@ async function ensureFreeformSheet(page) {
     }
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.locator('[data-canvas-host="freeform"]').click();
   await page.waitForTimeout(200);
   await page.getByRole('button', { name: 'Add Sheet' }).click();
@@ -181,7 +181,7 @@ async function main() {
   page.on('pageerror', (err) => errors.push(String(err).slice(0, 200)));
 
   await page.goto(`${origin}/debug/sheet-fs`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await ensureFreeformSheet(page);
 
   // ── Resize ─────────────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ async function main() {
 
   // Persist geometry via refresh
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.locator('[data-canvas-host="freeform"]').click();
   await waitReady(page);
   const afterRefreshGeom = await readPos(page);
@@ -345,7 +345,7 @@ async function main() {
 
   // Refresh persist check for paste
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('text=PR 3A — Sheet in transformed Free Space', { timeout: 60_000 });
+  await page.waitForSelector('text=PR 3A/3B — Sheet Free Space + UOV', { timeout: 60_000 });
   await page.locator('[data-canvas-host="freeform"]').click();
   await waitReady(page);
   const pasteAfterRefresh = await page.evaluate(() => {
