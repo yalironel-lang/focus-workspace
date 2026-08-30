@@ -7,6 +7,7 @@ import { validateFocusSheetDocument } from '../domain/validateFocusSheetDocument
 import { createUniverSpreadsheetEngine } from '../engine/UniverSpreadsheetEngine';
 import type { SpreadsheetEngineAdapter } from '../engine/SpreadsheetEngineAdapter';
 import { FocusSheetInvalidState } from './FocusSheetInvalidState';
+import { FocusSheetToolbar } from './FocusSheetToolbar';
 import {
   getActiveSheetEngineCount,
   noteSheetEngineDisposed,
@@ -36,7 +37,9 @@ export function FocusSheetSurface({
 }: FocusSheetSurfaceProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<SpreadsheetEngineAdapter | null>(null);
+  const [engine, setEngine] = useState<SpreadsheetEngineAdapter | null>(null);
   const aliveRef = useRef(true);
+  const commitCountRef = useRef(0);
   const parsed = validateFocusSheetDocument(storedDocument);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'failed'>(
     parsed.ok ? 'loading' : 'failed',
@@ -53,7 +56,10 @@ export function FocusSheetSurface({
       exportDocument: () => engineRef.current?.exportDocument() ?? storedDocument,
       commit: (doc) => {
         const next = validateFocusSheetDocument(doc);
-        if (next.ok) commitRef.current(next.document);
+        if (next.ok) {
+          commitCountRef.current += 1;
+          commitRef.current(next.document);
+        }
       },
       isAlive: () => aliveRef.current,
     }),
@@ -74,6 +80,7 @@ export function FocusSheetSurface({
       setSheetCellEditing(objectId, false);
       engineRef.current?.dispose();
       engineRef.current = null;
+      setEngine(null);
     };
   }, [objectId]);
 
@@ -95,37 +102,43 @@ export function FocusSheetSurface({
     const el = hostRef.current;
     if (!el) return;
     let cancelled = false;
-    const engine = createUniverSpreadsheetEngine();
-    engineRef.current = engine;
+    const nextEngine = createUniverSpreadsheetEngine();
+    engineRef.current = nextEngine;
     noteSheetEngineMounted(objectId);
     setPhase('loading');
 
-    const unsub = engine.onDocumentChanged(() => {
+    const unsub = nextEngine.onDocumentChanged(() => {
       schedulerRef.current.schedule();
     });
-    const unsubEdit = engine.onCellEditingChanged?.((editing) => {
+    const unsubEdit = nextEngine.onCellEditingChanged?.((editing) => {
       setSheetCellEditing(objectId, editing);
     });
 
-    void engine
+    void nextEngine
       .mount(el, migrateFocusSheetDocument(parsed.document))
       .then(() => {
         if (cancelled) {
-          engine.dispose();
+          nextEngine.dispose();
           return;
         }
+        setEngine(nextEngine);
         setPhase('ready');
-        engine.resize();
+        nextEngine.resize();
         if (import.meta.env.DEV) {
           const w = window as unknown as {
             __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter;
             __focusSheetEnginesByObject?: Map<string, SpreadsheetEngineAdapter>;
             __focusSheetActiveEngineCount?: (id?: string) => number;
+            __focusSheetCommitCount?: () => number;
+            __focusSheetSelectionNotifyCount?: () => number;
           };
-          w.__focusSheetSurfaceEngine = engine;
+          w.__focusSheetSurfaceEngine = nextEngine;
           w.__focusSheetEnginesByObject = w.__focusSheetEnginesByObject ?? new Map();
-          w.__focusSheetEnginesByObject.set(objectId, engine);
+          w.__focusSheetEnginesByObject.set(objectId, nextEngine);
           w.__focusSheetActiveEngineCount = getActiveSheetEngineCount;
+          w.__focusSheetCommitCount = () => commitCountRef.current;
+          w.__focusSheetSelectionNotifyCount = () =>
+            (nextEngine as { selectionNotifyCount?: number }).selectionNotifyCount ?? 0;
         }
       })
       .catch((err: unknown) => {
@@ -145,19 +158,20 @@ export function FocusSheetSurface({
       unsubEdit?.();
       schedulerRef.current.flush();
       setSheetCellEditing(objectId, false);
-      if (engineRef.current === engine) {
-        engine.dispose();
+      setEngine(null);
+      if (engineRef.current === nextEngine) {
+        nextEngine.dispose();
         engineRef.current = null;
         if (import.meta.env.DEV) {
           const w = window as unknown as {
             __focusSheetSurfaceEngine?: SpreadsheetEngineAdapter;
             __focusSheetEnginesByObject?: Map<string, SpreadsheetEngineAdapter>;
           };
-          if (w.__focusSheetSurfaceEngine === engine) w.__focusSheetSurfaceEngine = undefined;
+          if (w.__focusSheetSurfaceEngine === nextEngine) w.__focusSheetSurfaceEngine = undefined;
           w.__focusSheetEnginesByObject?.delete(objectId);
         }
       } else {
-        engine.dispose();
+        nextEngine.dispose();
       }
       noteSheetEngineDisposed(objectId);
     };
@@ -184,26 +198,31 @@ export function FocusSheetSurface({
 
   return (
     <div
-      className="relative h-full w-full min-h-0"
+      className="relative h-full w-full min-h-0 flex flex-col"
       data-fw-cmd-ignore="1"
       data-fw-sheet-surface="1"
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {phase === 'loading' ? (
-        <div
-          className="absolute inset-0 z-[1] flex items-center justify-center text-[11px]"
-          style={{ color: tokens.textMuted, backgroundColor: `${tokens.cardBg}cc` }}
-        >
-          Loading Sheet…
-        </div>
+      {phase === 'ready' && engine ? (
+        <FocusSheetToolbar engine={engine} tokens={tokens} />
       ) : null}
-      <div
-        ref={hostRef}
-        className="h-full w-full min-h-[240px]"
-        style={{ overflow: 'hidden' }}
-        data-fw-sheet-host={objectId}
-      />
+      <div className="relative flex-1 min-h-0">
+        {phase === 'loading' ? (
+          <div
+            className="absolute inset-0 z-[1] flex items-center justify-center text-[11px]"
+            style={{ color: tokens.textMuted, backgroundColor: `${tokens.cardBg}cc` }}
+          >
+            Loading Sheet…
+          </div>
+        ) : null}
+        <div
+          ref={hostRef}
+          className="h-full w-full min-h-[180px]"
+          style={{ overflow: 'hidden' }}
+          data-fw-sheet-host={objectId}
+        />
+      </div>
     </div>
   );
 }

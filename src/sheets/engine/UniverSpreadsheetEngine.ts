@@ -10,6 +10,15 @@ import {
 } from '../domain/FocusSheetDocument';
 import { migrateFocusSheetDocument } from '../domain/migrateFocusSheetDocument';
 import { SheetEngineError } from '../domain/sheetEngineErrors';
+import {
+  adjustNumberPatternDecimals,
+  patternToNumberPreset,
+  SHEET_NUMBER_FORMAT_PATTERNS,
+  type SheetHorizontalAlign,
+  type SheetNumberFormatPreset,
+  type SheetSelectionState,
+  type SheetStyleSnapshot,
+} from '../components/sheetToolbarTypes';
 import { createUniverOss, LocaleType, mergeLocales } from './createUniverOss';
 import type {
   SpreadsheetCellValue,
@@ -24,6 +33,16 @@ const COMMAND_TYPE_OPERATION = 1;
 
 type CommandInfo = { id?: string; type?: number; params?: { visible?: boolean } };
 
+type StyleData = {
+  bl?: number | null;
+  it?: number | null;
+  ul?: { s?: number } | number | null;
+  cl?: { rgb?: string } | null;
+  bg?: { rgb?: string } | null;
+  ht?: number | null;
+  n?: { pattern?: string } | null;
+};
+
 type UniverRange = {
   getValue: () => unknown;
   getFormula?: () => string;
@@ -31,7 +50,18 @@ type UniverRange = {
   setValues?: (grid: unknown) => unknown;
   setFormula?: (formula: string) => unknown;
   clearContent?: () => unknown;
-  setFontWeight?: (weight: string) => unknown;
+  setFontWeight?: (weight: string | null) => unknown;
+  setFontStyle?: (style: string | null) => unknown;
+  setFontLine?: (line: string | null) => unknown;
+  setFontColor?: (color: string | null) => unknown;
+  setBackgroundColor?: (color: string | null) => unknown;
+  setBackground?: (color: string | null) => unknown;
+  setHorizontalAlignment?: (align: string) => unknown;
+  setNumberFormat?: (pattern: string) => unknown;
+  getNumberFormat?: () => string;
+  getCellStyleData?: () => StyleData | null;
+  getHorizontalAlignment?: () => string;
+  getBackground?: () => string;
   getA1Notation?: () => string;
   getRow?: () => number;
   getColumn?: () => number;
@@ -57,6 +87,7 @@ type UniverWorkbook = {
   undo?: () => unknown;
   redo?: () => unknown;
   onCommandExecuted?: (cb: (info: CommandInfo) => void) => { dispose: () => void };
+  onSelectionChange?: (cb: (selections: unknown) => void) => { dispose: () => void };
   setActiveRange?: (range: UniverRange) => unknown;
 };
 
@@ -85,7 +116,9 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   private univerAPI: UniverApi | null = null;
   private container: HTMLElement | null = null;
   private changeListeners = new Set<() => void>();
+  private selectionListeners = new Set<() => void>();
   private commandUnsubs: Array<() => void> = [];
+  private selectionUnsub: (() => void) | null = null;
   /** Last mutation command ids (diagnostics / evidence). */
   lastMutationCommands: DocumentChangedTrace[] = [];
   /** All observed commands including operations. */
@@ -93,6 +126,8 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   /** True while Univer cell / formula editor is visible. */
   private cellEditing = false;
   private cellEditingListeners = new Set<(editing: boolean) => void>();
+  /** DEV: selection-only notifications (must not imply document commits). */
+  selectionNotifyCount = 0;
 
   isCellEditing(): boolean {
     return this.cellEditing;
@@ -193,8 +228,10 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
 
   dispose(): void {
     this.unbindCommandListeners();
+    this.unbindSelectionListener();
     this.setCellEditing(false);
     this.cellEditingListeners.clear();
+    this.selectionListeners.clear();
     try {
       this.univerAPI?.dispose();
     } catch {
@@ -220,6 +257,104 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     return () => {
       this.changeListeners.delete(cb);
     };
+  }
+
+  onSelectionChange(cb: () => void): SpreadsheetUnsubscribe {
+    this.selectionListeners.add(cb);
+    return () => {
+      this.selectionListeners.delete(cb);
+    };
+  }
+
+  getSelectionState(): SheetSelectionState {
+    if (!this.univerAPI) {
+      return { a1: null, rangeA1: null, style: null };
+    }
+    const rangeA1 = this.getActiveRangeA1();
+    const a1 = rangeA1
+      ? rangeA1.split(':')[0].replace(/\$/g, '').replace(/^.*!/, '')
+      : null;
+    const range = this.tryActiveRange();
+    return {
+      a1,
+      rangeA1,
+      style: range ? this.readStyleSnapshot(range) : null,
+    };
+  }
+
+  undo(): void {
+    const wb = this.requireWorkbook();
+    if (typeof wb.undo === 'function') {
+      void wb.undo();
+      return;
+    }
+    void this.requireApi().undo?.();
+  }
+
+  redo(): void {
+    const wb = this.requireWorkbook();
+    if (typeof wb.redo === 'function') {
+      void wb.redo();
+      return;
+    }
+    void this.requireApi().redo?.();
+  }
+
+  toggleBold(): void {
+    const range = this.requireActiveRange();
+    const style = this.readStyleSnapshot(range);
+    range.setFontWeight?.(style.bold ? null : 'bold');
+  }
+
+  toggleItalic(): void {
+    const range = this.requireActiveRange();
+    const style = this.readStyleSnapshot(range);
+    range.setFontStyle?.(style.italic ? null : 'italic');
+  }
+
+  toggleUnderline(): void {
+    const range = this.requireActiveRange();
+    const style = this.readStyleSnapshot(range);
+    range.setFontLine?.(style.underline ? null : 'underline');
+  }
+
+  setHorizontalAlign(align: SheetHorizontalAlign): void {
+    this.requireActiveRange().setHorizontalAlignment?.(align);
+  }
+
+  setFontColor(cssColor: string | null): void {
+    this.requireActiveRange().setFontColor?.(cssColor);
+  }
+
+  setFillColor(cssColor: string | null): void {
+    const range = this.requireActiveRange();
+    if (typeof range.setBackgroundColor === 'function') {
+      range.setBackgroundColor(cssColor);
+      return;
+    }
+    range.setBackground?.(cssColor);
+  }
+
+  setNumberFormat(preset: SheetNumberFormatPreset): void {
+    const pattern = SHEET_NUMBER_FORMAT_PATTERNS[preset];
+    const range = this.requireActiveRange();
+    if (typeof range.setNumberFormat !== 'function') {
+      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'setNumberFormat is unavailable');
+    }
+    range.setNumberFormat(pattern);
+  }
+
+  adjustDecimalPlaces(delta: -1 | 1): void {
+    const range = this.requireActiveRange();
+    const current =
+      (typeof range.getNumberFormat === 'function' ? range.getNumberFormat() : null)
+      ?? this.readStyleSnapshot(range).numberPattern
+      ?? 'General';
+    const next = adjustNumberPatternDecimals(current, delta);
+    if (typeof range.setNumberFormat !== 'function') {
+      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'setNumberFormat is unavailable');
+    }
+    range.setNumberFormat(next);
   }
 
   setCellValue(a1: string, value: SpreadsheetCellValue): void {
@@ -255,26 +390,6 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       return;
     }
     range.setValue(grid[0]?.[0] ?? null);
-  }
-
-  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
-  undo(): void {
-    const wb = this.requireWorkbook();
-    if (typeof wb.undo === 'function') {
-      void wb.undo();
-      return;
-    }
-    void this.requireApi().undo?.();
-  }
-
-  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
-  redo(): void {
-    const wb = this.requireWorkbook();
-    if (typeof wb.redo === 'function') {
-      void wb.redo();
-      return;
-    }
-    void this.requireApi().redo?.();
   }
 
   /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
@@ -399,6 +514,55 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     return this.requireWorkbook().getActiveSheet().getRange(a1);
   }
 
+  private tryActiveRange(): UniverRange | null {
+    if (!this.univerAPI) return null;
+    const wb = this.univerAPI.getActiveWorkbook();
+    const sheet = wb?.getActiveSheet?.();
+    if (!sheet) return null;
+    return sheet.getActiveRange?.() ?? sheet.getActiveCell?.() ?? null;
+  }
+
+  private requireActiveRange(): UniverRange {
+    const range = this.tryActiveRange();
+    if (!range) {
+      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'No active range');
+    }
+    return range;
+  }
+
+  private readStyleSnapshot(range: UniverRange): SheetStyleSnapshot {
+    const data = typeof range.getCellStyleData === 'function' ? range.getCellStyleData() : null;
+    const pattern =
+      (typeof range.getNumberFormat === 'function' ? range.getNumberFormat() : null)
+      ?? data?.n?.pattern
+      ?? null;
+    const ht = data?.ht;
+    let horizontalAlign: SheetHorizontalAlign | null = null;
+    if (ht === 1 || range.getHorizontalAlignment?.() === 'left') horizontalAlign = 'left';
+    else if (ht === 2 || range.getHorizontalAlignment?.() === 'center') horizontalAlign = 'center';
+    else if (ht === 3 || range.getHorizontalAlignment?.() === 'right') horizontalAlign = 'right';
+
+    const ul = data?.ul;
+    const underline =
+      typeof ul === 'number' ? ul === 1 : Boolean(ul && typeof ul === 'object' && ul.s === 1);
+
+    return {
+      bold: data?.bl === 1,
+      italic: data?.it === 1,
+      underline,
+      horizontalAlign,
+      fontColor: data?.cl?.rgb ?? null,
+      fillColor: data?.bg?.rgb ?? (typeof range.getBackground === 'function' ? range.getBackground() || null : null),
+      numberFormat: patternToNumberPreset(pattern),
+      numberPattern: pattern,
+    };
+  }
+
+  private emitSelectionChange(): void {
+    this.selectionNotifyCount += 1;
+    for (const cb of this.selectionListeners) cb();
+  }
+
   private setCellEditing(editing: boolean): void {
     if (this.cellEditing === editing) return;
     this.cellEditing = editing;
@@ -407,6 +571,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
 
   private bindCommandListeners(): void {
     this.unbindCommandListeners();
+    this.bindSelectionListener();
     const emitIfMutation = (info: CommandInfo) => {
       const id = String(info?.id ?? '');
       const trace: DocumentChangedTrace = { id, type: info?.type };
@@ -424,6 +589,8 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       if (info?.type === COMMAND_TYPE_MUTATION) {
         this.lastMutationCommands = [...this.lastMutationCommands.slice(-80), trace];
         for (const cb of this.changeListeners) cb();
+        // Style may have changed — refresh toolbar without implying a second export.
+        this.emitSelectionChange();
       }
     };
 
@@ -439,6 +606,25 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     }
   }
 
+  private bindSelectionListener(): void {
+    this.unbindSelectionListener();
+    const wb = this.univerAPI?.getActiveWorkbook();
+    if (!wb || typeof wb.onSelectionChange !== 'function') return;
+    const d = wb.onSelectionChange(() => {
+      this.emitSelectionChange();
+    });
+    this.selectionUnsub = () => d.dispose();
+  }
+
+  private unbindSelectionListener(): void {
+    try {
+      this.selectionUnsub?.();
+    } catch {
+      // ignore
+    }
+    this.selectionUnsub = null;
+  }
+
   private unbindCommandListeners(): void {
     for (const u of this.commandUnsubs) {
       try {
@@ -448,6 +634,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       }
     }
     this.commandUnsubs = [];
+    this.unbindSelectionListener();
   }
 }
 
