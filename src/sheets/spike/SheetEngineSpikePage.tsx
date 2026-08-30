@@ -1,15 +1,19 @@
 /**
  * DEV-only Univer feasibility harness.
- * Not a Free Space object. Easy to delete with src/sheets/spike/.
+ * Consumes production domain/engine — not a Free Space object.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SpreadsheetAdapter } from './SpreadsheetAdapter';
-import { createUniverSpreadsheetAdapter } from './UniverSpreadsheetAdapter';
+import {
+  createEmptyFocusSheetDocument,
+  inspectWorkbookEngineIds,
+  migrateFocusSheetDocument,
+  type FocusSheetDocument,
+} from '../domain';
+import { UniverSpreadsheetEngine } from '../engine/UniverSpreadsheetEngine';
 import {
   SPIKE_FIXTURES,
   type SpikeFixtureId,
-  fixtureEmpty,
   fixtureFormulas,
 } from './spikeFixtures';
 import {
@@ -20,6 +24,14 @@ import {
 } from './spikeAcceptance';
 
 type SizeReport = { id: string; bytes: number; msMount: number; msExport: number; error?: string };
+
+function wrapWorkbook(workbook: unknown): FocusSheetDocument {
+  return migrateFocusSheetDocument({
+    schemaVersion: 1,
+    engine: 'univer',
+    workbook,
+  });
+}
 
 function utf8Bytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
@@ -63,7 +75,7 @@ function summarizeSnapshot(state: unknown): string {
 
 export default function SheetEngineSpikePage() {
   const hostRef = useRef<HTMLDivElement>(null);
-  const adapterRef = useRef<SpreadsheetAdapter | null>(null);
+  const adapterRef = useRef<UniverSpreadsheetEngine | null>(null);
   const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState('Idle');
   const [log, setLog] = useState<string[]>([]);
@@ -72,9 +84,10 @@ export default function SheetEngineSpikePage() {
   const [height, setHeight] = useState(520);
   const [scaleOn, setScaleOn] = useState(false);
   const [ignoreCmd, setIgnoreCmd] = useState(true);
-  const [lastExport, setLastExport] = useState<unknown>(null);
+  const [lastExport, setLastExport] = useState<FocusSheetDocument | null>(null);
   const [sizeReports, setSizeReports] = useState<SizeReport[]>([]);
   const [consoleNotes, setConsoleNotes] = useState<string[]>([]);
+  const [changeFires, setChangeFires] = useState(0);
 
   const append = useCallback((line: string) => {
     setLog((prev) => [`[${new Date().toISOString().slice(11, 19)}] ${line}`, ...prev].slice(0, 80));
@@ -124,7 +137,10 @@ export default function SheetEngineSpikePage() {
 
   const ensureAdapter = useCallback(() => {
     if (!adapterRef.current) {
-      adapterRef.current = createUniverSpreadsheetAdapter();
+      const engine = new UniverSpreadsheetEngine();
+      engine.onDocumentChanged(() => setChangeFires((n) => n + 1));
+      adapterRef.current = engine;
+      (window as unknown as { __focusSheetEngine?: UniverSpreadsheetEngine }).__focusSheetEngine = engine;
     }
     return adapterRef.current;
   }, []);
@@ -137,7 +153,9 @@ export default function SheetEngineSpikePage() {
       const t0 = performance.now();
       try {
         const adapter = ensureAdapter();
-        const initial = fixtureId ? SPIKE_FIXTURES[fixtureId]() : fixtureEmpty();
+        const initial = fixtureId
+          ? wrapWorkbook(SPIKE_FIXTURES[fixtureId]())
+          : createEmptyFocusSheetDocument();
         await adapter.mount(el, initial);
         const ms = Math.round(performance.now() - t0);
         setMounted(true);
@@ -164,10 +182,11 @@ export default function SheetEngineSpikePage() {
 
   const exportNow = useCallback(() => {
     try {
-      const state = ensureAdapter().exportState();
+      const state = ensureAdapter().exportDocument();
       setLastExport(state);
       const bytes = utf8Bytes(state);
-      append(`Exported ${bytes} bytes`);
+      const ids = inspectWorkbookEngineIds(state.workbook);
+      append(`Exported ${bytes} bytes wb=${ids.workbookId} ws=${ids.worksheetId}`);
       return state;
     } catch (err) {
       append(`Export failed: ${String(err)}`);
@@ -204,10 +223,10 @@ export default function SheetEngineSpikePage() {
       const adapter = ensureAdapter();
       const t0 = performance.now();
       try {
-        await adapter.mount(el, SPIKE_FIXTURES[id]());
+        await adapter.mount(el, wrapWorkbook(SPIKE_FIXTURES[id]()));
         const msMount = Math.round(performance.now() - t0);
         const t1 = performance.now();
-        const state = adapter.exportState();
+        const state = adapter.exportDocument();
         const msExport = Math.round(performance.now() - t1);
         const bytes = utf8Bytes(state);
         reports.push({ id, bytes, msMount, msExport });
@@ -258,11 +277,11 @@ export default function SheetEngineSpikePage() {
     const el = hostRef.current;
     if (!el) return;
     const adapter = ensureAdapter();
-    await adapter.mount(el, fixtureFormulas());
+    await adapter.mount(el, wrapWorkbook(fixtureFormulas()));
     setMounted(true);
     // Allow formula engine time to compute
     await new Promise((r) => setTimeout(r, 800));
-    const before = adapter.probeCells?.(['C1', 'D2', 'A8', 'A9', 'B9', 'A1']) ?? {};
+    const before = adapter.probeCells(['C1', 'D2', 'A8', 'A9', 'B9', 'A1']);
     append(`Formula probe before: ${JSON.stringify(before)}`);
     const c1 = (before.C1 as { value?: unknown } | undefined)?.value;
     const d2 = (before.D2 as { value?: unknown } | undefined)?.value;
@@ -277,9 +296,9 @@ export default function SheetEngineSpikePage() {
       `probe C1=${String(c1)} D2=${String(d2)} A8=${String(a8)}. Expected 30 / 12 / 15. Full=${JSON.stringify(before)}`,
     );
 
-    adapter.setCellValue?.('A1', 100);
+    adapter.setCellValue('A1', 100);
     await new Promise((r) => setTimeout(r, 600));
-    const after = adapter.probeCells?.(['C1', 'A1']) ?? {};
+    const after = adapter.probeCells(['C1', 'A1']);
     append(`Formula probe after A1=100: ${JSON.stringify(after)}`);
     const c1b = (after.C1 as { value?: unknown } | undefined)?.value;
     setVerdict(
@@ -287,11 +306,11 @@ export default function SheetEngineSpikePage() {
       Number(c1b) === 120 ? 'PASS' : 'FAIL',
       `After setCellValue(A1,100), C1=${String(c1b)} (expect 120). ${JSON.stringify(after)}`,
     );
-    setLastExport(adapter.exportState());
+    setLastExport(adapter.exportDocument());
   }, [append, ensureAdapter, setVerdict]);
 
   const nudgeResize = useCallback(() => {
-    ensureAdapter().resizeHint?.();
+    ensureAdapter().resize();
     append(`resizeHint dispatched (container ${width}x${height})`);
     setVerdict(
       'resize',
@@ -302,8 +321,49 @@ export default function SheetEngineSpikePage() {
 
   useEffect(() => {
     if (!mounted) return;
-    ensureAdapter().resizeHint?.();
+    ensureAdapter().resize();
   }, [width, height, mounted, ensureAdapter]);
+
+  const runChangeDetectionGate = useCallback(async () => {
+    const el = hostRef.current;
+    if (!el) return;
+    const adapter = ensureAdapter();
+    setChangeFires(0);
+    await adapter.mount(el, createEmptyFocusSheetDocument());
+    setMounted(true);
+    await new Promise((r) => setTimeout(r, 300));
+    adapter.lastObservedCommands = [];
+    adapter.lastMutationCommands = [];
+
+    const countFires = async (label: string, fn: () => void) => {
+      const before = adapter.lastMutationCommands.length;
+      fn();
+      await new Promise((r) => setTimeout(r, 300));
+      const delta = adapter.lastMutationCommands.length - before;
+      append(`GATE ${label}: mutationEvents=${delta}`);
+      return delta;
+    };
+
+    const rows = {
+      setCellValue: await countFires('setCellValue', () => adapter.setCellValue('A1', 11)),
+      formula: await countFires('formula', () => adapter.setCellFormula('B1', '=A1+1')),
+      paste: await countFires('paste', () => adapter.pasteValues('C1', [[1, 2], [3, 4]])),
+      clear: await countFires('clear', () => adapter.clearCell('C1')),
+      undo: await countFires('undo', () => adapter.undo()),
+      redo: await countFires('redo', () => adapter.redo()),
+      selection: await countFires('selection', () => adapter.selectRange('Z99')),
+    };
+    const payload = {
+      rows,
+      observed: adapter.lastObservedCommands,
+      mutations: adapter.lastMutationCommands,
+      ids: inspectWorkbookEngineIds(adapter.exportDocument().workbook),
+    };
+    (window as unknown as { __focusSheetChangeGate?: typeof payload }).__focusSheetChangeGate = payload;
+    append(`GATE summary ${JSON.stringify(rows)}`);
+    append(`GATE observed ${JSON.stringify(adapter.lastObservedCommands.slice(-12))}`);
+    setStatus('Change-detection gate done');
+  }, [append, ensureAdapter]);
 
   const evidenceDump = useMemo(() => {
     return {
@@ -311,7 +371,7 @@ export default function SheetEngineSpikePage() {
       matrix,
       sizeReports,
       consoleNotes,
-      lastExportSummary: lastExport ? summarizeSnapshot(lastExport) : null,
+      lastExportSummary: lastExport ? summarizeSnapshot(lastExport.workbook) : null,
       manualClipboardSteps: [
         '1. Select a multi-cell range in the spike → Cmd/Ctrl+C.',
         '2. Paste into Google Sheets or Excel. Note whether values land in a grid (not one cell).',
@@ -333,14 +393,15 @@ export default function SheetEngineSpikePage() {
       data-fw-cmd-ignore={ignoreCmd ? '1' : undefined}
     >
       <header className="mb-3 space-y-1">
-        <h1 className="text-xl font-semibold">Focus Sheets — PR1 Univer Spike</h1>
+        <h1 className="text-xl font-semibold">Focus Sheets — PR2 engine harness</h1>
         <p className="text-sm text-slate-400">
-          DEV-only. No Free Space / persistence / math-sheet. Status: {status}
+          DEV-only. Production domain/engine. No Free Space / persistence / math-sheet. Status: {status}
+          {' · '}changes:{changeFires}
         </p>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-3 text-sm">
-        <button type="button" className="px-2 py-1 rounded bg-emerald-700" onClick={() => void mountWith('empty')}>
+        <button type="button" className="px-2 py-1 rounded bg-emerald-700" onClick={() => void mountWith()}>
           Mount empty
         </button>
         <button type="button" className="px-2 py-1 rounded bg-emerald-700" onClick={() => void mountWith('formulas')}>
@@ -369,6 +430,9 @@ export default function SheetEngineSpikePage() {
         </button>
         <button type="button" className="px-2 py-1 rounded bg-violet-800" onClick={() => void runFormulaApiCheck()}>
           Formula API check
+        </button>
+        <button type="button" className="px-2 py-1 rounded bg-amber-800" onClick={() => void runChangeDetectionGate()}>
+          Run change-detection gate
         </button>
         <button type="button" className="px-2 py-1 rounded bg-amber-700" onClick={nudgeResize}>
           Resize hint
@@ -510,7 +574,7 @@ export default function SheetEngineSpikePage() {
           <div>
             <h2 className="font-medium">Last export summary</h2>
             <pre className="text-xs bg-slate-900 p-2 rounded overflow-auto max-h-40">
-              {lastExport ? summarizeSnapshot(lastExport) : '—'}
+              {lastExport ? summarizeSnapshot(lastExport.workbook) : '—'}
             </pre>
           </div>
 

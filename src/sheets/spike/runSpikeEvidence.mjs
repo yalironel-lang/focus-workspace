@@ -58,7 +58,7 @@ async function main() {
   });
 
   await page.goto(url, { waitUntil: 'networkidle', timeout: 120_000 });
-  await page.waitForSelector('text=Focus Sheets — PR1 Univer Spike', { timeout: 60_000 });
+  await page.waitForSelector('text=Focus Sheets — PR2 engine harness', { timeout: 60_000 });
 
   // Mount empty — React 19 / render smoke
   await page.getByRole('button', { name: 'Mount empty' }).click();

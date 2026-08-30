@@ -1,9 +1,7 @@
 /**
  * Thin OSS createUniver shim.
  *
- * Plan deviation: do NOT depend on `@univerjs/presets` — that meta-package
- * pulls `@univerjs-pro/*` via advanced/collaboration presets. This helper
- * mirrors the OSS createUniver surface using `@univerjs/core` only.
+ * Do NOT depend on `@univerjs/presets` — that meta-package pulls `@univerjs-pro/*`.
  */
 
 import { LocaleType, LogLevel, Univer, mergeLocales } from '@univerjs/core';
