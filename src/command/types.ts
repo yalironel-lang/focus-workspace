@@ -34,6 +34,7 @@ export interface FreeSpaceCommandHandlers {
   addMistake?: () => void;
   addCalculator: () => void;
   addGraph: () => void;
+  addSheet?: () => void;
   addPdf?: () => void;
   /** Current selected Free Space object id, if any */
   getFreeSpaceSelectedId?: () => string | null;
