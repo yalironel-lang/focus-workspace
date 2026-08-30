@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useLayoutEffect,
+  type ComponentType,
 } from 'react';
 import type {
   CSSProperties,
@@ -112,6 +113,7 @@ import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
   getMathTemplate,
   isLikelyMathLine,
+  isWholeLineMath,
   normalizeToLinearMath,
   plainMathToLatex,
   textLikelyHasPlainMath,
@@ -268,7 +270,9 @@ function parseNotebookLine(raw: string): NotebookLine {
     };
   }
 
-  const mathMatch = trimmed.match(/^\$\$\s*(.*)$/);
+  // Slash/equation-block prefix is `$$ <latex>` (whitespace required). Wrapping
+  // `$$...$$` display math stays a paragraph and is rendered by MathRichText.
+  const mathMatch = trimmed.match(/^\$\$\s+(.*)$/);
   if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
 
   const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
@@ -300,6 +304,121 @@ function previewInlineContent(text: string): ReactNode {
 
 function previewPlainForMath(text: string): string {
   return parseRichLine(text).plain;
+}
+
+/** Shared with MathZone: whole-line math via isLikelyMathLine; $ / $$ secondary. */
+function lineHasRenderableMath(text: string, isMathNotebook: boolean): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (isLikelyMathLine(t)) return true;
+  if (textHasMathDelimiters(t)) return true;
+  if (isMathNotebook && textLikelyHasPlainMath(t)) return true;
+  return false;
+}
+
+/**
+ * Use undelimited FLM/LaTeX KaTeX (MathZone policy) for math-like lines.
+ * Never disable solely because `$` appears — only mixed prose (delimiters without
+ * isLikelyMathLine) uses delimiter-only MathRichText.
+ */
+function mathLineAutoPlain(text: string, isMathNotebook: boolean): boolean {
+  if (isMathNotebook) return true;
+  if (isLikelyMathLine(text.trim())) return true;
+  return false;
+}
+
+function previewLineWithMath(
+  text: string,
+  opts: {
+    isMathNotebook: boolean;
+    textColor?: string;
+    mutedColor: string;
+  },
+): ReactNode {
+  if (!lineHasRenderableMath(text, opts.isMathNotebook)) {
+    return previewInlineContent(text);
+  }
+  const plain = previewPlainForMath(text);
+  const autoPlain = mathLineAutoPlain(text, opts.isMathNotebook);
+  // MathZone LineEquation parity for undelimited whole lines only.
+  // Delimited content stays on MathRichText (no leftover `$` / `$$`).
+  if (
+    autoPlain &&
+    !textHasMathDelimiters(plain) &&
+    (isLikelyMathLine(plain) || isWholeLineMath(plain))
+  ) {
+    return (
+      <KatexPreview
+        latex={plainMathToLatex(plain.trim())}
+        displayMode
+        hero
+        textColor={opts.textColor}
+        mutedColor={opts.mutedColor}
+      />
+    );
+  }
+  return (
+    <MathRichText
+      text={plain}
+      autoPlainMath={autoPlain}
+      textColor={opts.textColor}
+      mutedColor={opts.mutedColor}
+    />
+  );
+}
+
+type NotebookLineEditorProps = {
+  useMath: boolean;
+  autoPlainMath: boolean;
+  textColor: string;
+  mutedColor: string;
+  deskFormattingKeepEditable?: boolean;
+  EditableLine: ComponentType<{
+    id: string;
+    text: string;
+    marks?: InlineMark[];
+    tokens: AtmosphereTokens;
+    placeholder: string;
+    style: CSSProperties;
+    onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
+    onFocusIndex: (id: string) => void;
+    onAfterInput?: (el: HTMLDivElement) => void;
+    onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+  }>;
+  id: string;
+  text: string;
+  marks?: InlineMark[];
+  tokens: AtmosphereTokens;
+  placeholder: string;
+  style: CSSProperties;
+  onUpdate: (id: string, raw: string, marks?: InlineMark[]) => void;
+  onFocusIndex: (id: string) => void;
+  onAfterInput?: (el: HTMLDivElement) => void;
+  onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+};
+
+function NotebookLineEditor({
+  useMath,
+  autoPlainMath,
+  textColor,
+  mutedColor,
+  deskFormattingKeepEditable,
+  EditableLine,
+  ...lineProps
+}: NotebookLineEditorProps) {
+  if (!useMath) {
+    return <EditableLine {...lineProps} />;
+  }
+  return (
+    <MathEditableParagraph
+      {...lineProps}
+      autoPlainMath={autoPlainMath}
+      textColor={textColor}
+      mutedColor={mutedColor}
+      deskFormattingKeepEditable={deskFormattingKeepEditable}
+      EditableLine={EditableLine}
+    />
+  );
 }
 
 type BlockMarks = { marks?: InlineMark[] };
@@ -4528,12 +4647,18 @@ export function ProjectNotebookBlock({
             borderRadius: '0 8px 8px 0',
             marginBottom: 10,
           }}>
-            <EditableLineGuarded
+            <NotebookLineEditor
+              useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+              autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+              textColor={ink.primary}
+              mutedColor={tokens.textMuted}
+              deskFormattingKeepEditable={deskFormattingActive}
+              EditableLine={EditableLineGuarded}
               id={block.id}
               text={block.text}
-                    marks={block.marks}
-                    onSelectionChange={handleRichSelectionChange}
-                    tokens={tokens}
+              marks={block.marks}
+              onSelectionChange={handleRichSelectionChange}
+              tokens={tokens}
               placeholder={`${calloutLabel(block.tone)}…`}
               onUpdate={updateBlockText}
               onFocusIndex={setFocusIndexById}
@@ -4639,6 +4764,7 @@ export function ProjectNotebookBlock({
             placeholder="Write…"
             textColor={ink.primary}
             mutedColor={tokens.textMuted}
+            autoPlainMath
             onUpdate={updateBlockText}
             onFocusIndex={setFocusIndexById}
             onAfterInput={(el) => onEditableAfterInput(block.id, el)}
@@ -4658,11 +4784,20 @@ export function ProjectNotebookBlock({
 
       // Default: paragraph (non-math) and other block kinds (quote, bullet, etc.)
       return (
-        <EditableLineGuarded
+        <NotebookLineEditor
           key={listKey}
+          useMath={
+            (block.kind === 'paragraph' && isMathNotebook) ||
+            lineHasRenderableMath(block.text, isMathNotebook)
+          }
+          autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+          textColor={ink.primary}
+          mutedColor={tokens.textMuted}
+          deskFormattingKeepEditable={deskFormattingActive}
+          EditableLine={EditableLineGuarded}
           id={block.id}
           text={block.text}
-                    tokens={tokens}
+          tokens={tokens}
           placeholder="Write…"
           onUpdate={updateBlockText}
           onFocusIndex={setFocusIndexById}
@@ -5727,12 +5862,18 @@ export function ProjectNotebookBlock({
                     {block.number}.
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLineGuarded
+                    <NotebookLineEditor
+                      useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+                      autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+                      textColor={ink.primary}
+                      mutedColor={tokens.textMuted}
+                      deskFormattingKeepEditable={deskFormattingActive}
+                      EditableLine={EditableLineGuarded}
                       id={block.id}
                       text={block.text}
-                    marks={block.marks}
-                    onSelectionChange={handleRichSelectionChange}
-                    tokens={tokens}
+                      marks={block.marks}
+                      onSelectionChange={handleRichSelectionChange}
+                      tokens={tokens}
                       placeholder="List item…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -5792,12 +5933,18 @@ export function ProjectNotebookBlock({
                     {bulletGlyph}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLineGuarded
+                    <NotebookLineEditor
+                      useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+                      autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+                      textColor={ink.primary}
+                      mutedColor={tokens.textMuted}
+                      deskFormattingKeepEditable={deskFormattingActive}
+                      EditableLine={EditableLineGuarded}
                       id={block.id}
                       text={block.text}
-                    marks={block.marks}
-                    onSelectionChange={handleRichSelectionChange}
-                    tokens={tokens}
+                      marks={block.marks}
+                      onSelectionChange={handleRichSelectionChange}
+                      tokens={tokens}
                       placeholder="List item…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -5895,12 +6042,18 @@ export function ProjectNotebookBlock({
                     </span>
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableLineGuarded
+                    <NotebookLineEditor
+                      useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+                      autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+                      textColor={ink.primary}
+                      mutedColor={tokens.textMuted}
+                      deskFormattingKeepEditable={deskFormattingActive}
+                      EditableLine={EditableLineGuarded}
                       id={block.id}
                       text={block.text}
-                    marks={block.marks}
-                    onSelectionChange={handleRichSelectionChange}
-                    tokens={tokens}
+                      marks={block.marks}
+                      onSelectionChange={handleRichSelectionChange}
+                      tokens={tokens}
                       placeholder="Checklist line…"
                       onUpdate={updateBlockText}
                       onFocusIndex={setFocusIndexById}
@@ -5942,7 +6095,13 @@ export function ProjectNotebookBlock({
                     backgroundColor: `${tokens.accent}06`,
                   }}
                 >
-                  <EditableLineGuarded
+                  <NotebookLineEditor
+                    useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+                    autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+                    textColor={ink.secondary}
+                    mutedColor={tokens.textMuted}
+                    deskFormattingKeepEditable={deskFormattingActive}
+                    EditableLine={EditableLineGuarded}
                     id={block.id}
                     text={block.text}
                     marks={block.marks}
@@ -6049,7 +6208,13 @@ export function ProjectNotebookBlock({
                       {calloutLabel(block.tone)}
                     </span>
                   </div>
-                  <EditableLineGuarded
+                  <NotebookLineEditor
+                    useMath={lineHasRenderableMath(block.text, isMathNotebook)}
+                    autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
+                    textColor={ink.primary}
+                    mutedColor={tokens.textMuted}
+                    deskFormattingKeepEditable={deskFormattingActive}
+                    EditableLine={EditableLineGuarded}
                     id={block.id}
                     text={block.text}
                     marks={block.marks}
@@ -6210,7 +6375,8 @@ export function ProjectNotebookBlock({
                     Write a numeric step, then press <kbd>⌘↵</kbd> to check it.
                   </p>
                 ) : null}
-                {(isMathNotebook || isLikelyMathLine(block.text)) && !paraFine && !paraMuted ? (
+                {(isMathNotebook && !paraFine && !paraMuted) ||
+                lineHasRenderableMath(block.text, isMathNotebook) ? (
                   <MathEditableParagraph
                     id={block.id}
                     text={block.text}
@@ -6222,6 +6388,7 @@ export function ProjectNotebookBlock({
                     onAfterInput={el => onEditableAfterInput(block.id, el)}
                     onSelectionChange={handleRichSelectionChange}
                     deskFormattingKeepEditable={deskFormattingActive}
+                    autoPlainMath={mathLineAutoPlain(block.text, isMathNotebook)}
                     EditableLine={EditableLineGuarded}
                     textColor={ink.primary}
                     mutedColor={tokens.textMuted}
@@ -6437,7 +6604,11 @@ export function ProjectNotebookBlock({
                       lineHeight: 1.84,
                     }}
                   >
-                    {previewInlineContent(line.text)}
+                    {previewLineWithMath(line.text, {
+                      isMathNotebook,
+                      textColor: ink.primary,
+                      mutedColor: tokens.textMuted,
+                    })}
                   </span>
                 </div>
               );
@@ -6483,7 +6654,11 @@ export function ProjectNotebookBlock({
                     {line.checked ? '✓' : ''}
                   </span>
                   <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: `${typeScale.l3}px`, lineHeight: 1.84 }}>
-                    {previewInlineContent(line.text)}
+                    {previewLineWithMath(line.text, {
+                      isMathNotebook,
+                      textColor: ink.primary,
+                      mutedColor: tokens.textMuted,
+                    })}
                   </span>
                 </div>
               );
@@ -6521,7 +6696,11 @@ export function ProjectNotebookBlock({
                     fontWeight: 400,
                   }}>
                     {line.text
-                      ? previewInlineContent(line.text)
+                      ? previewLineWithMath(line.text, {
+                          isMathNotebook,
+                          textColor: ink.primary,
+                          mutedColor: tokens.textMuted,
+                        })
                       : <span style={{ color: ink.ghost, fontStyle: 'italic' }}>Empty</span>}
                   </div>
                 </div>
@@ -6548,7 +6727,11 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {previewInlineContent(line.text)}
+                  {previewLineWithMath(line.text, {
+                    isMathNotebook,
+                    textColor: ink.secondary,
+                    mutedColor: tokens.textMuted,
+                  })}
                 </blockquote>
               );
             }
@@ -6649,7 +6832,11 @@ export function ProjectNotebookBlock({
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {previewInlineContent(line.text)}
+                    {previewLineWithMath(line.text, {
+                      isMathNotebook,
+                      textColor: ink.primary,
+                      mutedColor: tokens.textMuted,
+                    })}
                   </div>
                 </div>
               );
@@ -6772,19 +6959,11 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {isMathNotebook ||
-                  textHasMathDelimiters(line.text) ||
-                  textLikelyHasPlainMath(line.text) ||
-                  isLikelyMathLine(line.text) ? (
-                    <MathRichText
-                      text={previewPlainForMath(line.text)}
-                    autoPlainMath={isMathNotebook}
-                      textColor={fine ? ink.muted : muted ? ink.secondary : ink.primary}
-                      mutedColor={tokens.textMuted}
-                    />
-                  ) : (
-                    previewInlineContent(line.text)
-                  )}
+                  {previewLineWithMath(line.text, {
+                    isMathNotebook,
+                    textColor: fine ? ink.muted : muted ? ink.secondary : ink.primary,
+                    mutedColor: tokens.textMuted,
+                  })}
                 </div>
               );
             }
