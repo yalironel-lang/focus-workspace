@@ -19,6 +19,12 @@ import {
   type SheetSelectionState,
   type SheetStyleSnapshot,
 } from '../components/sheetToolbarTypes';
+import {
+  SHEET_FILTER_MESSAGES,
+  sheetFilterFail,
+  type SheetDataToolState,
+  type SheetFilterResult,
+} from '../components/sheetFilterTypes';
 import { createUniverOss, LocaleType, mergeLocales } from './createUniverOss';
 import type {
   SpreadsheetCellValue,
@@ -43,6 +49,14 @@ type StyleData = {
   n?: { pattern?: string } | null;
 };
 
+type UniverFilter = {
+  remove?: () => unknown;
+  removeFilterCriteria?: () => unknown;
+  getFilteredOutRows?: () => number[];
+  getRange?: () => { startRow?: number; endRow?: number; startColumn?: number; endColumn?: number } | null;
+  getColumnFilterCriteria?: (col: number) => unknown;
+};
+
 type UniverRange = {
   getValue: () => unknown;
   getFormula?: () => string;
@@ -65,6 +79,10 @@ type UniverRange = {
   getA1Notation?: () => string;
   getRow?: () => number;
   getColumn?: () => number;
+  getWidth?: () => number;
+  getHeight?: () => number;
+  createFilter?: () => UniverFilter | null;
+  getFilter?: () => UniverFilter | null;
 };
 
 type UniverSheet = {
@@ -72,6 +90,8 @@ type UniverSheet = {
   setActiveRange?: (range: UniverRange) => unknown;
   getActiveRange?: () => UniverRange | null;
   getActiveCell?: () => UniverRange | null;
+  getFilter?: () => UniverFilter | null;
+  getSheetId?: () => string;
   insertRows?: (rowIndex: number, numRows?: number) => unknown;
   deleteRows?: (rowPosition: number, howMany: number) => unknown;
   insertColumns?: (columnIndex: number, numColumns?: number) => unknown;
@@ -101,6 +121,7 @@ type UniverApi = {
   dispose: () => void;
   undo?: () => Promise<boolean> | boolean;
   redo?: () => Promise<boolean> | boolean;
+  executeCommand?: (id: string, params?: unknown) => Promise<unknown> | unknown;
   onCommandExecuted?: (cb: (info: CommandInfo) => void) => { dispose: () => void };
 };
 
@@ -156,13 +177,29 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     const doc = migrateFocusSheetDocument(document);
 
     try {
-      const [{ UniverSheetsCorePreset }, sheetsCoreEnUS] = await Promise.all([
+      const [
+        { UniverSheetsCorePreset },
+        sheetsCoreEnUS,
+        filterPkg,
+        filterUiPkg,
+        filterEnUS,
+        filterUiEnUS,
+      ] = await Promise.all([
         import('@univerjs/preset-sheets-core'),
         import('@univerjs/preset-sheets-core/locales/en-US'),
+        import('@univerjs/sheets-filter'),
+        import('@univerjs/sheets-filter-ui'),
+        import('@univerjs/sheets-filter/locale/en-US'),
+        import('@univerjs/sheets-filter-ui/locale/en-US'),
       ]);
       await import('@univerjs/preset-sheets-core/lib/index.css');
+      await import('@univerjs/sheets-filter-ui/lib/index.css');
+      // Facade mixin: FRange.createFilter / FFilter — lazy sheet chunk only.
+      await import('@univerjs/sheets-filter/facade');
 
       const localeMod = (sheetsCoreEnUS as { default?: unknown }).default ?? sheetsCoreEnUS;
+      const filterLocale = (filterEnUS as { default?: unknown }).default ?? filterEnUS;
+      const filterUiLocale = (filterUiEnUS as { default?: unknown }).default ?? filterUiEnUS;
 
       if (hostOwners.get(container) !== this) {
         this.univerAPI = null;
@@ -174,7 +211,11 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       const { univer, univerAPI } = createUniverOss({
         locale: LocaleType.EN_US,
         locales: {
-          [LocaleType.EN_US]: mergeLocales(localeMod as Parameters<typeof mergeLocales>[0]),
+          [LocaleType.EN_US]: mergeLocales(
+            localeMod as Parameters<typeof mergeLocales>[0],
+            filterLocale as Parameters<typeof mergeLocales>[0],
+            filterUiLocale as Parameters<typeof mergeLocales>[0],
+          ),
         },
         presets: [
           UniverSheetsCorePreset({
@@ -183,6 +224,10 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
             toolbar: false,
             formulaBar: true,
           }),
+        ],
+        extraPlugins: [
+          filterPkg.UniverSheetsFilterPlugin,
+          filterUiPkg.UniverSheetsFilterUIPlugin,
         ],
       });
 
@@ -411,6 +456,102 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     range.setNumberFormat(next);
   }
 
+  addFilter(): SheetFilterResult {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    if (sheet.getFilter?.()) return sheetFilterFail('filter-exists');
+
+    const resolved = this.resolveFilterRangeA1();
+    if (!resolved.ok) return resolved;
+
+    try {
+      if (resolved.useSmartToggle) {
+        const api = this.requireApi();
+        const range = sheet.getRange(resolved.a1);
+        sheet.setActiveRange?.(range);
+        void api.executeCommand?.('sheet.command.smart-toggle-filter');
+      } else {
+        const range = sheet.getRange(resolved.a1);
+        sheet.setActiveRange?.(range);
+        const created = range.createFilter?.();
+        if (!created && !sheet.getFilter?.()) {
+          void this.requireApi().executeCommand?.('sheet.command.smart-toggle-filter');
+        }
+      }
+      if (!sheet.getFilter?.()) return sheetFilterFail('invalid-selection');
+      return { ok: true };
+    } catch {
+      return sheetFilterFail('unsupported');
+    }
+  }
+
+  clearFilter(): SheetFilterResult {
+    const filter = this.requireWorkbook().getActiveSheet().getFilter?.();
+    if (!filter) return sheetFilterFail('no-filter');
+    if (!this.filterHasCriteria(filter)) return sheetFilterFail('no-criteria');
+    try {
+      filter.removeFilterCriteria?.();
+      return { ok: true };
+    } catch {
+      return sheetFilterFail('unsupported');
+    }
+  }
+
+  removeFilter(): SheetFilterResult {
+    const filter = this.requireWorkbook().getActiveSheet().getFilter?.();
+    if (!filter) return sheetFilterFail('no-filter');
+    try {
+      filter.remove?.();
+      return { ok: true };
+    } catch {
+      return sheetFilterFail('unsupported');
+    }
+  }
+
+  getDataToolState(): SheetDataToolState {
+    if (!this.univerAPI) {
+      return {
+        canAddFilter: false,
+        canClearFilter: false,
+        canRemoveFilter: false,
+        addDisableReason: SHEET_FILTER_MESSAGES.unsupported,
+        clearDisableReason: SHEET_FILTER_MESSAGES['no-filter'],
+        removeDisableReason: SHEET_FILTER_MESSAGES['no-filter'],
+        hasFilter: false,
+        hasCriteria: false,
+      };
+    }
+    const sheet = this.requireWorkbook().getActiveSheet();
+    const filter = sheet.getFilter?.() ?? null;
+    const hasFilter = Boolean(filter);
+    const hasCriteria = hasFilter ? this.filterHasCriteria(filter!) : false;
+
+    if (hasFilter) {
+      return {
+        canAddFilter: false,
+        canClearFilter: hasCriteria,
+        canRemoveFilter: true,
+        addDisableReason: SHEET_FILTER_MESSAGES['filter-exists'],
+        clearDisableReason: hasCriteria ? null : SHEET_FILTER_MESSAGES['no-criteria'],
+        removeDisableReason: null,
+        hasFilter: true,
+        hasCriteria,
+      };
+    }
+
+    const resolved = this.resolveFilterRangeA1();
+    const canAdd = resolved.ok;
+    return {
+      canAddFilter: canAdd,
+      canClearFilter: false,
+      canRemoveFilter: false,
+      addDisableReason: canAdd ? null : (!resolved.ok ? resolved.message : SHEET_FILTER_MESSAGES['invalid-selection']),
+      clearDisableReason: SHEET_FILTER_MESSAGES['no-filter'],
+      removeDisableReason: SHEET_FILTER_MESSAGES['no-filter'],
+      hasFilter: false,
+      hasCriteria: false,
+    };
+  }
+
   setCellValue(a1: string, value: SpreadsheetCellValue): void {
     this.requireRange(a1).setValue(value);
   }
@@ -547,6 +688,59 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     return {
       row0: typeof sheet.getRowHeight === 'function' ? sheet.getRowHeight(0) : 24,
       col0: typeof sheet.getColumnWidth === 'function' ? sheet.getColumnWidth(0) : 73,
+    };
+  }
+
+  private filterHasCriteria(filter: UniverFilter): boolean {
+    const out = filter.getFilteredOutRows?.() ?? [];
+    if (out.length > 0) return true;
+    const range = filter.getRange?.();
+    if (!range) return false;
+    const start = range.startColumn ?? 0;
+    const end = range.endColumn ?? start;
+    for (let col = start; col <= end; col += 1) {
+      if (filter.getColumnFilterCriteria?.(col) != null) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Resolve AutoFilter rectangle:
+   * - multi-row selection → use as-is
+   * - single cell / single row → defer to Univer smart-toggle expand
+   * - require >1 row after resolve (or smart-toggle)
+   */
+  private resolveFilterRangeA1():
+    | { ok: true; a1: string; useSmartToggle?: boolean }
+    | Extract<SheetFilterResult, { ok: false }> {
+    if (!this.univerAPI) return sheetFilterFail('unsupported');
+    const sheet = this.requireWorkbook().getActiveSheet();
+    const active =
+      sheet.getActiveRange?.()
+      ?? (this.lastRangeA1 ? sheet.getRange(this.lastRangeA1) : null)
+      ?? sheet.getActiveCell?.()
+      ?? null;
+    if (!active) return sheetFilterFail('invalid-selection');
+
+    const startRow = active.getRow?.() ?? 0;
+    const startCol = active.getColumn?.() ?? 0;
+    const height = active.getHeight?.() ?? 1;
+    const width = active.getWidth?.() ?? 1;
+    const endRow = startRow + Math.max(1, height) - 1;
+    const endCol = startCol + Math.max(1, width) - 1;
+
+    if (endRow <= startRow) {
+      // Official smart-toggle expands continuous region from selection.
+      return {
+        ok: true,
+        a1: active.getA1Notation?.() ?? `${colToA1(startCol)}${startRow + 1}`,
+        useSmartToggle: true,
+      };
+    }
+
+    return {
+      ok: true,
+      a1: `${colToA1(startCol)}${startRow + 1}:${colToA1(endCol)}${endRow + 1}`,
     };
   }
 
@@ -711,6 +905,17 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     this.commandUnsubs = [];
     this.unbindSelectionListener();
   }
+}
+
+function colToA1(colIndex: number): string {
+  let n = colIndex + 1;
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 export function createUniverSpreadsheetEngine(): SpreadsheetEngineAdapter {

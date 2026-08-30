@@ -54,6 +54,15 @@ export interface SpreadsheetEngineAdapter {
   setNumberFormat(preset: SheetNumberFormatPreset): void;
   adjustDecimalPlaces(delta: -1 | 1): void;
 
+  /** Add AutoFilter on the resolved selection (header = first row). */
+  addFilter(): import('../components/sheetFilterTypes').SheetFilterResult;
+  /** Clear all column criteria; keep filter buttons. */
+  clearFilter(): import('../components/sheetFilterTypes').SheetFilterResult;
+  /** Remove AutoFilter entirely. */
+  removeFilter(): import('../components/sheetFilterTypes').SheetFilterResult;
+  /** Toolbar enable/disable for Data ▾ filter actions. */
+  getDataToolState(): import('../components/sheetFilterTypes').SheetDataToolState;
+
   /** Optional — used by UOV Escape handoff when the engine tracks cell edit UI. */
   isCellEditing?(): boolean;
   onCellEditingChanged?(cb: (editing: boolean) => void): SpreadsheetUnsubscribe;

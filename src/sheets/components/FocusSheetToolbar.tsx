@@ -31,6 +31,7 @@ import {
   type SheetSelectionState,
   type SheetStyleSnapshot,
 } from './sheetToolbarTypes';
+import type { SheetDataToolState } from './sheetFilterTypes';
 
 export type FocusSheetToolbarDensity = 'full' | 'compact';
 
@@ -42,7 +43,7 @@ type Props = {
 
 const COMPACT_BREAKPOINT_PX = 520;
 
-type MenuId = 'format' | 'number' | 'textColor' | 'fillColor' | null;
+type MenuId = 'format' | 'number' | 'textColor' | 'fillColor' | 'data' | null;
 
 /**
  * Color/Number menus MUST portal to document.body.
@@ -126,9 +127,11 @@ export function FocusSheetToolbar({ engine, tokens, density: densityProp }: Prop
   const numberBtnRef = useRef<HTMLButtonElement>(null);
   const textColorBtnRef = useRef<HTMLButtonElement>(null);
   const fillColorBtnRef = useRef<HTMLButtonElement>(null);
+  const dataBtnRef = useRef<HTMLButtonElement>(null);
   const [autoCompact, setAutoCompact] = useState(false);
   const [menu, setMenu] = useState<MenuId>(null);
   const [sel, setSel] = useState<SheetSelectionState>(() => engine.getSelectionState());
+  const [dataTools, setDataTools] = useState(() => engine.getDataToolState());
 
   const density: FocusSheetToolbarDensity =
     densityProp ?? (autoCompact ? 'compact' : 'full');
@@ -146,7 +149,10 @@ export function FocusSheetToolbar({ engine, tokens, density: densityProp }: Prop
   }, [densityProp]);
 
   useEffect(() => {
-    const refresh = () => setSel(engine.getSelectionState());
+    const refresh = () => {
+      setSel(engine.getSelectionState());
+      setDataTools(engine.getDataToolState());
+    };
     refresh();
     const u1 = engine.onSelectionChange(refresh);
     const u2 = engine.onDocumentChanged(refresh);
@@ -396,6 +402,63 @@ export function FocusSheetToolbar({ engine, tokens, density: densityProp }: Prop
           />
         </ToolbarPopover>
       ) : null}
+
+      {sep}
+
+      <button
+        ref={dataBtnRef}
+        type="button"
+        title={
+          dataTools.canAddFilter || dataTools.canRemoveFilter
+            ? 'Data'
+            : (dataTools.addDisableReason ?? 'Data')
+        }
+        aria-expanded={menu === 'data'}
+        aria-label="Data"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setMenu((m) => (m === 'data' ? null : 'data'))}
+        style={{
+          ...toolBtnStyle(tokens, menu === 'data'),
+          width: 'auto',
+          padding: '0 6px',
+          gap: 2,
+          fontSize: 11,
+          fontWeight: 600,
+        }}
+      >
+        Data
+        <ChevronDown size={12} />
+      </button>
+      {menu === 'data' ? (
+        <ToolbarPopover
+          anchorEl={dataBtnRef.current}
+          tokens={tokens}
+          onClose={() => setMenu(null)}
+        >
+          <DataMenuBody
+            tokens={tokens}
+            dataTools={dataTools}
+            onAdd={() => {
+              setMenu(null);
+              run(() => {
+                engine.addFilter();
+              });
+            }}
+            onClear={() => {
+              setMenu(null);
+              run(() => {
+                engine.clearFilter();
+              });
+            }}
+            onRemove={() => {
+              setMenu(null);
+              run(() => {
+                engine.removeFilter();
+              });
+            }}
+          />
+        </ToolbarPopover>
+      ) : null}
     </div>
   );
 }
@@ -550,6 +613,53 @@ function NumberMenuBody({
       <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onDecimal(-1)} style={menuRow(tokens)}>
         Decrease decimal
       </button>
+    </div>
+  );
+}
+
+function DataMenuBody({
+  tokens,
+  dataTools,
+  onAdd,
+  onClear,
+  onRemove,
+}: {
+  tokens: AtmosphereTokens;
+  dataTools: SheetDataToolState;
+  onAdd: () => void;
+  onClear: () => void;
+  onRemove: () => void;
+}) {
+  const item = (
+    label: string,
+    enabled: boolean,
+    reason: string | null,
+    onClick: () => void,
+  ) => (
+    <button
+      type="button"
+      disabled={!enabled}
+      title={enabled ? label : (reason ?? undefined)}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        if (!enabled) return;
+        onClick();
+      }}
+      style={{
+        ...menuRow(tokens),
+        opacity: enabled ? 1 : 0.45,
+        cursor: enabled ? 'pointer' : 'not-allowed',
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ minWidth: 168, padding: 4 }}>
+      {item('Add filter', dataTools.canAddFilter, dataTools.addDisableReason, onAdd)}
+      {item('Clear filter', dataTools.canClearFilter, dataTools.clearDisableReason, onClear)}
+      {item('Remove filter', dataTools.canRemoveFilter, dataTools.removeDisableReason, onRemove)}
     </div>
   );
 }

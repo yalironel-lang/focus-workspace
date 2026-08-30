@@ -18,6 +18,9 @@ export type CreateUniverOssOptions = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   locales: Record<string, any>;
   presets: PresetLike[];
+  /** Extra OSS plugins (e.g. sheets-filter) registered after presets. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  extraPlugins?: any[];
 };
 
 export function createUniverOss(options: CreateUniverOssOptions): {
@@ -45,6 +48,11 @@ export function createUniverOss(options: CreateUniverOssOptions): {
 
   for (const { plugin, options: pluginOptions } of pluginMap.values()) {
     univer.registerPlugin(plugin, pluginOptions);
+  }
+
+  for (const plugin of options.extraPlugins ?? []) {
+    if (!plugin) continue;
+    univer.registerPlugin(plugin);
   }
 
   return {
