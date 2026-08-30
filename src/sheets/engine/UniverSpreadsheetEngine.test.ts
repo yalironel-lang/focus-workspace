@@ -24,4 +24,22 @@ describe('UniverSpreadsheetEngine (jsdom/happy-dom)', () => {
       expect((err as SheetEngineError).code).toBe('ENGINE_NOT_MOUNTED');
     }
   });
+
+  it('throws ENGINE_NOT_MOUNTED for color formatters before mount', () => {
+    const engine = new UniverSpreadsheetEngine();
+    for (const run of [
+      () => engine.setFontColor('#dc2626'),
+      () => engine.setFillColor('#fef08a'),
+      () => engine.setFontColor(null),
+      () => engine.setFillColor(null),
+    ]) {
+      try {
+        run();
+        throw new Error('expected throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(SheetEngineError);
+        expect((err as SheetEngineError).code).toBe('ENGINE_NOT_MOUNTED');
+      }
+    }
+  });
 });

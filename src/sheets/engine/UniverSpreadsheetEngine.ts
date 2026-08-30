@@ -86,6 +86,9 @@ type UniverWorkbook = {
   getActiveSheet: () => UniverSheet;
   undo?: () => unknown;
   redo?: () => unknown;
+  /** Sheets-ui facade: exit cell/formula editor so UndoCommand hits sheet history. */
+  endEditingAsync?: (save?: boolean) => Promise<boolean>;
+  endEditing?: (save?: boolean) => Promise<boolean>;
   onCommandExecuted?: (cb: (info: CommandInfo) => void) => { dispose: () => void };
   onSelectionChange?: (cb: (selections: unknown) => void) => { dispose: () => void };
   setActiveRange?: (range: UniverRange) => unknown;
@@ -128,6 +131,12 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   private cellEditingListeners = new Set<(editing: boolean) => void>();
   /** DEV: selection-only notifications (must not imply document commits). */
   selectionNotifyCount = 0;
+  /**
+   * Last known selection A1 (may be a range like B2:D4).
+   * Toolbar menus portal outside the grid; Univer selection can clear when
+   * focus moves — formatting must still target this range.
+   */
+  private lastRangeA1: string | null = null;
 
   isCellEditing(): boolean {
     return this.cellEditing;
@@ -270,11 +279,12 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     if (!this.univerAPI) {
       return { a1: null, rangeA1: null, style: null };
     }
-    const rangeA1 = this.getActiveRangeA1();
+    const rangeA1 = this.getActiveRangeA1() ?? this.lastRangeA1;
+    if (rangeA1) this.lastRangeA1 = rangeA1;
     const a1 = rangeA1
       ? rangeA1.split(':')[0].replace(/\$/g, '').replace(/^.*!/, '')
       : null;
-    const range = this.tryActiveRange();
+    const range = this.tryActiveRange() ?? (rangeA1 ? this.tryRange(rangeA1) : null);
     return {
       a1,
       rangeA1,
@@ -283,61 +293,105 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   }
 
   undo(): void {
-    const wb = this.requireWorkbook();
-    if (typeof wb.undo === 'function') {
-      void wb.undo();
-      return;
-    }
-    void this.requireApi().undo?.();
+    void this.runUndoRedo('undo');
   }
 
   redo(): void {
+    void this.runUndoRedo('redo');
+  }
+
+  /**
+   * While the sheet cell/formula editor is active, UndoCommand targets the
+   * editor stack (often a no-op for sheet styles). Exit editing without
+   * saving first — `endEditingAsync(true)` pushes a save onto the undo stack
+   * that consumes the next Undo and leaves style mutations in place.
+   * Prefer FUniver.undo/redo (async executeCommand) over FWorkbook.undo
+   * (syncExecuteCommand + focusUnit), which is less reliable mid-edit.
+   */
+  private async runUndoRedo(kind: 'undo' | 'redo'): Promise<void> {
     const wb = this.requireWorkbook();
-    if (typeof wb.redo === 'function') {
-      void wb.redo();
+    const api = this.requireApi();
+    try {
+      // Always exit editor before sheet undo/redo. When not editing this is a no-op.
+      // Use save=false so we do not push an editor-commit onto the undo stack.
+      if (typeof wb.endEditingAsync === 'function') {
+        await wb.endEditingAsync(false);
+      } else if (typeof wb.endEditing === 'function') {
+        await wb.endEditing(false);
+      }
+    } catch {
+      // best-effort — still attempt undo/redo
+    }
+    if (kind === 'undo') {
+      if (typeof api.undo === 'function') {
+        await api.undo();
+        return;
+      }
+      wb.undo?.();
       return;
     }
-    void this.requireApi().redo?.();
+    if (typeof api.redo === 'function') {
+      await api.redo();
+      return;
+    }
+    wb.redo?.();
   }
 
   toggleBold(): void {
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
     const style = this.readStyleSnapshot(range);
     range.setFontWeight?.(style.bold ? null : 'bold');
   }
 
   toggleItalic(): void {
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
     const style = this.readStyleSnapshot(range);
     range.setFontStyle?.(style.italic ? null : 'italic');
   }
 
   toggleUnderline(): void {
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
     const style = this.readStyleSnapshot(range);
     range.setFontLine?.(style.underline ? null : 'underline');
   }
 
   setHorizontalAlign(align: SheetHorizontalAlign): void {
-    this.requireActiveRange().setHorizontalAlignment?.(align);
+    this.requireFormatTargetRange().setHorizontalAlignment?.(align);
   }
 
   setFontColor(cssColor: string | null): void {
-    this.requireActiveRange().setFontColor?.(cssColor);
+    const range = this.requireFormatTargetRange();
+    if (typeof range.setFontColor !== 'function') {
+      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'setFontColor is unavailable on active range');
+    }
+    // Facade expects CSS color string; null resets (value: null → clear cl).
+    range.setFontColor(cssColor);
   }
 
   setFillColor(cssColor: string | null): void {
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
+    if (cssColor == null) {
+      // setBackgroundColor(null) still works via SetStyleCommand { bg: { rgb: null } }.
+      if (typeof range.setBackgroundColor === 'function') {
+        range.setBackgroundColor(null as unknown as string);
+        return;
+      }
+      range.setBackground?.(null as unknown as string);
+      return;
+    }
     if (typeof range.setBackgroundColor === 'function') {
       range.setBackgroundColor(cssColor);
       return;
     }
-    range.setBackground?.(cssColor);
+    if (typeof range.setBackground !== 'function') {
+      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'setBackgroundColor is unavailable on active range');
+    }
+    range.setBackground(cssColor);
   }
 
   setNumberFormat(preset: SheetNumberFormatPreset): void {
     const pattern = SHEET_NUMBER_FORMAT_PATTERNS[preset];
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
     if (typeof range.setNumberFormat !== 'function') {
       throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'setNumberFormat is unavailable');
     }
@@ -345,7 +399,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   }
 
   adjustDecimalPlaces(delta: -1 | 1): void {
-    const range = this.requireActiveRange();
+    const range = this.requireFormatTargetRange();
     const current =
       (typeof range.getNumberFormat === 'function' ? range.getNumberFormat() : null)
       ?? this.readStyleSnapshot(range).numberPattern
@@ -394,6 +448,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
 
   /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
   selectRange(a1: string): void {
+    this.lastRangeA1 = a1;
     const wb = this.requireWorkbook();
     const range = this.requireRange(a1);
     if (typeof wb.setActiveRange === 'function') {
@@ -522,12 +577,30 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     return sheet.getActiveRange?.() ?? sheet.getActiveCell?.() ?? null;
   }
 
-  private requireActiveRange(): UniverRange {
-    const range = this.tryActiveRange();
-    if (!range) {
-      throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'No active range');
+  private tryRange(a1: string): UniverRange | null {
+    try {
+      return this.requireWorkbook().getActiveSheet().getRange(a1);
+    } catch {
+      return null;
     }
-    return range;
+  }
+
+  /**
+   * Prefer live Univer selection; fall back to lastRangeA1 via getRange so
+   * toolbar popovers (portaled / focus-stealing) still format the intended range.
+   */
+  private requireFormatTargetRange(): UniverRange {
+    const liveA1 = this.getActiveRangeA1();
+    if (liveA1) this.lastRangeA1 = liveA1;
+    const live = this.tryActiveRange();
+    if (live && typeof live.setFontColor === 'function') return live;
+    const fallbackA1 = this.lastRangeA1;
+    if (fallbackA1) {
+      const viaGet = this.tryRange(fallbackA1);
+      if (viaGet && typeof viaGet.setFontColor === 'function') return viaGet;
+    }
+    if (live) return live;
+    throw new SheetEngineError('ENGINE_NOT_MOUNTED', 'No active range for formatting');
   }
 
   private readStyleSnapshot(range: UniverRange): SheetStyleSnapshot {
@@ -611,6 +684,8 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     const wb = this.univerAPI?.getActiveWorkbook();
     if (!wb || typeof wb.onSelectionChange !== 'function') return;
     const d = wb.onSelectionChange(() => {
+      const a1 = this.getActiveRangeA1();
+      if (a1) this.lastRangeA1 = a1;
       this.emitSelectionChange();
     });
     this.selectionUnsub = () => d.dispose();
