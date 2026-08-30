@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Minimize2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
@@ -9,6 +9,35 @@ import {
   Z_UNIVERSAL_VIEW_PANEL,
 } from '../../lib/ui/zIndexLayers';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
+import { isSheetCellEditing } from '../../sheets/components/sheetEngineLifecycle';
+
+function isDomSheetEditorFocused(): boolean {
+  const ae = document.activeElement;
+  if (!(ae instanceof HTMLElement)) return false;
+  // Only treat dedicated formula/cell editors as "editing" — Univer's grid
+  // surface itself is often contenteditable even when not editing a cell.
+  if (
+    ae.closest('.univer-editor')
+    || ae.closest('[class*="formula-editor"]')
+    || ae.closest('[class*="cell-editor"]')
+    || ae.closest('[class*="FormulaEditor"]')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function shouldDeferSheetEscapeClose(): boolean {
+  if (isSheetCellEditing()) return true;
+  if (import.meta.env.DEV) {
+    const eng = (window as unknown as {
+      __focusSheetSurfaceEngine?: { isCellEditing?: () => boolean };
+    }).__focusSheetSurfaceEngine;
+    if (eng?.isCellEditing?.()) return true;
+  }
+  if (isDomSheetEditorFocused()) return true;
+  return false;
+}
 
 interface Props {
   title: string;
@@ -19,6 +48,12 @@ interface Props {
   children: ReactNode;
 }
 
+/**
+ * Escape policy (Sheet-aware, other types unchanged):
+ * If a Sheet cell editor is active when Escape starts (capture),
+ * skip closing UOV so Univer can cancel/exit cell editing.
+ * A subsequent Escape (editor inactive) returns to floating.
+ */
 export function UniversalObjectViewPortal({
   title,
   tokens,
@@ -27,7 +62,29 @@ export function UniversalObjectViewPortal({
   onSetMode,
   children,
 }: Props) {
-  useEffect(() => pushEscapeHandler(() => onSetMode('floating')), [onSetMode]);
+  const deferEscapeCloseRef = useRef(false);
+
+  useEffect(() => {
+    const onCapture = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Capture runs before Univer's shortcut + our bubble handler.
+      deferEscapeCloseRef.current = shouldDeferSheetEscapeClose();
+    };
+    window.addEventListener('keydown', onCapture, true);
+    const pop = pushEscapeHandler(() => {
+      // Re-check at bubble time — Univer may still be exiting edit on this same keydown.
+      if (deferEscapeCloseRef.current || shouldDeferSheetEscapeClose()) {
+        deferEscapeCloseRef.current = false;
+        return false;
+      }
+      onSetMode('floating');
+    });
+    return () => {
+      window.removeEventListener('keydown', onCapture, true);
+      pop();
+    };
+  }, [onSetMode]);
+
   useEffect(() => {
     if (mode !== 'fullscreen') return;
     return acquireBodyScrollLock();

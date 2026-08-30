@@ -18,6 +18,13 @@ import {
 } from '../lib/freeSpacePdfThumbIdb';
 import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
+import { cloneFocusSheetDocument } from '../sheets/domain/cloneFocusSheetDocument';
+import type { FocusSheetDocument } from '../sheets/domain/FocusSheetDocument';
+import {
+  createDefaultSheetObjectContent,
+  passthroughSheetDocument,
+  shouldAcceptObjectContentUpdate,
+} from '../sheets/freeSpace/sheetObjectContent';
 import {
   normalizeFreeSpaceObjectGeometry,
   type FreeSpaceObjectGeometry,
@@ -90,7 +97,8 @@ export type ProjectObjectType =
   | 'graph'
   | 'pdf'
   | 'studyfile'
-  | 'companion';
+  | 'companion'
+  | 'sheet';
 
 export type UniversalObjectViewMode = 'floating' | 'split' | 'fullscreen';
 export type UniversalObjectSplitSide = 'left' | 'right';
@@ -211,7 +219,8 @@ export type ProjectObjectContent =
       page: number;
       zoom: number;
     }
-  | ({ type: 'companion' } & CompanionPanelContentFields);
+  | ({ type: 'companion' } & CompanionPanelContentFields)
+  | { type: 'sheet'; document: FocusSheetDocument };
 
 export interface ProjectSpaceObject {
   id: string;
@@ -256,6 +265,7 @@ const OBJECT_TYPES = new Set<ProjectObjectType>([
   'pdf',
   'studyfile',
   'companion',
+  'sheet',
 ]);
 
 function key(sectionId: string, boardId = ''): string {
@@ -362,6 +372,11 @@ function makeDefaults(type: ProjectObjectType): { title: string; content: Projec
             embedMode: 'auto',
           }),
         },
+      };
+    case 'sheet':
+      return {
+        title: 'Sheet',
+        content: createDefaultSheetObjectContent(),
       };
   }
 }
@@ -659,6 +674,11 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         favicon: favicon || companion.favicon,
       };
     }
+    case 'sheet':
+      return {
+        type: 'sheet',
+        document: passthroughSheetDocument(r.document),
+      };
   }
 }
 
@@ -1701,6 +1721,9 @@ export function useSectionFreeSpaceObjects(
       });
     }
     setObjects(prev => {
+      if (!shouldAcceptObjectContentUpdate(id, prev, pendingDeletedIdsRef.current)) {
+        return prev;
+      }
       const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
       markObjectDirty(id);
       schedulePersist(next);
@@ -1866,6 +1889,16 @@ export function useSectionFreeSpaceObjects(
       updatedAt: now,
       connections: dupConnections.length ? dupConnections : undefined,
     };
+    if (source.type === 'sheet' && source.content.type === 'sheet') {
+      try {
+        copy.content = {
+          type: 'sheet',
+          document: cloneFocusSheetDocument(source.content.document),
+        };
+      } catch {
+        copy.content = createDefaultSheetObjectContent();
+      }
+    }
     if (source.type === 'pdf') {
       void copyPdfBlob(sectionId, source.id, copy.id);
       void copyPdfStudyMarks(sectionId, source.id, copy.id);

@@ -80,6 +80,13 @@ export default defineConfig({
         // All app-shell assets are content-hashed, so Workbox can track
         // revisions and update them atomically across deploys.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
+        // Sheet/Univer chunks load only when a Sheet mounts — do not precache them
+        // for every Free Space user.
+        globIgnores: [
+          '**/FocusSheetSurface-*.js',
+          '**/univer-sheets-*.js',
+          '**/univer-sheets-*.css',
+        ],
 
         // ── Critical update flags ─────────────────────────────────────────────
         // skipWaiting: new SW jumps straight to active — no waiting for tabs to close.
@@ -226,5 +233,15 @@ export default defineConfig({
     port: 4173,
     host: true,
     allowedHosts: ['legal-bats-post.loca.lt'],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/@univerjs')) return 'univer-sheets';
+          return undefined;
+        },
+      },
+    },
   },
 })

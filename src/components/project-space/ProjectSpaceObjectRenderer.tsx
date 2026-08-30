@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode, lazy, Suspense } from 'react';
 import { flickerDebugCount } from '../../lib/flickerDebug';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import {
@@ -35,6 +35,10 @@ import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBo
 import { useFreeSpaceRenderPolicy } from '../canvas/FreeSpaceRenderPolicyContext';
 import { shouldSuspendPdfViewer } from '../../lib/freeSpaceScalePolicy';
 import { FreeSpaceObjectShell } from './FreeSpaceObjectShell';
+
+const FocusSheetSurface = lazy(() =>
+  import('../../sheets/components/FocusSheetSurface').then((m) => ({ default: m.FocusSheetSurface })),
+);
 import { StudyLayoutDockedPlaceholder } from './StudyLayoutDockedPlaceholder';
 import { StudySessionCardChip } from './StudySessionCardChip';
 import {
@@ -502,6 +506,18 @@ function ProjectSpaceObjectRendererInner({
     );
   }
 
+  if (renderPolicy.suspendHeavyContent && object.type === 'sheet') {
+    return (
+      <FreeSpaceObjectShell
+        type="sheet"
+        title={object.title}
+        tokens={tokens}
+        variant="preview"
+        subtitle="Sheet"
+      />
+    );
+  }
+
   if (renderPolicy.suspendHeavyContent && object.type === 'notebook' && content.type === 'notebook') {
     const preview = (content.body ?? '')
       .split('\n')
@@ -729,6 +745,25 @@ function ProjectSpaceObjectRendererInner({
               suspendEmbed={renderPolicy.suspendHeavyContent}
             />,
           )}
+        </WorkspaceSurfaceErrorBoundary>
+      );
+    case 'sheet':
+      return (
+        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Sheet">
+          <Suspense
+            fallback={
+              <div className="h-full w-full flex items-center justify-center text-[11px]" style={{ color: tokens.textMuted }}>
+                Loading Sheet…
+              </div>
+            }
+          >
+            <FocusSheetSurface
+              objectId={object.id}
+              document={content.document}
+              tokens={tokens}
+              onDocumentCommit={(document) => onChange({ type: 'sheet', document })}
+            />
+          </Suspense>
         </WorkspaceSurfaceErrorBoundary>
       );
     default:

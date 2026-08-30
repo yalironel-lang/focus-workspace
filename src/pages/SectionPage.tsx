@@ -53,6 +53,7 @@ import {
 } from '../lib/notebookSearchIndex';
 import { panViewportToBlock } from '../lib/notebookCanvasFocus';
 import { flushAllHandwritingForObject } from '../lib/handwritingFlushRegistry';
+import { flushSheetForObject } from '../sheets/components/sheetFlushRegistry';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
 import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
@@ -222,6 +223,7 @@ import {
   MessageCircle,
   Calculator,
   LineChart,
+  Table2,
   Link2,
   Image,
 } from 'lucide-react';
@@ -362,6 +364,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'calculator', title: 'Calculator', description: 'Use a math scratchpad.', icon: <Calculator className="w-4 h-4" /> },
         { id: 'graph', title: 'Graph', description: 'Plot and inspect an equation.', icon: <LineChart className="w-4 h-4" /> },
+        { id: 'sheet', title: 'Sheet', description: 'A spreadsheet for tables and formulas.', icon: <Table2 className="w-4 h-4" /> },
         { id: 'link', title: 'Link', description: 'Save a reference URL.', icon: <Link2 className="w-4 h-4" /> },
         { id: 'image', title: 'Image', description: 'Place a visual reference.', icon: <Image className="w-4 h-4" /> },
       ],
@@ -1525,6 +1528,8 @@ export function SectionPage() {
                 ? { w: 380, h: 320 }
                 : type === 'pdf'
                   ? { w: 520, h: 460 }
+                  : type === 'sheet'
+                    ? { w: 720, h: 480 }
                   : { w: 360, h: 280 };
     initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     applyStudyLinksForObject(obj.id, type);
@@ -3353,6 +3358,7 @@ export function SectionPage() {
     || o.type === 'image'
     || o.type === 'note'
     || o.type === 'checklist'
+    || o.type === 'sheet'
   ), []);
 
   const isStudySessionObject = useCallback(
@@ -3391,6 +3397,10 @@ export function SectionPage() {
     if (target.type === 'notebook') {
       await flushAllHandwritingForObject(objectId);
     }
+    // Sync Sheet export into canonical object content BEFORE viewMode remount.
+    if (target.type === 'sheet') {
+      flushSheetForObject(objectId);
+    }
 
     if (mode === 'split') {
       const side = splitSide ?? target.splitSide ?? 'right';
@@ -3398,6 +3408,7 @@ export function SectionPage() {
         if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
         if (isStudySessionObject(o.id)) continue;
         if ((o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === side) {
+          if (o.type === 'sheet') flushSheetForObject(o.id);
           store.updateObjectFields(o.id, { viewMode: 'floating' });
         }
       }
@@ -3406,6 +3417,7 @@ export function SectionPage() {
       for (const o of store.objects) {
         if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
         if ((o.viewMode ?? 'floating') === 'fullscreen') {
+          if (o.type === 'sheet') flushSheetForObject(o.id);
           store.updateObjectFields(o.id, { viewMode: 'floating' });
         }
       }

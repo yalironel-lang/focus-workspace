@@ -580,6 +580,7 @@ export function FreeformBlock({
         {/* Resize affordance — minimal corner, generous hit target */}
         <div
           role="presentation"
+          data-fw-resize-handle="1"
           onMouseDown={e => {
             e.stopPropagation();
             onBlockMouseDown(id, e, 'resize');

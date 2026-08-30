@@ -1,6 +1,7 @@
 type EscapeHandlerEntry = {
   id: number;
-  onEscape: () => void;
+  /** Return `false` to leave the event unhandled (no preventDefault). */
+  onEscape: () => boolean | void;
 };
 
 let nextEscapeHandlerId = 1;
@@ -16,14 +17,15 @@ function ensureEscapeListener() {
     if (e.key !== 'Escape') return;
     const top = escapeHandlers[escapeHandlers.length - 1];
     if (!top) return;
+    const result = top.onEscape();
+    if (result === false) return;
     e.preventDefault();
-    top.onEscape();
   };
   window.addEventListener('keydown', onKey);
   escapeListenerAttached = true;
 }
 
-export function pushEscapeHandler(onEscape: () => void): () => void {
+export function pushEscapeHandler(onEscape: () => boolean | void): () => void {
   const id = nextEscapeHandlerId++;
   escapeHandlers.push({ id, onEscape });
   ensureEscapeListener();
@@ -47,7 +49,7 @@ export function acquireBodyScrollLock(): () => void {
     bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
     if (bodyScrollLockCount === 0) {
       document.body.style.overflow = previousBodyOverflow ?? '';
-      previousBodyOverflow = null;
     }
+    previousBodyOverflow = null;
   };
 }

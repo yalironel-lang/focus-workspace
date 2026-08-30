@@ -61,7 +61,7 @@ export interface BlockPolicyInput {
 const DEFAULT_BLOCK_W = 340;
 const DEFAULT_BLOCK_H = 220;
 
-const HEAVY_TYPES = new Set(['notebook', 'pdf', 'companion', 'graph']);
+const HEAVY_TYPES = new Set(['notebook', 'pdf', 'companion', 'graph', 'sheet']);
 
 export const DEFAULT_BLOCK_RENDER_POLICY: BlockRenderPolicy = {
   fidelity: 'full',
