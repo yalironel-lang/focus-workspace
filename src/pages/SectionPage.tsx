@@ -222,6 +222,7 @@ import {
   MessageCircle,
   Calculator,
   LineChart,
+  Table2,
   Link2,
   Image,
 } from 'lucide-react';
@@ -362,6 +363,7 @@ function FreeSpaceToolPalette({
       items: [
         { id: 'calculator', title: 'Calculator', description: 'Use a math scratchpad.', icon: <Calculator className="w-4 h-4" /> },
         { id: 'graph', title: 'Graph', description: 'Plot and inspect an equation.', icon: <LineChart className="w-4 h-4" /> },
+        { id: 'sheet', title: 'Sheet', description: 'A spreadsheet for tables and formulas.', icon: <Table2 className="w-4 h-4" /> },
         { id: 'link', title: 'Link', description: 'Save a reference URL.', icon: <Link2 className="w-4 h-4" /> },
         { id: 'image', title: 'Image', description: 'Place a visual reference.', icon: <Image className="w-4 h-4" /> },
       ],
@@ -1525,6 +1527,8 @@ export function SectionPage() {
                 ? { w: 380, h: 320 }
                 : type === 'pdf'
                   ? { w: 520, h: 460 }
+                  : type === 'sheet'
+                    ? { w: 720, h: 480 }
                   : { w: 360, h: 280 };
     initPos(obj.id, { x: base.x, y: base.y, ...sizeHint });
     applyStudyLinksForObject(obj.id, type);

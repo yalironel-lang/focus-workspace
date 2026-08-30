@@ -38,6 +38,7 @@ const PROFILE_BY_TYPE: Record<ProjectObjectType, SemanticProfile> = {
   companion: { lane: 'source', hierarchy: 'secondary', weight: 92, intimacy: 1.02 },
   graph: { lane: 'tool', hierarchy: 'secondary', weight: 86, intimacy: 0.98 },
   calculator: { lane: 'tool', hierarchy: 'utility', weight: 74, intimacy: 0.86 },
+  sheet: { lane: 'tool', hierarchy: 'secondary', weight: 90, intimacy: 1.0 },
   mistake: { lane: 'review', hierarchy: 'secondary', weight: 88, intimacy: 1.05 },
   checklist: { lane: 'support', hierarchy: 'utility', weight: 62, intimacy: 0.82 },
 };

@@ -1277,7 +1277,9 @@ export function FreeformCanvas({
   useEffect(() => {
     const isEditingTarget = (el: EventTarget | null): boolean => {
       if (!(el instanceof HTMLElement)) return false;
-      return !!el.closest('input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable]');
+      return !!el.closest(
+        'input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable], [data-fw-sheet-surface="1"]',
+      );
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== 'Space' && e.key !== ' ') return;

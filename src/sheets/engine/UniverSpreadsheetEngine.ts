@@ -12,7 +12,6 @@ import { migrateFocusSheetDocument } from '../domain/migrateFocusSheetDocument';
 import { SheetEngineError } from '../domain/sheetEngineErrors';
 import { createUniverOss, LocaleType, mergeLocales } from './createUniverOss';
 import type {
-  SpreadsheetCellGrid,
   SpreadsheetCellValue,
   SpreadsheetEngineAdapter,
   SpreadsheetUnsubscribe,
@@ -32,11 +31,23 @@ type UniverRange = {
   setValues?: (grid: unknown) => unknown;
   setFormula?: (formula: string) => unknown;
   clearContent?: () => unknown;
+  setFontWeight?: (weight: string) => unknown;
+  getA1Notation?: () => string;
+  getRow?: () => number;
+  getColumn?: () => number;
 };
 
 type UniverSheet = {
   getRange: (a1: string) => UniverRange;
   setActiveRange?: (range: UniverRange) => unknown;
+  getActiveRange?: () => UniverRange | null;
+  getActiveCell?: () => UniverRange | null;
+  insertRows?: (rowIndex: number, numRows?: number) => unknown;
+  deleteRows?: (rowPosition: number, howMany: number) => unknown;
+  insertColumns?: (columnIndex: number, numColumns?: number) => unknown;
+  deleteColumns?: (columnPosition: number, howMany: number) => unknown;
+  getRowHeight?: (rowPosition: number) => number;
+  getColumnWidth?: (columnPosition: number) => number;
 };
 
 type UniverWorkbook = {
@@ -61,6 +72,9 @@ type UniverApi = {
 
 type UniverHandle = { dispose: () => void };
 
+/** Prevents a cancelled Strict-Mode mount from wiping a newer engine's host DOM. */
+const hostOwners = new WeakMap<HTMLElement, UniverSpreadsheetEngine>();
+
 export type DocumentChangedTrace = {
   id: string;
   type: number | undefined;
@@ -80,6 +94,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
   async mount(container: HTMLElement, document: FocusSheetDocument): Promise<void> {
     this.dispose();
     this.container = container;
+    hostOwners.set(container, this);
     const doc = migrateFocusSheetDocument(document);
 
     try {
@@ -90,6 +105,13 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       await import('@univerjs/preset-sheets-core/lib/index.css');
 
       const localeMod = (sheetsCoreEnUS as { default?: unknown }).default ?? sheetsCoreEnUS;
+
+      if (hostOwners.get(container) !== this) {
+        this.univerAPI = null;
+        this.univer = null;
+        this.container = null;
+        throw new SheetEngineError('ENGINE_MOUNT_FAILED', 'SHEET_MOUNT_SUPERSEDED');
+      }
 
       const { univer, univerAPI } = createUniverOss({
         locale: LocaleType.EN_US,
@@ -169,10 +191,12 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     }
     this.univerAPI = null;
     this.univer = null;
-    if (this.container) {
-      this.container.replaceChildren();
-    }
+    const host = this.container;
     this.container = null;
+    if (host && hostOwners.get(host) === this) {
+      hostOwners.delete(host);
+      host.replaceChildren();
+    }
   }
 
   onDocumentChanged(cb: () => void): SpreadsheetUnsubscribe {
@@ -204,7 +228,11 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     range.setValue(null);
   }
 
-  pasteValues(startA1: string, grid: SpreadsheetCellGrid): void {
+  /**
+   * Evidence/harness only — not on SpreadsheetEngineAdapter.
+   * GATE 1 must use a real clipboard/DOM paste path, not this helper.
+   */
+  pasteValues(startA1: string, grid: Array<Array<SpreadsheetCellValue>>): void {
     const range = this.requireRange(startA1);
     if (typeof range.setValues === 'function') {
       range.setValues(grid);
@@ -213,6 +241,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     range.setValue(grid[0]?.[0] ?? null);
   }
 
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
   undo(): void {
     const wb = this.requireWorkbook();
     if (typeof wb.undo === 'function') {
@@ -222,6 +251,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     void this.requireApi().undo?.();
   }
 
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
   redo(): void {
     const wb = this.requireWorkbook();
     if (typeof wb.redo === 'function') {
@@ -231,6 +261,7 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     void this.requireApi().redo?.();
   }
 
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
   selectRange(a1: string): void {
     const wb = this.requireWorkbook();
     const range = this.requireRange(a1);
@@ -240,6 +271,51 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
     }
     const sheet = wb.getActiveSheet();
     sheet.setActiveRange?.(range);
+  }
+
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
+  setCellFontWeight(a1: string, weight: string): void {
+    const range = this.requireRange(a1);
+    if (typeof range.setFontWeight !== 'function') {
+      throw new Error('Univer range.setFontWeight is not available');
+    }
+    range.setFontWeight(weight);
+  }
+
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
+  insertRows(rowIndex: number, numRows = 1): void {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    if (typeof sheet.insertRows !== 'function') {
+      throw new Error('Univer sheet.insertRows is not available');
+    }
+    sheet.insertRows(rowIndex, numRows);
+  }
+
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
+  deleteRows(rowPosition: number, howMany = 1): void {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    if (typeof sheet.deleteRows !== 'function') {
+      throw new Error('Univer sheet.deleteRows is not available');
+    }
+    sheet.deleteRows(rowPosition, howMany);
+  }
+
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
+  insertColumns(columnIndex: number, numColumns = 1): void {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    if (typeof sheet.insertColumns !== 'function') {
+      throw new Error('Univer sheet.insertColumns is not available');
+    }
+    sheet.insertColumns(columnIndex, numColumns);
+  }
+
+  /** Evidence/harness only — not on SpreadsheetEngineAdapter. */
+  deleteColumns(columnPosition: number, howMany = 1): void {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    if (typeof sheet.deleteColumns !== 'function') {
+      throw new Error('Univer sheet.deleteColumns is not available');
+    }
+    sheet.deleteColumns(columnPosition, howMany);
   }
 
   /** Test helper: read displayed value/formula without exposing Univer types. */
@@ -254,6 +330,38 @@ export class UniverSpreadsheetEngine implements SpreadsheetEngineAdapter {
       };
     }
     return out;
+  }
+
+  /** Evidence helper — active cell A1 after a pointer hit. */
+  getActiveA1(): string | null {
+    const raw = this.getActiveRangeA1();
+    if (!raw) return null;
+    return raw.split(':')[0].replace(/\$/g, '').replace(/^.*!/, '');
+  }
+
+  getActiveRangeA1(): string | null {
+    if (!this.univerAPI) return null;
+    const wb = this.univerAPI.getActiveWorkbook();
+    const sheet = wb?.getActiveSheet?.();
+    if (!sheet) return null;
+    // Prefer the full selection range — getActiveCell is often only the anchor cell.
+    const cell = sheet.getActiveRange?.() ?? sheet.getActiveCell?.();
+    if (!cell) return null;
+    if (typeof cell.getA1Notation === 'function') return cell.getA1Notation();
+    const row = cell.getRow?.();
+    const col = cell.getColumn?.();
+    if (typeof row === 'number' && typeof col === 'number') {
+      return `${String.fromCharCode(65 + col)}${row + 1}`;
+    }
+    return null;
+  }
+
+  getGridMetrics(): { row0: number; col0: number } {
+    const sheet = this.requireWorkbook().getActiveSheet();
+    return {
+      row0: typeof sheet.getRowHeight === 'function' ? sheet.getRowHeight(0) : 24,
+      col0: typeof sheet.getColumnWidth === 'function' ? sheet.getColumnWidth(0) : 73,
+    };
   }
 
   private requireApi(): UniverApi {

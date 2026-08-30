@@ -20,6 +20,9 @@ import { SyncStatusIndicator } from './components/sync/SyncStatusIndicator';
 const SheetEngineSpikePage = import.meta.env.DEV
   ? lazy(() => import('./sheets/spike/SheetEngineSpikePage'))
   : null;
+const SheetFreeSpaceIntegrationPage = import.meta.env.DEV
+  ? lazy(() => import('./sheets/spike/SheetFreeSpaceIntegrationPage'))
+  : null;
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -119,6 +122,22 @@ function AppRoutes() {
               }
             >
               <SheetEngineSpikePage />
+            </Suspense>
+          }
+        />
+      ) : null}
+      {import.meta.env.DEV && SheetFreeSpaceIntegrationPage ? (
+        <Route
+          path="/debug/sheet-fs"
+          element={
+            <Suspense
+              fallback={
+                <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
+                  Loading sheet Free Space…
+                </div>
+              }
+            >
+              <SheetFreeSpaceIntegrationPage />
             </Suspense>
           }
         />

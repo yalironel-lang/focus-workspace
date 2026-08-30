@@ -138,7 +138,11 @@ export default function SheetEngineSpikePage() {
   const ensureAdapter = useCallback(() => {
     if (!adapterRef.current) {
       const engine = new UniverSpreadsheetEngine();
-      engine.onDocumentChanged(() => setChangeFires((n) => n + 1));
+      engine.onDocumentChanged(() => {
+        setChangeFires((n) => n + 1);
+        const w = window as unknown as { __focusSheetChangeFires?: number };
+        w.__focusSheetChangeFires = (w.__focusSheetChangeFires ?? 0) + 1;
+      });
       adapterRef.current = engine;
       (window as unknown as { __focusSheetEngine?: UniverSpreadsheetEngine }).__focusSheetEngine = engine;
     }
@@ -347,11 +351,21 @@ export default function SheetEngineSpikePage() {
     const rows = {
       setCellValue: await countFires('setCellValue', () => adapter.setCellValue('A1', 11)),
       formula: await countFires('formula', () => adapter.setCellFormula('B1', '=A1+1')),
-      paste: await countFires('paste', () => adapter.pasteValues('C1', [[1, 2], [3, 4]])),
+      adapterSetValues: await countFires('adapterSetValues', () =>
+        adapter.pasteValues('C1', [
+          [1, 2],
+          [3, 4],
+        ]),
+      ),
       clear: await countFires('clear', () => adapter.clearCell('C1')),
       undo: await countFires('undo', () => adapter.undo()),
       redo: await countFires('redo', () => adapter.redo()),
       selection: await countFires('selection', () => adapter.selectRange('Z99')),
+      formatBold: await countFires('formatBold', () => adapter.setCellFontWeight('A1', 'bold')),
+      insertRows: await countFires('insertRows', () => adapter.insertRows(0, 1)),
+      deleteRows: await countFires('deleteRows', () => adapter.deleteRows(0, 1)),
+      insertColumns: await countFires('insertColumns', () => adapter.insertColumns(0, 1)),
+      deleteColumns: await countFires('deleteColumns', () => adapter.deleteColumns(0, 1)),
     };
     const payload = {
       rows,

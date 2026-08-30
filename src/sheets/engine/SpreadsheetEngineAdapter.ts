@@ -4,8 +4,6 @@ export type SpreadsheetUnsubscribe = () => void;
 
 export type SpreadsheetCellValue = string | number | boolean | null;
 
-export type SpreadsheetCellGrid = SpreadsheetCellValue[][];
-
 /**
  * Focus-owned spreadsheet engine boundary.
  * Product code must not import Univer types through this interface.
@@ -27,15 +25,10 @@ export interface SpreadsheetEngineAdapter {
    */
   onDocumentChanged(cb: () => void): SpreadsheetUnsubscribe;
 
+  /** Future Calculate UX / tests. */
   setCellValue(a1: string, value: SpreadsheetCellValue): void;
   setCellFormula(a1: string, formula: string): void;
   clearCell(a1: string): void;
-  /** Multi-cell value write used by tests and future Calculate / paste paths. */
-  pasteValues(startA1: string, grid: SpreadsheetCellGrid): void;
-  undo(): void;
-  redo(): void;
-  /** Test/harness: move selection without intending a content mutation. */
-  selectRange(a1: string): void;
 }
 
 export interface SpreadsheetEngineAdapterFactory {

@@ -21,7 +21,7 @@ export interface FocusSheetDocument {
   workbook: unknown;
 }
 
-function newEngineId(prefix: 'fwb' | 'fws'): string {
+export function newSheetEngineId(prefix: 'fwb' | 'fws'): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `${prefix}-${crypto.randomUUID()}`;
   }
@@ -34,8 +34,8 @@ function newEngineId(prefix: 'fwb' | 'fws'): string {
  * Focus object identity.
  */
 export function createEmptyFocusSheetDocument(): FocusSheetDocument {
-  const workbookId = newEngineId('fwb');
-  const worksheetId = newEngineId('fws');
+  const workbookId = newSheetEngineId('fwb');
+  const worksheetId = newSheetEngineId('fws');
   return {
     schemaVersion: FOCUS_SHEET_SCHEMA_VERSION,
     engine: FOCUS_SHEET_ENGINE,

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { FileText, BookOpen, Link2, Calculator, BarChart3, AlertCircle, Image } from 'lucide-react';
+import { FileText, BookOpen, Link2, Calculator, BarChart3, AlertCircle, Image, Table2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectType } from '../../hooks/useSectionFreeSpaceObjects';
 
@@ -24,6 +24,8 @@ function typeIcon(type: string) {
       return Calculator;
     case 'graph':
       return BarChart3;
+    case 'sheet':
+      return Table2;
     case 'mistake':
       return AlertCircle;
     case 'image':

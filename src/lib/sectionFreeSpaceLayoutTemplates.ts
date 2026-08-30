@@ -51,6 +51,7 @@ const DEFAULT_W: Record<ProjectObjectType, number> = {
   graph: 400,
   pdf: 520,
   studyfile: 520,
+  sheet: 720,
 };
 
 const DEFAULT_H: Record<ProjectObjectType, number> = {
@@ -65,6 +66,7 @@ const DEFAULT_H: Record<ProjectObjectType, number> = {
   graph: 360,
   pdf: 460,
   studyfile: 460,
+  sheet: 480,
 };
 
 type LocalClusterLayout = {

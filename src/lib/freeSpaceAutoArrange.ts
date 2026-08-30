@@ -55,6 +55,7 @@ const DEFAULT_W: Record<ProjectObjectType, number> = {
   pdf: 520,
   studyfile: 520,
   companion: 460,
+  sheet: 720,
 };
 
 const DEFAULT_H: Record<ProjectObjectType, number> = {
@@ -69,6 +70,7 @@ const DEFAULT_H: Record<ProjectObjectType, number> = {
   pdf: 460,
   studyfile: 460,
   companion: 320,
+  sheet: 480,
 };
 
 function classifyCategory(o: ProjectSpaceObject): 'core' | 'source' | 'note' | 'task' | 'image' | 'tool' | 'unknown' {
@@ -77,7 +79,7 @@ function classifyCategory(o: ProjectSpaceObject): 'core' | 'source' | 'note' | '
   if (o.type === 'note') return 'note';
   if (o.type === 'checklist') return 'task';
   if (o.type === 'image') return 'image';
-  if (o.type === 'calculator' || o.type === 'graph' || o.type === 'companion' || o.type === 'mistake') return 'tool';
+  if (o.type === 'calculator' || o.type === 'graph' || o.type === 'companion' || o.type === 'mistake' || o.type === 'sheet') return 'tool';
   return 'unknown';
 }
 

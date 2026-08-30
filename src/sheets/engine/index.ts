@@ -1,5 +1,4 @@
 export type {
-  SpreadsheetCellGrid,
   SpreadsheetCellValue,
   SpreadsheetEngineAdapter,
   SpreadsheetEngineAdapterFactory,
