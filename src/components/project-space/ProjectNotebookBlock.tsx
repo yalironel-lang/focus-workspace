@@ -47,11 +47,19 @@ import {
   type NotebookPageKind,
 } from '../../lib/notebookPages';
 import {
+  createInitialWorkspaceChromeState,
+  enterWorkspaceFocus,
+  exitWorkspaceFocus,
+  saveNotebookWorkspaceChrome,
+  type FocusRestoreSnapshot,
+} from '../../lib/notebookPages/notebookWorkspaceChrome';
+import {
   nbSyncDiagLog,
   nbSyncDiagSummarizeContent,
 } from '../../lib/notebookPages/nbSyncDiag';
 import { NotebookWorkspaceLayout } from '../notebook/NotebookWorkspaceLayout';
 import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigator';
+import { NotebookPanelRailToggle, NOTEBOOK_PANEL_RAIL_WIDTH_PX } from '../notebook/NotebookPanelRailToggle';
 import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
@@ -1551,6 +1559,11 @@ export function ProjectNotebookBlock({
   const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
   const [surfaceWidth, setSurfaceWidth] = useState(0);
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  const [workspaceChrome, setWorkspaceChrome] = useState(createInitialWorkspaceChromeState);
+  const workspaceFocusSnapshotRef = useRef<FocusRestoreSnapshot>({
+    topicsOpen: workspaceChrome.topicsOpen,
+    contextOpen: workspaceChrome.contextOpen,
+  });
   const [selectionToolbar, setSelectionToolbar] = useState<NotebookSelectionState | null>(null);
   const [paperPopoverOpen, setPaperPopoverOpen] = useState(false);
   const [isFocusModeOpen, setIsFocusModeOpen] = useState(false);
@@ -2045,8 +2058,62 @@ export function ProjectNotebookBlock({
   }, [activeNotebookBlock, blocks]);
   const hasNotebookContext = contextData.totalCount > 0;
   const canDockContext = surfaceWidth >= 640;
+  const workspaceFocusActive = isWorkspacePresentation && workspaceChrome.focusMode;
+  const contextPanelVisible = isWorkspacePresentation
+    ? workspaceChrome.contextOpen
+    : contextPanelOpen;
+  const showWorkspaceContextDock =
+    isWorkspacePresentation && hasNotebookContext && canDockContext && !workspaceFocusActive;
   const showNotebookContext =
-    !isDeskPresentation && context === 'free-space' && hasNotebookContext && contextPanelOpen;
+    !isDeskPresentation &&
+    context === 'free-space' &&
+    hasNotebookContext &&
+    contextPanelVisible &&
+    !workspaceFocusActive &&
+    (!isWorkspacePresentation || !canDockContext);
+
+  const setTopicsOpen = useCallback((open: boolean) => {
+    setWorkspaceChrome(s => ({ ...s, topicsOpen: open }));
+  }, []);
+
+  const toggleContextPanel = useCallback(() => {
+    if (isWorkspacePresentation) {
+      setWorkspaceChrome(s => ({ ...s, contextOpen: !s.contextOpen }));
+    } else {
+      setContextPanelOpen(v => !v);
+    }
+  }, [isWorkspacePresentation]);
+
+  const toggleWorkspaceFocus = useCallback(async () => {
+    await flushHandwritingBeforeTransition();
+    setWorkspaceChrome(s => {
+      if (s.focusMode) {
+        return exitWorkspaceFocus(workspaceFocusSnapshotRef.current);
+      }
+      const { next, snapshot } = enterWorkspaceFocus(s);
+      workspaceFocusSnapshotRef.current = snapshot;
+      return next;
+    });
+  }, [flushHandwritingBeforeTransition]);
+
+  useEffect(() => {
+    if (!isWorkspacePresentation) return;
+    saveNotebookWorkspaceChrome({
+      topicsOpen: workspaceChrome.topicsOpen,
+      contextOpen: workspaceChrome.contextOpen,
+    });
+  }, [isWorkspacePresentation, workspaceChrome.topicsOpen, workspaceChrome.contextOpen]);
+
+  useEffect(() => {
+    if (!workspaceFocusActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setWorkspaceChrome(exitWorkspaceFocus(workspaceFocusSnapshotRef.current));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [workspaceFocusActive]);
 
   useLayoutEffect(() => {
     const el = shellRef.current;
@@ -2059,8 +2126,14 @@ export function ProjectNotebookBlock({
   }, []);
 
   useEffect(() => {
-    if (!hasNotebookContext && contextPanelOpen) setContextPanelOpen(false);
-  }, [hasNotebookContext, contextPanelOpen]);
+    if (!hasNotebookContext) {
+      if (isWorkspacePresentation) {
+        setWorkspaceChrome(s => (s.contextOpen ? { ...s, contextOpen: false } : s));
+      } else if (contextPanelOpen) {
+        setContextPanelOpen(false);
+      }
+    }
+  }, [hasNotebookContext, isWorkspacePresentation, contextPanelOpen]);
 
   const commitBlocks = useCallback((next: Block[]) => {
     const normalized = normalizeOrderedSequences(next);
@@ -5012,11 +5085,14 @@ export function ProjectNotebookBlock({
           }}
         >
           <span style={{ opacity: headerHovered ? 1 : 0.55, transition: 'opacity 0.4s ease' }}>
-            {!isWorkspacePresentation ? (
             <button
               type="button"
-              title="Focus mode"
+              title={workspaceFocusActive || isFocusModeOpen ? 'Exit focus mode' : 'Focus mode'}
               onClick={() => {
+                if (isWorkspacePresentation) {
+                  void toggleWorkspaceFocus();
+                  return;
+                }
                 void (async () => {
                   await flushHandwritingBeforeTransition();
                   setIsFocusModeOpen(true);
@@ -5033,7 +5109,6 @@ export function ProjectNotebookBlock({
                 <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-            ) : null}
           </span>
           <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? (notebookMode === 'math-workspace' ? 0.75 : 1) : (notebookMode === 'math-workspace' ? 0.08 : 0.32), transition: 'opacity 0.4s ease' }}>
           {context === 'free-space' ? (
@@ -5069,18 +5144,24 @@ export function ProjectNotebookBlock({
             <button
               type="button"
               disabled={!hasNotebookContext}
-              onClick={() => setContextPanelOpen(v => !v)}
-              title={!hasNotebookContext ? 'No context yet' : showNotebookContext ? 'Hide sources' : 'Show sources'}
+              onClick={toggleContextPanel}
+              title={
+                !hasNotebookContext
+                  ? 'No context yet'
+                  : contextPanelVisible
+                    ? 'Hide sources'
+                    : 'Show sources'
+              }
               style={{
                 border: '1px solid rgba(255,255,255,0.06)',
                 background: !hasNotebookContext
                   ? 'rgba(255,255,255,0.02)'
-                  : showNotebookContext
+                  : contextPanelVisible
                     ? 'rgba(255,255,255,0.08)'
                     : 'rgba(255,255,255,0.03)',
                 color: !hasNotebookContext
                   ? ink.ghost
-                  : showNotebookContext
+                  : contextPanelVisible
                     ? ink.primary
                     : ink.secondary,
                 borderRadius: '10px',
@@ -5217,6 +5298,9 @@ export function ProjectNotebookBlock({
         enabled={v1PagesShell && isWorkspacePresentation}
         tokens={tokens}
         breadcrumb={getNotebookWorkspaceBreadcrumb(effectiveContent)}
+        topicsOpen={workspaceChrome.topicsOpen}
+        onTopicsOpenChange={setTopicsOpen}
+        topicsSuppressed={workspaceFocusActive}
         navigator={
           (effectiveContent.sections?.length ?? 0) > 0 ? (
             <NotebookWorkspaceNavigator
@@ -5527,12 +5611,19 @@ export function ProjectNotebookBlock({
         onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
         style={{
           position: 'relative',
-          display: showNotebookContext && canDockContext ? 'grid' : 'flex',
-          flexDirection: showNotebookContext && canDockContext ? undefined : 'column',
+          display:
+            (showNotebookContext && canDockContext) || showWorkspaceContextDock
+              ? 'grid'
+              : 'flex',
+          flexDirection: 'column',
           flex: isDeskPresentation && context === 'free-space' ? 1 : undefined,
           minHeight: context === 'free-space' ? '100%' : undefined,
-          gridTemplateColumns: showNotebookContext && canDockContext ? 'minmax(0, 1fr) 232px' : undefined,
-          gap: showNotebookContext && canDockContext ? '16px' : undefined,
+          gridTemplateColumns:
+            (showNotebookContext && canDockContext) || showWorkspaceContextDock
+              ? `minmax(0, 1fr) ${workspaceChrome.contextOpen || !showWorkspaceContextDock ? '232px' : `${NOTEBOOK_PANEL_RAIL_WIDTH_PX}px`}`
+              : undefined,
+          gap: (showNotebookContext && canDockContext) || showWorkspaceContextDock ? '16px' : undefined,
+          alignItems: undefined,
         }}
       >
       {editorMode === 'edit' && !isFocusModeOpen ? (
@@ -5556,6 +5647,9 @@ export function ProjectNotebookBlock({
           data-desk-surface={isDeskPresentation ? '1' : undefined}
           style={{
             ...editorSurfaceStyle,
+            ...(showWorkspaceContextDock && !workspaceChrome.contextOpen
+              ? { flex: 1, minWidth: 0 }
+              : {}),
             ...(isDeskPresentation
               ? {
                   flex: 1,
@@ -6972,6 +7066,64 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       )}
+      {showWorkspaceContextDock ? (
+        <div
+          style={{
+            position: 'relative',
+            minHeight: 0,
+            minWidth: 0,
+            width: workspaceChrome.contextOpen ? '100%' : NOTEBOOK_PANEL_RAIL_WIDTH_PX,
+            flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              width: 232,
+              height: '100%',
+              overflow: 'hidden',
+              flexShrink: 0,
+              marginLeft: workspaceChrome.contextOpen
+                ? 0
+                : -(232 - NOTEBOOK_PANEL_RAIL_WIDTH_PX),
+            }}
+          >
+            <NotebookContextSidebar
+              tokens={tokens}
+              title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+              data={contextData}
+              onSelectObject={onRequestSelectObject}
+            />
+          </div>
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: workspaceChrome.contextOpen
+                ? -Math.floor(NOTEBOOK_PANEL_RAIL_WIDTH_PX / 2)
+                : 0,
+              transform: 'translateY(-50%)',
+              zIndex: 12,
+              width: NOTEBOOK_PANEL_RAIL_WIDTH_PX,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'auto',
+            }}
+          >
+            <NotebookPanelRailToggle
+              tokens={tokens}
+              edge="right"
+              panelOpen={workspaceChrome.contextOpen}
+              variant={workspaceChrome.contextOpen ? 'seam' : 'rail'}
+              collapseLabel="Collapse Context"
+              expandLabel="Show Context"
+              onToggle={() =>
+                setWorkspaceChrome(s => ({ ...s, contextOpen: !s.contextOpen }))
+              }
+            />
+          </div>
+        </div>
+      ) : null}
       {showNotebookContext ? (
         canDockContext ? (
           <NotebookContextSidebar
@@ -6995,7 +7147,7 @@ export function ProjectNotebookBlock({
               title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
               data={contextData}
               floating
-              onClose={() => setContextPanelOpen(false)}
+              onClose={toggleContextPanel}
               onSelectObject={onRequestSelectObject}
             />
           </div>

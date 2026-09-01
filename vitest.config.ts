@@ -51,6 +51,7 @@ export default defineConfig({
       'src/lib/notebookPages.persistence.test.ts',
       'src/lib/notebookPages.crossDevice.integration.test.ts',
       'src/lib/notebookPages.live.test.ts',
+      'src/lib/notebookPages/notebookWorkspaceChrome.test.ts',
       'src/lib/crossDevicePersistence.integration.test.ts',
       'src/lib/desk/deskPersistence.test.ts',
       'src/lib/focusCache/userWorkspaceStateCloud.live.test.ts',
