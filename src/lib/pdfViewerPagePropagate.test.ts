@@ -3,7 +3,7 @@ import {
   createPagePersistScheduler,
   PAGE_PERSIST_DEBOUNCE_MS,
 } from './pdfViewerController';
-import { applyPdfVisiblePageToContent } from './pdfViewerState';
+import { applyPdfVisiblePageToContent, formatPdfToolbarPageLabel, pdfToolbarDisplayPage } from './pdfViewerState';
 
 describe('PDF visible page → content.page propagation', () => {
   const baseContent = {
@@ -39,6 +39,30 @@ describe('PDF visible page → content.page propagation', () => {
 
   it('does not emit when visible page matches content.page', () => {
     expect(applyPdfVisiblePageToContent(baseContent, 5)).toBeNull();
+  });
+});
+
+describe('PDF toolbar live page display', () => {
+  it('toolbar uses live visiblePage not persisted content.page', () => {
+    const visiblePage = 31;
+    const contentPage = 29;
+    const displayPage = pdfToolbarDisplayPage(visiblePage, 40);
+    expect(displayPage).toBe(31);
+    expect(displayPage).not.toBe(contentPage);
+    expect(formatPdfToolbarPageLabel(displayPage, 40)).toBe('Page 31 / 40');
+  });
+
+  it('viewer callback → card live state → toolbar label', () => {
+    let visiblePage = 29;
+    const onVisiblePageChange = (page: number) => {
+      visiblePage = pdfToolbarDisplayPage(page, 40);
+    };
+
+    onVisiblePageChange(30);
+    expect(formatPdfToolbarPageLabel(visiblePage, 40)).toBe('Page 30 / 40');
+
+    onVisiblePageChange(31);
+    expect(formatPdfToolbarPageLabel(visiblePage, 40)).toBe('Page 31 / 40');
   });
 });
 

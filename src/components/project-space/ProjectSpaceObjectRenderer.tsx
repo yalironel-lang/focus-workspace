@@ -98,6 +98,7 @@ interface Props {
   suppressStudyToolbar?: boolean;
   studyDeskQuiet?: boolean;
   onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
+  onPdfLivePageChange?: (page: number) => void;
   /** Canvas object presentation (floating / split / fullscreen). */
   objectPresentationMode?: UniversalObjectViewMode;
   onSetObjectPresentationMode?: (
@@ -398,6 +399,7 @@ function ProjectSpaceObjectRendererInner({
   suppressStudyToolbar = false,
   studyDeskQuiet = false,
   onStudyMarksChromeChange,
+  onPdfLivePageChange,
   objectPresentationMode = 'floating',
   onSetObjectPresentationMode,
 }: Props) {
@@ -728,6 +730,7 @@ function ProjectSpaceObjectRendererInner({
             presentation={contentHost === 'study-session' ? 'study-session' : 'canvas'}
             suppressStudyToolbar={suppressStudyToolbar}
             onStudyMarksChromeChange={onStudyMarksChromeChange}
+            onPdfLivePageChange={onPdfLivePageChange}
           />
           </div>
         </WorkspaceSurfaceErrorBoundary>

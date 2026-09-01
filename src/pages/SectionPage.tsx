@@ -200,7 +200,7 @@ import {
   scheduleDropRenderCheck,
 } from '../lib/dropPlacementDebug';
 import { extractPdfSpatialData } from '../lib/pdfIngestion';
-import { mergePdfIngestionReadyContent } from '../lib/pdfViewerState';
+import { mergePdfIngestionReadyContent, bumpPdfPage, pdfToolbarDisplayPage } from '../lib/pdfViewerState';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
 import {
@@ -870,6 +870,7 @@ export function SectionPage() {
   const [studyFocusQuestionToken, setStudyFocusQuestionToken] = useState(0);
   const [studyPaneFocus, setStudyPaneFocus] = useState<StudyPaneFocus>('exam');
   const [studyPdfMarksChrome, setStudyPdfMarksChrome] = useState<PdfStudyMarksChrome | null>(null);
+  const [studyPdfLivePage, setStudyPdfLivePage] = useState<number | null>(null);
   const [studySplitRatio, setStudySplitRatio] = useState<number>(() => {
     if (typeof window === 'undefined') return 0.75;
     const raw = window.localStorage.getItem('focus.studySession.splitRatio.v1');
@@ -3113,6 +3114,10 @@ export function SectionPage() {
     return parseExamQuestionsFromBody(c.body ?? '');
   }, [activeStudySession, sectionObjects.objects]);
 
+  useEffect(() => {
+    setStudyPdfLivePage(null);
+  }, [activeStudySession?.sourceObjectId ?? null]);
+
   const studyExamPdfControls = useMemo((): StudyExamPdfControls | null => {
     if (!activeStudySession) return null;
     const src = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
@@ -3120,8 +3125,9 @@ export function SectionPage() {
     const c = ensureProjectObjectContent('pdf', src.content);
     if (c.type !== 'pdf' || !c.fileName) return null;
     const sourceId = activeStudySession.sourceObjectId;
+    const displayPage = pdfToolbarDisplayPage(studyPdfLivePage ?? c.page, c.pageCount);
     return {
-      page: c.page,
+      page: displayPage,
       pageCount: c.pageCount,
       zoom: c.zoom,
       ready: true,
@@ -3132,9 +3138,10 @@ export function SectionPage() {
         if (!o || o.type !== 'pdf') return;
         const pc = ensureProjectObjectContent('pdf', o.content);
         if (pc.type !== 'pdf') return;
+        const basePage = pdfToolbarDisplayPage(studyPdfLivePage ?? pc.page, pc.pageCount);
         store.updateObjectContent(sourceId, {
           ...pc,
-          page: Math.max(1, pc.page + delta),
+          page: bumpPdfPage(basePage, delta, pc.pageCount),
         });
       },
       onZoomDelta: (delta: number) => {
@@ -3155,7 +3162,7 @@ export function SectionPage() {
         store.updateObjectContent(sourceId, { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
       },
     };
-  }, [activeStudySession, sectionObjects.objects, studyPdfMarksChrome]);
+  }, [activeStudySession, sectionObjects.objects, studyPdfMarksChrome, studyPdfLivePage]);
 
   const handleStudySessionWorkFocus = useCallback(
     (blockId: string | null) => {
@@ -3578,6 +3585,13 @@ export function SectionPage() {
               ? setStudyPdfMarksChrome
               : undefined
           }
+          onPdfLivePageChange={
+            contentHost === 'study-session' &&
+            obj.type === 'pdf' &&
+            activeStudySession?.sourceObjectId === objectId
+              ? setStudyPdfLivePage
+              : undefined
+          }
           suppressLearningAttemptChip={
             studySessionPrimary &&
             (contentHost === 'study-session' || obj.type === 'pdf')
@@ -3607,6 +3621,7 @@ export function SectionPage() {
       handleStudySessionWorkFocus,
       getObjectPresentation,
       setObjectPresentationMode,
+      activeStudySession?.sourceObjectId,
     ],
   );
 

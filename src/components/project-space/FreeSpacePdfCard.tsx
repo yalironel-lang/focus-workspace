@@ -27,7 +27,13 @@ import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMar
 import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { PdfStudyMarksOverlay } from './PdfStudyMarksOverlay';
 import { PdfJsScrollViewer } from './PdfJsScrollViewer';
-import { bumpPdfPage, normalizePdfPage, applyPdfVisiblePageToContent } from '../../lib/pdfViewerState';
+import {
+  bumpPdfPage,
+  normalizePdfPage,
+  applyPdfVisiblePageToContent,
+  pdfToolbarDisplayPage,
+  formatPdfToolbarPageLabel,
+} from '../../lib/pdfViewerState';
 import { flushAllFreeSpacePersistence } from '../../lib/freeSpacePersistFlush';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
@@ -75,6 +81,8 @@ interface FreeSpacePdfCardProps {
   suppressStudyToolbar?: boolean;
   /** Lifts mark/highlight chrome into StudySessionShell header. */
   onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
+  /** Lifts live viewer page into StudySessionShell toolbar (persisted content.page can lag). */
+  onPdfLivePageChange?: (page: number) => void;
 }
 
 export const STUDY_SESSION_PDF_FIT_WIDTH_ZOOM = 1.8;
@@ -97,6 +105,7 @@ export function FreeSpacePdfCard({
   suppressStudyToolbar = false,
   suppressExternalTabLink = false,
   onStudyMarksChromeChange,
+  onPdfLivePageChange,
 }: FreeSpacePdfCardProps) {
   const { user } = useAuth();
   const content = ensureProjectObjectContent('pdf', rawContent);
@@ -334,9 +343,16 @@ export function FreeSpacePdfCard({
     setLoadState('error');
   }, [objectId, sectionId, content.fileName]);
 
-  const handleVisiblePageChange = useCallback((page: number) => {
-    setVisiblePage(page);
-  }, []);
+  const toolbarPage = pdfToolbarDisplayPage(visiblePage, content.pageCount);
+
+  const handleVisiblePageChange = useCallback(
+    (page: number) => {
+      const live = pdfToolbarDisplayPage(page, content.pageCount);
+      setVisiblePage(live);
+      onPdfLivePageChange?.(live);
+    },
+    [content.pageCount, onPdfLivePageChange],
+  );
 
   const contentRef = useRef(content);
   contentRef.current = content;
@@ -352,7 +368,7 @@ export function FreeSpacePdfCard({
   );
 
   const bumpPage = (delta: number) => {
-    const nextPage = bumpPdfPage(visiblePage, delta, content.pageCount);
+    const nextPage = bumpPdfPage(toolbarPage, delta, content.pageCount);
     onChange({
       ...content,
       page: nextPage,
@@ -400,13 +416,13 @@ export function FreeSpacePdfCard({
         title="Previous page"
         className="p-1 rounded-md"
         style={{ color: tokens.textMuted }}
-        disabled={visiblePage <= 1 || loadState !== 'ready'}
+        disabled={toolbarPage <= 1 || loadState !== 'ready'}
         onClick={() => bumpPage(-1)}
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
       <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-        {content.pageCount ? `Page ${visiblePage} / ${content.pageCount}` : `Page ${visiblePage}`}
+        {formatPdfToolbarPageLabel(toolbarPage, content.pageCount)}
       </span>
       <button
         type="button"
@@ -602,13 +618,13 @@ export function FreeSpacePdfCard({
             title="Previous page"
             className="p-1 rounded-md"
             style={{ color: tokens.textMuted }}
-            disabled={visiblePage <= 1 || loadState !== 'ready'}
+            disabled={toolbarPage <= 1 || loadState !== 'ready'}
             onClick={() => bumpPage(-1)}
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-            {content.pageCount ? `Page ${visiblePage} / ${content.pageCount}` : `Page ${visiblePage}`}
+            {formatPdfToolbarPageLabel(toolbarPage, content.pageCount)}
           </span>
           <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
             <ChevronRight className="w-4 h-4" />

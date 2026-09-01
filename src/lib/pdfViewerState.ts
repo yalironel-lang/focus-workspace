@@ -54,6 +54,15 @@ export function applyPdfVisiblePageToContent<
   return { ...content, page: nextPage };
 }
 
+/** Toolbar / chrome: live viewer page — not persisted content.page. */
+export function pdfToolbarDisplayPage(visiblePage: number, pageCount?: number | null): number {
+  return normalizePdfPage(visiblePage, pageCount);
+}
+
+export function formatPdfToolbarPageLabel(page: number, pageCount?: number): string {
+  return pageCount ? `Page ${page} / ${pageCount}` : `Page ${page}`;
+}
+
 /**
  * True when replacing the attached file on an existing object (not materializing→ready).
  */
