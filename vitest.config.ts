@@ -43,6 +43,8 @@ export default defineConfig({
       'src/lib/spatialAssetCloud.live.test.ts',
       'src/lib/freeSpaceImageObject.persistence.test.ts',
       'src/lib/freeSpacePdfObject.persistence.test.ts',
+      'src/lib/pdfPageVisibility.test.ts',
+      'src/lib/pdfViewerPagePropagate.test.ts',
       'src/lib/spatialAssetCloud.crossDevice.delete.integration.test.ts',
       'src/lib/spatialAssetCloud.crossDevice.pdfDelete.integration.test.ts',
       'src/lib/notebookDeleteCascade.test.ts',

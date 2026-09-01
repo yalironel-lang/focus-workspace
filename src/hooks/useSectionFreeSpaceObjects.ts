@@ -17,6 +17,7 @@ import {
   stripPdfThumbnailsFromObjects,
 } from '../lib/freeSpacePdfThumbIdb';
 import { markSavePending, recordStorageConflict, setSaveScope } from '../lib/saveStatus';
+import { normalizePdfPage, normalizePdfZoom } from '../lib/pdfViewerState';
 import { copyStudyFileBlob } from '../lib/freeSpaceStudyFileIdb';
 import { cloneFocusSheetDocument } from '../sheets/domain/cloneFocusSheetDocument';
 import type { FocusSheetDocument } from '../sheets/domain/FocusSheetDocument';
@@ -584,13 +585,12 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const last = r.lastOpenedAt;
       const lastOpenedAt =
         typeof last === 'number' && Number.isFinite(last) ? last : null;
-      const page = Math.max(1, Math.floor(numOr(r.page, d.page)));
-      const zoom = Math.min(2.5, Math.max(0.5, numOr(r.zoom, d.zoom)));
-      // Optional spatial ingestion fields — preserved as-is, no coercion needed
       const pageCount      = typeof r.pageCount      === 'number' && r.pageCount > 0 ? r.pageCount : undefined;
       const documentTitle  = typeof r.documentTitle  === 'string' && r.documentTitle.trim() ? r.documentTitle.trim() : undefined;
       const thumbnailDataUrl = typeof r.thumbnailDataUrl === 'string' && r.thumbnailDataUrl.startsWith('data:') ? r.thumbnailDataUrl : undefined;
       const ingestionPhase = r.ingestionPhase === 'materializing' || r.ingestionPhase === 'ready' ? r.ingestionPhase : undefined;
+      const page = normalizePdfPage(r.page, pageCount);
+      const zoom = normalizePdfZoom(r.zoom, d.zoom);
       return {
         type: 'pdf',
         fileName,
@@ -630,8 +630,8 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const last = r.lastOpenedAt;
       const lastOpenedAt =
         typeof last === 'number' && Number.isFinite(last) ? last : null;
-      const page = Math.max(1, Math.floor(numOr(r.page, d.page)));
-      const zoom = Math.min(2.5, Math.max(0.5, numOr(r.zoom, d.zoom)));
+      const page = normalizePdfPage(r.page);
+      const zoom = normalizePdfZoom(r.zoom, d.zoom);
       return {
         type: 'studyfile',
         fileName,

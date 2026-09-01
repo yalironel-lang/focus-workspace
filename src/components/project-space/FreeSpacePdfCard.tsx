@@ -23,10 +23,12 @@ import {
 } from '../../lib/spatialAssetCloud';
 import { loadPdfThumbnail } from '../../lib/freeSpacePdfThumbIdb';
 import { pdfUploadDiag, pdfUploadDiagDump } from '../../lib/pdfUploadDiag';
-import { flickerDebugLog } from '../../lib/flickerDebug';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { usePdfStudyMarks } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
 import { PdfStudyMarksOverlay } from './PdfStudyMarksOverlay';
+import { PdfJsScrollViewer } from './PdfJsScrollViewer';
+import { bumpPdfPage, normalizePdfPage, applyPdfVisiblePageToContent } from '../../lib/pdfViewerState';
+import { flushAllFreeSpacePersistence } from '../../lib/freeSpacePersistFlush';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
 function useCoarsePointer(): boolean {
@@ -55,7 +57,7 @@ interface FreeSpacePdfCardProps {
   sectionId: string;
   onChange: (next: ProjectObjectContent) => void;
   onTitleChange?: (title: string) => void;
-  /** LOD: keep chrome, suspend iframe until object is active/near. */
+  /** LOD: keep chrome, suspend PDF viewer until object is active/near. */
   suspendViewer?: boolean;
   linkedNotebookTitle?: string | null;
   relatedMistakeCount?: number;
@@ -103,16 +105,14 @@ export function FreeSpacePdfCard({
   const inRvStudy = presentation === 'rv-study';
   const inStudySession = presentation === 'study-session' || inRvStudy;
   const coarsePointer = useCoarsePointer();
-  const useTransformZoom = coarsePointer || inStudySession;
-  const forceIframeRemount = coarsePointer || inStudySession;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [idbThumbnail, setIdbThumbnail] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'recover' | 'error'>('idle');
   const [dragOver, setDragOver] = useState(false);
+  const [visiblePage, setVisiblePage] = useState(content.page);
   const mounted = useRef(true);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -320,91 +320,42 @@ export function FreeSpacePdfCard({
         setLoadState('recover');
       }
     },
-    [sectionId, objectId, onChange, onTitleChange, revokeIf],
+    [sectionId, objectId, onChange, onTitleChange, revokeIf, user?.id],
   );
 
-  const [displayPage, setDisplayPage] = useState(content.page);
   useEffect(() => {
-    if (forceIframeRemount) {
-      setDisplayPage(content.page);
-      return;
-    }
-    const timer = window.setTimeout(() => setDisplayPage(content.page), 280);
-    return () => window.clearTimeout(timer);
-  }, [content.page, forceIframeRemount]);
+    setVisiblePage(content.page);
+  }, [content.page]);
 
-  const iframeSrc =
-    objectUrl && loadState === 'ready'
-      ? `${objectUrl}#page=${Math.max(1, displayPage)}&toolbar=0&navpanes=0`
-      : '';
+  useEffect(() => () => flushAllFreeSpacePersistence(), []);
 
-  const handleIframeError = useCallback(() => {
-    pdfUploadDiag('iframe:onError', { objectId, sectionId, fileName: content.fileName });
-    setObjectUrl(prev => {
-      revokeIf(prev);
-      return null;
-    });
+  const handleViewerError = useCallback(() => {
+    pdfUploadDiag('viewer:onError', { objectId, sectionId, fileName: content.fileName });
     setLoadState('error');
-  }, [revokeIf, objectId, sectionId, content.fileName]);
+  }, [objectId, sectionId, content.fileName]);
 
-  const handleIframeLoad = useCallback(() => {
-    const el = iframeRef.current;
-    pdfUploadDiag('iframe:onLoad', {
-      objectId,
-      sectionId,
-      w: el?.offsetWidth ?? 0,
-      h: el?.offsetHeight ?? 0,
-    });
-  }, [objectId, sectionId]);
+  const handleVisiblePageChange = useCallback((page: number) => {
+    setVisiblePage(page);
+  }, []);
 
-  useEffect(() => {
-    if (loadState !== 'ready' || !objectUrl) return;
-    pdfUploadDiag('viewer:ready', {
-      objectId,
-      sectionId,
-      suspendViewer,
-      coarsePointer,
-      useTransformZoom,
-      hasIframeSrc: !!iframeSrc,
-      iframeSrcPrefix: iframeSrc ? iframeSrc.slice(0, 32) : '',
-      studyEnabled: !!onStartStudySession,
-    });
-    const t = window.setTimeout(() => {
-      const el = iframeRef.current;
-      pdfUploadDiag('iframe:dimensions', {
-        objectId,
-        mounted: !!el,
-        w: el?.offsetWidth ?? 0,
-        h: el?.offsetHeight ?? 0,
-        clientW: el?.clientWidth ?? 0,
-        clientH: el?.clientHeight ?? 0,
-      });
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, [
-    loadState,
-    objectUrl,
-    iframeSrc,
-    objectId,
-    sectionId,
-    suspendViewer,
-    coarsePointer,
-    useTransformZoom,
-    onStartStudySession,
-  ]);
+  const contentRef = useRef(content);
+  contentRef.current = content;
 
-  const iframeRemountKey = forceIframeRemount
-    ? `${objectId}-p${content.page}`
-    : objectId;
-
-  useEffect(() => {
-    if (iframeSrc) flickerDebugLog('pdf-iframe-src', `${objectId} p${displayPage}`);
-  }, [iframeSrc, objectId, displayPage]);
+  const handlePagePersist = useCallback(
+    (page: number) => {
+      const c = contentRef.current;
+      const next = applyPdfVisiblePageToContent(c, page);
+      if (!next) return;
+      onChange(next);
+    },
+    [onChange],
+  );
 
   const bumpPage = (delta: number) => {
+    const nextPage = bumpPdfPage(visiblePage, delta, content.pageCount);
     onChange({
       ...content,
-      page: Math.max(1, content.page + delta),
+      page: nextPage,
     });
   };
 
@@ -419,7 +370,8 @@ export function FreeSpacePdfCard({
 
   const jumpToPage = useCallback(
     (page: number) => {
-      onChange({ ...content, page: Math.max(1, page) });
+      const nextPage = normalizePdfPage(page, content.pageCount);
+      onChange({ ...content, page: nextPage });
     },
     [content, onChange],
   );
@@ -427,8 +379,8 @@ export function FreeSpacePdfCard({
   const studyMarks = usePdfStudyMarks({
     sectionId,
     objectId,
-    page: content.page,
-    enabled: inStudySession && loadState === 'ready',
+    page: visiblePage,
+    enabled: inStudySession && loadState === 'ready' && !suspendViewer,
     onJumpToPage: jumpToPage,
     onChromeChange: onStudyMarksChromeChange,
   });
@@ -448,13 +400,13 @@ export function FreeSpacePdfCard({
         title="Previous page"
         className="p-1 rounded-md"
         style={{ color: tokens.textMuted }}
-        disabled={content.page <= 1 || loadState !== 'ready'}
+        disabled={visiblePage <= 1 || loadState !== 'ready'}
         onClick={() => bumpPage(-1)}
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
       <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-        {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
+        {content.pageCount ? `Page ${visiblePage} / ${content.pageCount}` : `Page ${visiblePage}`}
       </span>
       <button
         type="button"
@@ -650,13 +602,13 @@ export function FreeSpacePdfCard({
             title="Previous page"
             className="p-1 rounded-md"
             style={{ color: tokens.textMuted }}
-            disabled={content.page <= 1 || loadState !== 'ready'}
+            disabled={visiblePage <= 1 || loadState !== 'ready'}
             onClick={() => bumpPage(-1)}
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-            {content.pageCount ? `Page ${content.page} / ${content.pageCount}` : `Page ${content.page}`}
+            {content.pageCount ? `Page ${visiblePage} / ${content.pageCount}` : `Page ${visiblePage}`}
           </span>
           <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
             <ChevronRight className="w-4 h-4" />
@@ -813,63 +765,29 @@ export function FreeSpacePdfCard({
           </div>
         )}
 
-        {iframeSrc && !suspendViewer && useTransformZoom ? (
-          <div
-            className="absolute inset-0 overflow-auto"
-            style={{ backgroundColor: tokens.wellBg, touchAction: 'pan-y' }}
-          >
-            <div
-              style={{
-                position: 'relative',
-                width: `${100 / content.zoom}%`,
-                minHeight: `${100 / content.zoom}%`,
-                transform: `scale(${content.zoom})`,
-                transformOrigin: 'top left',
-              }}
-            >
-              <iframe
-                ref={iframeRef}
-                key={iframeRemountKey}
-                title={content.fileName || 'PDF'}
-                src={iframeSrc}
-                className="border-0 block"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  minHeight: inStudySession ? '720px' : '420px',
-                  backgroundColor: tokens.wellBg,
-                }}
-                onLoad={handleIframeLoad}
-                onError={handleIframeError}
-              />
-              {inStudySession && studyMarks.loaded ? (
-                <PdfStudyMarksOverlay
-                  tokens={tokens}
-                  regions={studyMarks.currentRegions}
-                  tool={studyMarks.tool}
-                  onAddRegion={studyMarks.addRegion}
-                  onRemoveRegion={studyMarks.removeRegion}
-                />
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-        {iframeSrc && !suspendViewer && !useTransformZoom ? (
-          <iframe
-            ref={iframeRef}
-            key={iframeRemountKey}
-            title={content.fileName || 'PDF'}
-            src={iframeSrc}
-            className="border-0"
-            style={{
-              zoom: content.zoom,
-              width: '100%',
-              height: '100%',
-              minHeight: '420px',
-              backgroundColor: tokens.wellBg,
-            }}
-            onLoad={handleIframeLoad}
-            onError={handleIframeError}
+        {objectUrl && loadState === 'ready' && !suspendViewer ? (
+          <PdfJsScrollViewer
+            blobUrl={objectUrl}
+            page={content.page}
+            zoom={content.zoom}
+            pageCount={content.pageCount}
+            backgroundColor={tokens.wellBg}
+            onVisiblePageChange={handleVisiblePageChange}
+            onPagePersist={handlePagePersist}
+            onError={handleViewerError}
+            renderPageOverlay={
+              inStudySession && studyMarks.loaded
+                ? () => (
+                    <PdfStudyMarksOverlay
+                      tokens={tokens}
+                      regions={studyMarks.currentRegions}
+                      tool={studyMarks.tool}
+                      onAddRegion={studyMarks.addRegion}
+                      onRemoveRegion={studyMarks.removeRegion}
+                    />
+                  )
+                : undefined
+            }
           />
         ) : null}
       </div>

@@ -13,18 +13,7 @@
  * The workspace noticed what was dropped. Nothing announces that it did.
  */
 
-// `import type` — erased at compile time, zero runtime cost.
-// Gives us the PDFDocumentProxy type for renderThumbnail without a static runtime import.
-import type { PDFDocumentProxy } from 'pdfjs-dist';
-
-// The worker URL is imported statically — it's just a string resolved by Vite,
-// not code that runs at startup. The main pdfjs-dist library is imported dynamically
-// below so Vite can code-split it into a separate chunk, keeping the main bundle
-// below the Workbox 2MB precache limit.
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
-
-// Ensures the worker is configured once across repeated calls
-let pdfjsConfigured = false;
+import { loadPdfDocument } from './pdfjsBootstrap';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,7 +54,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
  * Returns null on any failure.
  */
 async function renderThumbnail(
-  pdf: PDFDocumentProxy,
+  pdf: Awaited<ReturnType<typeof loadPdfDocument>>,
 ): Promise<string | null> {
   try {
     const page     = await pdf.getPage(1);
@@ -124,19 +113,9 @@ export async function extractPdfSpatialData(file: File): Promise<PdfSpatialData>
   };
 
   try {
-    // Dynamic import — Vite splits pdfjs-dist into its own chunk.
-    // Loads once on first PDF drop, not at app startup.
-    const pdfjsLib = await import('pdfjs-dist');
-    if (!pdfjsConfigured) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
-      pdfjsConfigured = true;
-    }
-
     const arrayBuffer = await file.arrayBuffer();
-    const loadTask    = pdfjsLib.getDocument({ data: arrayBuffer });
-
     const pdf = await withTimeout(
-      loadTask.promise,
+      loadPdfDocument(arrayBuffer),
       EXTRACTION_TIMEOUT_MS,
       null,
     );

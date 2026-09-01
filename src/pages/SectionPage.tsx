@@ -200,6 +200,7 @@ import {
   scheduleDropRenderCheck,
 } from '../lib/dropPlacementDebug';
 import { extractPdfSpatialData } from '../lib/pdfIngestion';
+import { mergePdfIngestionReadyContent } from '../lib/pdfViewerState';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
 import {
@@ -1824,18 +1825,35 @@ export function SectionPage() {
         storageFailed = true;
         toast.error('Could not store this PDF on this device. Reconnect the same file to try again.');
       }
-      const readyContent = {
-        type: 'pdf' as const,
-        fileName: file.name,
-        fileType: file.type || 'application/pdf',
-        fileSize: persistedBlobSize || file.size,
-        lastOpenedAt: Date.now(),
-        page: 1,
-        zoom: 1,
-        ingestionPhase: 'ready' as const,
-        ...(spatial?.pageCount ? { pageCount: spatial.pageCount } : {}),
-        ...(spatial?.documentTitle ? { documentTitle: spatial.documentTitle } : {}),
-      };
+      const latestObj = sectionObjectsRef.current.getObject(obj.id);
+      const latestPdf =
+        latestObj?.type === 'pdf'
+          ? ensureProjectObjectContent('pdf', latestObj.content)
+          : null;
+      const existingViewer =
+        latestPdf?.type === 'pdf'
+          ? {
+              page: latestPdf.page,
+              zoom: latestPdf.zoom,
+              fileName: latestPdf.fileName,
+              fileSize: latestPdf.fileSize,
+            }
+          : null;
+
+      const readyContent = mergePdfIngestionReadyContent(
+        existingViewer,
+        {
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          fileSize: persistedBlobSize || file.size,
+        },
+        spatial
+          ? {
+              ...(spatial.pageCount ? { pageCount: spatial.pageCount } : {}),
+              ...(spatial.documentTitle ? { documentTitle: spatial.documentTitle } : {}),
+            }
+          : null,
+      );
 
       if (spatial?.thumbnailDataUrl) {
         void savePdfThumbnail(sectionId, obj.id, spatial.thumbnailDataUrl);

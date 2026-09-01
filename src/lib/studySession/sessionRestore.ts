@@ -3,6 +3,7 @@ import {
   type ProjectObjectContent,
   type ProjectSpaceObject,
 } from '../../hooks/useSectionFreeSpaceObjects';
+import { normalizePdfPage } from '../pdfViewerState';
 import type { StudySessionRecord } from './types';
 
 export interface StudyRestorePayload {
@@ -24,7 +25,7 @@ export function applyPdfPageRestore(
 ): ProjectObjectContent | null {
   const c = ensureProjectObjectContent('pdf', obj.content);
   if (c.type !== 'pdf') return null;
-  const nextPage = Math.max(1, page);
+  const nextPage = normalizePdfPage(page, c.pageCount);
   if (c.page === nextPage) return null;
   return { ...c, page: nextPage, lastOpenedAt: Date.now() };
 }
