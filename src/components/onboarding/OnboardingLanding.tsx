@@ -9,8 +9,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { ArrowRight, BookOpenCheck, Zap } from 'lucide-react';
+import { ArrowRight, Zap } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import { ZikukLogo } from '../ZikukLogo';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -593,18 +594,7 @@ export function OnboardingLanding({ tokens, onEnter }: Props) {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width:           '26px',
-              height:          '26px',
-              borderRadius:    '7px',
-              backgroundColor: tokens.accent,
-              boxShadow:       `0 0 12px ${tokens.accentGlow}`,
-              display:         'flex',
-              alignItems:      'center',
-              justifyContent:  'center',
-            }}>
-              <BookOpenCheck style={{ width: '14px', height: '14px', color: '#000' }} strokeWidth={2.5} />
-            </div>
+            <ZikukLogo size={26} />
             <span style={{
               fontFamily:    "'Plus Jakarta Sans', sans-serif",
               fontSize:      '15px',
@@ -612,7 +602,7 @@ export function OnboardingLanding({ tokens, onEnter }: Props) {
               letterSpacing: '-0.02em',
               color:         tokens.textPrimary,
             }}>
-              Focus
+              ZIKUK
             </span>
           </div>
 

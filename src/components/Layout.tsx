@@ -2,8 +2,9 @@ import { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { AtmosphereTokens } from '../hooks/useAtmosphere';
-import { BookOpenCheck, Sliders } from 'lucide-react';
+import { Sliders } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { ZikukLogo } from './ZikukLogo';
 
 interface LayoutProps {
   children: ReactNode;
@@ -71,20 +72,12 @@ export function Layout({ children, tokens, designMode, onToggleDesignMode }: Lay
 
             {/* Logo */}
             <Link to="/dashboard" className="flex items-center gap-2.5 group">
-              <div
-                className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
-                style={{
-                  backgroundColor: t.accent,
-                  boxShadow: `0 0 12px ${t.accentGlow ?? t.accent + '50'}`,
-                }}
-              >
-                <BookOpenCheck className="w-3.5 h-3.5 text-black" strokeWidth={2.5} />
-              </div>
+              <ZikukLogo size={24} />
               <span
                 className="font-bold text-sm tracking-tight transition-colors"
                 style={{ color: t.textPrimary }}
               >
-                Focus
+                ZIKUK
               </span>
             </Link>
 

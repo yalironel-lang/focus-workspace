@@ -16,10 +16,11 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AtmosphereTokens, ATMOSPHERES } from '../../hooks/useAtmosphere';
 import {
-  BookOpenCheck, Plus, ChevronDown, LogOut,
+  Plus, ChevronDown, LogOut,
   LayoutDashboard, Move, Sliders, Settings2,
 } from 'lucide-react';
 import type { CanvasMode } from '../../hooks/useCanvasMode';
+import { ZikukLogo } from '../ZikukLogo';
 
 interface Props {
   tokens:           AtmosphereTokens;
@@ -96,18 +97,7 @@ export function CommandBar({
             className="flex items-center gap-2.5"
             style={{ textDecoration: 'none' }}
           >
-            <div style={{
-              width:           '26px',
-              height:          '26px',
-              borderRadius:    '7px',
-              backgroundColor: tokens.accent,
-              display:         'flex',
-              alignItems:      'center',
-              justifyContent:  'center',
-              flexShrink:      0,
-            }}>
-              <BookOpenCheck style={{ width: '14px', height: '14px', color: '#000' }} strokeWidth={2.5} />
-            </div>
+            <ZikukLogo size={26} />
             <span
               style={{
                 fontFamily:    "'Plus Jakarta Sans', sans-serif",

@@ -165,11 +165,11 @@ export default defineConfig({
 
       // ── Web app manifest ──────────────────────────────────────────────────
       manifest: {
-        name: 'Focus Workspace',
-        short_name: 'Focus',
+        name: 'ZIKUK',
+        short_name: 'ZIKUK',
         description: 'Your calm daily operating layer. Capture → Choose → Focus.',
-        theme_color: '#0a0805',
-        background_color: '#0a0805',
+        theme_color: '#000119',
+        background_color: '#000119',
         display: 'standalone',
         orientation: 'portrait-primary',
         scope: '/',
@@ -190,10 +190,16 @@ export default defineConfig({
             purpose: 'any',
           },
           {
-            src: '/icon-maskable.svg',
+            src: '/icon-maskable-512.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'maskable',
+          },
+          {
+            src: '/icon-48.png',
+            sizes: '48x48',
+            type: 'image/png',
+            purpose: 'any',
           },
         ],
         shortcuts: [
@@ -202,14 +208,14 @@ export default defineConfig({
             short_name: 'Capture',
             description: 'Capture a thought instantly',
             url: '/dashboard?capture=1',
-            icons: [{ src: '/icon.svg', sizes: 'any' }],
+            icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
           },
           {
             name: 'Start Focus Session',
             short_name: 'Focus',
             description: 'Begin a timed work session',
             url: '/dashboard?focus=1',
-            icons: [{ src: '/icon.svg', sizes: 'any' }],
+            icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
           },
         ],
       },

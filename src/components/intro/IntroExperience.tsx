@@ -115,7 +115,7 @@ export function IntroExperience({ onComplete, onSkip }: Props) {
           className="font-sans text-sm tracking-[0.2em] uppercase"
           style={{ color: 'rgba(148,163,184,0.9)' }}
         >
-          Focus Workspace
+          ZIKUK
         </p>
       </div>
     );
@@ -261,7 +261,7 @@ export function IntroExperience({ onComplete, onSkip }: Props) {
             }}
             {...titleMotion}
           >
-            Focus Workspace
+            ZIKUK
           </motion.h1>
         )}
       </motion.div>

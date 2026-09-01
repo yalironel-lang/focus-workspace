@@ -136,7 +136,7 @@ export function ArrivalExperienceLayer({ tokens, reopened = false, onAction }: P
                   className="mt-6 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl lg:text-[42px]"
                   style={{ color: tokens.textPrimary }}
                 >
-                  Focus Workspace
+                  ZIKUK
                 </h1>
 
                 <p className="mt-4 max-w-[28rem] text-base leading-7 sm:text-[17px]" style={{ color: tokens.textSecondary }}>

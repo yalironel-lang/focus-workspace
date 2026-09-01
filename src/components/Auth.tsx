@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { Loader2, BookOpenCheck } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { ZikukLogo } from './ZikukLogo';
 
 /** Google "G" SVG — inline so there's no external icon dependency */
 function GoogleIcon() {
@@ -52,17 +53,12 @@ export function Auth() {
 
         {/* Logo + headline */}
         <div className="text-center mb-10">
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-5"
-            style={{ backgroundColor: '#f59e0b' }}
-          >
-            <BookOpenCheck className="w-6 h-6 text-black" strokeWidth={2.5} />
-          </div>
+          <ZikukLogo size={48} className="mx-auto mb-5" />
           <h1
             className="text-3xl font-bold tracking-tight mb-3"
             style={{ color: '#f1f5f9' }}
           >
-            Focus
+            ZIKUK
           </h1>
           <p
             className="text-sm leading-relaxed"

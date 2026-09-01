@@ -6,6 +6,7 @@ import { UNIVERSE_ROUTE } from '../../lib/workspaceUniverse/types';
 import type { LibrarySpatialState } from './spatial/LibrarySpatialContext';
 import { SpatialLibraryNavLink } from './spatial/SpatialLibraryNavLink';
 import { LibrarySidebarRailToggle } from './LibrarySidebarRailToggle';
+import { ZikukLogo } from '../ZikukLogo';
 
 interface Props {
   tokens: AtmosphereTokens;
@@ -343,26 +344,10 @@ export function LibrarySidebar({
             transition: 'background 1.2s ease',
           }}
         />
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 10,
-            flexShrink: 0,
-            position: 'relative',
-            background: `radial-gradient(circle at 34% 24%, rgba(255,255,255,0.48), transparent 30%), linear-gradient(135deg, ${accent}, ${accent}cc)`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: `0 8px 22px ${accent}42, inset 0 1px 0 rgba(255,255,255,0.22)`,
-            transition: 'background 1.2s ease, box-shadow 1.2s ease',
-          }}
-        >
-          <BookOpenCheck style={{ width: 13, height: 13, color: '#000' }} strokeWidth={2.5} />
-        </div>
+        <ZikukLogo size={30} />
         <div className="library-sidebar-brand-text" style={{ position: 'relative' }}>
           <div style={{ fontSize: 9.5, fontWeight: 750, letterSpacing: '0.06em', color: 'rgba(255,255,255,0.32)' }}>
-            Focus Workspace
+            ZIKUK
           </div>
           <div
             style={{
