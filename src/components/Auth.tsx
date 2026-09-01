@@ -53,7 +53,7 @@ export function Auth() {
 
         {/* Logo + headline */}
         <div className="text-center mb-10">
-          <ZikukLogo size={48} className="mx-auto mb-5" />
+          <ZikukLogo size={72} className="mx-auto mb-6" />
           <h1
             className="text-3xl font-bold tracking-tight mb-3"
             style={{ color: '#f1f5f9' }}
