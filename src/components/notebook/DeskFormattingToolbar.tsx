@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Bold, Eraser, Italic, Underline } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { FONT_SIZE_OPTIONS, marksAtSelection } from '../../lib/notebookInlineMarks';
@@ -21,6 +21,10 @@ function preventToolbarEvent(e: React.PointerEvent | React.MouseEvent): void {
   e.stopPropagation();
 }
 
+function preventToolbarContainerDefault(e: React.PointerEvent | React.MouseEvent): void {
+  e.preventDefault();
+}
+
 function DeskToolbarBtn({
   title,
   active,
@@ -32,6 +36,15 @@ function DeskToolbarBtn({
   onAction: () => void;
   children: React.ReactNode;
 }) {
+  const actionGateRef = useRef(false);
+  const fireActionOnce = () => {
+    if (actionGateRef.current) return;
+    actionGateRef.current = true;
+    onAction();
+    requestAnimationFrame(() => {
+      actionGateRef.current = false;
+    });
+  };
   return (
     <button
       type="button"
@@ -39,14 +52,15 @@ function DeskToolbarBtn({
       title={title}
       tabIndex={-1}
       data-active={active ? 'true' : undefined}
-      onMouseDownCapture={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onAction();
-      }}
       onPointerDownCapture={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        fireActionOnce();
+      }}
+      onMouseDownCapture={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fireActionOnce();
       }}
     >
       {children}
@@ -83,7 +97,7 @@ export function DeskFormattingToolbar({
   );
 
   const onToolbarInteractionStart = (e: React.PointerEvent | React.MouseEvent) => {
-    preventToolbarEvent(e);
+    preventToolbarContainerDefault(e);
     onToolbarPointerDown?.();
   };
 

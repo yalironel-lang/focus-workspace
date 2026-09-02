@@ -148,12 +148,25 @@ export function stripMarkPrefix(raw: string): string {
   return parseRichLine(raw).plain;
 }
 
-function marksCoveringRange(marks: InlineMark[], start: number, end: number, type: InlineMarkType, value?: string): boolean {
-  return marks.some(m => {
-    if (m.t !== type) return false;
-    if (value !== undefined && m.v !== value) return false;
-    return m.s <= start && m.e >= end;
-  });
+/** True when every index in [start, end) carries mark type T (supports fragmented marks). */
+export function isMarkActiveOnRange(
+  marks: InlineMark[],
+  start: number,
+  end: number,
+  type: InlineMarkType,
+  value?: string,
+): boolean {
+  if (end <= start) return false;
+  const valued = type === 'fs' || type === 'fg' || type === 'bg' || type === 'hl';
+  for (let i = start; i < end; i++) {
+    const hit = marks.some(m => {
+      if (m.t !== type) return false;
+      if (valued && value !== undefined && m.v !== value) return false;
+      return m.s <= i && m.e > i;
+    });
+    if (!hit) return false;
+  }
+  return true;
 }
 
 export function marksAtSelection(
@@ -165,7 +178,7 @@ export function marksAtSelection(
   const active: Partial<Record<InlineMarkType, string | true>> = {};
   for (const t of VALID_TYPES) {
     if (t === 'fs' || t === 'fg' || t === 'bg' || t === 'hl') continue;
-    if (marksCoveringRange(marks, start, end, t)) active[t] = true;
+    if (isMarkActiveOnRange(marks, start, end, t)) active[t] = true;
   }
   for (const t of ['fs', 'fg', 'bg', 'hl'] as const) {
     const covering = marks.filter(m => m.t === t && m.s <= start && m.e >= end);
@@ -224,10 +237,10 @@ export function applyMarkToggle(
 ): InlineMark[] {
   if (end <= start) return marks;
   const valued = type === 'fs' || type === 'fg' || type === 'bg' || type === 'hl';
-  if (!valued && marksCoveringRange(marks, start, end, type)) {
+  if (!valued && isMarkActiveOnRange(marks, start, end, type)) {
     return removeMarksInRange(marks, start, end, new Set([type]));
   }
-  if (valued && value && marksCoveringRange(marks, start, end, type, value)) {
+  if (valued && value && isMarkActiveOnRange(marks, start, end, type, value)) {
     return removeMarksInRange(marks, start, end, new Set([type]));
   }
   return applyMarkRange(marks, start, end, type, value);

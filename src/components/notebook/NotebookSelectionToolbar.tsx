@@ -27,7 +27,7 @@ import {
 } from '../../lib/notebookInlineMarks';
 import type { NotebookSelectionState, ToolbarCommand } from '../../lib/notebookSelectionToolbar';
 import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
-import { nbAgentLog } from '../../lib/notebookDebugIngest';
+import { NB_FORMAT_TOOLBAR_Z } from '../../lib/notebookToolbarLayers';
 import './notebookToolbar.css';
 
 interface Props {
@@ -62,34 +62,9 @@ function ToolbarBtn({
       title={title}
       tabIndex={-1}
       data-active={active ? 'true' : undefined}
-      onMouseDownCapture={(e) => {
+      onMouseDown={(e) => {
         e.preventDefault();
-        e.stopPropagation();
-        // #region agent log
-        nbAgentLog(
-          'NotebookSelectionToolbar:ToolbarBtn',
-          'toolbar-mousedown-capture',
-          {
-            title,
-            selectionText: window.getSelection()?.toString() ?? '',
-            activeElement:
-              document.activeElement instanceof HTMLElement
-                ? document.activeElement.tagName
-                : null,
-            activeInContentEditable:
-              document.activeElement instanceof HTMLElement &&
-              (document.activeElement.isContentEditable ||
-                !!document.activeElement.closest('[contenteditable="true"]')),
-          },
-          'A',
-          'post-fix',
-        );
-        // #endregion
         onAction();
-      }}
-      onPointerDownCapture={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
       }}
     >
       {children}
@@ -130,7 +105,6 @@ function ColorPicker({
         className="nb-toolbar-btn"
         title={label}
         onMouseDown={toggleOpen}
-        onPointerDown={preventToolbarEvent}
         style={{ fontSize: 10, fontWeight: 700 }}
       >
         A
@@ -149,7 +123,6 @@ function ColorPicker({
                 onPick(c);
                 setOpen(false);
               }}
-              onPointerDown={preventToolbarEvent}
             />
           ))}
         </div>
@@ -173,18 +146,17 @@ export function NotebookSelectionToolbar({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onDismiss();
     };
-    const onDocMouseDown = (e: MouseEvent) => {
+    const onDocPointerDown = (e: PointerEvent) => {
       const t = e.target;
       if (!(t instanceof Element)) return;
-      if (t.closest('.nb-selection-toolbar')) {
-        e.preventDefault();
-      }
+      if (t.closest('[data-nb-format-toolbar="1"]')) return;
+      onDismiss();
     };
     window.addEventListener('keydown', onKey, true);
-    document.addEventListener('mousedown', onDocMouseDown, true);
+    document.addEventListener('pointerdown', onDocPointerDown, true);
     return () => {
       window.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('mousedown', onDocMouseDown, true);
+      document.removeEventListener('pointerdown', onDocPointerDown, true);
     };
   }, [onDismiss]);
 
@@ -196,37 +168,22 @@ export function NotebookSelectionToolbar({
     [onCommand],
   );
 
+  const onBoldClick = useCallback(() => {
+    run({ type: 'toggleMark', mark: 'b' });
+  }, [run]);
+
   const fsValue = typeof active.fs === 'string' ? active.fs : '16';
-
-  const onToolbarInteractionStart = (e: React.PointerEvent | React.MouseEvent) => {
-    preventToolbarEvent(e);
-    onToolbarPointerDown?.();
-  };
-
-  const onToolbarInteractionEnd = () => {
-    onToolbarPointerUp?.();
-  };
 
   return createPortal(
     <>
-      <button
-        type="button"
-        aria-label="Dismiss formatting toolbar"
+      <div
+        aria-hidden
+        data-nb-toolbar-backdrop="1"
         style={{
           position: 'fixed',
           inset: 0,
-          zIndex: 10049,
-          background: 'transparent',
-          border: 'none',
-          cursor: 'default',
-        }}
-        onMouseDown={(e) => {
-          preventToolbarEvent(e);
-          onDismiss();
-        }}
-        onPointerDown={(e) => {
-          preventToolbarEvent(e);
-          onDismiss();
+          zIndex: NB_FORMAT_TOOLBAR_Z.backdrop,
+          pointerEvents: 'none',
         }}
       />
       <div
@@ -238,7 +195,7 @@ export function NotebookSelectionToolbar({
         suppressContentEditableWarning
         style={{
           position: 'fixed',
-          zIndex: 10050,
+          zIndex: NB_FORMAT_TOOLBAR_Z.toolbar,
           top: anchor.top,
           left: anchor.left,
           width: anchor.width,
@@ -253,16 +210,22 @@ export function NotebookSelectionToolbar({
           background: 'rgba(10, 14, 24, 0.96)',
           boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
           backdropFilter: 'blur(12px)',
+          pointerEvents: 'auto',
         }}
-        onMouseDownCapture={onToolbarInteractionStart}
-        onPointerDownCapture={onToolbarInteractionStart}
-        onMouseUpCapture={onToolbarInteractionEnd}
-        onPointerUpCapture={onToolbarInteractionEnd}
-        onPointerCancelCapture={onToolbarInteractionEnd}
+        onPointerDown={() => onToolbarPointerDown?.()}
+        onPointerUp={() => onToolbarPointerUp?.()}
       >
-        <ToolbarBtn title="Bold" active={!!active.b} onAction={() => run({ type: 'toggleMark', mark: 'b' })}>
+        <button
+          type="button"
+          className="nb-toolbar-btn"
+          title="Bold"
+          tabIndex={-1}
+          data-nb-toolbar-bold="1"
+          data-active={active.b ? 'true' : undefined}
+          onClick={onBoldClick}
+        >
           <Bold size={14} strokeWidth={2.5} />
-        </ToolbarBtn>
+        </button>
         <ToolbarBtn title="Italic" active={!!active.i} onAction={() => run({ type: 'toggleMark', mark: 'i' })}>
           <Italic size={14} strokeWidth={2.5} />
         </ToolbarBtn>
@@ -279,8 +242,10 @@ export function NotebookSelectionToolbar({
           className="nb-toolbar-select"
           title="Font size"
           value={fsValue}
-          onMouseDown={(e) => preventToolbarEvent(e)}
-          onPointerDown={(e) => preventToolbarEvent(e)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onToolbarPointerDown?.();
+          }}
           onChange={(e) => run({ type: 'setFontSize', px: Number(e.target.value) })}
         >
           {FONT_SIZE_OPTIONS.map(px => (

@@ -12,8 +12,6 @@ import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { InlineMark } from '../../lib/notebookInlineMarks';
 import { mergeAdjacentMarks, sortMarks } from '../../lib/notebookInlineMarks';
 import { getCaretOffsetIn, setCaretOffsetIn } from '../../lib/notebookCaret';
-import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
-import { nbAgentLog } from '../../lib/notebookDebugIngest';
 import {
   isPenPointer,
   isPenTextBlockActive,
@@ -277,11 +275,14 @@ export function RichEditableLine({
     const sameMarks = JSON.stringify(current.marks) === JSON.stringify(marks);
     if (focusedRef.current) {
       if (!samePlain || !sameMarks) {
-        const offset = getCaretOffsetIn(el);
         programmaticRef.current = true;
         renderRichContent(el, plain, marks);
         finishProgrammaticRender();
-        setCaretOffsetIn(el, Math.min(offset, plain.length));
+        // Marks-only updates: preserve browser selection; parent restores session range.
+        if (!samePlain) {
+          const offset = getCaretOffsetIn(el);
+          setCaretOffsetIn(el, Math.min(offset, plain.length));
+        }
       }
       return;
     }
@@ -402,21 +403,6 @@ export function RichEditableLine({
             isInputSuppressed(id, suppressInputRef, ignoreDomInputBlockIdRef);
           if (blocked) {
             ev.preventDefault();
-            nbToolbarDebug('onBeforeInput blocked', { id, inputType: (ev.nativeEvent as InputEvent).inputType });
-          } else {
-            // #region agent log
-            nbAgentLog(
-              'RichEditableLine:onBeforeInput',
-              'beforeinput-not-blocked',
-              {
-                id,
-                inputType: (ev.nativeEvent as InputEvent).inputType,
-                data: (ev.nativeEvent as InputEvent).data,
-                domText: ev.currentTarget.textContent ?? '',
-              },
-              'B',
-            );
-            // #endregion
           }
         }}
         onInput={(ev) => {
@@ -428,15 +414,6 @@ export function RichEditableLine({
             return;
           }
           if (toolbarActiveBlockIdRef?.current === id) {
-            // #region agent log
-            nbAgentLog(
-              'RichEditableLine:onInput',
-              'onInput-blocked-toolbar-block',
-              { id, domPlain: target.textContent?.slice(0, 60) ?? '', reactPlain: plain },
-              'D',
-              'post-fix',
-            );
-            // #endregion
             programmaticRef.current = true;
             renderRichContent(target, plain, marks);
             finishProgrammaticRender();
@@ -446,44 +423,11 @@ export function RichEditableLine({
             programmaticRef.current ||
             isInputSuppressed(id, suppressInputRef, ignoreDomInputBlockIdRef);
           const rich = domToRichLine(target);
-          nbToolbarDebug('onInput', {
-            id,
-            plain: rich.plain,
-            marks: rich.marks,
-            programmatic: programmaticRef.current,
-            toolbarGuard: suppressInputRef?.current === true,
-            ignoreBlock: ignoreDomInputBlockIdRef?.current === id,
-            suppressed,
-          });
-          // #region agent log
-          nbAgentLog(
-            'RichEditableLine:onInput',
-            suppressed ? 'onInput-suppressed' : 'onInput-commit',
-            {
-              id,
-              plain: rich.plain,
-              suppressed,
-              programmatic: programmaticRef.current,
-              toolbarGuard: suppressInputRef?.current === true,
-              ignoreBlock: ignoreDomInputBlockIdRef?.current === id,
-            },
-            suppressed ? 'C' : 'D',
-          );
-          // #endregion
           if (suppressed) return;
           const lockActive =
             ignoreDomInputBlockIdRef?.current === id ||
             (domCommitLockUntilRef != null && Date.now() < domCommitLockUntilRef.current);
           if (lockActive && isLikelyDomCorruption(plain, rich.plain)) {
-            // #region agent log
-            nbAgentLog(
-              'RichEditableLine:onInput',
-              'onInput-reject-corruption',
-              { id, expectedPlain: plain, domPlain: rich.plain },
-              'D',
-              'post-fix',
-            );
-            // #endregion
             programmaticRef.current = true;
             renderRichContent(target, plain, marks);
             finishProgrammaticRender();

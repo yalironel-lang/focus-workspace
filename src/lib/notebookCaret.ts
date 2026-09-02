@@ -6,6 +6,32 @@ export interface SelectionOffsets {
   collapsed: boolean;
 }
 
+type TextPoint = { node: Text; offset: number };
+
+/** Map a plain-text offset to a DOM text node + offset (depth-first). */
+export function findTextPointIn(root: HTMLElement, offset: number): TextPoint | null {
+  let remaining = Math.max(0, offset);
+  const walk = (node: Node): TextPoint | null => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const textNode = node as Text;
+      const len = textNode.textContent?.length ?? 0;
+      if (remaining <= len) {
+        return { node: textNode, offset: remaining };
+      }
+      remaining -= len;
+      return null;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      for (let i = 0; i < node.childNodes.length; i += 1) {
+        const found = walk(node.childNodes[i]!);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return walk(root);
+}
+
 export function getCaretOffsetIn(el: HTMLElement): number {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) {
@@ -19,29 +45,14 @@ export function getCaretOffsetIn(el: HTMLElement): number {
 }
 
 export function setCaretOffsetIn(el: HTMLElement, offset: number): void {
+  const point = findTextPointIn(el, offset);
   const sel = window.getSelection();
   if (!sel) return;
   const range = document.createRange();
-  let remaining = offset;
-  const walk = (node: Node): boolean => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const len = node.textContent?.length ?? 0;
-      if (remaining <= len) {
-        range.setStart(node, remaining);
-        range.collapse(true);
-        return true;
-      }
-      remaining -= len;
-      return false;
-    }
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      for (let i = 0; i < node.childNodes.length; i += 1) {
-        if (walk(node.childNodes[i]!)) return true;
-      }
-    }
-    return false;
-  };
-  if (!walk(el)) {
+  if (point) {
+    range.setStart(point.node, point.offset);
+    range.collapse(true);
+  } else {
     range.selectNodeContents(el);
     range.collapse(false);
   }
@@ -52,47 +63,18 @@ export function setCaretOffsetIn(el: HTMLElement, offset: number): void {
 export function setSelectionOffsetsIn(el: HTMLElement, start: number, end: number): void {
   const sel = window.getSelection();
   if (!sel) return;
+  const s = Math.max(0, Math.min(start, end));
+  const e = Math.max(s, Math.max(start, end));
+  const startPoint = findTextPointIn(el, s);
+  const endPoint = findTextPointIn(el, e);
   const range = document.createRange();
-  let remainingStart = start;
-  let remainingEnd = end;
-  let startSet = false;
-
-  const walk = (node: Node): boolean => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const len = node.textContent?.length ?? 0;
-      if (!startSet) {
-        if (remainingStart <= len) {
-          range.setStart(node, remainingStart);
-          startSet = true;
-          remainingEnd = end - start + remainingStart;
-          if (remainingEnd <= len) {
-            range.setEnd(node, remainingEnd);
-            return true;
-          }
-          remainingEnd -= len;
-          return false;
-        }
-        remainingStart -= len;
-        remainingEnd -= len;
-        return false;
-      }
-      if (remainingEnd <= len) {
-        range.setEnd(node, remainingEnd);
-        return true;
-      }
-      remainingEnd -= len;
-      return false;
-    }
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      for (let i = 0; i < node.childNodes.length; i += 1) {
-        if (walk(node.childNodes[i]!)) return true;
-      }
-    }
-    return false;
-  };
-
-  walk(el);
-  if (!startSet) {
+  if (startPoint && endPoint) {
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+  } else if (startPoint) {
+    range.setStart(startPoint.node, startPoint.offset);
+    range.collapse(true);
+  } else {
     range.selectNodeContents(el);
     range.collapse(false);
   }
