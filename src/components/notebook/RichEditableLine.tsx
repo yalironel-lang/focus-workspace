@@ -10,8 +10,8 @@ import {
 } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { InlineMark } from '../../lib/notebookInlineMarks';
-import { mergeAdjacentMarks, sortMarks } from '../../lib/notebookInlineMarks';
-import { getCaretOffsetIn, setCaretOffsetIn } from '../../lib/notebookCaret';
+import { mergeAdjacentMarks, sortMarks, DEFAULT_NOTEBOOK_FONT_SIZE } from '../../lib/notebookInlineMarks';
+import { getCaretOffsetIn, setCaretOffsetIn, getSelectionOffsetsIn, setSelectionOffsetsIn } from '../../lib/notebookCaret';
 import {
   isPenPointer,
   isPenTextBlockActive,
@@ -38,6 +38,8 @@ interface Props {
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
   onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+  /** Triple/quadruple click — parent applies logical block / document selection. */
+  onMultiClickSelect?: (payload: { blockId: string; kind: 'block' | 'document' }) => void;
   /** When true, block user input events (toolbar interaction). */
   suppressInputRef?: RefObject<boolean>;
   /** When equal to this line's id, block DOM onInput commits (mark apply in flight). */
@@ -173,8 +175,8 @@ function wrapText(text: string, types: Map<InlineMark['t'], string | undefined>)
         break;
       case 'fs': {
         el = document.createElement('span');
-        el.setAttribute('data-fs', v ?? '16');
-        el.style.fontSize = `${v ?? 16}px`;
+        el.setAttribute('data-fs', v ?? String(DEFAULT_NOTEBOOK_FONT_SIZE));
+        el.style.fontSize = `${v ?? DEFAULT_NOTEBOOK_FONT_SIZE}px`;
         break;
       }
       case 'fg': {
@@ -247,6 +249,7 @@ export function RichEditableLine({
   onFocusIndex,
   onAfterInput,
   onSelectionChange,
+  onMultiClickSelect,
   suppressInputRef,
   ignoreDomInputBlockIdRef,
   domCommitLockUntilRef,
@@ -275,14 +278,17 @@ export function RichEditableLine({
     const sameMarks = JSON.stringify(current.marks) === JSON.stringify(marks);
     if (focusedRef.current) {
       if (!samePlain || !sameMarks) {
+        const preserved =
+          samePlain && !sameMarks ? getSelectionOffsetsIn(el) : null;
         programmaticRef.current = true;
         renderRichContent(el, plain, marks);
-        finishProgrammaticRender();
-        // Marks-only updates: preserve browser selection; parent restores session range.
         if (!samePlain) {
           const offset = getCaretOffsetIn(el);
           setCaretOffsetIn(el, Math.min(offset, plain.length));
+        } else if (preserved && !preserved.collapsed) {
+          setSelectionOffsetsIn(el, preserved.start, preserved.end);
         }
+        finishProgrammaticRender();
       }
       return;
     }
@@ -324,6 +330,42 @@ export function RichEditableLine({
     const el = ref.current;
     if (el && onSelectionChange) onSelectionChange(id, el);
   }, [id, onSelectionChange]);
+
+  const handleMouseDown = useCallback(
+    (ev: React.MouseEvent<HTMLDivElement>) => {
+      // Consume multi-click before Free Space card/canvas handlers.
+      if (ev.detail >= 3) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const kind = ev.detail >= 4 ? 'document' : 'block';
+        if (kind === 'block') {
+          const el = ref.current;
+          if (el) {
+            setSelectionOffsetsIn(el, 0, plain.length);
+            el.focus({ preventScroll: true });
+          }
+        }
+        onMultiClickSelect?.({ blockId: id, kind });
+        requestAnimationFrame(() => notifySelection());
+        return;
+      }
+      if (ev.detail === 2) {
+        // Native word selection — still stop bubbling so canvas does not steal the gesture.
+        ev.stopPropagation();
+      }
+    },
+    [id, plain.length, onMultiClickSelect, notifySelection],
+  );
+
+  const handleClick = useCallback(
+    (ev: React.MouseEvent<HTMLDivElement>) => {
+      if (ev.detail >= 3) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    },
+    [],
+  );
 
   const handlePenGuardPointerDown = useCallback((ev: ReactPointerEvent<HTMLDivElement>) => {
     noteNotebookPointerDown(ev.nativeEvent);
@@ -436,6 +478,8 @@ export function RichEditableLine({
           onUpdate(id, rich);
           requestAnimationFrame(() => onAfterInput?.(target));
         }}
+        onMouseDown={handleMouseDown}
+        onClick={handleClick}
         onMouseUp={notifySelection}
         onKeyUp={notifySelection}
         onKeyDown={() => noteNotebookKeyboardTyping()}

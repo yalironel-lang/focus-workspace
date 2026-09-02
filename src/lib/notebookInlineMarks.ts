@@ -169,6 +169,28 @@ export function isMarkActiveOnRange(
   return true;
 }
 
+/** Canonical default paragraph size — must match ProjectNotebookBlock typeScale.l3. */
+export const DEFAULT_NOTEBOOK_FONT_SIZE = 18;
+
+export const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20, 24, 32, 48] as const;
+
+/** Resolve toolbar display value for a selection's font-size marks. */
+export function fontSizeAtSelection(
+  marks: InlineMark[],
+  start: number,
+  end: number,
+): { value: string; mixed: boolean } {
+  if (end <= start) return { value: String(DEFAULT_NOTEBOOK_FONT_SIZE), mixed: false };
+  const sizes = new Set<string>();
+  for (let i = start; i < end; i += 1) {
+    const hit = marks.find(m => m.t === 'fs' && m.s <= i && m.e > i);
+    sizes.add(hit?.v ?? String(DEFAULT_NOTEBOOK_FONT_SIZE));
+  }
+  if (sizes.size === 0) return { value: String(DEFAULT_NOTEBOOK_FONT_SIZE), mixed: false };
+  if (sizes.size > 1) return { value: '', mixed: true };
+  return { value: [...sizes][0]!, mixed: false };
+}
+
 export function marksAtSelection(
   marks: InlineMark[],
   start: number,
@@ -180,9 +202,15 @@ export function marksAtSelection(
     if (t === 'fs' || t === 'fg' || t === 'bg' || t === 'hl') continue;
     if (isMarkActiveOnRange(marks, start, end, t)) active[t] = true;
   }
-  for (const t of ['fs', 'fg', 'bg', 'hl'] as const) {
+  for (const t of ['fg', 'bg', 'hl'] as const) {
     const covering = marks.filter(m => m.t === t && m.s <= start && m.e >= end);
     if (covering.length === 1 && covering[0]!.v) active[t] = covering[0]!.v;
+  }
+  // Only report fs when an explicit mark covers the range (toolbar uses fontSizeAtSelection for default/mixed UI).
+  const coveringFs = marks.filter(m => m.t === 'fs' && m.s <= start && m.e >= end);
+  if (coveringFs.length === 1 && coveringFs[0]!.v) {
+    const fs = fontSizeAtSelection(marks, start, end);
+    if (!fs.mixed && fs.value) active.fs = fs.value;
   }
   return active;
 }
@@ -311,8 +339,6 @@ export function shiftMarksForEdit(
   }
   return mergeAdjacentMarks(out);
 }
-
-export const FONT_SIZE_OPTIONS = [12, 14, 16, 18, 20, 24, 32, 48] as const;
 
 export const HIGHLIGHT_PRESETS = [
   '#fef08a',

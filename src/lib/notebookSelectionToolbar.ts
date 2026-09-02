@@ -14,6 +14,17 @@ export interface StoredNotebookSelection {
   end: number;
   plain: string;
   marks: InlineMark[];
+  /** Block kind at session open — used for paragraph/H1/H2 active states. */
+  blockKind?: string;
+  /**
+   * `block` (default): single-block range.
+   * `document`: multi-block / full-notebook selection.
+   */
+  scope?: 'block' | 'document';
+  /** Ordered rich-editable block ids when scope === 'document'. */
+  blockIds?: string[];
+  /** Full document plain text (newline-joined) for copy when scope === 'document'. */
+  documentPlain?: string;
 }
 
 export interface NotebookSelectionState extends StoredNotebookSelection {
@@ -46,27 +57,52 @@ export type ToolbarCommand =
   | { type: 'duplicate' }
   | { type: 'clearFormatting' };
 
-const TOOLBAR_HEIGHT = 44;
-const TOOLBAR_GAP = 8;
+const TOOLBAR_HEIGHT_SINGLE = 44;
+/** Default assumes possible two-row wrap so “above” placement clears selection. */
+const TOOLBAR_HEIGHT_DEFAULT = 80;
+const TOOLBAR_GAP = 10;
 const VIEWPORT_PAD = 12;
 
-export function computeToolbarAnchor(rect: DOMRect, toolbarWidth = 420): ToolbarAnchor {
+export function computeToolbarAnchor(
+  rect: DOMRect,
+  toolbarWidth = 420,
+  toolbarHeight = TOOLBAR_HEIGHT_DEFAULT,
+): ToolbarAnchor {
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
-  let top = rect.top - TOOLBAR_HEIGHT - TOOLBAR_GAP;
-  if (top < VIEWPORT_PAD) {
-    top = rect.bottom + TOOLBAR_GAP;
+  const height = Math.max(TOOLBAR_HEIGHT_SINGLE, toolbarHeight);
+  const width = Math.max(120, toolbarWidth);
+
+  const aboveTop = rect.top - height - TOOLBAR_GAP;
+  const belowTop = rect.bottom + TOOLBAR_GAP;
+  const fitsAbove = aboveTop >= VIEWPORT_PAD;
+  const fitsBelow = belowTop + height <= vh - VIEWPORT_PAD;
+
+  let top: number;
+  if (fitsAbove) {
+    top = aboveTop;
+  } else if (fitsBelow) {
+    top = belowTop;
+  } else {
+    // Prefer below when both are tight; clamp within viewport without
+    // dragging an “above” placement down onto the selection.
+    top = Math.min(belowTop, vh - height - VIEWPORT_PAD);
+    top = Math.max(VIEWPORT_PAD, top);
   }
-  top = Math.max(VIEWPORT_PAD, Math.min(top, vh - TOOLBAR_HEIGHT - VIEWPORT_PAD));
-  let left = rect.left + rect.width / 2 - toolbarWidth / 2;
-  left = Math.max(VIEWPORT_PAD, Math.min(left, vw - toolbarWidth - VIEWPORT_PAD));
-  return { top, left, width: toolbarWidth };
+
+  let left = rect.left + rect.width / 2 - width / 2;
+  left = Math.max(VIEWPORT_PAD, Math.min(left, vw - width - VIEWPORT_PAD));
+
+  return { top, left, width };
 }
 
-export function anchorFromSelection(): ToolbarAnchor | null {
+export function anchorFromSelection(
+  toolbarWidth = 420,
+  toolbarHeight = TOOLBAR_HEIGHT_DEFAULT,
+): ToolbarAnchor | null {
   const rect = getSelectionClientRect();
   if (!rect) return null;
-  return computeToolbarAnchor(rect);
+  return computeToolbarAnchor(rect, toolbarWidth, toolbarHeight);
 }
 
 export function selectionPlainSlice(plain: string, start: number, end: number): string {

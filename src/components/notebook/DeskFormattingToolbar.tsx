@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Bold, Eraser, Italic, Underline } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
-import { FONT_SIZE_OPTIONS, marksAtSelection } from '../../lib/notebookInlineMarks';
+import { FONT_SIZE_OPTIONS, marksAtSelection, DEFAULT_NOTEBOOK_FONT_SIZE } from '../../lib/notebookInlineMarks';
 import type { NotebookSelectionState, ToolbarCommand } from '../../lib/notebookSelectionToolbar';
 import { nbToolbarDebug } from '../../lib/notebookToolbarDebug';
 import './notebookToolbar.css';
@@ -78,7 +78,7 @@ export function DeskFormattingToolbar({
 }: Props) {
   const { start, end, marks } = selection;
   const active = marksAtSelection(marks, start, end);
-  const fsValue = typeof active.fs === 'string' ? active.fs : '16';
+  const fsValue = typeof active.fs === 'string' ? active.fs : String(DEFAULT_NOTEBOOK_FONT_SIZE);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

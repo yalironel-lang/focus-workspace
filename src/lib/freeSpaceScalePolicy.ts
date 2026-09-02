@@ -232,9 +232,10 @@ export function getBlockRenderPolicy(
   const suspendHeavyContent =
     heavy &&
     !input.editing &&
+    !input.selected &&
     (fidelity === 'distant' ||
       fidelity === 'chrome' ||
-      (fidelity === 'reduced' && !input.selected) ||
+      fidelity === 'reduced' ||
       (ctx.zoom < 0.48 && !priority));
 
   const chromeOnly =

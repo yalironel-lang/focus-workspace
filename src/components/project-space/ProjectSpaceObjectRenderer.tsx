@@ -10,7 +10,7 @@ import { NoteBlock } from '../workspace/blocks/NoteBlock';
 import { LinkBlock } from '../workspace/blocks/LinkBlock';
 import { ChecklistBlock } from '../workspace/blocks/ChecklistBlock';
 import { FreeSpaceImageCard } from './FreeSpaceImageCard';
-import { NotebookCardPreview } from '../notebook/NotebookCardPreview';
+import { FreeSpaceNotebookSurface } from '../notebook/FreeSpaceNotebookSurface';
 import { ProjectNotebookBlock } from './ProjectNotebookBlock';
 import { isNotebookV1PagesEnabled } from '../../lib/notebookPages';
 import type {
@@ -261,26 +261,6 @@ function FreeSpaceMathNotebookRenderer({
     );
   }
 
-  const v1PagesCardPreview =
-    isNotebookV1PagesEnabled() &&
-    contentHost === 'canvas' &&
-    objectPresentationMode === 'floating' &&
-    !useDeskPrototype;
-
-  if (v1PagesCardPreview) {
-    return (
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        {attemptBtn}
-        <NotebookCardPreview
-          content={content}
-          objectTitle={object.title}
-          tokens={tokens}
-          onOpen={() => onSetObjectPresentationMode?.(object.id, 'fullscreen')}
-        />
-      </div>
-    );
-  }
-
   if (useDeskPrototype && !legacyOpen) {
     return (
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -305,6 +285,34 @@ function FreeSpaceMathNotebookRenderer({
           studyFocusQuestionToken={studyFocusQuestionToken}
           onStudySessionActiveQuestionNumber={onStudySessionActiveQuestionNumber}
           studyDeskQuiet={studyDeskQuiet}
+        />
+      </div>
+    );
+  }
+
+  const floatingEmbeddedNotebook =
+    contentHost === 'canvas' &&
+    objectPresentationMode === 'floating' &&
+    !useDeskPrototype;
+
+  if (floatingEmbeddedNotebook) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {attemptBtn}
+        <FreeSpaceNotebookSurface
+          content={content}
+          tokens={tokens}
+          object={object}
+          allObjects={allObjects}
+          freeSpaceSectionId={freeSpaceSectionId}
+          freeSpaceBoardId={freeSpaceBoardId}
+          onChange={onChange}
+          onNotebookEditingChange={onNotebookEditingChange}
+          onRequestSelectObject={onRequestSelectObject}
+          onCreateNotebookRecall={onCreateNotebookRecall}
+          compositionChromeSuppressed={studyDeskQuiet}
+          onExpand={() => onSetObjectPresentationMode?.(object.id, 'fullscreen')}
+          onOpenBinderStudy={onOpenBinderStudy}
         />
       </div>
     );

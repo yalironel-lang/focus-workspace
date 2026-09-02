@@ -188,6 +188,13 @@ import {
   caretAtVisualLineEnd,
 } from '../../lib/notebookCaret';
 import { buildNotebookCopyFromSelection } from '../../lib/notebookCopySelection';
+import {
+  buildDocumentPlainFromBlocks,
+  isMultiBlockDomSelection,
+  listRichEditables,
+  selectLogicalBlock,
+  selectNotebookDocument,
+} from '../../lib/notebookMultiClickSelection';
 import { RichEditableLine } from '../notebook/RichEditableLine';
 import { NotebookSelectionToolbar } from '../notebook/NotebookSelectionToolbar';
 import { DeskFormattingToolbar } from '../notebook/DeskFormattingToolbar';
@@ -1022,6 +1029,7 @@ interface EditableLineProps {
   onFocusIndex: (id: string) => void;
   onAfterInput?: (el: HTMLDivElement) => void;
   onSelectionChange?: (id: string, el: HTMLDivElement) => void;
+  onMultiClickSelect?: (payload: { blockId: string; kind: 'block' | 'document' }) => void;
   suppressInputRef?: RefObject<boolean>;
   ignoreDomInputBlockIdRef?: RefObject<string | null>;
   domCommitLockUntilRef?: RefObject<number>;
@@ -1039,6 +1047,7 @@ function EditableLine({
   onFocusIndex,
   onAfterInput,
   onSelectionChange,
+  onMultiClickSelect,
   suppressInputRef,
   ignoreDomInputBlockIdRef,
   domCommitLockUntilRef,
@@ -1056,6 +1065,7 @@ function EditableLine({
       onFocusIndex={onFocusIndex}
       onAfterInput={onAfterInput}
       onSelectionChange={onSelectionChange}
+      onMultiClickSelect={onMultiClickSelect}
       suppressInputRef={suppressInputRef}
       ignoreDomInputBlockIdRef={ignoreDomInputBlockIdRef}
       domCommitLockUntilRef={domCommitLockUntilRef}
@@ -1306,7 +1316,9 @@ interface Props {
   freeSpaceSectionId?: string;
   freeSpaceBoardId?: string;
   /** Desk layout: paper-first math surface inside MathDeskPrototype shell. */
-  presentation?: 'notebook' | 'desk' | 'workspace';
+  presentation?: 'notebook' | 'desk' | 'workspace' | 'embedded';
+  /** Embedded Free Space: open Universal Object View (expand). */
+  onExpand?: () => void;
   /** Desk: notify shell when the focused derivation line changes (for Plot-from-line). */
   onDeskFocusedLine?: (payload: { blockId: string | null; text: string }) => void;
   /** Study session: one-time restore of focused block after resume. */
@@ -1360,6 +1372,7 @@ export function ProjectNotebookBlock({
   freeSpaceSectionId,
   freeSpaceBoardId = '',
   presentation = 'notebook',
+  onExpand,
   onDeskFocusedLine,
   sessionRestoreBlockId = null,
   studyFocusQuestionNumber = null,
@@ -1405,7 +1418,8 @@ export function ProjectNotebookBlock({
   contentRef.current = effectiveContent;
   const isDeskPresentation = presentation === 'desk';
   const isWorkspacePresentation = presentation === 'workspace';
-  const showCardChrome = !isDeskPresentation && !isWorkspacePresentation;
+  const isEmbeddedPresentation = presentation === 'embedded';
+  const showCardChrome = !isDeskPresentation && !isWorkspacePresentation && !isEmbeddedPresentation;
   const activeNotebookPage = useMemo(() => {
     if (!v1PagesShell) return null;
     const pageId =
@@ -1627,6 +1641,10 @@ export function ProjectNotebookBlock({
   persistObjectIdRef.current = objectId ?? '';
   const notebookEditCountRef = useRef(0);
   const selectionSnapshotRef = useRef<StoredNotebookSelection | null>(null);
+  /** Restore selection after React commits mark/block updates (child layout runs first). */
+  const pendingSelectionRestoreRef = useRef<{ blockId: string; start: number; end: number } | null>(
+    null,
+  );
   const toolbarInteractingRef = useRef(false);
   const ignoreDomInputBlockIdRef = useRef<string | null>(null);
   /** Timestamp (ms) until which DOM-derived text commits are rejected (toolbar/mark apply). */
@@ -1659,10 +1677,14 @@ export function ProjectNotebookBlock({
     else window.setTimeout(attempt, delayMs);
   }, []);
 
+  const handleMultiClickSelectRef = useRef<
+    ((payload: { blockId: string; kind: 'block' | 'document' }) => void) | null
+  >(null);
+
   const EditableLineGuarded = useCallback(
     (props: Omit<
       EditableLineProps,
-      'suppressInputRef' | 'ignoreDomInputBlockIdRef' | 'domCommitLockUntilRef' | 'toolbarActiveBlockIdRef'
+      'suppressInputRef' | 'ignoreDomInputBlockIdRef' | 'domCommitLockUntilRef' | 'toolbarActiveBlockIdRef' | 'onMultiClickSelect'
     >) => {
       const { onUpdate, ...rest } = props;
       return (
@@ -1672,12 +1694,13 @@ export function ProjectNotebookBlock({
           ignoreDomInputBlockIdRef={ignoreDomInputBlockIdRef}
           domCommitLockUntilRef={domCommitLockUntilRef}
           toolbarActiveBlockIdRef={toolbarActiveBlockIdRef}
+          onMultiClickSelect={(payload) => handleMultiClickSelectRef.current?.(payload)}
           onUpdate={(id, raw, marks) => {
             if (ignoreDomInputBlockIdRef.current === id) {
               return;
             }
             const snap = selectionSnapshotRef.current;
-            if (snap?.blockId === id && raw !== snap.plain) {
+            if (snap?.scope !== 'document' && snap?.blockId === id && raw !== snap.plain) {
               return;
             }
             onUpdate(id, raw, marks);
@@ -2043,6 +2066,7 @@ export function ProjectNotebookBlock({
     isWorkspacePresentation && hasNotebookContext && canDockContext && !workspaceFocusActive;
   const showNotebookContext =
     !isDeskPresentation &&
+    !isEmbeddedPresentation &&
     context === 'free-space' &&
     hasNotebookContext &&
     contextPanelVisible &&
@@ -2214,6 +2238,15 @@ export function ProjectNotebookBlock({
     );
   }, [isDomTextCommitLocked]);
 
+  const syncHostEditingActivity = useCallback(() => {
+    if (context !== 'free-space' || !onEditingChangeRef.current) return;
+    const toolbarOpen = selectionToolbarRef.current != null;
+    const editorFocused = isNotebookEditorFocused();
+    const active =
+      editorFocused || toolbarOpen || toolbarInteractingRef.current || isDomTextCommitLocked();
+    onEditingChangeRef.current(active);
+  }, [context, isNotebookEditorFocused, isDomTextCommitLocked]);
+
   const captureCaretForBlock = useCallback(
     (blockId: string): number | null => {
       const root = getEditorRoot();
@@ -2268,6 +2301,9 @@ export function ProjectNotebookBlock({
       if (serializeBlocks(prev) === body) return prev;
       if (isNotebookEditorFocused()) return prev;
       if (isDomTextCommitLocked()) return prev;
+      // Free Space toolbar session: never reparse from host while a format session is open.
+      if (selectionToolbarRef.current != null) return prev;
+      if (toolbarActiveBlockIdRef.current != null) return prev;
       return parseBodyToBlocks(body, prev);
     });
   }, [effectiveContent.body, isNotebookEditorFocused, isDomTextCommitLocked]);
@@ -2528,7 +2564,8 @@ export function ProjectNotebookBlock({
         lastFocusedMathBlockIdRef.current = bid;
       }
     }
-  }, []);
+    syncHostEditingActivity();
+  }, [syncHostEditingActivity]);
 
   const handleSurfaceBlur = useCallback(
     (e: ReactFocusEvent<HTMLDivElement>) => {
@@ -2536,6 +2573,7 @@ export function ProjectNotebookBlock({
       if (rt instanceof HTMLElement) {
         if (e.currentTarget.contains(rt)) return;
         if (rt.closest('[data-nb-slash-menu]')) return;
+        if (rt.closest('[data-nb-format-toolbar="1"]')) return;
         if (rt.closest('[data-nb-typo-rail]')) return;
         if (rt.closest('[data-math-input-toolbar]')) return;
         if (rt.closest('.desk-math-palette')) return;
@@ -2552,8 +2590,9 @@ export function ProjectNotebookBlock({
         if (sc) schedulePosePersist(sc.scrollTop, surfaceFocusBlockId);
       }
       setSurfaceFocusBlockId(null);
+      syncHostEditingActivity();
     },
-    [context, schedulePosePersist, surfaceFocusBlockId],
+    [context, schedulePosePersist, surfaceFocusBlockId, syncHostEditingActivity],
   );
 
   const handlePreviewActivate = useCallback((lineIndex: number) => {
@@ -2857,7 +2896,8 @@ export function ProjectNotebookBlock({
     toolbarInteractingRef.current = false;
     ignoreDomInputBlockIdRef.current = null;
     domCommitLockUntilRef.current = 0;
-  }, []);
+    syncHostEditingActivity();
+  }, [syncHostEditingActivity]);
 
   const dismissNotebookTextEditing = useCallback(() => {
     dismissSelectionToolbar();
@@ -3016,6 +3056,11 @@ export function ProjectNotebookBlock({
   const restoreRichSelection = useCallback(
     (blockId: string, start: number, end: number) => {
       const root = getEditorRoot();
+      const snap = selectionSnapshotRef.current;
+      if (snap?.scope === 'document' && root) {
+        selectNotebookDocument(root, blocksRef.current);
+        return;
+      }
       if (!root) return;
       const el = findRichEditable(root, blockId);
       if (!el) return;
@@ -3024,6 +3069,13 @@ export function ProjectNotebookBlock({
     },
     [getEditorRoot],
   );
+
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRestoreRef.current;
+    if (!pending) return;
+    pendingSelectionRestoreRef.current = null;
+    restoreRichSelection(pending.blockId, pending.start, pending.end);
+  });
 
   const refreshToolbarFromSnapshot = useCallback(
     (snapshot: StoredNotebookSelection) => {
@@ -3038,7 +3090,14 @@ export function ProjectNotebookBlock({
         isDeskPresentation && deskFormattingV1 ? null : snapshot.blockId;
       setSelectionToolbar(prev =>
         prev
-          ? { ...prev, marks, plain: snapshot.plain, start: snapshot.start, end: snapshot.end }
+          ? {
+              ...prev,
+              marks,
+              plain: snapshot.plain,
+              start: snapshot.start,
+              end: snapshot.end,
+              blockKind: snapshot.blockKind ?? prev.blockKind,
+            }
           : prev,
       );
     },
@@ -3079,6 +3138,51 @@ export function ProjectNotebookBlock({
         dismissSelectionToolbar();
         return;
       }
+
+      // Multi-block / document selection (quadruple-click, Cmd+A, or drag across blocks).
+      if (isMultiBlockDomSelection(root)) {
+        const editables = listRichEditables(root);
+        const blockIds = editables
+          .map(el => el.getAttribute('data-block-id'))
+          .filter((id): id is string => !!id);
+        if (blockIds.length === 0) {
+          if (sessionActive) return;
+          dismissSelectionToolbar();
+          return;
+        }
+        const firstId = blockIds[0]!;
+        const firstBlk = blocksRef.current.find(b => b.id === firstId);
+        const documentPlain = buildDocumentPlainFromBlocks(blocksRef.current);
+        if (!documentPlain) {
+          if (sessionActive) return;
+          dismissSelectionToolbar();
+          return;
+        }
+        let anchor = anchorFromSelection();
+        if (!anchor) {
+          const rect = editables[0]!.getBoundingClientRect();
+          anchor =
+            rect.width > 0 || rect.height > 0
+              ? computeToolbarAnchor(rect)
+              : { top: 12, left: 12, width: 420 };
+        }
+        const snapshot: StoredNotebookSelection = {
+          blockId: firstId,
+          start: 0,
+          end: firstBlk && 'text' in firstBlk ? String(firstBlk.text).length : 0,
+          plain: firstBlk && 'text' in firstBlk ? String(firstBlk.text) : '',
+          marks: [],
+          blockKind: firstBlk?.kind,
+          scope: 'document',
+          blockIds,
+          documentPlain,
+        };
+        selectionSnapshotRef.current = snapshot;
+        toolbarActiveBlockIdRef.current = deskFmtOn ? null : firstId;
+        setSelectionToolbar({ ...snapshot, anchor });
+        return;
+      }
+
       const editable = sel.anchorNode instanceof Node
         ? (sel.anchorNode.nodeType === Node.ELEMENT_NODE
             ? (sel.anchorNode as Element).closest('[data-rich-editable="1"]')
@@ -3119,10 +3223,13 @@ export function ProjectNotebookBlock({
               : null;
         anchor = rect ? computeToolbarAnchor(rect, 200) : { top: 12, left: 12, width: 200 };
       } else if (!anchor) {
-        recordDeskFormatSyncEvent('dismiss', { reason: 'no-anchor', blockId });
-        if (sessionActive) return;
-        dismissSelectionToolbar();
-        return;
+        // Free Space / transform / happy-dom: selection client rect may be empty.
+        // Still open the session — fall back to the editable bounds.
+        const editableRect = (editable as HTMLElement).getBoundingClientRect();
+        anchor =
+          editableRect.width > 0 || editableRect.height > 0
+            ? computeToolbarAnchor(editableRect)
+            : { top: 12, left: 12, width: 420 };
       }
       const snapshot: StoredNotebookSelection = {
         blockId,
@@ -3130,6 +3237,8 @@ export function ProjectNotebookBlock({
         end: offsets.end,
         plain,
         marks: blk.marks ?? [],
+        blockKind: blk.kind,
+        scope: 'block',
       };
       selectionSnapshotRef.current = snapshot;
       toolbarActiveBlockIdRef.current = deskFmtOn ? null : blockId;
@@ -3367,12 +3476,23 @@ export function ProjectNotebookBlock({
           nextBlock.kind !== 'divider' && nextBlock.kind !== 'image-ref' && nextBlock.kind !== 'handwriting'
             ? (nextBlock.marks ?? [])
             : [];
-        selectionSnapshotRef.current = { ...snapshot, plain: plainText, marks: nextMarks };
+        selectionSnapshotRef.current = {
+          ...snapshot,
+          plain: plainText,
+          marks: nextMarks,
+          blockKind: nextBlock.kind,
+        };
         refreshToolbarFromSnapshot(selectionSnapshotRef.current);
       }
+      pendingSelectionRestoreRef.current = { blockId, start: selStart, end: selEnd };
+      // Safety net if layout effect is skipped in edge environments.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          restoreRichSelection(blockId, selStart, selEnd);
+          const still = pendingSelectionRestoreRef.current;
+          if (still && still.blockId === blockId) {
+            pendingSelectionRestoreRef.current = null;
+            restoreRichSelection(blockId, still.start, still.end);
+          }
           releaseDomTextCommitLock(600);
         });
       });
@@ -3695,6 +3815,109 @@ export function ProjectNotebookBlock({
       if (deskFormattingActive) recordDeskFormattingMetric(cmd);
       const snapshot = selectionSnapshotRef.current;
       if (!snapshot) return;
+
+      if (snapshot.scope === 'document') {
+        const documentPlain = snapshot.documentPlain ?? '';
+        if (cmd.type === 'copy') {
+          void (async () => {
+            try {
+              await navigator.clipboard.writeText(documentPlain);
+              toast.success('Copied');
+            } catch {
+              toast.error('Could not copy');
+            }
+          })();
+          pendingSelectionRestoreRef.current = {
+            blockId: snapshot.blockId,
+            start: snapshot.start,
+            end: snapshot.end,
+          };
+          requestAnimationFrame(() => restoreRichSelection(snapshot.blockId, snapshot.start, snapshot.end));
+          return;
+        }
+        if (cmd.type === 'morphBlock' || cmd.type === 'duplicate') {
+          // Block-level / ambiguous for multi-block — disabled in toolbar UI.
+          return;
+        }
+
+        if (!isApplyingFormatHistoryRef.current) {
+          formatHistoryRef.current.pushBeforeFormat(captureFormatHistorySnapshot());
+        }
+
+        const ids = snapshot.blockIds?.length
+          ? snapshot.blockIds
+          : listRichEditables(getEditorRoot() ?? document.body).map(
+              el => el.getAttribute('data-block-id') ?? '',
+            ).filter(Boolean);
+
+        flushSync(() => {
+          setBlocks(prev => {
+            let next = prev;
+            for (const id of ids) {
+              const i = next.findIndex(b => b.id === id);
+              if (i === -1) continue;
+              const block = next[i]!;
+              if (block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') {
+                continue;
+              }
+              const start = 0;
+              const end = block.text.length;
+              if (end <= start) continue;
+              let marks = block.marks ?? [];
+              switch (cmd.type) {
+                case 'toggleMark':
+                  marks = applyMarkToggle(marks, start, end, cmd.mark, cmd.value);
+                  break;
+                case 'setFontSize':
+                  marks = applyMarkToggle(marks, start, end, 'fs', String(cmd.px));
+                  break;
+                case 'setTextColor':
+                  marks = applyMarkToggle(marks, start, end, 'fg', cmd.color);
+                  break;
+                case 'setHighlight':
+                  marks = applyMarkToggle(marks, start, end, 'hl', cmd.color);
+                  break;
+                case 'clearFormatting':
+                  marks = clearAllMarksInRange(marks, start, end);
+                  break;
+                default:
+                  break;
+              }
+              const nextBlock = {
+                ...block,
+                marks: marks.length ? marks : undefined,
+              } as Block;
+              next = [...next.slice(0, i), nextBlock, ...next.slice(i + 1)];
+            }
+            return next;
+          });
+        });
+
+        const nextBlocks = blocksRef.current;
+        const nextBody = serializeBlocks(nextBlocks);
+        pushContent({ ...contentRef.current, body: nextBody });
+        const nextDocPlain = buildDocumentPlainFromBlocks(nextBlocks);
+        selectionSnapshotRef.current = {
+          ...snapshot,
+          documentPlain: nextDocPlain,
+          marks: [],
+        };
+        refreshToolbarFromSnapshot(selectionSnapshotRef.current);
+        pendingSelectionRestoreRef.current = {
+          blockId: snapshot.blockId,
+          start: snapshot.start,
+          end: snapshot.end,
+        };
+        lockDomTextCommits(520);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            restoreRichSelection(snapshot.blockId, snapshot.start, snapshot.end);
+            releaseDomTextCommitLock(600);
+          });
+        });
+        return;
+      }
+
       const { blockId, start, end, plain, marks } = snapshot;
       switch (cmd.type) {
         case 'toggleMark':
@@ -3718,12 +3941,19 @@ export function ProjectNotebookBlock({
           setBlocks(next);
           pushContent({ ...content, body: serializeBlocks(next) });
           setMorphPulseId(blockId);
+          selectionSnapshotRef.current = {
+            ...snapshot,
+            blockKind: morphed.kind,
+          };
+          refreshToolbarFromSnapshot(selectionSnapshotRef.current);
+          pendingSelectionRestoreRef.current = { blockId, start, end };
           requestAnimationFrame(() => restoreRichSelection(blockId, start, end));
           break;
         }
         case 'copy':
           void copyRichSlice(plain, start, end);
           toast.success('Copied');
+          pendingSelectionRestoreRef.current = { blockId, start, end };
           requestAnimationFrame(() => restoreRichSelection(blockId, start, end));
           break;
         case 'duplicate': {
@@ -3734,6 +3964,7 @@ export function ProjectNotebookBlock({
             end: dup.selectionEnd,
             plain: dup.plain,
             marks: dup.marks,
+            scope: 'block',
           };
           toolbarActiveBlockIdRef.current = blockId;
           updateBlockText(blockId, dup.plain, dup.marks);
@@ -3759,16 +3990,28 @@ export function ProjectNotebookBlock({
       refreshToolbarFromSnapshot,
       toggleInlineMarkFromSnapshot,
       deskFormattingActive,
+      captureFormatHistorySnapshot,
+      getEditorRoot,
+      lockDomTextCommits,
+      releaseDomTextCommitLock,
     ],
   );
 
   const handleToolbarPointerDown = useCallback(() => {
-    lockDomTextCommits(deskFormattingActive ? 320 : 520);
-  }, [lockDomTextCommits, deskFormattingActive]);
+    lockDomTextCommits(deskFormattingActive ? 320 : 1200);
+    syncHostEditingActivity();
+  }, [lockDomTextCommits, deskFormattingActive, syncHostEditingActivity]);
 
   const handleToolbarPointerUp = useCallback(() => {
-    releaseDomTextCommitLock(400);
-  }, [releaseDomTextCommitLock]);
+    // Canvas floating toolbar: do NOT release the DOM commit lock on pointerup.
+    // Early release + editor blur during toolbar interaction allowed Free Space
+    // host body echo to reparse and shrink/corrupt the selection session.
+    if (deskFormattingActive) {
+      releaseDomTextCommitLock(400);
+    }
+    syncHostEditingActivity();
+    window.setTimeout(() => syncHostEditingActivity(), 450);
+  }, [releaseDomTextCommitLock, syncHostEditingActivity, deskFormattingActive]);
 
   const handleRichSelectionChange = useCallback(
     (_blockId: string, _el: HTMLDivElement) => {
@@ -3777,12 +4020,86 @@ export function ProjectNotebookBlock({
     [syncSelectionToolbar],
   );
 
+  const openDocumentSelectionSession = useCallback(() => {
+    const root = getEditorRoot();
+    if (!root || editorMode !== 'edit') return false;
+    const doc = selectNotebookDocument(root, blocksRef.current);
+    if (!doc || !doc.documentPlain) return false;
+    const firstBlk = blocksRef.current.find(b => b.id === doc.firstBlockId);
+    let anchor = anchorFromSelection();
+    if (!anchor) {
+      const firstEl = listRichEditables(root)[0];
+      const rect = firstEl?.getBoundingClientRect();
+      anchor =
+        rect && (rect.width > 0 || rect.height > 0)
+          ? computeToolbarAnchor(rect)
+          : { top: 12, left: 12, width: 420 };
+    }
+    const snapshot: StoredNotebookSelection = {
+      blockId: doc.firstBlockId,
+      start: 0,
+      end: firstBlk && 'text' in firstBlk ? String(firstBlk.text).length : 0,
+      plain: firstBlk && 'text' in firstBlk ? String(firstBlk.text) : '',
+      marks: [],
+      blockKind: firstBlk?.kind,
+      scope: 'document',
+      blockIds: doc.blockIds,
+      documentPlain: doc.documentPlain,
+    };
+    selectionSnapshotRef.current = snapshot;
+    toolbarActiveBlockIdRef.current = snapshot.blockId;
+    setSelectionToolbar({ ...snapshot, anchor });
+    return true;
+  }, [getEditorRoot, editorMode]);
+
+  const handleMultiClickSelect = useCallback(
+    (payload: { blockId: string; kind: 'block' | 'document' }) => {
+      if (payload.kind === 'document') {
+        openDocumentSelectionSession();
+        return;
+      }
+      const root = getEditorRoot();
+      const blk = blocksRef.current.find(b => b.id === payload.blockId);
+      if (!root || !blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') {
+        return;
+      }
+      const el = findRichEditable(root, payload.blockId);
+      if (!el) return;
+      const { start, end } = selectLogicalBlock(el, blk.text.length);
+      let anchor = anchorFromSelection();
+      if (!anchor) {
+        const rect = el.getBoundingClientRect();
+        anchor =
+          rect.width > 0 || rect.height > 0
+            ? computeToolbarAnchor(rect)
+            : { top: 12, left: 12, width: 420 };
+      }
+      const snapshot: StoredNotebookSelection = {
+        blockId: payload.blockId,
+        start,
+        end,
+        plain: blk.text,
+        marks: blk.marks ?? [],
+        blockKind: blk.kind,
+        scope: 'block',
+      };
+      selectionSnapshotRef.current = snapshot;
+      toolbarActiveBlockIdRef.current = payload.blockId;
+      setSelectionToolbar({ ...snapshot, anchor });
+    },
+    [getEditorRoot, openDocumentSelectionSession],
+  );
+  handleMultiClickSelectRef.current = handleMultiClickSelect;
+
   const handleEditorCopy = useCallback(
     (e: React.ClipboardEvent) => {
       if (editorMode !== 'edit' || showInkMode) return;
       const snap = selectionSnapshotRef.current;
       if (snap && selectionToolbarRef.current) {
-        const text = snap.plain.slice(snap.start, snap.end);
+        const text =
+          snap.scope === 'document'
+            ? (snap.documentPlain ?? '')
+            : snap.plain.slice(snap.start, snap.end);
         if (text) {
           e.preventDefault();
           e.clipboardData.setData('text/plain', text);
@@ -4076,6 +4393,14 @@ export function ProjectNotebookBlock({
           e.stopPropagation();
           return;
         }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && !e.altKey) {
+        // Select notebook document — not the Free Space canvas / page.
+        e.preventDefault();
+        e.stopPropagation();
+        openDocumentSelectionSession();
+        return;
       }
 
       if (isDeskPresentation && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -4613,6 +4938,7 @@ export function ProjectNotebookBlock({
       applyMarksToBlock,
       applyFormatHistoryUndo,
       applyFormatHistoryRedo,
+      openDocumentSelectionSession,
     ],
   );
 
@@ -4652,12 +4978,18 @@ export function ProjectNotebookBlock({
 }
 `;
 
-  // Host notification: when running inside Free Space, surface edit vs preview to the canvas host.
-  // Use ref to avoid re-firing when the callback reference changes (inline arrow in parent render).
+  // Host notification: report actual editor focus / toolbar activity to Free Space LOD.
   useEffect(() => {
-    if (context !== 'free-space' || !onEditingChangeRef.current) return;
-    onEditingChangeRef.current(editorMode === 'edit');
-  }, [context, editorMode]);
+    syncHostEditingActivity();
+  }, [context, selectionToolbar, syncHostEditingActivity]);
+
+  useEffect(() => {
+    return () => {
+      if (context === 'free-space' && onEditingChangeRef.current) {
+        onEditingChangeRef.current(false);
+      }
+    };
+  }, [context]);
 
   function renderFocusModeBlocks() {
     return blocks.map((block, index) => {
@@ -4903,7 +5235,11 @@ export function ProjectNotebookBlock({
           padding: isDeskPresentation || isWorkspacePresentation
             ? 0
             : context === 'free-space'
-              ? (isMathWorkspaceMode ? '12px 10px 10px' : '18px 18px 18px')
+              ? isEmbeddedPresentation
+                ? '6px 8px 4px'
+                : isMathWorkspaceMode
+                  ? '12px 10px 10px'
+                  : '18px 18px 18px'
               : '18px 24px 28px',
           ...(context === 'free-space'
             ? {
@@ -5299,6 +5635,76 @@ export function ProjectNotebookBlock({
           </div>
         </div>
       </div>
+      ) : null}
+
+      {isEmbeddedPresentation ? (
+        <div
+          data-fs-notebook-embedded-bar="1"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '0 2px 6px',
+            marginBottom: 2,
+            borderBottom: `1px solid ${tokens.cardBorder}`,
+            minHeight: 0,
+          }}
+        >
+          <span
+            title={objectTitle ?? 'Notebook'}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              color: tokens.textMuted,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+            }}
+          >
+            {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+          </span>
+          {onExpand ? (
+            <button
+              type="button"
+              data-fs-notebook-expand="1"
+              onClick={onExpand}
+              title="Expand to full view"
+              style={{
+                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 6,
+                border: `1px solid ${tokens.cardBorder}`,
+                background: tokens.wellBg,
+                color: tokens.textSecondary,
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                cursor: 'pointer',
+                transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+                <path
+                  d="M1 5V1h4M7 1h4v4M1 7v4h4M7 11h4V7"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Expand
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       <NotebookWorkspaceLayout

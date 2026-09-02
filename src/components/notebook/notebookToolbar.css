@@ -1,24 +1,42 @@
 .nb-selection-toolbar {
-  animation: nbToolbarIn 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
-  transform-origin: center bottom;
+  animation: nbToolbarIn 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+.nb-selection-toolbar--leave {
+  animation: nbToolbarOut 0.14s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none !important;
 }
 
 @keyframes nbToolbarIn {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.96);
+    transform: translateY(5px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
+  }
+}
+
+@keyframes nbToolbarOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(3px);
   }
 }
 
 .nb-toolbar-divider {
   width: 1px;
-  height: 20px;
+  height: 18px;
+  margin: 0 2px;
   background: rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
+  align-self: center;
 }
 
 .nb-toolbar-btn {

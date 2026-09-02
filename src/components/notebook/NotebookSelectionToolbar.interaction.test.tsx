@@ -1,5 +1,6 @@
 /**
- * Real NotebookSelectionToolbar interaction — Bold click must reach onCommand.
+ * Real NotebookSelectionToolbar interaction — Bold must reach onCommand
+ * via the unified pointerdown/mousedown path (not click-after-focus-steal).
  *
  * @vitest-environment happy-dom
  */
@@ -19,6 +20,7 @@ const selection = {
   end: 15,
   plain: 'test environment here',
   marks: [] as const,
+  blockKind: 'paragraph',
   anchor: { top: 120, left: 80, width: 420 },
 };
 
@@ -59,11 +61,21 @@ afterEach(() => {
 });
 
 describe('NotebookSelectionToolbar Bold interaction', () => {
-  it('click on Bold invokes onCommand once', () => {
+  it('pointerdown on Bold invokes onCommand once', () => {
     const onCommand = mountToolbar();
     const bold = findBoldButton();
     act(() => {
-      bold.click();
+      bold.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    });
+    expect(onCommand).toHaveBeenCalledTimes(1);
+    expect(onCommand.mock.calls[0]![0]).toEqual({ type: 'toggleMark', mark: 'b' });
+  });
+
+  it('mousedown on Bold invokes onCommand (compat path)', () => {
+    const onCommand = mountToolbar();
+    const bold = findBoldButton();
+    act(() => {
+      bold.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     });
     expect(onCommand).toHaveBeenCalledTimes(1);
     expect(onCommand.mock.calls[0]![0]).toEqual({ type: 'toggleMark', mark: 'b' });
