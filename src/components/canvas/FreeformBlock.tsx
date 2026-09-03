@@ -217,6 +217,9 @@ export function FreeformBlock({
         : tokens.cardBorder;
 
   const z = (isDragging ? 10 : selected ? 7 : hovered ? 4 : 2) + presentationZBoost;
+  // Note: this z-index is local to the block card. Cross-object stacking on the
+  // canvas is controlled by FreeformCanvas paint order (selected/dragging last),
+  // because per-item opacity/filter wrappers create stacking contexts.
 
   return (
     <div

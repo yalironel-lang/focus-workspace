@@ -8,7 +8,19 @@ import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
 import { buildExploreFocusPack } from '../workspaceStarter/buildExploreFocusPack';
 import { MissionControlView } from '../components/mission-control/MissionControlView';
-import { runMissionControlContinueOpen } from '../lib/missionControlContinueOpen';
+import { MissionControlSectionSetup } from '../components/mission-control/MissionControlSectionSetup';
+import { MissionControlShelfAdd } from '../components/mission-control/MissionControlShelfAdd';
+import { MissionControlWorkCapture } from '../components/mission-control/MissionControlWorkCapture';
+import { PDFViewerModal } from '../components/PDFViewerModal';
+import { useMissionControlIndex } from '../hooks/useMissionControlIndex';
+import {
+  executeMissionControlAction,
+  openMissionControlExternalUrl,
+} from '../lib/missionControl/executeMissionControlAction';
+import { runMissionControlFreeSpaceFocus } from '../lib/missionControl/runMissionControlFreeSpaceFocus';
+import { pendingNotebookFocusPhase } from '../lib/missionControl/pendingNotebookFocusPhase';
+import { getShelfPdfSignedUrl } from '../lib/shelf/openShelfPdf';
+import type { MissionControlItem } from '../lib/missionControl/types';
 import {
   EXPLORE_FOCUS_SCENE_CENTER,
   isExploreFocusWorkspace,
@@ -52,11 +64,14 @@ import {
   consumePendingNotebookFocus,
   type PendingNotebookFocus,
 } from '../lib/notebookSearchIndex';
-import { panViewportToBlock } from '../lib/notebookCanvasFocus';
+import {
+  panViewportToBlock,
+  frameMissionControlTarget,
+  readVisibleFreeformCanvasFrameMetrics,
+} from '../lib/notebookCanvasFocus';
 import { flushAllHandwritingForObject } from '../lib/handwritingFlushRegistry';
 import { flushSheetForObject } from '../sheets/components/sheetFlushRegistry';
 import { pulsePerformancePressure, usePerformanceCalm } from '../lib/performanceSafeMode';
-import { useDeadlines } from '../hooks/useDeadlines';
 import { usePortalLinks } from '../hooks/usePortalLinks';
 import { useWorkspaceCustomization, WorkspaceCustomization } from '../hooks/useWorkspaceCustomization';
 import { useAtmosphere } from '../hooks/useAtmosphere';
@@ -96,7 +111,6 @@ import {
 } from '../lib/spatialAssetCloud.fsPdfSyncDiag';
 import { useAuth } from '../hooks/useAuth';
 import { GroupComponent } from '../components/GroupComponent';
-import { AddDeadlineModal } from '../components/AddDeadlineModal';
 import { CourseHub } from '../components/CourseHub';
 import { CustomizeModal } from '../components/CustomizeModal';
 import { DesignModeBar } from '../components/DesignModeBar';
@@ -214,8 +228,8 @@ import {
 import { AIAssistanceResultModal } from '../components/ai/AIAssistanceResultModal';
 import type { GroupWithItems } from '../types';
 import {
-  Loader2, CheckCircle2, Circle, ArrowRight, Plus, X, Calendar,
-  AlertTriangle, PlayCircle, ChevronDown, ChevronRight,
+  Loader2, Plus, X,
+  AlertTriangle,
   FileText,
   BookOpen,
   FileUp,
@@ -231,21 +245,9 @@ import {
 } from 'lucide-react';
 import { MATH_ZONE_SEED_BODY, MATH_ZONE_SOLUTION_SEED } from '../lib/mathNotebookSeed';
 import toast from 'react-hot-toast';
-import { Item, ItemType, SectionWithProgress, Deadline } from '../types';
-import { loadSession, saveSession, pickTasks, pickPortals } from '../utils/sessionPlan';
 import type { CompanionPanelContentFields } from '../lib/companionPanels';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getEffort(item: Item): string {
-  if (item.type === 'file') return 'Long';
-  if (item.type === 'link') return 'Quick';
-  if (item.type === 'note') return 'Medium';
-  const words = item.title.trim().split(/\s+/).length;
-  return words >= 8 ? 'Long' : words >= 4 ? 'Medium' : 'Quick';
-}
-
-
 
 function formatExamDate(d: string): string {
   return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -254,63 +256,6 @@ function daysUntil(d: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.ceil((new Date(d + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
 }
-
-function deadlineDiff(due: string): number {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return Math.ceil((new Date(due + 'T12:00:00').getTime() - today.getTime()) / 86_400_000);
-}
-
-// ── Space age ────────────────────────────────────────────────────────────────
-// A quiet ambient signal: how long has this space existed?
-// Not a KPI — just a sense of the space having history.
-function spaceAge(createdAt: string): string {
-  const days = (Date.now() - new Date(createdAt).getTime()) / 86_400_000;
-  if (days < 1)   return '';           // too new, say nothing
-  if (days < 7)   return `${Math.floor(days)}d`;
-  if (days < 60)  return `${Math.floor(days / 7)}w`;
-  if (days < 365) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
-}
-
-const URGENCY_ORDER = { overdue: 0, urgent: 1, soon: 2, far: 3 } as const;
-type UrgencyLevel = keyof typeof URGENCY_ORDER;
-
-function deadlineUrgencyLevel(d: Deadline): UrgencyLevel {
-  if (d.completed) return 'far';
-  const diff = deadlineDiff(d.due_date);
-  if (diff < 0)  return 'overdue';
-  if (diff < 3)  return 'urgent';
-  if (diff <= 7) return 'soon';
-  return 'far';
-}
-
-function formatDueDate(d: string): string {
-  return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function urgencyDot(d: Deadline): string {
-  if (d.completed) return '#263043';
-  const diff = deadlineDiff(d.due_date);
-  if (diff < 0)   return '#4b5563';
-  if (diff <= 1)  return '#ef4444';
-  if (diff < 3)   return '#ef4444';
-  if (diff <= 7)  return '#f59e0b';
-  return '#374151';
-}
-function urgencyLabel(d: Deadline): { text: string; color: string } {
-  if (d.completed) return { text: '', color: '' };
-  const diff = deadlineDiff(d.due_date);
-  if (diff < 0)   return { text: `${Math.abs(diff)}d overdue`, color: '#4b5563' };
-  if (diff === 0) return { text: 'Today',                       color: '#ef4444' };
-  if (diff === 1) return { text: 'Tomorrow',                    color: '#f59e0b' };
-  if (diff < 3)   return { text: `${diff} days`,                color: '#ef4444' };
-  if (diff <= 7)  return { text: `${diff} days`,                color: '#f59e0b' };
-  return               { text: `${diff}d`,                  color: '#374151' };
-}
-
-const PLAN_PRIORITY = ['Exercises', 'Exams', 'Slides'] as const;
-
-
 
 type FreeSpacePaletteItemId =
   | ProjectObjectType
@@ -565,211 +510,6 @@ function FreeSpaceEmptyGuidance({
   );
 }
 
-// ── WorkItem ──────────────────────────────────────────────────────────────────
-
-// Items accumulate temporal presence. Something sitting unfinished for weeks
-// feels different from something you added this morning — not labeled, just subtly
-// more tired. The space has memory.
-function itemAge(createdAt: string): 'fresh' | 'settled' | 'lingering' | 'old' {
-  const days = (Date.now() - new Date(createdAt).getTime()) / 86_400_000;
-  if (days < 2)   return 'fresh';
-  if (days < 7)   return 'settled';
-  if (days < 21)  return 'lingering';
-  return 'old';
-}
-
-function WorkItem({ item, onToggle, onDelete }: {
-  item: Item;
-  onToggle: (id: string, completed: boolean) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
-  const [hovered, setHovered] = useState(false);
-  const age = item.completed ? 'fresh' : itemAge(item.created_at);
-
-  // Temporal presence — older unfinished items recede slightly, like they've been
-  // sitting in the same place for a while.
-  const itemOpacity = item.completed ? 0.4
-    : age === 'fresh'     ? 1.0
-    : age === 'settled'   ? 0.92
-    : age === 'lingering' ? 0.82
-    : 0.70;
-
-  // The toggle button takes on a faint amber warmth for lingering/old items —
-  // a quiet signal that this has been waiting, without announcing it.
-  const toggleColor = item.completed ? '#10b981'
-    : age === 'lingering' ? '#6b5c3e'
-    : age === 'old'       ? '#7c5e3a'
-    : '#263043';
-
-  const toggleHoverColor = item.completed ? '#10b981'
-    : (age === 'lingering' || age === 'old') ? '#f59e0b'
-    : '#374151';
-
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '11px 0 9px', borderBottom: '1px solid rgba(255,255,255,0.022)', opacity: itemOpacity, transition: 'opacity 0.5s cubic-bezier(0.4,0,0.2,1)' }}
-    >
-      <button
-        onClick={() => onToggle(item.id, !item.completed).catch(() => toast.error('Failed'))}
-        style={{ flexShrink: 0, color: toggleColor, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = toggleHoverColor; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = toggleColor; }}
-      >
-        {item.completed ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-      </button>
-      <span style={{ flex: 1, fontSize: '14px', fontWeight: 500, color: item.completed ? '#374151' : '#e2e8f0', textDecoration: item.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {item.title}
-      </span>
-      {hovered && (
-        <button
-          onClick={() => onDelete(item.id).catch(() => toast.error('Failed'))}
-          style={{ flexShrink: 0, color: '#263043', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '2px' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#ef4444')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── WorkCapture ───────────────────────────────────────────────────────────────
-
-function WorkCapture({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
-  const [value, setValue] = useState('');
-  const [adding, setAdding] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const t = value.trim();
-    if (!t) return;
-    setAdding(true);
-    try { await onAdd(t); setValue(''); }
-    catch { toast.error('Failed to add'); }
-    finally { setAdding(false); }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: '13px', padding: '13px 0 6px', marginTop: '2px' }}>
-      <span style={{ flexShrink: 0, color: '#1e2a38', display: 'flex', padding: '2px', transition: 'color 0.35s cubic-bezier(0.4,0,0.2,1)' }}>
-        {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-      </span>
-      <input
-        type="text"
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        placeholder="capture a task…"
-        style={{ flex: 1, fontSize: '13px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', outline: 'none', fontStyle: 'italic' }}
-        onFocus={e => { (e.currentTarget as HTMLInputElement).style.color = '#64748b'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'normal'; }}
-        onBlur={e => { (e.currentTarget as HTMLInputElement).style.color = '#2a3a50'; (e.currentTarget as HTMLInputElement).style.fontStyle = 'italic'; }}
-        onKeyDown={e => { if (e.key === 'Escape') { setValue(''); (e.currentTarget as HTMLInputElement).blur(); } }}
-      />
-      {value.trim() && (
-        <button type="submit" disabled={adding} style={{ flexShrink: 0, fontSize: '11px', color: '#2a3a50', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 6px', borderRadius: '4px', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#2a3a50')}>
-          ↵
-        </button>
-      )}
-    </form>
-  );
-}
-
-// ── AmbientDates ──────────────────────────────────────────────────────────────
-
-function AmbientDates({ sectionId, sectionTitle }: { sectionId: string; sectionTitle: string }) {
-  const { deadlines, addDeadline, toggleDeadline } = useDeadlines(sectionId);
-  const [showAdd, setShowAdd] = useState(false);
-  const sectionForModal = [{ id: sectionId, title: sectionTitle } as SectionWithProgress];
-
-  const pending = [...deadlines]
-    .filter(d => !d.completed)
-    .sort((a, b) => {
-      const au = URGENCY_ORDER[deadlineUrgencyLevel(a)];
-      const bu = URGENCY_ORDER[deadlineUrgencyLevel(b)];
-      return au !== bu ? au - bu : a.due_date.localeCompare(b.due_date);
-    })
-    .slice(0, 6);
-
-  const urgentCount = pending.filter(d => {
-    const lvl = deadlineUrgencyLevel(d);
-    return lvl === 'overdue' || lvl === 'urgent';
-  }).length;
-
-  return (
-    <>
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#3d5068' }}>
-              Dates
-            </span>
-            {urgentCount > 0 && (
-              <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>
-                {urgentCount}
-              </span>
-            )}
-          </div>
-          <button onClick={() => setShowAdd(true)} style={{ fontSize: '13px', lineHeight: 1, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: '6px' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#f59e0b'; (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.08)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#3d5068'; (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}>
-            +
-          </button>
-        </div>
-
-        {pending.length === 0 ? (
-          <button onClick={() => setShowAdd(true)} style={{ fontSize: '12px', color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0' }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#64748b')}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
-            + Add a date
-          </button>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {pending.map(d => {
-              const lbl = urgencyLabel(d);
-              const dot = urgencyDot(d);
-              return (
-                <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: dot, flexShrink: 0, marginTop: '5px' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: '12px', fontWeight: 600, color: '#4b5563', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
-                      {d.title}
-                    </p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
-                      <span style={{ fontSize: '11px', color: '#263043' }}>{formatDueDate(d.due_date)}</span>
-                      {lbl.text && <span style={{ fontSize: '11px', color: lbl.color, fontWeight: 600 }}>· {lbl.text}</span>}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => toggleDeadline(d.id, !d.completed).catch(() => {})}
-                    style={{ flexShrink: 0, color: '#3d5068', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: '6px' }}
-                    title="Mark done"
-                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#10b981')}
-                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#3d5068')}>
-                    <CheckCircle2 className="w-3 h-3" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {showAdd && (
-        <AddDeadlineModal
-          sections={sectionForModal}
-          defaultSectionId={sectionId}
-          onClose={() => setShowAdd(false)}
-          onAdd={addDeadline}
-        />
-      )}
-    </>
-  );
-}
-
 // ── SectionPage ───────────────────────────────────────────────────────────────
 
 export function SectionPage() {
@@ -807,7 +547,6 @@ export function SectionPage() {
   }, [loading, navigate, notFound, sectionId]);
 
   const { links: courseLinks } = usePortalLinks('course', id);
-  const { links: globalLinks } = usePortalLinks('global');
   const { customization, setCustomization } = useWorkspaceCustomization(sectionId);
   const { tokens: atmTokens, atmosphereId, setAtmosphere } = useAtmosphere();
   const { design, global, updateGlobal } = useWorkspaceTheme();
@@ -815,6 +554,18 @@ export function SectionPage() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const prefersReducedMotion = usePrefersReducedMotion();
   const sectionBoards = useSectionFreeSpaceBoards(sectionId, user?.id ?? null);
+  const missionControlBoardIds = useMemo(
+    () => sectionBoards.boards.map(b => b.id),
+    [sectionBoards.boards],
+  );
+  const missionControlIndex = useMissionControlIndex({
+    sectionId,
+    userId: user?.id ?? null,
+    boardIds: missionControlBoardIds,
+    groups: section?.groups ?? [],
+    courseLinks,
+    enabled: Boolean(sectionId),
+  });
   const sectionCanvas = useSectionCanvasMode(sectionId, sectionBoards.activeBoardId);
   const sectionCanvasRef = useRef(sectionCanvas);
   sectionCanvasRef.current = sectionCanvas;
@@ -909,6 +660,11 @@ export function SectionPage() {
   spaceSelectedIdRef.current = spaceSelectedId;
   const [notebookSearchPulseId, setNotebookSearchPulseId] = useState<string | null>(null);
   const pendingNotebookFocusRef = useRef<PendingNotebookFocus | null>(null);
+  /** Mission Control: apply floating after board/object resolves (cross-board safe). */
+  const pendingMcFloatingRef = useRef<string | null>(null);
+  /** Cross-board MC: frame after free-space surface is visible + laid out. */
+  const pendingMcVisualFrameRef = useRef<{ objectId: string; boardId: string } | null>(null);
+  const [shelfPdfViewer, setShelfPdfViewer] = useState<{ url: string; title: string } | null>(null);
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectHoverId, setConnectHoverId] = useState<string | null>(null);
@@ -1206,28 +962,6 @@ export function SectionPage() {
     setDragId(null);
     setDragOverId(null);
     dragIdRef.current = null;
-  };
-
-  const activeSession        = loadSession();
-  const sessionIsThisCourse  = activeSession?.sectionId === id;
-
-  const handleStartSession = () => {
-    if (!section) return;
-    if (sessionIsThisCourse) { navigate('/session'); return; }
-    const tasks   = pickTasks(section.groups);
-    const portals = pickPortals(courseLinks, globalLinks);
-    if (tasks.length === 0) {
-      toast('No tasks found — add items to your To Do list first.');
-      return;
-    }
-    saveSession({
-      sectionId:    section.id,
-      sectionTitle: section.title,
-      taskIds:      tasks.map(t => t.item.id),
-      portalIds:    portals.map(p => p.id),
-      startedAt:    new Date().toISOString(),
-    });
-    navigate('/session');
   };
 
   const handleWorkCapture = async (title: string) => {
@@ -2324,25 +2058,8 @@ export function SectionPage() {
     }
   }, [sectionId]);
 
-  useEffect(() => {
-    const pending = pendingNotebookFocusRef.current;
-    if (!pending || pending.sectionId !== sectionId) return;
-    if (pending.boardId !== sectionBoards.activeBoardId) {
-      sectionBoards.setActiveBoardId(pending.boardId);
-      return;
-    }
-    if (!sectionObjects.getObject(pending.objectId)) return;
-    pendingNotebookFocusRef.current = null;
-    const t = window.setTimeout(() => focusNotebookOnCanvas(pending.objectId), 80);
-    return () => window.clearTimeout(t);
-  }, [
-    sectionId,
-    sectionBoards.activeBoardId,
-    sectionObjects.objects,
-    sectionObjects,
-    focusNotebookOnCanvas,
-    sectionBoards.setActiveBoardId,
-  ]);
+  // Cross-board Mission Control focus is resolved after setObjectPresentationMode
+  // (see pending effect below that gate) so floating + fitted framing can run in order.
 
   useEffect(() => {
     if (!id) {
@@ -3461,15 +3178,242 @@ export function SectionPage() {
     })();
   }, [supportsUniversalPresentation, isStudySessionObject]);
 
-  /** Mission Control Continue — floating spatial focus only (never restore UOV). */
-  const handleMissionControlOpenObject = useCallback(
-    (objectId: string) => {
-      runMissionControlContinueOpen(objectId, {
-        setPresentationMode: setObjectPresentationMode,
-        spatialFocus: focusNotebookOnCanvas,
-      });
+  /** Mission Control Open — board switch + visual frame (never restore UOV). */
+  const focusNotebookForMissionControl = useCallback(
+    (objectId: string, boardId?: string) => {
+      if (boardId && boardId !== sectionBoards.activeBoardId) {
+        pendingNotebookFocusRef.current = { sectionId, boardId, objectId };
+        sectionBoards.setActiveBoardId(boardId);
+        return;
+      }
+      // Same-board: queue MC visual-focus frame (no window-based pan).
+      seedMissingPositions([objectId]);
+      if (!spacePositionsRef.current[objectId]) {
+        initPos(objectId, { x: 120, y: 120, w: 520, h: 460 });
+      }
+      pendingMcVisualFrameRef.current = {
+        objectId,
+        boardId: sectionBoards.activeBoardId,
+      };
+      setSectionViewMode('free-space');
+      setSpaceSelectedId(objectId);
+      setNotebookSearchPulseId(objectId);
     },
-    [setObjectPresentationMode, focusNotebookOnCanvas],
+    [
+      sectionId,
+      sectionBoards.activeBoardId,
+      sectionBoards.setActiveBoardId,
+      seedMissingPositions,
+      initPos,
+      setSectionViewMode,
+    ],
+  );
+
+  /**
+   * Cross-board MC Open: board → exact object → position → floating → then
+   * queue pendingMcVisualFrameRef (frame after free-space is visible).
+   */
+  useEffect(() => {
+    const pending = pendingNotebookFocusRef.current;
+    const isFloatingOnCanvas = (objectId: string) => {
+      const obj = sectionObjects.getObject(objectId);
+      if (!obj) return false;
+      if (!supportsUniversalPresentation(obj)) return true;
+      return (obj.viewMode ?? 'floating') === 'floating';
+    };
+    const phaseArgs = {
+      pending,
+      sectionId,
+      activeBoardId: sectionBoards.activeBoardId,
+      hasObject: (objectId: string) => Boolean(sectionObjects.getObject(objectId)),
+      hasPosition: (objectId: string) => Boolean(spacePositionsRef.current[objectId]),
+      isFloatingOnCanvas,
+    };
+    let phase = pendingNotebookFocusPhase(phaseArgs);
+
+    if (phase === 'idle') return;
+
+    if (phase === 'switch-board') {
+      if (pending) sectionBoards.setActiveBoardId(pending.boardId);
+      return;
+    }
+
+    if (phase === 'wait-object') return;
+
+    if (phase === 'wait-position' && pending) {
+      seedMissingPositions([pending.objectId]);
+      if (!spacePositionsRef.current[pending.objectId]) {
+        initPos(pending.objectId, { x: 120, y: 120, w: 520, h: 460 });
+      }
+      // Position may land in the ref without a React dep change — re-phase now.
+      phase = pendingNotebookFocusPhase(phaseArgs);
+      if (phase === 'wait-position') return;
+    }
+
+    if (phase === 'wait-floating' && pending) {
+      setObjectPresentationMode(pending.objectId, 'floating');
+      if (pendingMcFloatingRef.current === pending.objectId) {
+        pendingMcFloatingRef.current = null;
+      }
+      return;
+    }
+
+    if (phase !== 'ready-to-focus' || !pending) return;
+
+    const objectId = pending.objectId;
+    // Keep pending until the deferred callback — hydration churn must not drop focus.
+    const t = window.setTimeout(() => {
+      const still = pendingNotebookFocusRef.current;
+      if (!still || still.objectId !== objectId) return;
+      if (!sectionObjectsRef.current.getObject(objectId)) return;
+      pendingNotebookFocusRef.current = null;
+      pendingMcFloatingRef.current = null;
+      // Do NOT call focusNotebookOnCanvas here: it pans with window dims while
+      // Free Space is still content-visibility:hidden. Queue a visual frame for
+      // after the free-space surface is visible and laid out.
+      seedMissingPositions([objectId]);
+      if (!spacePositionsRef.current[objectId]) {
+        initPos(objectId, { x: 120, y: 120, w: 520, h: 460 });
+      }
+      pendingMcVisualFrameRef.current = {
+        objectId,
+        boardId: still.boardId,
+      };
+      setSectionViewMode('free-space');
+      setSpaceSelectedId(objectId);
+      setNotebookSearchPulseId(objectId);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [
+    sectionId,
+    sectionBoards.activeBoardId,
+    sectionBoards.setActiveBoardId,
+    sectionObjects.objects,
+    sectionObjects,
+    supportsUniversalPresentation,
+    setObjectPresentationMode,
+    seedMissingPositions,
+    initPos,
+    setSectionViewMode,
+  ]);
+
+  // Same-board MC Open still queues floating; apply when object already exists.
+  useEffect(() => {
+    const objectId = pendingMcFloatingRef.current;
+    if (!objectId) return;
+    // Cross-board pending owns floating+focus sequencing for this id.
+    if (pendingNotebookFocusRef.current?.objectId === objectId) return;
+    if (!sectionObjects.getObject(objectId)) return;
+    setObjectPresentationMode(objectId, 'floating');
+    pendingMcFloatingRef.current = null;
+  }, [sectionObjects.objects, sectionObjects, setObjectPresentationMode]);
+
+  /**
+   * Cross-board MC visual frame: run only after Free Space is the visible surface
+   * so [data-fw-canvas-viewport] has real laid-out client size (not while
+   * content-visibility:hidden under Mission Control).
+   */
+  useEffect(() => {
+    const pending = pendingMcVisualFrameRef.current;
+    if (!pending) return;
+    if (sectionViewMode !== 'free-space' || !freeSpaceSurfaceVisible) return;
+    if (!sectionObjectsRef.current.getObject(pending.objectId)) return;
+
+    let cancelled = false;
+    const objectId = pending.objectId;
+    let attempts = 0;
+
+    const applyMcVisualFrame = () => {
+      if (cancelled) return;
+      const still = pendingMcVisualFrameRef.current;
+      if (!still || still.objectId !== objectId) return;
+
+      const metrics = readVisibleFreeformCanvasFrameMetrics();
+      const pos = spacePositionsRef.current[objectId];
+      const canvasEl = document.querySelector('[data-fw-canvas-viewport]') as HTMLElement | null;
+      const sizeAtRead = canvasEl
+        ? { w: canvasEl.clientWidth, h: canvasEl.clientHeight }
+        : null;
+
+      if (!metrics || !pos || !sizeAtRead || sizeAtRead.w < 1 || sizeAtRead.h < 1) {
+        attempts += 1;
+        if (attempts < 12) {
+          requestAnimationFrame(() => {
+            if (!cancelled) applyMcVisualFrame();
+          });
+        } else {
+          pendingMcVisualFrameRef.current = null;
+        }
+        return;
+      }
+
+      pendingMcVisualFrameRef.current = null;
+      const view = frameMissionControlTarget(pos, metrics);
+      sectionCanvasRef.current.setViewport(view.zoom, view.panX, view.panY);
+    };
+
+    // Double rAF: first commit after mode switch, second after layout/paint.
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(applyMcVisualFrame);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(id);
+    };
+  }, [
+    sectionViewMode,
+    freeSpaceSurfaceVisible,
+    sectionObjects.objects,
+    sectionBoards.activeBoardId,
+  ]);
+
+  const missionControlActionDeps = useMemo(
+    () => ({
+      focusFreeSpace: (objectId: string, boardId: string) => {
+        runMissionControlFreeSpaceFocus(
+          { objectId, boardId },
+          {
+            activeBoardId: sectionBoards.activeBoardId,
+            focusNotebook: focusNotebookForMissionControl,
+            queueFloatingPresentation: id => {
+              pendingMcFloatingRef.current = id;
+            },
+            setPresentationModeFloating: id => {
+              setObjectPresentationMode(id, 'floating');
+            },
+          },
+        );
+      },
+      openExternalUrl: openMissionControlExternalUrl,
+      openShelfFile: async ({ filePath }: { itemId: string; filePath: string }) => {
+        try {
+          const url = await getShelfPdfSignedUrl(filePath);
+          const name = filePath.split('/').pop() || 'Document';
+          setShelfPdfViewer({ url, title: name });
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Could not open file');
+        }
+      },
+    }),
+    [
+      sectionBoards.activeBoardId,
+      focusNotebookForMissionControl,
+      setObjectPresentationMode,
+    ],
+  );
+
+  const handleMissionControlOpenItem = useCallback(
+    (item: MissionControlItem) => {
+      executeMissionControlAction(item.openAction, missionControlActionDeps);
+    },
+    [missionControlActionDeps],
+  );
+
+  const handleMissionControlShowInWorkspace = useCallback(
+    (item: MissionControlItem) => {
+      executeMissionControlAction(item.showInWorkspaceAction, missionControlActionDeps);
+    },
+    [missionControlActionDeps],
   );
 
   const handleStudyLayoutChange = useCallback((objectId: string, mode: StudyLayoutMode) => {
@@ -3782,42 +3726,11 @@ export function SectionPage() {
   // Customization — accent overrides progress-based color for decorative elements only
   const accentColor = customization.accent || progressColor;
 
-  const isPanic = !!section.exam_date && progress < 50;
-
-  // Split: Exercises (primary) vs everything else (resources)
-  const exercisesGroup = section.groups.find(g => g.title === 'Exercises');
   const resourceGroups = section.groups.filter(g => g.title !== 'Exercises');
-
-  // Today's Plan — up to 3 recommended actions
-  const todayPlan = (() => {
-    const result: Array<{ item: Item; lane: string; reason: string; effort: string }> = [];
-    for (const gName of PLAN_PRIORITY) {
-      if (result.length >= 3) break;
-      const g = section.groups.find(x => x.title === gName);
-      if (!g) continue;
-      const lane   = gName === 'Exercises' ? 'To Do' : gName;
-      const reason = gName === 'Exercises' ? 'Next incomplete task'
-                   : gName === 'Exams'     ? 'Focus here first'
-                   : 'Review lecture material';
-      for (const item of g.items) {
-        if (!item.completed && result.length < 3) result.push({ item, lane, reason, effort: getEffort(item) });
-      }
-    }
-    if (result.length < 3) {
-      for (const g of section.groups) {
-        if (result.length >= 3) break;
-        if ([...PLAN_PRIORITY, 'Links', 'Notes'].includes(g.title)) continue;
-        for (const item of g.items) {
-          if (!item.completed && result.length < 3)
-            result.push({ item, lane: g.title, reason: 'Next best action', effort: getEffort(item) });
-        }
-      }
-    }
-    return result;
-  })();
-
-  const scrollToItem = (itemId: string) =>
-    document.getElementById(`item-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const shelfDefaultGroupId =
+    resourceGroups.find(g => !(customization.hiddenLanes ?? []).includes(g.id))?.id ??
+    resourceGroups[0]?.id ??
+    null;
 
   // Common props passed to every GroupComponent and ResourcesBlock
   const groupCallbacks = {
@@ -4475,248 +4388,92 @@ export function SectionPage() {
           </div>
         </div>
       </div>
-      <div style={surfaceShellStyle(workSurfaceVisible, { opaqueBackground: tokens.pageBg })}>
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-[248px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%', paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
-
-          {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
-          <aside
-            className="hidden lg:flex flex-col overflow-y-auto"
-            style={{ borderRight: '1px solid rgba(255,255,255,0.04)', padding: '32px 14px 24px 18px', gap: 0, backgroundColor: '#070b14' }}
-          >
-            <CourseHub sectionId={section.id} />
-
-            <div style={{ margin: '24px 0 16px', height: '1px', backgroundColor: 'rgba(255,255,255,0.04)' }} />
-
-            <AmbientDates sectionId={section.id} sectionTitle={section.title} />
-          </aside>
-
-          {/* ── RIGHT WORK SURFACE ───────────────────────────────────────── */}
-          <main style={{ overflowY: 'auto', position: 'relative', backgroundColor: tokens.pageBg }}>
-
-            {/* Subtle session hint — secondary to workspace */}
-            <div style={{
-              position: 'absolute', inset: 0,
-              background: sessionIsThisCourse
-                ? 'radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.035) 0%, transparent 65%)'
-                : 'none',
-              pointerEvents: 'none', zIndex: 0, transition: 'background 1.4s cubic-bezier(0.4,0,0.2,1)',
-            }} />
-
-            <div style={{ position: 'relative', zIndex: 1, padding: '36px 40px 88px', maxWidth: '720px' }}>
-
-              {/* Workspace context — quiet */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    {customization.icon && (
-                      <span style={{ fontSize: '15px', lineHeight: 1 }} role="img">{customization.icon}</span>
-                    )}
-                    <h1 style={{ fontSize: '17px', fontWeight: 650, color: 'rgba(226,232,240,0.88)', letterSpacing: '-0.02em', margin: 0 }}>
-                      {section.title}
-                    </h1>
-                    {spaceAge(section.created_at) && (
-                      <span style={{ fontSize: '10px', color: '#374151', fontWeight: 500, flexShrink: 0, userSelect: 'none' }}>
-                        {spaceAge(section.created_at)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+      <div style={surfaceShellStyle(workSurfaceVisible, { opaqueBackground: '#f4f6fa' })}>
+        <div
+          className="flex-1"
+          style={{
+            overflow: 'hidden',
+            minHeight: 0,
+            height: '100%',
+            paddingTop: WORKSPACE_SHELL_TOP_INSET,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <main style={{ overflowY: 'auto', position: 'relative', flex: 1, minHeight: 0, backgroundColor: '#f4f6fa' }}>
+            <MissionControlView
+              sectionTitle={section.title}
+              sectionIcon={customization.icon}
+              items={missionControlIndex.items}
+              completeness={missionControlIndex.completeness}
+              status={missionControlIndex.status}
+              onOpenItem={handleMissionControlOpenItem}
+              onShowInWorkspace={handleMissionControlShowInWorkspace}
+              onOpenWorkspace={() => setSectionViewMode('free-space')}
+              customizeButton={
                 <button
+                  type="button"
                   onClick={() => setShowCustomize(true)}
-                  style={{ flexShrink: 0, fontSize: '10px', padding: '4px 6px', borderRadius: '4px', color: '#1e2a38', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', marginTop: '2px', transition: 'color 0.3s cubic-bezier(0.4,0,0.2,1)' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#374151'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#1e2a38'; }}
+                  style={{
+                    flexShrink: 0,
+                    fontSize: 11,
+                    padding: '8px 10px',
+                    minHeight: 44,
+                    borderRadius: 8,
+                    color: '#64748b',
+                    border: 'none',
+                    backgroundColor: 'transparent',
+                    cursor: 'pointer',
+                  }}
                   title="Customize workspace"
                 >
                   ✦
                 </button>
-              </div>
-
-              <MissionControlView
-                objects={sectionObjects.objects}
-                accent={accentColor}
-                onOpenObject={handleMissionControlOpenObject}
-              />
-
-              {/* Recessed lane progress — not the visual center */}
-              <div style={{ marginBottom: 24, opacity: 0.72 }}>
-                {totalItems > 0 ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    {allDone ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 500, color: '#10b981' }}>
-                        <CheckCircle2 className="w-3 h-3" /> All caught up
-                      </span>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: '11px', color: '#4b5563' }}>
-                          <span style={{ color: '#64748b', fontWeight: 500 }}>{remaining}</span> remaining
-                        </span>
-                        <span style={{ fontSize: '11px', color: '#1a2230' }}>·</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '56px', height: '2px', borderRadius: '2px', backgroundColor: '#111827', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${progress}%`, backgroundColor: progressColor, borderRadius: '2px', transition: 'width 0.7s ease' }} />
-                          </div>
-                          <span style={{ fontSize: '10px', color: '#374151', fontWeight: 500 }}>{progress}%</span>
-                        </div>
-                      </>
-                    )}
-                    {editingExamDate ? (
-                      <input
-                        type="date"
-                        defaultValue={section.exam_date ?? ''}
-                        autoFocus
-                        style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', backgroundColor: '#111827', border: '1px solid #f59e0b', color: '#f8fafc', outline: 'none' }}
-                        onBlur={e => { setEditingExamDate(false); setExamDate(e.target.value || null).catch(() => toast.error('Failed to save exam date')); }}
-                        onKeyDown={e => { if (e.key === 'Escape') setEditingExamDate(false); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                      />
-                    ) : section.exam_date ? (
-                      <button
-                        onClick={() => setEditingExamDate(true)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#4b5563', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                        onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#94a3b8')}
-                        onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-                      >
-                        <Calendar className="w-3 h-3" />
-                        {formatExamDate(section.exam_date)}
-                        {examDays !== null && (
-                          <span style={{ color: examDays <= 0 ? '#4b5563' : examDays <= 7 ? '#ef4444' : examDays <= 14 ? '#f59e0b' : '#4b5563', fontWeight: 600 }}>
-                            · {examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today!' : 'Past'}
-                          </span>
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setEditingExamDate(true)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#263043', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                        onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-                        onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}
-                      >
-                        <Calendar className="w-3 h-3" /> Set exam date
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: '11px', color: '#263043', margin: 0 }}>Add tasks to track progress</p>
-                )}
-              </div>
-
-              {/* ── PANIC BANNER ─────────────────────────────────────────── */}
-              {isPanic && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px 12px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)', marginBottom: '20px' }}>
-                  <AlertTriangle className="w-3.5 h-3.5" style={{ color: '#f59e0b', flexShrink: 0, marginTop: '1px' }} />
-                  <p style={{ fontSize: '12px', color: '#f59e0b', margin: 0 }}>
-                    Exam approaching — focus on high-impact items
-                  </p>
-                </div>
-              )}
-
-              {/* ── FOCUS NOW STRIP ──────────────────────────────────────── */}
-              {todayPlan.length > 0 && (
-                <div style={{ borderLeft: '1.5px solid rgba(245,158,11,0.45)', backgroundColor: 'rgba(245,158,11,0.014)', borderRadius: '0 3px 3px 0', marginBottom: '36px' }}>
-                  <div style={{ padding: '6px 16px 0', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '9px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(245,158,11,0.5)', fontWeight: 600 }}>Do next</span>
-                  </div>
-
-                  <button
-                    onClick={() => scrollToItem(todayPlan[0].item.id)}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '8px 16px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                    onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.025)')}
-                    onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
-                  >
-                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: '#f59e0b', flexShrink: 0, opacity: 0.7 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {todayPlan[0].item.title}
-                      </p>
-                      <p style={{ fontSize: '10px', color: '#374151', margin: '2px 0 0' }}>
-                        {todayPlan[0].lane}
-                      </p>
-                    </div>
-                    <ArrowRight className="w-3 h-3" style={{ color: '#2a3040', flexShrink: 0 }} />
-                  </button>
-
-                  {todayPlan.slice(1).map((rec) => (
-                    <button
-                      key={rec.item.id}
-                      onClick={() => scrollToItem(rec.item.id)}
-                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '6px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-                      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(245,158,11,0.015)')}
-                      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
-                    >
-                      <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#374151', flexShrink: 0, opacity: 0.5 }} />
-                      <p style={{ flex: 1, fontSize: '12px', color: '#4b5563', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {rec.item.title}
-                      </p>
-                    </button>
-                  ))}
-
-                  <div style={{ padding: '10px 16px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      onClick={() => setSectionViewMode('free-space')}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '6px', backgroundColor: accentColor, color: '#000', fontSize: '11px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
-                    >
-                      Open workspace
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleStartSession}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px', backgroundColor: 'transparent', color: '#6b7280', fontSize: '11px', fontWeight: 600, border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.14)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#6b7280'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'; }}
-                    >
-                      <PlayCircle className="w-3 h-3" />
-                      {sessionIsThisCourse ? 'Resume focus session' : 'Focus session'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── TASKS & CAPTURE ────────────────────────────────────── */}
-              <div style={{ marginBottom: '40px' }}>
-
-                {exercisesGroup ? (
-                  <>
-                    {exercisesGroup.items.map(item => (
-                      <div key={item.id} id={`item-${item.id}`}>
-                        <WorkItem item={item} onToggle={toggleTask} onDelete={deleteItem} />
-                      </div>
-                    ))}
-                    {exercisesGroup.items.length === 0 && (
-                      <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', fontStyle: 'italic', margin: 0 }}>
-                        Nothing here yet — add a task below.
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p style={{ fontSize: '13px', color: '#263043', padding: '10px 0', margin: 0 }}>
-                    No work items yet.
-                  </p>
-                )}
-
-                <WorkCapture onAdd={handleWorkCapture} />
-              </div>
-
-              {/* ── SHELF ────────────────────────────────────────────────── */}
-              <div style={{ paddingTop: '32px', borderTop: '1px solid rgba(255,255,255,0.035)' }}>
-                <ResourcesBlock
-                  groups={resourceGroups.filter(g => !(customization.hiddenLanes ?? []).includes(g.id))}
-                  sectionId={section.id}
-                  groupCallbacks={groupCallbacks}
-                  density={customization.density || ''}
+              }
+              setupSlot={
+                <MissionControlSectionSetup
+                  examDate={section.exam_date ?? null}
+                  examDateLabel={
+                    section.exam_date
+                      ? `${formatExamDate(section.exam_date)}${
+                          examDays !== null
+                            ? ` · ${examDays > 0 ? `${examDays}d` : examDays === 0 ? 'Today' : 'Past'}`
+                            : ''
+                        }`
+                      : null
+                  }
+                  editingExamDate={editingExamDate}
+                  onStartEditExamDate={() => setEditingExamDate(true)}
+                  onCancelEditExamDate={() => setEditingExamDate(false)}
+                  onCommitExamDate={value => {
+                    setEditingExamDate(false);
+                    setExamDate(value).catch(() => toast.error('Failed to save exam date'));
+                  }}
+                  workCapture={<MissionControlWorkCapture onAdd={handleWorkCapture} />}
+                  shelfAdd={
+                    <MissionControlShelfAdd
+                      defaultGroupId={shelfDefaultGroupId}
+                      onAddGroup={addGroup}
+                      onAddItem={async (groupId, type, title, content) => {
+                        await addItem(groupId, type, title, content);
+                      }}
+                    />
+                  }
+                  courseHub={<CourseHub sectionId={section.id} />}
                 />
-              </div>
-
-              {/* Mobile: ambient dates below shelf */}
-              <div className="lg:hidden" style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                <AmbientDates sectionId={section.id} sectionTitle={section.title} />
-              </div>
-
-            </div>
+              }
+            />
           </main>
         </div>
       </div>
+
+      {shelfPdfViewer && (
+        <PDFViewerModal
+          url={shelfPdfViewer.url}
+          title={shelfPdfViewer.title}
+          onClose={() => setShelfPdfViewer(null)}
+        />
+      )}
 
       {/* ── MATH ZONE SURFACE ─────────────────────────────────────────────── */}
       <div style={surfaceShellStyle(mathZoneSurfaceVisible)}>
@@ -4749,375 +4506,6 @@ export function SectionPage() {
           onChange={setCustomization}
           onClose={() => setShowCustomize(false)}
         />
-      )}
-    </div>
-  );
-}
-
-
-// ── ResourcesBlock ────────────────────────────────────────────────────────────
-
-// ── ShelfAddForm — inline creation for a single item ─────────────────────────
-// Appears in-place when the user picks a type. Auto-creates "Shelf" group if
-// none exists so users never have to think about group structure.
-
-type ShelfItemType = 'note' | 'link' | 'task';
-
-interface ShelfFormProps {
-  type:        ShelfItemType;
-  groupId:     string | null;   // null → auto-create "Shelf" group
-  onAddGroup:  (title: string) => Promise<string>;
-  onAddItem:   (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
-  onDone:      () => void;
-}
-
-function ShelfAddForm({ type, groupId, onAddGroup, onAddItem, onDone }: ShelfFormProps) {
-  const [title,   setTitle]   = useState('');
-  const [content, setContent] = useState('');
-  const [url,     setUrl]     = useState('');
-  const [saving,  setSaving]  = useState(false);
-  const titleRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { titleRef.current?.focus(); }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // For links, url is the key field; title is optional (falls back to url)
-    const finalTitle   = type === 'link'
-      ? (title.trim() || url.trim())
-      : title.trim();
-    const finalContent = type === 'link'
-      ? url.trim()
-      : content.trim() || undefined;
-    if (!finalTitle) return;
-
-    setSaving(true);
-    try {
-      let targetId = groupId;
-      if (!targetId) {
-        // Auto-create a default shelf — groups are an implementation detail
-        targetId = await onAddGroup('Shelf');
-      }
-      await onAddItem(targetId, type, finalTitle, finalContent);
-      onDone();
-    } catch {
-      setSaving(false);
-    }
-  };
-
-  const cancel = () => { if (!saving) onDone(); };
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="rounded-lg p-3 flex flex-col gap-2.5"
-      style={{ backgroundColor: 'rgba(7,11,20,0.6)', border: '1px solid rgba(255,255,255,0.055)' }}
-    >
-      {/* Type badge */}
-      <div className="flex items-center justify-between">
-        <span
-          className="text-[9px] font-bold uppercase tracking-[0.14em] px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: '#1a2236', color: '#4b5563' }}
-        >
-          {type === 'task' ? 'Checklist item' : type}
-        </span>
-        <button
-          type="button"
-          onClick={cancel}
-          style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1 }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#374151'; }}
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Link URL — shown first for links since it's the primary field */}
-      {type === 'link' && (
-        <input
-          ref={titleRef as React.RefObject<HTMLInputElement>}
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          placeholder="https://…"
-          className="w-full text-sm bg-transparent outline-none"
-          style={{ color: '#f1f5f9' }}
-          onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
-        />
-      )}
-
-      {/* Title / label */}
-      <input
-        ref={type !== 'link' ? titleRef : undefined}
-        value={title}
-        onChange={e => setTitle(e.target.value)}
-        placeholder={
-          type === 'note' ? 'Title (e.g. "Chapter 3 notes")' :
-          type === 'link' ? 'Label (optional)' :
-          'What needs doing?'
-        }
-        className="w-full text-sm bg-transparent outline-none"
-        style={{ color: '#f1f5f9' }}
-        onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
-      />
-
-      {/* Content body — only for notes */}
-      {type === 'note' && (
-        <textarea
-          value={content}
-          onChange={e => setContent(e.target.value)}
-          placeholder="Add details (optional)"
-          rows={3}
-          className="w-full text-xs bg-transparent outline-none resize-none"
-          style={{ color: '#94a3b8' }}
-          onKeyDown={e => { if (e.key === 'Escape') cancel(); }}
-        />
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 pt-0.5">
-        <button
-          type="button"
-          onClick={cancel}
-          className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
-          style={{ color: '#4b5563' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving || (type === 'link' ? !url.trim() : !title.trim())}
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40"
-          style={{ backgroundColor: '#1a2236', color: '#94a3b8', border: '1px solid #263043' }}
-          onMouseEnter={e => { if (!saving) (e.currentTarget as HTMLElement).style.backgroundColor = '#263043'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#1a2236'; }}
-        >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-          Save
-        </button>
-      </div>
-    </form>
-  );
-}
-
-// ── ResourcesBlock ────────────────────────────────────────────────────────────
-// A lightweight shelf for keeping useful things close to the work.
-// Groups (now "sections") are an optional organising layer — never required.
-
-function ResourcesBlock({
-  groups, sectionId, groupCallbacks, density = '',
-}: {
-  groups: GroupWithItems[];
-  sectionId: string;
-  density?: 'compact' | 'comfortable' | 'spacious' | '';
-  groupCallbacks: {
-    onAddItem:    (groupId: string, type: ItemType, title: string, content?: string) => Promise<void>;
-    onPushItem:   (groupId: string, item: Item) => void;
-    onToggleItem: (itemId: string, completed: boolean) => Promise<void>;
-    onDeleteItem: (itemId: string) => Promise<void>;
-    onUpdateItem: (itemId: string, updates: { title?: string; content?: string | null }) => Promise<void>;
-    onRenameGroup: (groupId: string, title: string) => Promise<void>;
-    onDeleteGroup: (groupId: string) => Promise<void>;
-    onAddGroup:   (title: string) => Promise<string>;
-    onRefresh:    () => void;
-  };
-}) {
-  // Open by default — this shelf is part of the space, not a collapsed extra.
-  const [isOpen,      setIsOpen]      = useState(true);
-  const [addingType,  setAddingType]  = useState<ShelfItemType | null>(null);
-  const [showSection, setShowSection] = useState(false);
-  const [sectionName, setSectionName] = useState('');
-
-  const totalItems  = groups.reduce((s, g) => s + g.items.length, 0);
-  // The default landing group — first available, or null (auto-create "Shelf")
-  const defaultGroupId = groups[0]?.id ?? null;
-
-  const handleAddSection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const t = sectionName.trim();
-    if (!t) return;
-    try { await groupCallbacks.onAddGroup(t); } catch { /* handled upstream */ }
-    setSectionName('');
-    setShowSection(false);
-  };
-
-  // Quick-add chips shown in header and inside the body
-  const TYPE_CHIPS: Array<{ type: ShelfItemType; label: string }> = [
-    { type: 'note', label: 'Note'      },
-    { type: 'link', label: 'Link'      },
-    { type: 'task', label: 'Checklist' },
-  ];
-
-  const QuickChips = ({ compact = false }: { compact?: boolean }) => (
-    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-      {TYPE_CHIPS.map(({ type, label }) => (
-        <button
-          key={type}
-          onClick={() => { setAddingType(type); setIsOpen(true); }}
-          className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-colors"
-          style={{
-            backgroundColor: addingType === type ? '#1a2236' : 'transparent',
-            color:           addingType === type ? '#94a3b8' : '#4b5563',
-            border:          `1px solid ${addingType === type ? '#263043' : 'transparent'}`,
-          }}
-          onMouseEnter={e => {
-            if (addingType !== type) {
-              (e.currentTarget as HTMLElement).style.backgroundColor = '#111827';
-              (e.currentTarget as HTMLElement).style.color = '#94a3b8';
-            }
-          }}
-          onMouseLeave={e => {
-            if (addingType !== type) {
-              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-              (e.currentTarget as HTMLElement).style.color = '#4b5563';
-            }
-          }}
-        >
-          <Plus className="w-2.5 h-2.5" />
-          {compact ? null : label}
-        </button>
-      ))}
-    </div>
-  );
-
-  return (
-    <div className="mb-4">
-
-      {/* ── Header ── */}
-      <div
-        className="flex items-center justify-between mb-3 cursor-pointer select-none"
-        onClick={() => setIsOpen(o => !o)}
-      >
-        <div className="flex items-center gap-2">
-          <span className="flex-shrink-0" style={{ color: '#263043', transition: 'color 0.25s cubic-bezier(0.4,0,0.2,1)' }}
-            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = '#4b5563')}
-            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = '#263043')}>
-            {isOpen
-              ? <ChevronDown  className="w-3 h-3" />
-              : <ChevronRight className="w-3 h-3" />}
-          </span>
-          <span className="text-[10px] font-semibold"
-                style={{ color: '#374151', letterSpacing: '0.04em' }}>
-            shelf
-          </span>
-          {totalItems > 0 && (
-            <span className="text-[9px]"
-                  style={{ color: '#263043' }}>
-              {totalItems}
-            </span>
-          )}
-        </div>
-        {/* Quick-add chips — stop propagation so they don't toggle collapse */}
-        <QuickChips />
-      </div>
-
-      {/* ── Body ── */}
-      {isOpen && (
-        <div className="flex flex-col gap-2">
-
-          {/* Inline add form — appears when a type chip is selected */}
-          {addingType && (
-            <ShelfAddForm
-              type={addingType}
-              groupId={defaultGroupId}
-              onAddGroup={groupCallbacks.onAddGroup}
-              onAddItem={groupCallbacks.onAddItem}
-              onDone={() => setAddingType(null)}
-            />
-          )}
-
-          {/* Groups / items */}
-          {groups.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {groups.map(group => (
-                <GroupComponent
-                  key={group.id}
-                  group={group}
-                  sectionId={sectionId}
-                  onAddItem={groupCallbacks.onAddItem}
-                  onPushItem={groupCallbacks.onPushItem}
-                  onToggleItem={groupCallbacks.onToggleItem}
-                  onDeleteItem={groupCallbacks.onDeleteItem}
-                  onUpdateItem={groupCallbacks.onUpdateItem}
-                  onRenameGroup={groupCallbacks.onRenameGroup}
-                  onDeleteGroup={groupCallbacks.onDeleteGroup}
-                  onRefresh={groupCallbacks.onRefresh}
-                  density={density}
-                />
-              ))}
-            </div>
-          ) : !addingType ? (
-            /* ── Empty state ── */
-            <div className="flex flex-col py-6 gap-3" style={{ paddingLeft: '2px' }}>
-              <p className="text-xs" style={{ color: '#263043', fontStyle: 'italic' }}>
-                A place for notes, links, and references.
-              </p>
-              {/* Primary CTAs — one per type */}
-              <div className="flex items-center gap-2">
-                {TYPE_CHIPS.map(({ type, label }) => (
-                  <button
-                    key={type}
-                    onClick={() => setAddingType(type)}
-                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                    style={{ backgroundColor: '#1a2236', color: '#94a3b8', border: '1px solid #263043' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#263043'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#1a2236'; }}
-                  >
-                    <Plus className="w-3 h-3" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {/* ── Add section (power-user feature — sits quietly at the bottom) ── */}
-          {groups.length > 0 && (
-            showSection ? (
-              <form
-                onSubmit={handleAddSection}
-                className="flex items-center gap-2 px-2 py-2 rounded-lg"
-                style={{ backgroundColor: '#070b14', border: '1px solid #1a2236' }}
-              >
-                <input
-                  autoFocus
-                  value={sectionName}
-                  onChange={e => setSectionName(e.target.value)}
-                  placeholder="Section name (e.g. Notes, Links, References)"
-                  className="flex-1 text-xs bg-transparent outline-none"
-                  style={{ color: '#f1f5f9' }}
-                  onKeyDown={e => { if (e.key === 'Escape') { setShowSection(false); setSectionName(''); } }}
-                />
-                <button
-                  type="submit"
-                  disabled={!sectionName.trim()}
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg disabled:opacity-40 transition-colors"
-                  style={{ backgroundColor: '#1a2236', color: '#94a3b8' }}
-                >
-                  Add
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowSection(false); setSectionName(''); }}
-                  style={{ color: '#374151', background: 'none', border: 'none', cursor: 'pointer' }}
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </form>
-            ) : (
-              <button
-                onClick={() => setShowSection(true)}
-                className="self-start text-[10px] transition-colors"
-                style={{ color: '#263043', background: 'none', border: 'none', cursor: 'pointer' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4b5563'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#263043'; }}
-              >
-                + Add section
-              </button>
-            )
-          )}
-        </div>
       )}
     </div>
   );

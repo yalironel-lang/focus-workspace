@@ -61,6 +61,8 @@ export default defineConfig({
       'src/lib/deriveMissionControlContinue.test.ts',
       'src/lib/missionControlContinueOpen.test.ts',
       'src/lib/missionControl/**/*.test.ts',
+      'src/lib/missionControl/**/*.test.tsx',
+      'src/components/mission-control/**/*.test.tsx',
       'src/lib/freeSpaceNotebook.integration.test.tsx',
       'src/lib/freeSpaceNotebookToolbar.session.test.tsx',
       'src/lib/notebookMultiClickSelection.test.ts',

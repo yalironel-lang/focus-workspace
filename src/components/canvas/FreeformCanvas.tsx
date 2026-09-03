@@ -81,6 +81,7 @@ import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBo
 import { coerceFreeSpaceConnectionIds } from '../../hooks/useSectionFreeSpaceObjects';
 import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP } from '../../hooks/useCanvasMode';
 import { clientToWorld, readDisplayedViewport, zoomViewportTowardPoint } from '../../lib/canvasCoordinates';
+import { orderFreeformItemsForPaint } from '../../lib/freeformPaintOrder';
 import { WHEEL_PAN_SETTLE_MS, liveWheelPanFromDeltas } from '../../lib/viewportPersist';
 import { useFreeSpaceTouchNavigation } from '../../hooks/useFreeSpaceTouchNavigation';
 import {
@@ -1043,6 +1044,21 @@ export function FreeformCanvas({
     ...blocks.map(b => ({ kind: 'block' as const, id: b.id })),
     ...tools.map(t => ({ kind: 'tool' as const, id: t.id })),
   ];
+
+  /**
+   * Paint order: per-item opacity/filter/transform wrappers create stacking
+   * contexts, so FreeformBlock z-index cannot raise a selected card above a
+   * later sibling. Render the active/selected id last (transient only).
+   */
+  const paintItems = useMemo(
+    () =>
+      orderFreeformItemsForPaint(allItems, {
+        draggingId,
+        selectedId,
+        focusEditingId,
+      }),
+    [allItems, draggingId, selectedId, focusEditingId],
+  );
 
   const semanticClusterRegions = useMemo(() => {
     if (!spatialAmbient || !freeSpaceConnectionsEnabled || blocks.length < 2) return [];
@@ -2267,7 +2283,7 @@ export function FreeformCanvas({
           );
         })()}
 
-        {allItems.map(item => {
+        {paintItems.map(item => {
           const storedPos = positions[item.id] ?? { x: 40, y: 40, w: 340, h: 0 };
           const liveGeom = liveBlockGeomRef.current;
           const pos =
