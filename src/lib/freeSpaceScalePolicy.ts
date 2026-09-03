@@ -34,6 +34,12 @@ export interface CanvasScaleContext {
   connectionOpacityMul: number;
   connectionGlowEnabled: boolean;
   continuityGlowEnabled: boolean;
+  /**
+   * When false (e.g. Mission Control covering Free Space), force heavy-content
+   * suspension so PDF.js / notebooks / sheets do not keep rendering under the
+   * hidden surface. Tree stays mounted for state preservation.
+   */
+  surfaceActive: boolean;
 }
 
 export interface BlockRenderPolicy {
@@ -62,6 +68,16 @@ const DEFAULT_BLOCK_W = 340;
 const DEFAULT_BLOCK_H = 220;
 
 const HEAVY_TYPES = new Set(['notebook', 'pdf', 'companion', 'graph', 'sheet']);
+/** Types that must suspend when Free Space is covered by another surface (MC). */
+const SURFACE_INACTIVE_SUSPEND_TYPES = new Set([
+  'notebook',
+  'pdf',
+  'companion',
+  'graph',
+  'sheet',
+  'studyfile',
+  'image',
+]);
 
 export const DEFAULT_BLOCK_RENDER_POLICY: BlockRenderPolicy = {
   fidelity: 'full',
@@ -144,6 +160,8 @@ export function buildCanvasScaleContext(input: {
   viewportW: number;
   viewportH: number;
   objectCount: number;
+  /** Defaults true — false when Free Space is mounted but not the active surface. */
+  surfaceActive?: boolean;
 }): CanvasScaleContext {
   const viewportWorld = worldViewportRect(
     input.panX,
@@ -174,11 +192,16 @@ export function buildCanvasScaleContext(input: {
     connectionOpacityMul,
     connectionGlowEnabled,
     continuityGlowEnabled,
+    surfaceActive: input.surfaceActive !== false,
   };
 }
 
 function isHeavyBlock(blockType?: string): boolean {
   return HEAVY_TYPES.has((blockType ?? '').toLowerCase());
+}
+
+function shouldSuspendOnInactiveSurface(blockType?: string): boolean {
+  return SURFACE_INACTIVE_SUSPEND_TYPES.has((blockType ?? '').toLowerCase());
 }
 
 export function getBlockRenderPolicy(
@@ -190,6 +213,25 @@ export function getBlockRenderPolicy(
   const overlapStrict = viewportOverlapRatio(rect, ctx.viewportWorld);
   const dist = distanceFromViewportCenter(rect, ctx.viewportWorld);
   const heavy = input.kind === 'block' && isHeavyBlock(input.blockType);
+
+  // Covered by Mission Control (or another surface): suspend heavy viewers.
+  // Selected/editing must not keep PDF.js alive under a hidden Free Space shell.
+  // PDF is special: keep FreeSpacePdfCard mounted (chromeOnly=false) so blob URL /
+  // card state survive the round-trip, while PdfJsScrollViewer still suspends via
+  // suspendHeavyContent + shouldSuspendPdfViewer(surfaceActive:false).
+  if (!ctx.surfaceActive) {
+    const suspend = input.kind === 'block' && shouldSuspendOnInactiveSurface(input.blockType);
+    const isPdf = (input.blockType ?? '').toLowerCase() === 'pdf';
+    return {
+      fidelity: 'distant',
+      quietMul: 0.78,
+      shadowMul: 0.4,
+      glowAllowed: false,
+      suspendHeavyContent: suspend,
+      chromeOnly: isPdf ? false : suspend || heavy,
+      materialShadowMul: 0.4,
+    };
+  }
 
   const priority =
     input.editing ||
@@ -265,12 +307,14 @@ export function buildBlockRenderPolicies(
 
 /**
  * PDF viewer suspension — on coarse pointer (iPad), never pause the live viewer for
- * objects that are on-canvas and visible; always show iframe in study session.
+ * objects that are on-canvas and visible; always show viewer in study session.
+ * When Free Space is not the active surface, always suspend (overrides coarse-pointer guard).
  */
 export function shouldSuspendPdfViewer(
   policy: Pick<BlockRenderPolicy, 'suspendHeavyContent' | 'fidelity' | 'chromeOnly'>,
-  opts: { coarsePointer: boolean; inStudySession: boolean },
+  opts: { coarsePointer: boolean; inStudySession: boolean; surfaceActive?: boolean },
 ): boolean {
+  if (opts.surfaceActive === false) return true;
   if (!policy.suspendHeavyContent) return false;
   if (opts.inStudySession) return false;
   if (opts.coarsePointer && policy.fidelity !== 'distant') return false;

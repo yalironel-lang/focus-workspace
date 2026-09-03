@@ -1,6 +1,14 @@
 /**
  * Mission Control derivation — pure function, no side effects, no storage.
- * Derives NEXT / ACTIVE / FADING from the live Free Space object array.
+ *
+ * CONTINUE source of truth: `deriveMissionControlContinue`.
+ * ACTIVE / FADING remain secondary lists derived from the same object array.
+ *
+ * Other continuation systems (not unified in this pass):
+ * - StudyContinueBanner / study session restore
+ * - CourseEntry strip (`resolveCourseEntry` — may share this Continue via sections.next)
+ * - workspaceContinuity suggestions
+ * - legacy `getContinueTarget` (lane tasks/files)
  */
 
 import type { ProjectSpaceObject } from '../hooks/useSectionFreeSpaceObjects';
@@ -14,6 +22,9 @@ const ACTIVE_EXCLUDED = new Set(['calculator', 'graph', 'companion', 'mistake'])
 const ACTIVE_CAP   = 8;
 const FADING_CAP   = 6;
 const ACTIVE_WINDOW = 14 * DAY;
+
+/** Study surfaces older than this are ignored for Continue. */
+const CONTINUE_MAX_AGE = 14 * DAY;
 
 // ── Text helpers ──────────────────────────────────────────────────────────────
 
@@ -41,12 +52,20 @@ function lastMeaningfulLine(body: string): string {
 }
 
 function truncate(text: string, maxWords: number): string {
-  const words = text.split(/\s+/);
+  const words = text.split(/\s+/).filter(Boolean);
   return words.length <= maxWords ? text : words.slice(0, maxWords).join(' ') + '…';
 }
 
+/** Finite timestamps only — malformed values never dominate ranking. */
+export function safeTimestamp(value: unknown, fallback = 0): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback;
+  return value;
+}
+
 export function relativeTime(now: number, then: number): string {
-  const diff = now - then;
+  const t = safeTimestamp(then);
+  if (t <= 0) return '';
+  const diff = Math.max(0, now - t);
   if (diff < 60_000)     return 'just now';
   if (diff < HOUR)       return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 2 * HOUR)   return '1h ago';
@@ -55,82 +74,231 @@ export function relativeTime(now: number, then: number): string {
   return `${Math.floor(diff / DAY)}d ago`;
 }
 
-// ── NEXT ──────────────────────────────────────────────────────────────────────
+function recencyBonus(now: number, at: number): number {
+  const t = safeTimestamp(at);
+  if (t <= 0) return 0;
+  const age = now - t;
+  if (age < 0) return 0;
+  if (age < HOUR)       return 100;
+  if (age < 4 * HOUR)   return 80;
+  if (age < DAY)        return 50;
+  if (age < 3 * DAY)    return 25;
+  if (age < CONTINUE_MAX_AGE) return 10;
+  return 0;
+}
+
+function noteSubstance(body: string): 0 | 1 | 2 {
+  const t = stripMd(body).replace(/\s+/g, ' ').trim();
+  if (!t) return 0;
+  if (t.length < 12) return 1;
+  return 2;
+}
+
+function notebookSubstance(body: string, subtitle: string | null | undefined): 0 | 1 | 2 {
+  const sub = subtitle ? stripMd(subtitle) : '';
+  if (sub.length >= 4) return 2;
+  return noteSubstance(body);
+}
+
+function activityAt(o: ProjectSpaceObject): number {
+  if (o.content.type === 'pdf' || o.content.type === 'studyfile') {
+    const opened = safeTimestamp(o.content.lastOpenedAt);
+    if (opened > 0) return opened;
+  }
+  const updated = safeTimestamp(o.updatedAt);
+  if (updated > 0) return updated;
+  return safeTimestamp(o.createdAt);
+}
+
+function joinMeta(parts: Array<string | null | undefined | false>): string {
+  return parts.filter((p): p is string => typeof p === 'string' && p.length > 0).join(' · ');
+}
+
+// ── CONTINUE ──────────────────────────────────────────────────────────────────
 
 export interface NextItem {
   object: ProjectSpaceObject;
   verb: 'Continue' | 'Return to' | 'Revisit' | 'Resolve';
   label: string;
   sublabel: string;
+  /** Ranking score — exposed for tests. */
+  score?: number;
 }
 
-function deriveNext(objects: ProjectSpaceObject[]): NextItem | null {
-  const now = Date.now();
+/**
+ * Single source of truth for Mission Control Continue.
+ *
+ * Semantic hierarchy (base bands — recency adds within band):
+ * 1. Primary study surfaces — notebook / pdf / studyfile (800+)
+ * 2. Other meaningful recent objects — image/link with signal (400+)
+ * 3. Capture / unlinked notes with substance (220+)
+ * 4. Empty/tiny notes (40+) — never beat a study surface with any recent activity
+ * 5. Mistake revisit prompts (150+) — below active study work
+ *
+ * Rules:
+ * - PDF/studyfile eligible WITHOUT graph connections (connections are a small bonus only).
+ * - Empty/new notes must not steal Continue from meaningful notebook/PDF work.
+ * - Malformed timestamps are treated as 0 (no recency boost).
+ * - Only objects in the provided array are considered (section-scoped by caller).
+ */
+export function deriveMissionControlContinue(
+  objects: ProjectSpaceObject[],
+  nowInput?: number,
+): NextItem | null {
+  const now = typeof nowInput === 'number' && Number.isFinite(nowInput) ? nowInput : Date.now();
 
   let bestScore = -1;
   let bestItem: NextItem | null = null;
 
-  const tryCandidate = (score: number, item: NextItem) => {
-    if (score > bestScore) { bestScore = score; bestItem = item; }
+  const consider = (score: number, item: NextItem) => {
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = { ...item, score };
+    }
   };
 
   for (const o of objects) {
-    const age = now - o.updatedAt;
-    const recency = age < HOUR ? 30 : age < 4 * HOUR ? 20 : age < DAY ? 10 : age < 3 * DAY ? 5 : 0;
+    if (!o?.id || !o.content) continue;
+    const at = activityAt(o);
+    const age = at > 0 ? now - at : Number.POSITIVE_INFINITY;
+    const bonus = recencyBonus(now, at);
+    const timeLabel = relativeTime(now, at);
 
-    // Notebooks — primary writing surface, strongest continuation signal
+    // ── 1. Notebook ─────────────────────────────────────────────────────────
     if (o.content.type === 'notebook') {
+      if (age > CONTINUE_MAX_AGE && at > 0) continue;
+      const substance = notebookSubstance(o.content.body ?? '', o.content.subtitle);
       const subtitle = o.content.subtitle ? stripMd(o.content.subtitle) : null;
-      const lastLine = lastMeaningfulLine(o.content.body);
-      const label = truncate(subtitle ?? (lastLine || o.title), 12);
-      tryCandidate(80 + recency, {
-        object: o, verb: 'Continue', label,
-        sublabel: relativeTime(now, o.updatedAt),
+      const lastLine = lastMeaningfulLine(o.content.body ?? '');
+      const label = truncate(subtitle || lastLine || o.title || 'Notebook', 12);
+      const base = substance >= 2 ? 820 : substance === 1 ? 760 : 700;
+      consider(base + bonus, {
+        object: o,
+        verb: 'Continue',
+        label,
+        sublabel: joinMeta(['Notebook', timeLabel]),
       });
+      continue;
     }
 
-    // Isolated notes created < 24h — interrupted thought capture
-    if (o.content.type === 'note' && !o.connections?.length && now - o.createdAt < DAY) {
-      const line = firstMeaningfulLine(o.content.body);
-      tryCandidate(90, {
-        object: o, verb: 'Resolve',
-        label: truncate(line || o.title, 10),
-        sublabel: 'Captured · not yet connected',
-      });
-    }
-
-    // PDFs with connections opened recently — you were reading and taking notes
+    // ── 1. PDF (connections optional) ───────────────────────────────────────
     if (o.content.type === 'pdf') {
-      const lastOpened = o.content.lastOpenedAt ?? o.updatedAt;
-      if ((o.connections?.length ?? 0) > 0 && now - lastOpened < DAY) {
-        const pageLabel = o.content.page > 1 ? `  ·  p.${o.content.page}` : '';
-        tryCandidate(75, {
-          object: o, verb: 'Return to',
-          label: `${o.content.fileName}${pageLabel}`,
-          sublabel: relativeTime(now, lastOpened),
-        });
-      }
+      if (age > CONTINUE_MAX_AGE && at > 0) continue;
+      // No lastOpened/updated signal and ancient createdAt → skip
+      if (at <= 0) continue;
+      const page = typeof o.content.page === 'number' && o.content.page > 1 ? o.content.page : null;
+      const conns = o.connections?.length ?? 0;
+      const connBonus = conns > 0 ? 12 : 0;
+      const pageBonus = page ? 4 : 0;
+      const fileName = (o.content.fileName || o.title || 'PDF').trim() || 'PDF';
+      consider(800 + bonus + connBonus + pageBonus, {
+        object: o,
+        verb: 'Continue',
+        label: truncate(fileName, 14),
+        sublabel: joinMeta([
+          'PDF',
+          page ? `page ${page}` : null,
+          timeLabel,
+        ]),
+      });
+      continue;
     }
 
-    // Study files with connections opened recently
+    // ── 1. Study file ───────────────────────────────────────────────────────
     if (o.content.type === 'studyfile') {
-      const lastOpened = o.content.lastOpenedAt ?? o.updatedAt;
-      if ((o.connections?.length ?? 0) > 0 && now - lastOpened < DAY) {
-        const pageLabel = o.content.page > 1 ? `  ·  p.${o.content.page}` : '';
-        tryCandidate(72, {
-          object: o, verb: 'Return to',
-          label: `${o.content.fileName}${pageLabel}`,
-          sublabel: relativeTime(now, lastOpened),
-        });
-      }
+      if (age > CONTINUE_MAX_AGE && at > 0) continue;
+      if (at <= 0) continue;
+      const page = typeof o.content.page === 'number' && o.content.page > 1 ? o.content.page : null;
+      const conns = o.connections?.length ?? 0;
+      const fileName = (o.content.fileName || o.title || 'Study file').trim() || 'Study file';
+      consider(790 + bonus + (conns > 0 ? 10 : 0) + (page ? 4 : 0), {
+        object: o,
+        verb: 'Continue',
+        label: truncate(fileName, 14),
+        sublabel: joinMeta([
+          'Study file',
+          page ? `page ${page}` : null,
+          timeLabel,
+        ]),
+      });
+      continue;
     }
 
-    // Recall/mistake never reviewed, created < 48h — you flagged it while thinking
-    if (o.content.type === 'mistake' && o.content.timesReviewed === 0 && now - o.createdAt < 2 * DAY) {
-      tryCandidate(70, {
-        object: o, verb: 'Revisit',
-        label: truncate(stripMd(o.content.whatWrong), 8),
-        sublabel: "You haven't returned to this",
+    // ── 2. Image / link (meaningful recent) ─────────────────────────────────
+    if (o.content.type === 'image') {
+      if (age > CONTINUE_MAX_AGE) continue;
+      const conns = o.connections?.length ?? 0;
+      if (conns === 0 && age > DAY) continue;
+      consider(420 + bonus + (conns > 0 ? 15 : 0), {
+        object: o,
+        verb: 'Return to',
+        label: truncate(o.title || 'Reference image', 12),
+        sublabel: joinMeta(['Image', timeLabel]),
+      });
+      continue;
+    }
+
+    if (o.content.type === 'link') {
+      if (age > CONTINUE_MAX_AGE) continue;
+      consider(400 + bonus, {
+        object: o,
+        verb: 'Return to',
+        label: truncate(o.content.title || o.content.url || o.title || 'Link', 12),
+        sublabel: joinMeta(['Link', timeLabel]),
+      });
+      continue;
+    }
+
+    // ── 3–4. Notes (capture) — never outrank study surfaces via base score ──
+    if (o.content.type === 'note') {
+      const substance = noteSubstance(o.content.body ?? '');
+      const linked = (o.connections?.length ?? 0) > 0;
+      // Empty notes: only very recent, lowest band
+      if (substance === 0) {
+        if (now - safeTimestamp(o.createdAt, now) > DAY) continue;
+        consider(40 + Math.min(bonus, 20), {
+          object: o,
+          verb: 'Resolve',
+          label: truncate(o.title || 'Empty note', 10),
+          sublabel: joinMeta(['Note', 'empty', timeLabel || 'captured']),
+        });
+        continue;
+      }
+      // Unlinked capture with substance
+      if (!linked) {
+        if (age > 3 * DAY) continue;
+        const line = firstMeaningfulLine(o.content.body ?? '');
+        consider(220 + bonus + (substance === 2 ? 20 : 0), {
+          object: o,
+          verb: 'Resolve',
+          label: truncate(line || o.title || 'Note', 10),
+          sublabel: joinMeta(['Note', 'unlinked', timeLabel]),
+        });
+        continue;
+      }
+      // Linked note — mild recent object
+      if (age > CONTINUE_MAX_AGE) continue;
+      const line = firstMeaningfulLine(o.content.body ?? '');
+      consider(380 + bonus, {
+        object: o,
+        verb: 'Return to',
+        label: truncate(line || o.title || 'Note', 10),
+        sublabel: joinMeta(['Note', timeLabel]),
+      });
+      continue;
+    }
+
+    // ── 5. Mistakes — below study work ──────────────────────────────────────
+    if (o.content.type === 'mistake') {
+      if (o.content.confidence === 'mastered') continue;
+      if (o.content.timesReviewed !== 0) continue;
+      const created = safeTimestamp(o.createdAt);
+      if (created > 0 && now - created > 2 * DAY) continue;
+      consider(150 + Math.min(bonus, 40), {
+        object: o,
+        verb: 'Revisit',
+        label: truncate(stripMd(o.content.whatWrong || o.title || 'Mistake'), 8),
+        sublabel: joinMeta(["You haven't returned to this", timeLabel]),
       });
     }
   }
@@ -148,9 +316,7 @@ export interface ActiveItem {
 }
 
 function activeTimestamp(o: ProjectSpaceObject): number {
-  if (o.content.type === 'pdf')       return o.content.lastOpenedAt ?? o.updatedAt;
-  if (o.content.type === 'studyfile') return o.content.lastOpenedAt ?? o.updatedAt;
-  return o.updatedAt;
+  return activityAt(o);
 }
 
 function activeDisplay(o: ProjectSpaceObject): { primary: string; secondary?: string } {
@@ -158,7 +324,6 @@ function activeDisplay(o: ProjectSpaceObject): { primary: string; secondary?: st
     const subtitle = o.content.subtitle ? stripMd(o.content.subtitle) : null;
     const last = lastMeaningfulLine(o.content.body);
     if (subtitle) return { primary: truncate(subtitle, 14) };
-    // No subtitle — show the last thought fragment in quotes
     return { primary: last ? `"${truncate(last, 12)}"` : o.title };
   }
   if (o.content.type === 'pdf') {
@@ -196,7 +361,6 @@ function deriveActive(objects: ProjectSpaceObject[], excludeId: string | undefin
   const candidates = objects.filter(o => {
     if (ACTIVE_EXCLUDED.has(o.type)) return false;
     if (o.id === excludeId) return false;
-    // Isolated unlinked notes stay out of ACTIVE — they belong in NEXT
     if (o.type === 'note' && !o.connections?.length) return false;
     return now - activeTimestamp(o) < ACTIVE_WINDOW;
   });
@@ -274,7 +438,7 @@ export interface MissionControlSections {
 export function deriveMissionControlSections(
   objects: ProjectSpaceObject[],
 ): MissionControlSections {
-  const next   = deriveNext(objects);
+  const next   = deriveMissionControlContinue(objects);
   const active = deriveActive(objects, next?.object.id);
   const fading = deriveFading(objects);
   return { next, active, fading };

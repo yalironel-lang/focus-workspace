@@ -966,8 +966,9 @@ export function FreeformCanvas({
         viewportW: viewportSize.w,
         viewportH: viewportSize.h,
         objectCount: allItemsPreview.length,
+        surfaceActive,
       }),
-    [safeZoom, safePanX, safePanY, viewportSize.w, viewportSize.h, allItemsPreview.length],
+    [safeZoom, safePanX, safePanY, viewportSize.w, viewportSize.h, allItemsPreview.length, surfaceActive],
   );
 
   const ambientScale =

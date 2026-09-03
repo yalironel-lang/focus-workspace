@@ -32,7 +32,7 @@ import { isLearningLoopClosed, learningLoopFields } from '../../lib/learningLoop
 import { FreeSpacePdfCard } from './FreeSpacePdfCard';
 import { FreeSpaceCompanionCard } from './FreeSpaceCompanionCard';
 import { WorkspaceSurfaceErrorBoundary } from '../common/WorkspaceSurfaceErrorBoundary';
-import { useFreeSpaceRenderPolicy } from '../canvas/FreeSpaceRenderPolicyContext';
+import { useFreeSpaceRenderPolicy, useFreeSpaceScaleContext } from '../canvas/FreeSpaceRenderPolicyContext';
 import { shouldSuspendPdfViewer } from '../../lib/freeSpaceScalePolicy';
 import { FreeSpaceObjectShell } from './FreeSpaceObjectShell';
 
@@ -416,6 +416,8 @@ function ProjectSpaceObjectRendererInner({
   }, [object.id]);
 
   const renderPolicy = useFreeSpaceRenderPolicy(object.id);
+  const scaleContext = useFreeSpaceScaleContext();
+  const surfaceActive = scaleContext?.surfaceActive !== false;
   const content = ensureProjectObjectContent(object.type, object.content);
   const [coarsePointer, setCoarsePointer] = useState(false);
   useEffect(() => {
@@ -716,6 +718,7 @@ function ProjectSpaceObjectRendererInner({
       const suspendPdfViewer = shouldSuspendPdfViewer(renderPolicy, {
         coarsePointer,
         inStudySession: pdfInStudySession,
+        surfaceActive,
       });
       return (
         <WorkspaceSurfaceErrorBoundary tokens={tokens} label="PDF">

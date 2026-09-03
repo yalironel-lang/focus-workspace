@@ -1,6 +1,7 @@
 /**
  * Mission Control view — NEXT / ACTIVE / FADING.
- * Derived entirely from Free Space objects. No persistence. No configuration.
+ * Continue candidate comes exclusively from `deriveMissionControlContinue`
+ * (via deriveMissionControlSections). No local ranking.
  * Every item is a single tap: switch to Free Space and center on that object.
  */
 
@@ -91,7 +92,7 @@ function NextSection({ item, accent, onOpen }: { item: NextItem; accent: string;
               textTransform: 'uppercase',
               color: `${accent}bb`,
             }}>
-              {item.verb} →
+              {item.verb}
             </p>
             <p style={{
               margin: 0,

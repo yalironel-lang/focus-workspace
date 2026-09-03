@@ -8,6 +8,7 @@ import { isQuickCaptureBlockedTarget } from '../command/isBlockedTarget';
 import { buildWorkspaceStarterPack } from '../workspaceStarter/buildWorkspaceStarterPack';
 import { buildExploreFocusPack } from '../workspaceStarter/buildExploreFocusPack';
 import { MissionControlView } from '../components/mission-control/MissionControlView';
+import { runMissionControlContinueOpen } from '../lib/missionControlContinueOpen';
 import {
   EXPLORE_FOCUS_SCENE_CENTER,
   isExploreFocusWorkspace,
@@ -1414,6 +1415,10 @@ export function SectionPage() {
 
   const focusNotebookOnCanvas = useCallback(
     (objectId: string) => {
+      // Stale / deleted Continue targets must not switch surfaces into empty focus.
+      const existing = sectionObjectsRef.current.getObject(objectId);
+      if (!existing) return;
+
       setSectionViewMode('free-space');
       seedMissingPositions([objectId]);
       const positions = spacePositionsRef.current;
@@ -1429,6 +1434,8 @@ export function SectionPage() {
       canvas.setViewport(view.zoom, view.panX, view.panY);
       setSpaceSelectedId(objectId);
       setNotebookSearchPulseId(objectId);
+      // PDF page / notebook content resume via existing object persistence when the
+      // Free Space surface reactivates and the viewer remounts at content.page.
     },
     [setSectionViewMode, seedMissingPositions, initPos],
   );
@@ -3454,6 +3461,17 @@ export function SectionPage() {
     })();
   }, [supportsUniversalPresentation, isStudySessionObject]);
 
+  /** Mission Control Continue — floating spatial focus only (never restore UOV). */
+  const handleMissionControlOpenObject = useCallback(
+    (objectId: string) => {
+      runMissionControlContinueOpen(objectId, {
+        setPresentationMode: setObjectPresentationMode,
+        spatialFocus: focusNotebookOnCanvas,
+      });
+    },
+    [setObjectPresentationMode, focusNotebookOnCanvas],
+  );
+
   const handleStudyLayoutChange = useCallback((objectId: string, mode: StudyLayoutMode) => {
     const store = sectionObjectsRef.current;
     for (const o of store.objects) {
@@ -4457,7 +4475,7 @@ export function SectionPage() {
           </div>
         </div>
       </div>
-      <div style={surfaceShellStyle(workSurfaceVisible)}>
+      <div style={surfaceShellStyle(workSurfaceVisible, { opaqueBackground: tokens.pageBg })}>
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-[248px_1fr]" style={{ overflow: 'hidden', minHeight: 0, height: '100%', paddingTop: WORKSPACE_SHELL_TOP_INSET }}>
 
           {/* ── LEFT PERIPHERAL ──────────────────────────────────────────── */}
@@ -4473,7 +4491,7 @@ export function SectionPage() {
           </aside>
 
           {/* ── RIGHT WORK SURFACE ───────────────────────────────────────── */}
-          <main style={{ overflowY: 'auto', position: 'relative', backgroundColor: 'rgba(255,255,255,0.012)' }}>
+          <main style={{ overflowY: 'auto', position: 'relative', backgroundColor: tokens.pageBg }}>
 
             {/* Subtle session hint — secondary to workspace */}
             <div style={{
@@ -4517,7 +4535,7 @@ export function SectionPage() {
               <MissionControlView
                 objects={sectionObjects.objects}
                 accent={accentColor}
-                onOpenObject={focusNotebookOnCanvas}
+                onOpenObject={handleMissionControlOpenObject}
               />
 
               {/* Recessed lane progress — not the visual center */}

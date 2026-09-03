@@ -58,6 +58,8 @@ export default defineConfig({
       'src/lib/notebookInlineMarks.sequential.test.ts',
       'src/lib/notebookFormatHistory.test.ts',
       'src/lib/freeSpaceScalePolicy.test.ts',
+      'src/lib/deriveMissionControlContinue.test.ts',
+      'src/lib/missionControlContinueOpen.test.ts',
       'src/lib/freeSpaceNotebook.integration.test.tsx',
       'src/lib/freeSpaceNotebookToolbar.session.test.tsx',
       'src/lib/notebookMultiClickSelection.test.ts',
