@@ -1,14 +1,16 @@
 /**
- * PR7: Free Space initial pull — mounted-board-only apply.
+ * PR7: Free Space initial pull.
  *
- * Fetch may be section-scoped; apply writes localStorage / React only for the
- * currently mounted board. Content/object fields are never overwritten when
- * protected (dirty, undurable delete, pending create/update, tombstones) or when
+ * Fetch is section-scoped. Realtime INSERT/UPDATE applies to the mounted board
+ * only (React + that board's localStorage). Section catch-up hydrates **every known
+ * local board** into its own `*_objects_v1` SOT using the same merge/guard semantics;
+ * only the mounted board patches React. Content/object fields are never overwritten
+ * when protected (dirty, undurable delete, pending create/update, tombstones) or when
  * cloud.updatedAt is not strictly newer. Geometry is merged independently via
  * geometry.updatedAt (see freeSpaceObjectGeometryLww).
  *
- * Full section catch-up may prune local objects absent from cloud for the mounted
- * board (delete-wins), except pending CREATE (not yet in cloud) and pending DELETE
+ * Full section catch-up may prune local objects absent from cloud per board
+ * (delete-wins), except pending CREATE (not yet in cloud) and pending DELETE
  * entity ids. Single-row realtime INSERT/UPDATE must not prune.
  *
  * C1/C2: provisional winners must be re-validated immediately before LS write and
@@ -20,7 +22,12 @@ import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects'
 import { repairFreeSpaceObjectList } from '../../hooks/useSectionFreeSpaceObjects';
 import { resolveCacheNamespace } from '../focusCacheNamespace';
 import { stripPdfThumbnailsFromObjects } from '../freeSpacePdfThumbIdb';
-import { boardScopedFreeSpaceKeys, fwPersistWarn } from '../freeSpacePersistence';
+import {
+  boardHasLocalFreeSpaceObjectSot,
+  boardScopedFreeSpaceKeys,
+  fwPersistWarn,
+  readSectionLocalBoardIds,
+} from '../freeSpacePersistence';
 import { tryPersistLocalStorage } from '../freeSpacePersistWrite';
 import { idbGetByIndex, TOMBSTONES_STORE } from '../knowledge/knowledgeJournalIdb';
 import type { KnowledgeTombstone } from '../knowledge/knowledgeTypes';
@@ -416,13 +423,58 @@ export type CollectPullGuardsResult =
       reason: string;
     };
 
+/** Pending-ops / tombstone failures that indicate IndexedDB missing or open failure. */
+export function isIndexedDbGuardFailureReason(reason: string): boolean {
+  return (
+    reason === 'pending_ops:idb_unavailable' ||
+    reason === 'pending_ops:db_open_failed' ||
+    reason === 'tombstone_idb_unavailable' ||
+    reason === 'pending_ops_throw'
+  );
+}
+
+/**
+ * When IDB guards cannot be read: allow cloud→local seed only if **this board** has
+ * no local Free Space object SOT. Otherwise remain fail-closed (protect unsynced local).
+ * Per-board so one populated sibling cannot block empty-board bootstrap in the same section.
+ */
+function resolveIdbGuardFailure(input: {
+  sectionId: string;
+  boardId: string;
+  reason: string;
+  pendingCreateEntityIds?: Set<string>;
+  pendingUpdateEntityIds?: Set<string>;
+  pendingDeleteEntityIds?: Set<string>;
+}): CollectPullGuardsResult {
+  const hasLocal = boardHasLocalFreeSpaceObjectSot(input.sectionId, input.boardId);
+  if (hasLocal) {
+    fwPersistWarn(
+      `Free Space pull aborted (IDB guard failed; local object SOT present): reason=${input.reason} section="${input.sectionId}" board="${normalizeBoardId(input.boardId)}"`,
+    );
+    return { ok: false, reason: input.reason };
+  }
+  fwPersistWarn(
+    `Free Space pull fresh-bootstrap: IDB guard unavailable (reason=${input.reason}); no local object SOT for section "${input.sectionId}" board="${normalizeBoardId(input.boardId)}" — seeding from cloud with empty pending/tombstone guards`,
+  );
+  return {
+    ok: true,
+    pendingCreateEntityIds: input.pendingCreateEntityIds ?? new Set(),
+    pendingUpdateEntityIds: input.pendingUpdateEntityIds ?? new Set(),
+    pendingDeleteEntityIds: input.pendingDeleteEntityIds ?? new Set(),
+    tombstoneObjectIds: new Set(),
+  };
+}
+
 /**
  * Load IDB pending create/update/delete entity ids + non-expired free_space_object tombstones.
- * Fail-closed: any guard-read failure aborts the pull (caller must not apply cloud).
+ * Fail-closed on guard-read failure, except IndexedDB unavailable/open-failed when the
+ * target board has no local Free Space object SOT (fresh-device cloud bootstrap only).
  */
 export async function collectFreeSpacePullGuardIds(input: {
   userId: string | null | undefined;
   sectionId: string;
+  /** Board under apply — scopes the IDB-unavailable fresh-bootstrap exception. */
+  boardId: string;
   now?: number;
 }): Promise<CollectPullGuardsResult> {
   const pendingCreateEntityIds = new Set<string>();
@@ -430,6 +482,7 @@ export async function collectFreeSpacePullGuardIds(input: {
   const pendingDeleteEntityIds = new Set<string>();
   const tombstoneObjectIds = new Set<string>();
   const now = input.now ?? Date.now();
+  let pendingOpsResolved = false;
 
   try {
     const ns = resolveCacheNamespace(input.userId, input.sectionId);
@@ -440,8 +493,19 @@ export async function collectFreeSpacePullGuardIds(input: {
 
     const listed = await listPendingOperations(ns.namespace);
     if (!listed.ok) {
+      const reason = `pending_ops:${listed.reason}`;
+      if (
+        listed.reason === 'idb_unavailable' ||
+        listed.reason === 'db_open_failed'
+      ) {
+        return resolveIdbGuardFailure({
+          sectionId: input.sectionId,
+          boardId: input.boardId,
+          reason,
+        });
+      }
       fwPersistWarn(`Free Space pull aborted: pending-ops guard failed reason=${listed.reason}`);
-      return { ok: false, reason: `pending_ops:${listed.reason}` };
+      return { ok: false, reason };
     }
 
     for (const op of listed.value) {
@@ -451,9 +515,15 @@ export async function collectFreeSpacePullGuardIds(input: {
       else if (op.operationType === 'update') pendingUpdateEntityIds.add(op.entityId);
       else if (op.operationType === 'delete') pendingDeleteEntityIds.add(op.entityId);
     }
+    pendingOpsResolved = true;
   } catch (e) {
-    fwPersistWarn(`Free Space pull aborted: pending-ops guard threw: ${String(e)}`);
-    return { ok: false, reason: 'pending_ops_throw' };
+    const reason = 'pending_ops_throw';
+    fwPersistWarn(`Free Space pull: pending-ops guard threw: ${String(e)}`);
+    return resolveIdbGuardFailure({
+      sectionId: input.sectionId,
+      boardId: input.boardId,
+      reason,
+    });
   }
 
   try {
@@ -469,8 +539,25 @@ export async function collectFreeSpacePullGuardIds(input: {
       if (isExactNonEmptyId(t.objectId)) tombstoneObjectIds.add(t.objectId);
     }
   } catch (e) {
-    fwPersistWarn(`Free Space pull aborted: tombstone guard failed: ${String(e)}`);
-    return { ok: false, reason: 'tombstone_guard_failed' };
+    const msg = String(e);
+    const idbish =
+      msg.includes('idb_unavailable') ||
+      msg.includes('db_open_failed') ||
+      msg.includes('IndexedDB') ||
+      msg.includes("Can't find variable: indexedDB");
+    fwPersistWarn(`Free Space pull: tombstone guard failed: ${msg}`);
+    if (!idbish) {
+      return { ok: false, reason: 'tombstone_guard_failed' };
+    }
+    // Pending ops already read successfully — keep those sets; only tombs empty on fresh bootstrap.
+    return resolveIdbGuardFailure({
+      sectionId: input.sectionId,
+      boardId: input.boardId,
+      reason: 'tombstone_idb_unavailable',
+      pendingCreateEntityIds: pendingOpsResolved ? pendingCreateEntityIds : undefined,
+      pendingUpdateEntityIds: pendingOpsResolved ? pendingUpdateEntityIds : undefined,
+      pendingDeleteEntityIds: pendingOpsResolved ? pendingDeleteEntityIds : undefined,
+    });
   }
 
   return {
@@ -531,6 +618,7 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
   const guards = await collectFreeSpacePullGuardIds({
     userId: input.userId,
     sectionId: input.sectionId,
+    boardId: input.boardId,
   });
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
   if (!guards.ok) {
@@ -871,13 +959,79 @@ export async function applyFreeSpaceCloudDeleteToMountedBoard(input: {
   };
 }
 
+export type SectionPullBoardHydrationSummary = {
+  boardId: string;
+  ok: boolean;
+  reason?: string;
+  acceptedCount: number;
+  persisted: boolean;
+};
+
+export type SectionPullCatchUpResult = ApplyMountedBoardCloudRowsResult & {
+  /** Per-board hydrate outcomes for known local boards (mounted included). */
+  boardHydrations?: readonly SectionPullBoardHydrationSummary[];
+};
+
+/** Durable objects for one board from localStorage (empty when key absent). */
+export function loadDurableFreeSpaceObjectsForBoard(
+  sectionId: string,
+  boardId: string,
+): ProjectSpaceObject[] {
+  if (!isExactNonEmptyId(sectionId)) return [];
+  const storageKey = boardScopedFreeSpaceKeys(sectionId, boardId).objects;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw == null) return [];
+    return repairFreeSpaceObjectList(JSON.parse(raw) as unknown, sectionId).objects;
+  } catch {
+    return [];
+  }
+}
+
 /**
- * PR7 section SELECT + shared mounted-board apply (catch-up after Realtime SUBSCRIBED).
+ * Cloud row board_ids that are not in the local board list — diagnose only.
+ * Objects for unknown boards are not hydrated (no board-list invention).
+ */
+export function diagnoseUnknownCloudBoardIds(input: {
+  sectionId: string;
+  knownBoardIds: readonly string[];
+  rows: readonly FreeSpaceObjectCloudRow[];
+}): string[] {
+  const known = new Set(input.knownBoardIds.map(normalizeBoardId));
+  const unknown = new Set<string>();
+  for (const row of input.rows) {
+    const boardId = normalizeBoardId(typeof row.board_id === 'string' ? row.board_id : 'main');
+    if (!known.has(boardId)) unknown.add(boardId);
+  }
+  if (unknown.size > 0) {
+    fwPersistWarn(
+      `Free Space section catch-up: cloud rows reference unknown board id(s) [${[...unknown].join(', ')}] for section "${input.sectionId}" — skipped (no local board list entry)`,
+    );
+  }
+  return [...unknown];
+}
+
+/**
+ * Resolve known boards for section object catch-up: local board list + mounted.
+ * Does not invent boards from cloud-only ids.
+ */
+export function resolveSectionCatchUpBoardIds(
+  sectionId: string,
+  mountedBoardId: string,
+): string[] {
+  const ids = new Set(readSectionLocalBoardIds(sectionId).map(normalizeBoardId));
+  ids.add(normalizeBoardId(mountedBoardId));
+  return [...ids];
+}
+
+/**
+ * PR7 section SELECT + multi-board local SOT hydrate + mounted-board React apply.
+ * Non-mounted known boards receive persisted object SOT only (same merge/guards).
  * Enables cloud-absence prune so peer deletes stick across reload/offline.
  */
 export async function runFreeSpaceSectionPullCatchUp(
   input: Omit<ApplyMountedBoardCloudRowsInput, 'rows' | 'pruneCloudAbsences'>,
-): Promise<ApplyMountedBoardCloudRowsResult> {
+): Promise<SectionPullCatchUpResult> {
   if (!input.isCurrent()) return { ok: false, reason: 'stale_scope' };
 
   const fetched = await fetchFreeSpaceObjectsForSection(input.sectionId);
@@ -889,9 +1043,82 @@ export async function runFreeSpaceSectionPullCatchUp(
     return { ok: false, reason: `fetch:${fetched.reason}` };
   }
 
-  return applyFreeSpaceCloudRowsToMountedBoard({
+  const mounted = normalizeBoardId(input.boardId);
+  const knownBoardIds = resolveSectionCatchUpBoardIds(input.sectionId, mounted);
+  diagnoseUnknownCloudBoardIds({
+    sectionId: input.sectionId,
+    knownBoardIds,
+    rows: fetched.rows,
+  });
+
+  const boardHydrations: SectionPullBoardHydrationSummary[] = [];
+
+  // Persist non-mounted boards first so a later mounted failure cannot strand empty siblings
+  // after a successful sibling write. Each board uses independent IDB-bootstrap guards.
+  for (const boardId of knownBoardIds) {
+    if (boardId === mounted) continue;
+    if (!input.isCurrent()) return { ok: false, reason: 'stale_scope', boardHydrations };
+
+    const durable = () => loadDurableFreeSpaceObjectsForBoard(input.sectionId, boardId);
+    const result = await applyFreeSpaceCloudRowsToMountedBoard({
+      sectionId: input.sectionId,
+      boardId,
+      userId: input.userId,
+      rows: fetched.rows,
+      // Other boards are not in the mounted React/dirty session.
+      getDirtyIds: () => [],
+      getPendingDeletedIds: () => [],
+      getReactObjects: durable,
+      loadDurableObjects: durable,
+      isCurrent: input.isCurrent,
+      pruneCloudAbsences: true,
+    });
+
+    if (result.ok) {
+      boardHydrations.push({
+        boardId,
+        ok: true,
+        acceptedCount: result.acceptedCount,
+        persisted: result.persisted,
+      });
+    } else {
+      boardHydrations.push({
+        boardId,
+        ok: false,
+        reason: result.reason,
+        acceptedCount: 0,
+        persisted: false,
+      });
+      fwPersistWarn(
+        `Free Space section catch-up: board "${boardId}" hydrate failed reason=${result.reason} (continuing other boards)`,
+      );
+    }
+  }
+
+  if (!input.isCurrent()) return { ok: false, reason: 'stale_scope', boardHydrations };
+
+  const mountedResult = await applyFreeSpaceCloudRowsToMountedBoard({
     ...input,
     rows: fetched.rows,
     pruneCloudAbsences: true,
   });
+
+  if (mountedResult.ok) {
+    boardHydrations.push({
+      boardId: mounted,
+      ok: true,
+      acceptedCount: mountedResult.acceptedCount,
+      persisted: mountedResult.persisted,
+    });
+    return { ...mountedResult, boardHydrations };
+  }
+
+  boardHydrations.push({
+    boardId: mounted,
+    ok: false,
+    reason: mountedResult.reason,
+    acceptedCount: 0,
+    persisted: false,
+  });
+  return { ...mountedResult, boardHydrations };
 }

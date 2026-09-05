@@ -62,7 +62,47 @@ async function deleteFocusCacheDatabase(): Promise<void> {
   });
 }
 
+function installTestLocalStorage(): Storage {
+  const mem = new Map<string, string>();
+  const store: Storage = {
+    getItem(key: string) {
+      return mem.has(key) ? mem.get(key)! : null;
+    },
+    setItem(key: string, value: string) {
+      mem.set(key, String(value));
+    },
+    removeItem(key: string) {
+      mem.delete(key);
+    },
+    clear() {
+      mem.clear();
+    },
+    key(i: number) {
+      return [...mem.keys()][i] ?? null;
+    },
+    get length() {
+      return mem.size;
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    enumerable: true,
+    value: store,
+    writable: true,
+  });
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      enumerable: true,
+      value: store,
+      writable: true,
+    });
+  }
+  return store;
+}
+
 beforeEach(async () => {
+  installTestLocalStorage().clear();
   await deleteFocusCacheDatabase();
   resetCloudSyncStatusForTests();
   resetSaveStatusForTests();
@@ -72,7 +112,6 @@ beforeEach(async () => {
   upsertMock.mockResolvedValue({ ok: true });
   deleteMock.mockResolvedValue({ ok: true });
   fetchMock.mockResolvedValue({ ok: true, rows: [] });
-  localStorage.clear();
 });
 
 afterEach(async () => {
