@@ -6,12 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.build.json && vite build",
+    "build:ios": "CAPACITOR_IOS=1 tsc -p tsconfig.build.json && CAPACITOR_IOS=1 vite build",
+    "cap:sync": "npx cap sync ios",
+    "cap:ios": "npm run build:ios && npx cap sync ios",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
     "deploy:staging": "bash scripts/deploy-staging.sh"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
     "@supabase/supabase-js": "^2.49.0",
     "@tiptap/extension-highlight": "^3.23.6",
     "@tiptap/extension-placeholder": "^3.23.6",
@@ -36,6 +43,7 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
