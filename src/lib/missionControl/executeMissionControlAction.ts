@@ -9,6 +9,10 @@ export type MissionControlActionDeps = {
    * Floating presentation should be applied at the correct resolve point by the host.
    */
   focusFreeSpace: (objectId: string, boardId: string) => void;
+  /**
+   * Phone: board-aware fullscreen direct present (Mission Control stays home).
+   */
+  directPresent: (objectId: string, boardId: string) => void;
   openExternalUrl: (url: string) => void;
   openShelfFile: (payload: { itemId: string; filePath: string }) => void | Promise<void>;
 };
@@ -27,6 +31,9 @@ export function executeMissionControlAction(
   switch (action.type) {
     case 'freespace-focus':
       deps.focusFreeSpace(action.objectId, action.boardId);
+      return 'ok';
+    case 'direct-present':
+      deps.directPresent(action.objectId, action.boardId);
       return 'ok';
     case 'external-url':
       deps.openExternalUrl(action.url);

@@ -1319,6 +1319,8 @@ interface Props {
   presentation?: 'notebook' | 'desk' | 'workspace' | 'embedded';
   /** Embedded Free Space: open Universal Object View (expand). */
   onExpand?: () => void;
+  /** Embedded Free Space: learning Attempt in chrome row (avoids absolute overlap). */
+  onLearningAttempt?: () => void;
   /** Desk: notify shell when the focused derivation line changes (for Plot-from-line). */
   onDeskFocusedLine?: (payload: { blockId: string | null; text: string }) => void;
   /** Study session: one-time restore of focused block after resume. */
@@ -1373,6 +1375,7 @@ export function ProjectNotebookBlock({
   freeSpaceBoardId = '',
   presentation = 'notebook',
   onExpand,
+  onLearningAttempt,
   onDeskFocusedLine,
   sessionRestoreBlockId = null,
   studyFocusQuestionNumber = null,
@@ -5646,10 +5649,11 @@ export function ProjectNotebookBlock({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 8,
-            padding: '0 2px 6px',
+            padding: '4px 2px 8px',
             marginBottom: 2,
             borderBottom: `1px solid ${tokens.cardBorder}`,
-            minHeight: 0,
+            minHeight: TOUCH_TARGET_MIN_PX,
+            flexWrap: 'wrap',
           }}
         >
           <span
@@ -5669,41 +5673,87 @@ export function ProjectNotebookBlock({
           >
             {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
           </span>
-          {onExpand ? (
-            <button
-              type="button"
-              data-fs-notebook-expand="1"
-              onClick={onExpand}
-              title="Expand to full view"
-              style={{
-                flexShrink: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                borderRadius: 6,
-                border: `1px solid ${tokens.cardBorder}`,
-                background: tokens.wellBg,
-                color: tokens.textSecondary,
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: '0.04em',
-                cursor: 'pointer',
-                transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
-                <path
-                  d="M1 5V1h4M7 1h4v4M1 7v4h4M7 11h4V7"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              Expand
-            </button>
-          ) : null}
+          <div
+            data-fs-notebook-embedded-actions="1"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+              flexWrap: 'wrap',
+              justifyContent: 'flex-end',
+            }}
+          >
+            {onLearningAttempt ? (
+              <button
+                type="button"
+                data-fs-notebook-attempt="1"
+                onClick={e => {
+                  e.stopPropagation();
+                  onLearningAttempt();
+                }}
+                title="Learning attempt"
+                style={{
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: TOUCH_TARGET_MIN_PX,
+                  minHeight: TOUCH_TARGET_MIN_PX,
+                  padding: '0 12px',
+                  borderRadius: 8,
+                  border: `1px solid ${tokens.accent}44`,
+                  background: `${tokens.accent}22`,
+                  color: tokens.accent,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                  cursor: 'pointer',
+                  touchAction: 'manipulation',
+                }}
+              >
+                Attempt
+              </button>
+            ) : null}
+            {onExpand ? (
+              <button
+                type="button"
+                data-fs-notebook-expand="1"
+                onClick={onExpand}
+                title="Expand to full view"
+                style={{
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  minWidth: TOUCH_TARGET_MIN_PX,
+                  minHeight: TOUCH_TARGET_MIN_PX,
+                  padding: '0 12px',
+                  borderRadius: 8,
+                  border: `1px solid ${tokens.cardBorder}`,
+                  background: tokens.wellBg,
+                  color: tokens.textSecondary,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  cursor: 'pointer',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+                  <path
+                    d="M1 5V1h4M7 1h4v4M1 7v4h4M7 11h4V7"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Expand
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

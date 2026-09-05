@@ -3,45 +3,50 @@ import { executeMissionControlAction, openMissionControlExternalUrl } from './ex
 import { runMissionControlFreeSpaceFocus } from './runMissionControlFreeSpaceFocus';
 
 describe('executeMissionControlAction', () => {
+  const baseDeps = () => ({
+    focusFreeSpace: vi.fn(),
+    directPresent: vi.fn(),
+    openExternalUrl: vi.fn(),
+    openShelfFile: vi.fn(),
+  });
+
   it('dispatches freespace-focus', () => {
-    const focusFreeSpace = vi.fn();
+    const deps = baseDeps();
     const result = executeMissionControlAction(
       { type: 'freespace-focus', objectId: 'o1', boardId: 'b2' },
-      {
-        focusFreeSpace,
-        openExternalUrl: vi.fn(),
-        openShelfFile: vi.fn(),
-      },
+      deps,
     );
     expect(result).toBe('ok');
-    expect(focusFreeSpace).toHaveBeenCalledWith('o1', 'b2');
+    expect(deps.focusFreeSpace).toHaveBeenCalledWith('o1', 'b2');
+  });
+
+  it('dispatches direct-present', () => {
+    const deps = baseDeps();
+    const result = executeMissionControlAction(
+      { type: 'direct-present', objectId: 'o1', boardId: 'b2' },
+      deps,
+    );
+    expect(result).toBe('ok');
+    expect(deps.directPresent).toHaveBeenCalledWith('o1', 'b2');
   });
 
   it('dispatches external-url', () => {
-    const openExternalUrl = vi.fn();
-    executeMissionControlAction(
-      { type: 'external-url', url: 'https://ex.com' },
-      { focusFreeSpace: vi.fn(), openExternalUrl, openShelfFile: vi.fn() },
-    );
-    expect(openExternalUrl).toHaveBeenCalledWith('https://ex.com');
+    const deps = baseDeps();
+    executeMissionControlAction({ type: 'external-url', url: 'https://ex.com' }, deps);
+    expect(deps.openExternalUrl).toHaveBeenCalledWith('https://ex.com');
   });
 
   it('dispatches shelf-file', () => {
-    const openShelfFile = vi.fn();
+    const deps = baseDeps();
     executeMissionControlAction(
       { type: 'shelf-file', itemId: 'i1', filePath: 'u/s/g/i.pdf' },
-      { focusFreeSpace: vi.fn(), openExternalUrl: vi.fn(), openShelfFile },
+      deps,
     );
-    expect(openShelfFile).toHaveBeenCalledWith({ itemId: 'i1', filePath: 'u/s/g/i.pdf' });
+    expect(deps.openShelfFile).toHaveBeenCalledWith({ itemId: 'i1', filePath: 'u/s/g/i.pdf' });
   });
 
   it('returns unavailable for unavailable action', () => {
-    expect(
-      executeMissionControlAction(
-        { type: 'unavailable' },
-        { focusFreeSpace: vi.fn(), openExternalUrl: vi.fn(), openShelfFile: vi.fn() },
-      ),
-    ).toBe('unavailable');
+    expect(executeMissionControlAction({ type: 'unavailable' }, baseDeps())).toBe('unavailable');
   });
 });
 

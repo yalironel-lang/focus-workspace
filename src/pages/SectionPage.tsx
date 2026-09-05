@@ -18,9 +18,21 @@ import {
   openMissionControlExternalUrl,
 } from '../lib/missionControl/executeMissionControlAction';
 import { runMissionControlFreeSpaceFocus } from '../lib/missionControl/runMissionControlFreeSpaceFocus';
+import { runMissionControlDirectPresent } from '../lib/missionControl/runMissionControlDirectPresent';
+import { resolveMissionControlOpenForProfile } from '../lib/missionControl/resolveMissionControlOpenForProfile';
 import { pendingNotebookFocusPhase } from '../lib/missionControl/pendingNotebookFocusPhase';
 import { getShelfPdfSignedUrl } from '../lib/shelf/openShelfPdf';
 import type { MissionControlItem } from '../lib/missionControl/types';
+import { useWorkspacePresentationProfile } from '../hooks/useWorkspacePresentationProfile';
+import {
+  isPhonePresentationProfile,
+  readPresentationProfileFromWindow,
+} from '../lib/workspacePresentationProfile';
+import {
+  isPhoneLazyFreeSpaceEnabled,
+  shouldMountFreeSpaceCanvas,
+} from '../lib/phoneLazyFreeSpace';
+import { flushBeforePhoneFreeSpaceUnmount } from '../lib/flushBeforePhoneFreeSpaceUnmount';
 import {
   EXPLORE_FOCUS_SCENE_CENTER,
   isExploreFocusWorkspace,
@@ -538,6 +550,8 @@ export function SectionPage() {
 
   const sectionId = id ?? '';
   useMathZoneCloudHydrate(user?.id ?? null, sectionId);
+  const presentationProfile = useWorkspacePresentationProfile();
+  const isPhoneNav = isPhonePresentationProfile(presentationProfile);
 
   useEffect(() => {
     if (!sectionId || loading || !notFound) return;
@@ -601,6 +615,14 @@ export function SectionPage() {
   const [editingExamDate, setEditingExamDate]  = useState(false);
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space' | 'math-zone'>(() => {
+    const phone =
+      typeof window !== 'undefined' && readPresentationProfileFromWindow() === 'phone';
+    if (phone) {
+      if (navState?.firstArrival) return 'work-surface';
+      return sectionId
+        ? resolveSectionViewModeOnOpen(sectionId, { preferWorkSurface: true })
+        : 'work-surface';
+    }
     if (navState?.firstArrival) return 'free-space';
     return sectionId
       ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: isCourseEntryBehaviorV1Enabled() })
@@ -642,13 +664,41 @@ export function SectionPage() {
   const courseEntryWarmAppliedRef = useRef<string | null>(null);
   const courseEntryWarmWasPickRef = useRef(false);
   const courseEntryEnabled = isCourseEntryBehaviorV1Enabled();
+  const sectionViewModeRef = useRef(sectionViewMode);
+  sectionViewModeRef.current = sectionViewMode;
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
       const effective = normalizeSectionViewMode(mode);
-      pulsePerformancePressure('view-switch');
-      flickerDebugLog('view-mode', effective);
-      setSectionViewModeState(effective);
-      if (sectionId) saveSectionViewMode(sectionId, effective);
+      const prev = sectionViewModeRef.current;
+      const leavingFreeSpace = prev === 'free-space' && effective !== 'free-space';
+      const phoneLazy =
+        isPhonePresentationProfile(readPresentationProfileFromWindow()) &&
+        isPhoneLazyFreeSpaceEnabled();
+
+      const apply = () => {
+        pulsePerformancePressure('view-switch');
+        flickerDebugLog('view-mode', effective);
+        setSectionViewModeState(effective);
+        if (sectionId) saveSectionViewMode(sectionId, effective);
+      };
+
+      if (leavingFreeSpace && phoneLazy) {
+        void (async () => {
+          await flushBeforePhoneFreeSpaceUnmount();
+          // Reset UOV modes so MC does not inherit Workspace fullscreen/split.
+          const store = sectionObjectsRef.current;
+          for (const o of store.objects) {
+            const modeNow = o.viewMode ?? 'floating';
+            if (modeNow === 'fullscreen' || modeNow === 'split') {
+              store.updateObjectFields(o.id, { viewMode: 'floating' });
+            }
+          }
+          apply();
+        })();
+        return;
+      }
+
+      apply();
     },
     [sectionId],
   );
@@ -664,6 +714,14 @@ export function SectionPage() {
   const pendingMcFloatingRef = useRef<string | null>(null);
   /** Cross-board MC: frame after free-space surface is visible + laid out. */
   const pendingMcVisualFrameRef = useRef<{ objectId: string; boardId: string } | null>(null);
+  /** Phone MC: cross-board direct fullscreen present (no spatial frame). */
+  const pendingMcDirectPresentRef = useRef<{
+    sectionId: string;
+    boardId: string;
+    objectId: string;
+  } | null>(null);
+  /** Phone MC session: Done returns to Mission Control (not Free Space floating). */
+  const phoneDirectPresentSessionRef = useRef(false);
   const [shelfPdfViewer, setShelfPdfViewer] = useState<{ url: string; title: string } | null>(null);
   const [spaceEditingId, setSpaceEditingId] = useState<string | null>(null);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
@@ -674,6 +732,16 @@ export function SectionPage() {
   const [learningAttemptTarget, setLearningAttemptTarget] = useState<LearningAttemptTarget | null>(null);
   const [learningAttemptQueue, setLearningAttemptQueue] = useState<string[]>([]);
   const [learningAttemptIndex, setLearningAttemptIndex] = useState(0);
+
+  /** Phone lazy Free Space: drop canvas-only UI when canvas is unmounted. */
+  useEffect(() => {
+    if (!isPhoneNav || !isPhoneLazyFreeSpaceEnabled()) return;
+    if (sectionViewMode === 'free-space') return;
+    setConnectSourceId(null);
+    setConnectHoverId(null);
+    setShowSpaceAdd(false);
+    setSpaceEditingId(null);
+  }, [sectionViewMode, isPhoneNav]);
 
   const closeLearningAttempt = useCallback(() => {
     setLearningAttemptOpen(false);
@@ -773,6 +841,11 @@ export function SectionPage() {
     sectionViewMode === 'math-zone' && isMathZoneDestinationEnabled();
   const workSurfaceVisible       = sectionViewMode === 'work-surface' && !designMode;
   const designSurfaceVisible     = sectionViewMode === 'work-surface' && designMode;
+  const mountFreeSpaceCanvas = shouldMountFreeSpaceCanvas({
+    profile: presentationProfile,
+    sectionViewMode,
+    lazyEnabled: isPhoneLazyFreeSpaceEnabled(),
+  });
 
 
   useEffect(() => {
@@ -825,6 +898,11 @@ export function SectionPage() {
     pendingCompanionComposerRef.current = false;
     pendingQuickCaptureRef.current = null;
     quickCaptureStackRef.current = 0;
+    pendingNotebookFocusRef.current = null;
+    pendingMcFloatingRef.current = null;
+    pendingMcVisualFrameRef.current = null;
+    pendingMcDirectPresentRef.current = null;
+    phoneDirectPresentSessionRef.current = false;
     designSnapshot.current = null;
     dragIdRef.current = null;
 
@@ -834,9 +912,18 @@ export function SectionPage() {
     setEditingExamDate(false);
     setShowCustomize(false);
     setSectionViewModeState(
-      sectionId
-        ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: courseEntryEnabled })
-        : 'work-surface',
+      (() => {
+        const phone =
+          typeof window !== 'undefined' && readPresentationProfileFromWindow() === 'phone';
+        if (phone) {
+          return sectionId
+            ? resolveSectionViewModeOnOpen(sectionId, { preferWorkSurface: true })
+            : 'work-surface';
+        }
+        return sectionId
+          ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: courseEntryEnabled })
+          : 'work-surface';
+      })(),
     );
     setCourseEntryDismissed(false);
     setCourseEntryWarmFallback(false);
@@ -3209,6 +3296,68 @@ export function SectionPage() {
     ],
   );
 
+  /** Phone MC Open — fullscreen on Mission Control (no Free Space frame/pan). */
+  const presentDirectFromMissionControl = useCallback(
+    (objectId: string) => {
+      phoneDirectPresentSessionRef.current = true;
+      pendingMcVisualFrameRef.current = null;
+      pendingMcFloatingRef.current = null;
+      setSectionViewMode('work-surface');
+      setObjectPresentationMode(objectId, 'fullscreen');
+      setSpaceSelectedId(objectId);
+    },
+    [setSectionViewMode, setObjectPresentationMode],
+  );
+
+  const requestDirectPresentBoardSwitch = useCallback(
+    (objectId: string, boardId: string) => {
+      phoneDirectPresentSessionRef.current = true;
+      pendingMcVisualFrameRef.current = null;
+      pendingMcFloatingRef.current = null;
+      pendingNotebookFocusRef.current = null;
+      pendingMcDirectPresentRef.current = { sectionId, boardId, objectId };
+      sectionBoards.setActiveBoardId(boardId);
+    },
+    [sectionId, sectionBoards.setActiveBoardId],
+  );
+
+  const closePhoneDirectPresent = useCallback(
+    (objectId: string) => {
+      phoneDirectPresentSessionRef.current = false;
+      setObjectPresentationMode(objectId, 'floating');
+      setSectionViewMode('work-surface');
+    },
+    [setObjectPresentationMode, setSectionViewMode],
+  );
+
+  /** Cross-board phone direct-present: wait for board + object, then fullscreen. */
+  useEffect(() => {
+    const pending = pendingMcDirectPresentRef.current;
+    if (!pending || pending.sectionId !== sectionId) return;
+    if (pending.boardId !== sectionBoards.activeBoardId) {
+      sectionBoards.setActiveBoardId(pending.boardId);
+      return;
+    }
+    if (!sectionObjects.getObject(pending.objectId)) return;
+
+    const objectId = pending.objectId;
+    const t = window.setTimeout(() => {
+      const still = pendingMcDirectPresentRef.current;
+      if (!still || still.objectId !== objectId) return;
+      if (!sectionObjectsRef.current.getObject(objectId)) return;
+      pendingMcDirectPresentRef.current = null;
+      presentDirectFromMissionControl(objectId);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [
+    sectionId,
+    sectionBoards.activeBoardId,
+    sectionBoards.setActiveBoardId,
+    sectionObjects.objects,
+    sectionObjects,
+    presentDirectFromMissionControl,
+  ]);
+
   /**
    * Cross-board MC Open: board → exact object → position → floating → then
    * queue pendingMcVisualFrameRef (frame after free-space is visible).
@@ -3384,6 +3533,16 @@ export function SectionPage() {
           },
         );
       },
+      directPresent: (objectId: string, boardId: string) => {
+        runMissionControlDirectPresent(
+          { objectId, boardId },
+          {
+            activeBoardId: sectionBoards.activeBoardId,
+            requestBoardSwitch: requestDirectPresentBoardSwitch,
+            presentFullscreenOnMissionControl: presentDirectFromMissionControl,
+          },
+        );
+      },
       openExternalUrl: openMissionControlExternalUrl,
       openShelfFile: async ({ filePath }: { itemId: string; filePath: string }) => {
         try {
@@ -3399,14 +3558,23 @@ export function SectionPage() {
       sectionBoards.activeBoardId,
       focusNotebookForMissionControl,
       setObjectPresentationMode,
+      requestDirectPresentBoardSwitch,
+      presentDirectFromMissionControl,
     ],
   );
 
   const handleMissionControlOpenItem = useCallback(
     (item: MissionControlItem) => {
-      executeMissionControlAction(item.openAction, missionControlActionDeps);
+      const objectType =
+        item.sourceKind.source === 'freespace' ? item.sourceKind.type : null;
+      const action = resolveMissionControlOpenForProfile(
+        item.openAction,
+        presentationProfile,
+        objectType,
+      );
+      executeMissionControlAction(action, missionControlActionDeps);
     },
-    [missionControlActionDeps],
+    [missionControlActionDeps, presentationProfile],
   );
 
   const handleMissionControlShowInWorkspace = useCallback(
@@ -3787,6 +3955,7 @@ export function SectionPage() {
         sectionViewMode={sectionViewMode}
         onViewModeChange={setSectionViewMode}
         focusMode={focusMode}
+        presentationProfile={presentationProfile}
         boards={sectionBoards.boards}
         activeBoardId={sectionBoards.activeBoardId}
         onSelectBoard={sectionBoards.setActiveBoardId}
@@ -3871,7 +4040,34 @@ export function SectionPage() {
 
       {/* ── VIEW SURFACES (mounted; visibility switch — preserves iframes/PDF) ── */}
       <div style={{ position: 'relative', flex: 1, minHeight: 0, isolation: 'isolate', overflow: 'hidden' }}>
+      {/* Phone Mission Control → direct fullscreen (UOV) without Free Space visibility. */}
+      {isPhoneNav && workSurfaceVisible && !activeStudySession && (() => {
+        const eligible = sectionObjects.objects.filter(o => supportsUniversalPresentation(o));
+        const fullscreen = eligible
+          .filter(o => (o.viewMode ?? 'floating') === 'fullscreen')
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (!fullscreen) return null;
+        return (
+          <UniversalObjectViewPortal
+            key={`phone-direct-present-${fullscreen.id}`}
+            title={fullscreen.title}
+            tokens={freeSpaceTokens}
+            mode="fullscreen"
+            splitSide={fullscreen.splitSide ?? 'right'}
+            onSetMode={mode => {
+              if (mode === 'floating') {
+                closePhoneDirectPresent(fullscreen.id);
+                return;
+              }
+              setObjectPresentationMode(fullscreen.id, mode);
+            }}
+          >
+            {renderSpaceObject(fullscreen.id, 'canvas')}
+          </UniversalObjectViewPortal>
+        );
+      })()}
       <div style={surfaceShellStyle(freeSpaceSurfaceVisible)}>
+        {mountFreeSpaceCanvas ? (
         <div
           style={{
             position: 'relative',
@@ -4288,6 +4484,7 @@ export function SectionPage() {
             />
           )}
         </div>
+        ) : null}
       </div>
       <div style={surfaceShellStyle(designSurfaceVisible)}>
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: WORKSPACE_SHELL_TOP_INSET }}>

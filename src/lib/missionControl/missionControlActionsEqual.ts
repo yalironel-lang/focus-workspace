@@ -12,6 +12,9 @@ export function missionControlActionsEqual(
   if (a.type === 'freespace-focus' && b.type === 'freespace-focus') {
     return a.objectId === b.objectId && a.boardId === b.boardId;
   }
+  if (a.type === 'direct-present' && b.type === 'direct-present') {
+    return a.objectId === b.objectId && a.boardId === b.boardId;
+  }
   if (a.type === 'external-url' && b.type === 'external-url') {
     return a.url === b.url;
   }
