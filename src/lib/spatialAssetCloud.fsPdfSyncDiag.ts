@@ -533,22 +533,20 @@ export async function fsPdfSyncDiagHydration(): Promise<{
     let cloudDownloadAttempted = false;
     let cloudDownloadResult: string | null = null;
     let downloadedByteLength: number | null = null;
-    let hydrateResult: string | null = null;
 
     if (!localBlobBefore && userId) {
       cloudDownloadAttempted = true;
-      hydrateResult = await hydrateSpatialPdfWithCloud({
+      const hydrateOutcome = await hydrateSpatialPdfWithCloud({
         userId,
         sectionId,
         objectId: target.objectId,
         assetType: 'pdf',
       });
-      cloudDownloadResult = hydrateResult;
-      if (hydrateResult === 'cloud_hit') {
-        const blob = await loadPdfBlob(sectionId, target.objectId);
-        downloadedByteLength = blob?.size ?? null;
-      } else if (hydrateResult === 'missing') {
-        cloudDownloadResult = 'not_found';
+      cloudDownloadResult = hydrateOutcome.result;
+      if (hydrateOutcome.result === 'cloud_hit') {
+        downloadedByteLength = hydrateOutcome.blob?.size ?? null;
+      } else if (hydrateOutcome.result === 'missing') {
+        cloudDownloadResult = hydrateOutcome.errorMessage ?? 'not_found';
       }
     }
 
