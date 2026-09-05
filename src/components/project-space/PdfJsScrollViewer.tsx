@@ -8,6 +8,10 @@ import {
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { loadPdfDocument } from '../../lib/pdfjsBootstrap';
 import {
+  computePdfCanvasRenderMetrics,
+  computePdfFitZoomScale,
+} from '../../lib/pdfCanvasRender';
+import {
   computeRenderWindow,
   pageAtViewportCenter,
   PDF_PAGE_GAP_PX,
@@ -59,6 +63,7 @@ export function PdfJsScrollViewer({
   const containerWidthRef = useRef(0);
   const layoutReadyRef = useRef(false);
   const pageHeightsRef = useRef<number[]>([]);
+  const pageWidthsRef = useRef<number[]>([]);
   const pageRef = useRef(page);
   const zoomRef = useRef(zoom);
   const prevZoomRef = useRef(zoom);
@@ -67,8 +72,10 @@ export function PdfJsScrollViewer({
   pageRef.current = page;
   zoomRef.current = zoom;
 
+  const renderScaleRef = useRef(1);
   const [numPages, setNumPages] = useState(0);
   const [pageHeights, setPageHeights] = useState<number[]>([]);
+  const [pageWidths, setPageWidths] = useState<number[]>([]);
   const [renderScale, setRenderScale] = useState(1);
   const [renderWindow, setRenderWindow] = useState({ start: 0, end: -1 });
   const [restored, setRestored] = useState(false);
@@ -76,7 +83,9 @@ export function PdfJsScrollViewer({
   const [loadError, setLoadError] = useState(false);
 
   pageHeightsRef.current = pageHeights;
+  pageWidthsRef.current = pageWidths;
   visiblePageRef.current = visiblePage;
+  renderScaleRef.current = renderScale;
 
   const cancelAllRenderTasks = useCallback(() => {
     for (const task of renderTasksRef.current.values()) {
@@ -180,14 +189,16 @@ export function PdfJsScrollViewer({
     async (pdf: PDFDocumentProxy, width: number, zoomLevel: number) => {
       const firstPage = await pdf.getPage(1);
       const baseViewport = firstPage.getViewport({ scale: 1 });
-      const fitScale = width > 0 ? width / baseViewport.width : 1;
-      const scale = fitScale * zoomLevel;
+      const scale = computePdfFitZoomScale(width, baseViewport.width, zoomLevel);
       const heights: number[] = [];
+      const widths: number[] = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const p = i === 1 ? firstPage : await pdf.getPage(i);
-        heights.push(p.getViewport({ scale }).height);
+        const vp = p.getViewport({ scale });
+        heights.push(vp.height);
+        widths.push(vp.width);
       }
-      return { scale, heights };
+      return { scale, heights, widths };
     },
     [],
   );
@@ -197,16 +208,19 @@ export function PdfJsScrollViewer({
       const pdf = pdfRef.current;
       const el = scrollRef.current;
       if (!pdf || !el || containerWidthRef.current <= 0) return;
-      const { scale, heights } = await computeLayout(
+      const { scale, heights, widths } = await computeLayout(
         pdf,
         containerWidthRef.current,
         zoomRef.current,
       );
       const target = clampPage(anchorPage ?? pageRef.current, pdf.numPages, pageCount);
       cancelAllRenderTasks();
+      renderScaleRef.current = scale;
       setRenderScale(scale);
       setPageHeights(heights);
+      setPageWidths(widths);
       pageHeightsRef.current = heights;
+      pageWidthsRef.current = widths;
       isRestoringRef.current = true;
       isProgrammaticScrollRef.current = true;
       requestAnimationFrame(() => {
@@ -235,7 +249,7 @@ export function PdfJsScrollViewer({
   );
 
   const renderPage = useCallback(
-    async (pageNum: number, scale: number, slotHeight: number, gen: number) => {
+    async (pageNum: number, scale: number, slotWidth: number, slotHeight: number, gen: number) => {
       const pdf = pdfRef.current;
       const canvas = canvasRefs.current.get(pageNum);
       if (!pdf || !canvas) return;
@@ -253,16 +267,33 @@ export function PdfJsScrollViewer({
       try {
         const pdfPage = await pdf.getPage(pageNum);
         if (gen !== renderGenRef.current) return;
+        // Stale zoom/layout: a newer applyLayoutAndRestore bumped gen or scale.
+        if (scale !== renderScaleRef.current) return;
         const viewport = pdfPage.getViewport({ scale });
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        canvas.style.width = '100%';
-        canvas.style.height = `${slotHeight}px`;
+        if (gen !== renderGenRef.current) return;
+
+        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        const metrics = computePdfCanvasRenderMetrics(viewport, dpr);
+
+        canvas.width = metrics.backingWidth;
+        canvas.height = metrics.backingHeight;
+        // CSS must match page slot (logical viewport), never stretch via width:100%.
+        canvas.style.width = `${Math.max(1, Math.floor(slotWidth || metrics.cssWidth))}px`;
+        canvas.style.height = `${Math.max(1, Math.floor(slotHeight || metrics.cssHeight))}px`;
         canvas.style.display = 'block';
+
         const ctx = canvas.getContext('2d');
         if (!ctx || gen !== renderGenRef.current) return;
+        // canvas.width reset clears transforms — avoid accumulating ctx.scale across zooms.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const task = pdfPage.render({ canvas, canvasContext: ctx, viewport });
+
+        const task = pdfPage.render({
+          canvas,
+          canvasContext: ctx,
+          viewport,
+          ...(metrics.transform ? { transform: metrics.transform } : {}),
+        });
         renderTasksRef.current.set(pageNum, task);
         await task.promise;
         if (gen === renderGenRef.current) {
@@ -276,11 +307,16 @@ export function PdfJsScrollViewer({
   );
 
   const scheduleRendersForWindow = useCallback(
-    (window: { start: number; end: number }, scale: number, heights: number[]) => {
+    (
+      window: { start: number; end: number },
+      scale: number,
+      heights: number[],
+      widths: number[],
+    ) => {
       const gen = renderGenRef.current;
       for (let i = window.start; i <= window.end; i++) {
         const pageNum = i + 1;
-        void renderPage(pageNum, scale, heights[i] ?? 0, gen);
+        void renderPage(pageNum, scale, widths[i] ?? 0, heights[i] ?? 0, gen);
       }
     },
     [renderPage],
@@ -296,7 +332,9 @@ export function PdfJsScrollViewer({
     isRestoringRef.current = true;
     setNumPages(0);
     setPageHeights([]);
+    setPageWidths([]);
     pageHeightsRef.current = [];
+    pageWidthsRef.current = [];
     destroyPdf();
 
     const run = async () => {
@@ -389,7 +427,7 @@ export function PdfJsScrollViewer({
 
   useEffect(() => {
     if (!restored || renderWindow.end < renderWindow.start || renderScale <= 0) return;
-    scheduleRendersForWindow(renderWindow, renderScale, pageHeights);
+    scheduleRendersForWindow(renderWindow, renderScale, pageHeights, pageWidths);
     for (const [pageNum, task] of renderTasksRef.current.entries()) {
       const idx = pageNum - 1;
       if (idx < renderWindow.start || idx > renderWindow.end) {
@@ -401,7 +439,7 @@ export function PdfJsScrollViewer({
         renderTasksRef.current.delete(pageNum);
       }
     }
-  }, [restored, renderWindow, renderScale, pageHeights, scheduleRendersForWindow]);
+  }, [restored, renderWindow, renderScale, pageHeights, pageWidths, scheduleRendersForWindow]);
 
   const onScroll = useCallback(() => {
     updateRenderWindowFromScroll();
@@ -433,6 +471,7 @@ export function PdfJsScrollViewer({
     <div
       ref={scrollRef}
       className="absolute inset-0 overflow-auto"
+      data-pdf-scroll-host="1"
       style={{
         backgroundColor,
         touchAction: 'pan-y',
@@ -444,13 +483,14 @@ export function PdfJsScrollViewer({
         {pageHeights.map((height, index) => {
           const pageNum = index + 1;
           const inWindow = index >= renderWindow.start && index <= renderWindow.end;
+          const pageWidth = pageWidths[index] ?? containerWidthRef.current;
           return (
             <div
               key={pageNum}
               data-page={pageNum}
               className="relative shrink-0"
               style={{
-                width: '100%',
+                width: pageWidth > 0 ? pageWidth : '100%',
                 height,
                 marginBottom: index < pageHeights.length - 1 ? PDF_PAGE_GAP_PX : 0,
                 overflow: 'hidden',
@@ -464,7 +504,7 @@ export function PdfJsScrollViewer({
                   }}
                 />
               ) : null}
-              {renderPageOverlay && visiblePage === pageNum ? renderPageOverlay(pageNum) : null}
+              {renderPageOverlay && inWindow ? renderPageOverlay(pageNum) : null}
             </div>
           );
         })}

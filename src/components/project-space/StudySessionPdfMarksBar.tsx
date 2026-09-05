@@ -23,8 +23,19 @@ function btnStyle(tokens: AtmosphereTokens, active: boolean): CSSProperties {
 }
 
 export function StudySessionPdfMarksBar({ tokens, marks, currentPage }: Props) {
-  const { markedPages, isCurrentPageMarked, highlightMode, toggleMarkPage, jumpToPage, setHighlightMode } =
-    marks;
+  const {
+    markedPages,
+    isCurrentPageMarked,
+    highlightMode,
+    annotateMode,
+    eraserMode,
+    toggleMarkPage,
+    jumpToPage,
+    setHighlightMode,
+    setAnnotateMode,
+    setEraserMode,
+    clearCurrentPageInk,
+  } = marks;
 
   return (
     <div
@@ -52,6 +63,18 @@ export function StudySessionPdfMarksBar({ tokens, marks, currentPage }: Props) {
       </button>
       <button
         type="button"
+        title="View mode — scroll PDF"
+        aria-pressed={!highlightMode && !annotateMode && !eraserMode}
+        style={btnStyle(tokens, !highlightMode && !annotateMode && !eraserMode)}
+        onClick={() => {
+          setHighlightMode(false);
+          setAnnotateMode(false);
+        }}
+      >
+        View
+      </button>
+      <button
+        type="button"
         title="Drag on the PDF to highlight a region"
         aria-pressed={highlightMode}
         style={btnStyle(tokens, highlightMode)}
@@ -59,8 +82,43 @@ export function StudySessionPdfMarksBar({ tokens, marks, currentPage }: Props) {
       >
         {highlightMode ? 'Highlighting…' : 'Highlight'}
       </button>
+      <button
+        type="button"
+        title="Annotate — Apple Pencil draws; finger scrolls"
+        aria-pressed={annotateMode}
+        style={btnStyle(tokens, annotateMode)}
+        onClick={() => setAnnotateMode(!annotateMode)}
+      >
+        {annotateMode ? 'Annotating…' : 'Annotate'}
+      </button>
+      {annotateMode || eraserMode ? (
+        <>
+          <button
+            type="button"
+            title="Eraser — tap a stroke to remove"
+            aria-pressed={eraserMode}
+            style={btnStyle(tokens, eraserMode)}
+            onClick={() => setEraserMode(!eraserMode)}
+          >
+            Eraser
+          </button>
+          <button
+            type="button"
+            title="Clear ink on this page"
+            style={btnStyle(tokens, false)}
+            onClick={clearCurrentPageInk}
+          >
+            Clear page
+          </button>
+        </>
+      ) : null}
       {highlightMode ? (
         <span style={{ fontSize: 10, color: tokens.textMuted }}>Drag over the exam to highlight</span>
+      ) : null}
+      {annotateMode ? (
+        <span style={{ fontSize: 10, color: tokens.textMuted }}>
+          Pencil writes · finger scrolls · local only
+        </span>
       ) : null}
       {markedPages.length > 0 ? (
         <>

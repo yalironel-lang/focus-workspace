@@ -4,8 +4,13 @@ import {
   emptyPdfStudyMarksDoc,
   MAX_MARKED_PAGES,
   MAX_REGIONS_PER_PAGE,
+  MAX_STROKES_PER_PAGE,
+  PDF_INK_DEFAULT_COLOR,
+  PDF_INK_DEFAULT_WIDTH,
   type PdfHighlightRegion,
+  type PdfInkStroke,
   type PdfStudyMarksDoc,
+  type PdfStudyMarksPageLayer,
 } from './types';
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -18,15 +23,25 @@ function newRegionId(): string {
   return `hr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export type PdfStudyMarksTool = 'view' | 'highlight';
+function newStrokeId(): string {
+  return `is-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export type PdfStudyMarksTool = 'view' | 'highlight' | 'ink' | 'eraser';
 
 export type PdfStudyMarksChrome = {
   markedPages: number[];
   isCurrentPageMarked: boolean;
   highlightMode: boolean;
+  annotateMode: boolean;
+  eraserMode: boolean;
   toggleMarkPage: () => void;
   jumpToPage: (page: number) => void;
   setHighlightMode: (on: boolean) => void;
+  setAnnotateMode: (on: boolean) => void;
+  setEraserMode: (on: boolean) => void;
+  clearCurrentPageInk: () => void;
+  tool: PdfStudyMarksTool;
 };
 
 type Options = {
@@ -37,6 +52,10 @@ type Options = {
   onJumpToPage: (page: number) => void;
   onChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
 };
+
+function layerOrEmpty(doc: PdfStudyMarksDoc, p: string): PdfStudyMarksPageLayer {
+  return doc.pages[p] ?? { regions: [] };
+}
 
 export function usePdfStudyMarks({
   sectionId,
@@ -63,7 +82,9 @@ export function usePdfStudyMarks({
     }
     const { sectionId: sid, objectId: oid } = scopeRef.current;
     if (!sid || !oid) return;
-    void savePdfStudyMarks(sid, oid, docRef.current);
+    void savePdfStudyMarks(sid, oid, docRef.current).catch(() => {
+      /* markSaveError already recorded */
+    });
   }, []);
 
   const scheduleSave = useCallback(() => {
@@ -72,7 +93,9 @@ export function usePdfStudyMarks({
       saveTimerRef.current = null;
       const { sectionId: sid, objectId: oid } = scopeRef.current;
       if (!sid || !oid) return;
-      void savePdfStudyMarks(sid, oid, docRef.current);
+      void savePdfStudyMarks(sid, oid, docRef.current).catch(() => {
+        /* markSaveError already recorded */
+      });
     }, SAVE_DEBOUNCE_MS);
   }, []);
 
@@ -80,6 +103,7 @@ export function usePdfStudyMarks({
     if (!enabled || !sectionId || !objectId) {
       setLoaded(false);
       setDoc(emptyPdfStudyMarksDoc());
+      setTool('view');
       return;
     }
     let cancelled = false;
@@ -99,8 +123,19 @@ export function usePdfStudyMarks({
     return () => flushSave();
   }, [flushSave]);
 
+  const regionsForPage = useCallback(
+    (pageNum: number) => layerOrEmpty(doc, pageKey(pageNum)).regions,
+    [doc],
+  );
+
+  const strokesForPage = useCallback(
+    (pageNum: number) => layerOrEmpty(doc, pageKey(pageNum)).strokes ?? [],
+    [doc],
+  );
+
   const currentPageKey = pageKey(page);
   const currentRegions = doc.pages[currentPageKey]?.regions ?? [];
+  const currentStrokes = doc.pages[currentPageKey]?.strokes ?? [];
 
   const toggleMarkPage = useCallback(() => {
     setDoc(prev => {
@@ -118,11 +153,11 @@ export function usePdfStudyMarks({
   }, [page, scheduleSave]);
 
   const addRegion = useCallback(
-    (rect: { x: number; y: number; w: number; h: number }) => {
+    (pageNum: number, rect: { x: number; y: number; w: number; h: number }) => {
       if (rect.w < 0.01 || rect.h < 0.01) return;
-      const p = pageKey(page);
+      const p = pageKey(pageNum);
       setDoc(prev => {
-        const layer = prev.pages[p] ?? { regions: [] };
+        const layer = layerOrEmpty(prev, p);
         if (layer.regions.length >= MAX_REGIONS_PER_PAGE) return prev;
         const region: PdfHighlightRegion = {
           id: newRegionId(),
@@ -131,39 +166,108 @@ export function usePdfStudyMarks({
           w: Math.max(0, Math.min(1, rect.w)),
           h: Math.max(0, Math.min(1, rect.h)),
         };
-        const markedPages = prev.markedPages.includes(Math.floor(page))
+        const markedPages = prev.markedPages.includes(Math.floor(pageNum))
           ? prev.markedPages
-          : [...prev.markedPages, Math.max(1, Math.floor(page))].sort((a, b) => a - b);
+          : [...prev.markedPages, Math.max(1, Math.floor(pageNum))].sort((a, b) => a - b);
         return {
           ...prev,
           markedPages,
           pages: {
             ...prev.pages,
-            [p]: { regions: [...layer.regions, region] },
+            [p]: { ...layer, regions: [...layer.regions, region] },
           },
         };
       });
       scheduleSave();
     },
-    [page, scheduleSave],
+    [scheduleSave],
   );
 
   const removeRegion = useCallback(
-    (regionId: string) => {
-      const p = pageKey(page);
+    (pageNum: number, regionId: string) => {
+      const p = pageKey(pageNum);
       setDoc(prev => {
         const layer = prev.pages[p];
         if (!layer) return prev;
         const regions = layer.regions.filter(r => r.id !== regionId);
         const pages = { ...prev.pages };
-        if (regions.length) pages[p] = { regions };
-        else delete pages[p];
+        const next: PdfStudyMarksPageLayer = { regions, strokes: layer.strokes };
+        if (regions.length === 0 && !(next.strokes && next.strokes.length)) delete pages[p];
+        else pages[p] = next;
         return { ...prev, pages };
       });
       scheduleSave();
     },
-    [page, scheduleSave],
+    [scheduleSave],
   );
+
+  const addStroke = useCallback(
+    (pageNum: number, stroke: Omit<PdfInkStroke, 'id'> & { id?: string }) => {
+      if (!stroke.points.length) return;
+      const p = pageKey(pageNum);
+      const committed: PdfInkStroke = {
+        id: stroke.id ?? newStrokeId(),
+        color: stroke.color || PDF_INK_DEFAULT_COLOR,
+        width: stroke.width > 0 ? stroke.width : PDF_INK_DEFAULT_WIDTH,
+        points: stroke.points,
+      };
+      setDoc(prev => {
+        const layer = layerOrEmpty(prev, p);
+        const existing = layer.strokes ?? [];
+        if (existing.length >= MAX_STROKES_PER_PAGE) return prev;
+        return {
+          ...prev,
+          pages: {
+            ...prev.pages,
+            [p]: { ...layer, strokes: [...existing, committed] },
+          },
+        };
+      });
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  const removeStroke = useCallback(
+    (pageNum: number, strokeId: string) => {
+      const p = pageKey(pageNum);
+      setDoc(prev => {
+        const layer = prev.pages[p];
+        if (!layer?.strokes?.length) return prev;
+        const strokes = layer.strokes.filter(s => s.id !== strokeId);
+        const pages = { ...prev.pages };
+        const next: PdfStudyMarksPageLayer = { regions: layer.regions, strokes };
+        if (next.regions.length === 0 && strokes.length === 0) delete pages[p];
+        else {
+          if (strokes.length === 0) delete next.strokes;
+          pages[p] = next;
+        }
+        return { ...prev, pages };
+      });
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  const clearPageInk = useCallback(
+    (pageNum: number) => {
+      const p = pageKey(pageNum);
+      setDoc(prev => {
+        const layer = prev.pages[p];
+        if (!layer?.strokes?.length) return prev;
+        const pages = { ...prev.pages };
+        if (layer.regions.length === 0) delete pages[p];
+        else pages[p] = { regions: layer.regions };
+        return { ...prev, pages };
+      });
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  const clearCurrentPageInk = useCallback(() => {
+    clearPageInk(page);
+  }, [clearPageInk, page]);
 
   const jumpToPage = useCallback(
     (target: number) => {
@@ -184,9 +288,15 @@ export function usePdfStudyMarks({
       markedPages: doc.markedPages,
       isCurrentPageMarked,
       highlightMode: tool === 'highlight',
+      annotateMode: tool === 'ink',
+      eraserMode: tool === 'eraser',
       toggleMarkPage,
       jumpToPage,
       setHighlightMode: (on: boolean) => setTool(on ? 'highlight' : 'view'),
+      setAnnotateMode: (on: boolean) => setTool(on ? 'ink' : 'view'),
+      setEraserMode: (on: boolean) => setTool(on ? 'eraser' : tool === 'ink' ? 'ink' : 'view'),
+      clearCurrentPageInk,
+      tool,
     });
   }, [
     enabled,
@@ -196,6 +306,7 @@ export function usePdfStudyMarks({
     tool,
     toggleMarkPage,
     jumpToPage,
+    clearCurrentPageInk,
     onChromeChange,
   ]);
 
@@ -205,9 +316,17 @@ export function usePdfStudyMarks({
     setTool,
     markedPages: doc.markedPages,
     currentRegions,
+    currentStrokes,
+    regionsForPage,
+    strokesForPage,
     isCurrentPageMarked,
     toggleMarkPage,
     addRegion,
     removeRegion,
+    addStroke,
+    removeStroke,
+    clearPageInk,
+    clearCurrentPageInk,
+    flushSave,
   };
 }
