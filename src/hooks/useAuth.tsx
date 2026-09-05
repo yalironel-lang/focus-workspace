@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, createContext, useContext, ReactNode 
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { getOAuthRedirectTo } from '../lib/authRedirect';
 import { hasAuthCallbackInUrl } from '../lib/authCallback';
+import {
+  isNativePlatform,
+  openNativeOAuthAuthorizeUrl,
+} from '../lib/nativeOAuthDeepLink';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -116,13 +120,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Supabase is not configured for this deployment');
     }
     const redirectTo = getOAuthRedirectTo();
-    const { error } = await supabase.auth.signInWithOAuth({
+    const native = isNativePlatform();
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo,
+        // Native: keep PKCE verifier in the WebView; open authorize URL ourselves.
+        skipBrowserRedirect: native,
       },
     });
     if (error) throw error;
+    if (native) {
+      if (!data?.url) {
+        throw new Error('Native OAuth did not return an authorize URL');
+      }
+      await openNativeOAuthAuthorizeUrl(data.url);
+    }
   }, []);
 
   const signOut = useCallback(async () => {

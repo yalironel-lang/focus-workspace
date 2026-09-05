@@ -24,6 +24,7 @@ import {
 } from './lib/serviceWorkerUpdate'
 import { hasAuthCallbackInUrl } from './lib/authCallback'
 import { suppressVercelToolbar } from './lib/suppressVercelToolbar'
+import { initNativeOAuthDeepLinkListener } from './lib/nativeOAuthDeepLink'
 
 logAppBuildInfo()
 installFwInkDraftModeDiag()
@@ -34,6 +35,7 @@ if (typeof window !== 'undefined') {
 initPerformanceSafeModeListeners()
 suppressVercelToolbar()
 initServiceWorkerUpdateChecks()
+void initNativeOAuthDeepLinkListener()
 
 if (typeof window !== 'undefined') {
   const onHideOrUnload = () => {

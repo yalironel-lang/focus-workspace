@@ -72,9 +72,12 @@ export function Auth() {
     setLoading(true);
     try {
       await signInWithGoogle();
-      // Browser will redirect to Google — no further action needed here.
+      // Web: page navigates away. Native: Browser.open resolves once the
+      // in-app browser is presented — clear loading so Done/cancel cannot
+      // leave the button stuck spinning.
     } catch {
       toast.error('Failed to start Google sign-in');
+    } finally {
       setLoading(false);
     }
   };
