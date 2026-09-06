@@ -7693,7 +7693,7 @@ export function ProjectNotebookBlock({
           >
             <div
               style={{
-                position: 'fixed', top: 0, left: 0, right: 0,
+                position: 'fixed', top: 'var(--app-connectivity-inset, 0px)', left: 0, right: 0,
                 zIndex: 9995,
                 display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
                 gap: 12, padding: '14px 32px',

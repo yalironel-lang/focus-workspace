@@ -154,12 +154,33 @@ function AppShell() {
   }, []);
 
   return (
-    <>
+    <div
+      data-app-shell=""
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100dvh',
+        height: '100dvh',
+        width: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}
+    >
       <AppConnectivityBanner />
-      <AppRoutes />
-      <ArrivalExperienceGate />
-      <GlobalCommandPalette />
-    </>
+      <div
+        data-app-shell-main=""
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'auto',
+        }}
+      >
+        <AppRoutes />
+        <ArrivalExperienceGate />
+        <GlobalCommandPalette />
+      </div>
+    </div>
   );
 }
 

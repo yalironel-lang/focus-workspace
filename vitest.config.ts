@@ -12,6 +12,7 @@ export default defineConfig({
       'src/lib/focusCacheNamespace.test.ts',
       'src/lib/focusCache/pendingOperations.test.ts',
       'src/lib/focusCache/sectionSnapshots.test.ts',
+      'src/lib/appConnectivityInset.test.ts',
       'src/lib/focusCache/freeSpaceObjectCreateEnqueue.test.ts',
       'src/lib/focusCache/freeSpaceObjectUpdateEnqueue.test.ts',
       'src/lib/focusCache/freeSpaceObjectDeleteCancel.test.ts',

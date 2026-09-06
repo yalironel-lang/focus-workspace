@@ -12,6 +12,7 @@ import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMar
 import { acquireBodyScrollLock, pushEscapeHandler } from '../../lib/ui/overlayStack';
 import { Z_RV_STUDY_BACKDROP, Z_RV_STUDY_SHELL } from '../../lib/ui/zIndexLayers';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
+import { appChromeSafePadTop, appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 
 const SOURCE_FLEX = '0 0 44%';
 const WORK_FLEX = '1 1 56%';
@@ -90,7 +91,10 @@ export function RvStudySurface({
         aria-label="RV Study Surface"
         style={{
           position: 'fixed',
-          inset: 0,
+          top: appConnectivityInsetTop,
+          left: 0,
+          right: 0,
+          bottom: 0,
           zIndex: Z_RV_STUDY_SHELL,
           display: 'flex',
           flexDirection: 'column',
@@ -105,7 +109,7 @@ export function RvStudySurface({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            paddingTop: 'max(8px, env(safe-area-inset-top))',
+            paddingTop: appChromeSafePadTop,
             paddingRight: 'max(12px, env(safe-area-inset-right))',
             paddingBottom: 8,
             paddingLeft: 'max(12px, env(safe-area-inset-left))',

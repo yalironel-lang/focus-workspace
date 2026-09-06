@@ -4,6 +4,7 @@
 
 import { useSyncUiStatus } from '../../lib/sync/useSyncUiStatus';
 import { isSyncStatusUiEnabled } from '../../lib/sync/syncStatusTypes';
+import { appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 
 export function SyncStatusIndicator() {
   if (!isSyncStatusUiEnabled()) return null;
@@ -30,7 +31,7 @@ function SyncStatusIndicatorInner() {
       data-sync-ui-phase={status.phase}
       style={{
         position: 'fixed',
-        top: 52,
+        top: `calc(52px + ${appConnectivityInsetTop})`,
         right: 12,
         zIndex: 99990,
         pointerEvents: 'none',

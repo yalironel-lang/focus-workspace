@@ -3,6 +3,7 @@ import { AtmosphereTokens, ATMOSPHERES } from '../../hooks/useAtmosphere';
 import { ModuleConfig, WorkspacePreset } from '../../hooks/useWorkspaceLayout';
 import { MODULE_REGISTRY } from '../../modules/registry';
 import { X, RotateCcw, Check } from 'lucide-react';
+import { appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 
 interface Props {
   open: boolean;
@@ -51,7 +52,7 @@ export function WorkspaceDesigner({
 
   const panelStyle: React.CSSProperties = {
     position: 'fixed',
-    top: 0,
+    top: appConnectivityInsetTop,
     right: 0,
     bottom: 0,
     width: '360px',

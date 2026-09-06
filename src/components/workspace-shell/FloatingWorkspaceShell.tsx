@@ -10,6 +10,7 @@ import type { FreeSpaceBoard } from '../../hooks/useSectionFreeSpaceBoards';
 import type { FreeSpaceTemplateId } from '../../lib/sectionFreeSpaceLayoutTemplates';
 import type { ArrangeGoalId } from '../../lib/freeSpaceAutoArrange';
 import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
+import { appChromeSafePadTop, appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 import { glassIsland, shellIconBtn } from './shellGlass';
 import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
@@ -155,12 +156,12 @@ export function FloatingWorkspaceShell({
       aria-label="Workspace controls"
       style={{
         position: 'fixed',
-        top: 0,
+        top: appConnectivityInsetTop,
         left: 0,
         right: 0,
         zIndex: WORKSPACE_CHROME_Z,
         pointerEvents: 'none',
-        padding: 'max(8px, env(safe-area-inset-top)) 16px 0',
+        padding: `${appChromeSafePadTop} 16px 0`,
       }}
     >
       <div
