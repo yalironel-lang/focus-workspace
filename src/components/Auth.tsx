@@ -72,9 +72,8 @@ export function Auth() {
     setLoading(true);
     try {
       await signInWithGoogle();
-      // Web: page navigates away. Native: Browser.open resolves once the
-      // in-app browser is presented — clear loading so Done/cancel cannot
-      // leave the button stuck spinning.
+      // Web: page navigates away. Cap native / Tauri: system or in-app browser
+      // is opened; clear loading so cancel cannot leave the button spinning.
     } catch {
       toast.error('Failed to start Google sign-in');
     } finally {
