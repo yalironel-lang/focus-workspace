@@ -1,0 +1,4 @@
+# DESKTOP-3: keep Cargo artifacts inside the crate, not a Cursor sandbox cache.
+# CARGO_TARGET_DIR env (if set) still wins — package.json scripts unset/override it.
+[build]
+target-dir = "target"
