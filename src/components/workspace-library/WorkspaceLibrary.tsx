@@ -600,8 +600,8 @@ function WorkspaceLibraryView() {
               </div>
             )}
 
-            {/* Error */}
-            {error && (
+            {/* Fatal error only when there is no usable cached Library */}
+            {error && sections.length === 0 && (
               <div style={{
                 position: 'relative', zIndex: 2,
                 maxWidth: 480, borderRadius: 14, padding: '14px 18px', marginTop: 12,

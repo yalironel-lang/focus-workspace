@@ -1,15 +1,17 @@
 /**
  * focus_cache_v1 IndexedDB open/upgrade.
- * Queue infrastructure only — no entity stores, migrations beyond v1, or sync.
+ * Additive upgrades only — never delete stores or wipe pending_operations.
  */
 
 import { getIndexedDB } from '../indexedDbEnvironment';
 import {
   BY_ID_INDEX,
   BY_NAMESPACE_INDEX,
+  BY_USER_ID_INDEX,
   FOCUS_CACHE_DB_NAME,
   FOCUS_CACHE_DB_VERSION,
   PENDING_OPERATIONS_STORE,
+  SECTION_SNAPSHOTS_STORE,
 } from './types';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -19,6 +21,26 @@ function attachLifecycle(db: IDBDatabase): void {
     db.close();
     dbPromise = null;
   };
+}
+
+function ensurePendingOperationsStore(db: IDBDatabase): void {
+  if (db.objectStoreNames.contains(PENDING_OPERATIONS_STORE)) return;
+  const store = db.createObjectStore(PENDING_OPERATIONS_STORE, {
+    keyPath: 'seq',
+    autoIncrement: true,
+  });
+  store.createIndex(BY_ID_INDEX, 'id', { unique: true });
+  store.createIndex(BY_NAMESPACE_INDEX, ['userId', 'workspaceId'], {
+    unique: false,
+  });
+}
+
+function ensureSectionSnapshotsStore(db: IDBDatabase): void {
+  if (db.objectStoreNames.contains(SECTION_SNAPSHOTS_STORE)) return;
+  const store = db.createObjectStore(SECTION_SNAPSHOTS_STORE, {
+    keyPath: 'id',
+  });
+  store.createIndex(BY_USER_ID_INDEX, 'userId', { unique: false });
 }
 
 /**
@@ -57,16 +79,9 @@ export function openFocusCacheDb(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(PENDING_OPERATIONS_STORE)) {
-        const store = db.createObjectStore(PENDING_OPERATIONS_STORE, {
-          keyPath: 'seq',
-          autoIncrement: true,
-        });
-        store.createIndex(BY_ID_INDEX, 'id', { unique: true });
-        store.createIndex(BY_NAMESPACE_INDEX, ['userId', 'workspaceId'], {
-          unique: false,
-        });
-      }
+      // Additive only — create missing stores; never delete or clear.
+      ensurePendingOperationsStore(db);
+      ensureSectionSnapshotsStore(db);
     };
 
     request.onsuccess = () => {

@@ -5,6 +5,12 @@ import { SectionWithProgress, SectionDetail, GroupWithItems, Item } from '../typ
 import { useAuth } from './useAuth';
 import { pulsePerformancePressure } from '../lib/performanceSafeMode';
 import { clearFreeSpacePersistenceForSection } from '../lib/freeSpacePersistence';
+import {
+  readLibrarySectionsSnapshot,
+  readSectionDetailSnapshot,
+  writeLibraryFetchSnapshots,
+  writeSectionDetailSnapshot,
+} from '../lib/focusCache/sectionSnapshots';
 
 const DEFAULT_GROUPS = ['Slides', 'Exercises', 'Exams', 'Notes', 'Links'];
 
@@ -46,34 +52,72 @@ export function useSections() {
   const [sections, setSections] = useState<SectionWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** True when UI is showing last-known cache (offline/stale) rather than fresh network. */
+  const [fromCache, setFromCache] = useState(false);
   const retryOnReconnectRef = useRef(false);
+  const sectionsRef = useRef<SectionWithProgress[]>([]);
+  sectionsRef.current = sections;
 
   const fetchSections = useCallback(async () => {
     if (!user) {
       setSections([]);
       setLoading(false);
       setError(null);
+      setFromCache(false);
       retryOnReconnectRef.current = false;
       return;
     }
     if (!isSupabaseConfigured) {
       setSections([]);
       setError('This deployment is missing database configuration.');
+      setFromCache(false);
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setError(null);
+
+    const userId = user.id;
+    let hadCache = sectionsRef.current.length > 0;
+
+    // Read-first: hydrate last-known snapshot before network (cold offline).
+    if (!hadCache) {
+      setLoading(true);
+      setError(null);
+      try {
+        const cached = await readLibrarySectionsSnapshot(userId);
+        if (cached && cached.length > 0) {
+          setSections(cached);
+          sectionsRef.current = cached;
+          setFromCache(true);
+          hadCache = true;
+          setLoading(false);
+        }
+      } catch {
+        /* ignore cache read errors; fall through to network */
+      }
+    } else {
+      setError(null);
+    }
+
+    if (!hadCache) setLoading(true);
 
     try {
       const { data: sectionsData, error: sectionsError } = await supabase
         .from('sections')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (sectionsError) {
+        if (hadCache || sectionsRef.current.length > 0) {
+          // CACHE_PRESENT + FETCH_FAIL: keep list; no fatal Library error card.
+          setError(null);
+          setFromCache(true);
+          retryOnReconnectRef.current = true;
+          setLoading(false);
+          return;
+        }
         setSections([]);
+        setFromCache(false);
         setError(classifySupabaseError(sectionsError.message, 'Could not load workspaces'));
         retryOnReconnectRef.current = true;
         setLoading(false);
@@ -81,6 +125,7 @@ export function useSections() {
       }
 
       const sectionsWithProgress: SectionWithProgress[] = [];
+      const sectionDetails: SectionDetail[] = [];
 
       for (const section of sectionsData || []) {
         const { data: groupsData, error: groupsError } = await supabase
@@ -90,7 +135,16 @@ export function useSections() {
           .order('order_index');
 
         if (groupsError) {
+          // Partial fetch — do not wipe a good cache / in-progress list.
+          if (hadCache || sectionsRef.current.length > 0) {
+            setError(null);
+            setFromCache(true);
+            retryOnReconnectRef.current = true;
+            setLoading(false);
+            return;
+          }
           setSections(sectionsWithProgress);
+          setFromCache(false);
           setError(classifySupabaseError(groupsError.message, 'Could not load workspace details'));
           retryOnReconnectRef.current = true;
           setLoading(false);
@@ -114,13 +168,32 @@ export function useSections() {
           missing_groups: missingGroups,
           next_item_title: findNextItemTitle(groups),
         });
+
+        // Same groups payload → enough SectionDetail to open offline (no extra requests).
+        const detailGroups: GroupWithItems[] = groups.map((group) => ({
+          ...group,
+          items: (group.items || []) as Item[],
+        }));
+        sectionDetails.push({ ...section, groups: detailGroups });
       }
 
       setSections(sectionsWithProgress);
+      sectionsRef.current = sectionsWithProgress;
+      setFromCache(false);
+      setError(null);
       retryOnReconnectRef.current = false;
       setLoading(false);
+      void writeLibraryFetchSnapshots(userId, sectionsWithProgress, sectionDetails);
     } catch (err) {
+      if (hadCache || sectionsRef.current.length > 0) {
+        setError(null);
+        setFromCache(true);
+        retryOnReconnectRef.current = true;
+        setLoading(false);
+        return;
+      }
       setSections([]);
+      setFromCache(false);
       setError(classifyNetworkFailure(err, 'Could not load workspaces'));
       retryOnReconnectRef.current = true;
       setLoading(false);
@@ -160,7 +233,7 @@ export function useSections() {
     await fetchSections();
   };
 
-  return { sections, loading, error, fetchSections, createSection, deleteSection };
+  return { sections, loading, error, fromCache, fetchSections, createSection, deleteSection };
 }
 
 // ── useSectionDetail (workspace page) ────────────────────────────────────────
@@ -177,6 +250,7 @@ export function useSectionDetail(sectionId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
   // Track which sectionId we have already run ensureDefaultGroups for
   const ensuredRef = useRef<string | null>(null);
   const requestSeqRef = useRef(0);
@@ -189,6 +263,7 @@ export function useSectionDetail(sectionId: string | undefined) {
     sectionRef.current = null;
     setNotFound(false);
     setFetchError(null);
+    setFromCache(false);
     setLoading(!!user && !!sectionId);
     pulsePerformancePressure('section-navigate');
   }, [user, sectionId]);
@@ -198,40 +273,77 @@ export function useSectionDetail(sectionId: string | undefined) {
       setSection(null);
       setNotFound(false);
       setFetchError(null);
+      setFromCache(false);
       setLoading(false);
       return;
     }
     const requestId = ++requestSeqRef.current;
     const isStale = () => requestSeqRef.current !== requestId;
-    if (!sectionRef.current) setLoading(true);
-    setNotFound(false);
-    setFetchError(null);
+    const userId = user.id;
 
     if (!isSupabaseConfigured) {
       setSection(null);
       setFetchError('This deployment is missing database configuration.');
+      setFromCache(false);
       setLoading(false);
       return;
     }
+
+    // Read-first cache hydrate (cold offline section entry).
+    let hadCache = !!sectionRef.current && sectionRef.current.id === sectionId;
+    if (!hadCache) {
+      if (!sectionRef.current) setLoading(true);
+      setNotFound(false);
+      setFetchError(null);
+      try {
+        const cached = await readSectionDetailSnapshot(userId, sectionId);
+        if (isStale()) return;
+        if (cached) {
+          setSection(cached);
+          sectionRef.current = cached;
+          setFromCache(true);
+          hadCache = true;
+          setLoading(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setFetchError(null);
+    }
+
+    if (!sectionRef.current) setLoading(true);
+    setNotFound(false);
 
     try {
       const { data: sectionData, error: sectionError } = await supabase
         .from('sections')
         .select('*')
         .eq('id', sectionId)
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .maybeSingle();
 
       if (isStale()) return;
       if (sectionError) {
+        if (hadCache || sectionRef.current) {
+          // CACHE_PRESENT + FETCH_FAIL: keep hydrated section; no fatal gate.
+          setFetchError(null);
+          setFromCache(true);
+          setLoading(false);
+          return;
+        }
         setSection(null);
+        setFromCache(false);
         setFetchError(classifySupabaseError(sectionError.message, 'Could not load workspace'));
         setNotFound(false);
         setLoading(false);
         return;
       }
       if (!sectionData) {
+        // Authoritative online miss — only clear after successful empty response.
         setSection(null);
+        sectionRef.current = null;
+        setFromCache(false);
         setNotFound(true);
         setFetchError(null);
         setLoading(false);
@@ -246,7 +358,14 @@ export function useSectionDetail(sectionId: string | undefined) {
 
       if (isStale()) return;
       if (groupsError) {
+        if (hadCache || sectionRef.current) {
+          setFetchError(null);
+          setFromCache(true);
+          setLoading(false);
+          return;
+        }
         setSection(null);
+        setFromCache(false);
         setFetchError(classifySupabaseError(groupsError.message, 'Could not load workspace'));
         setLoading(false);
         return;
@@ -268,7 +387,14 @@ export function useSectionDetail(sectionId: string | undefined) {
             .order('order_index');
           if (isStale()) return;
           if (refetchError) {
+            if (hadCache || sectionRef.current) {
+              setFetchError(null);
+              setFromCache(true);
+              setLoading(false);
+              return;
+            }
             setSection(null);
+            setFromCache(false);
             setFetchError(classifySupabaseError(refetchError.message, 'Could not load workspace'));
             setLoading(false);
             return;
@@ -284,7 +410,14 @@ export function useSectionDetail(sectionId: string | undefined) {
           : { data: [], error: null };
       if (isStale()) return;
       if (itemsError) {
+        if (hadCache || sectionRef.current) {
+          setFetchError(null);
+          setFromCache(true);
+          setLoading(false);
+          return;
+        }
         setSection(null);
+        setFromCache(false);
         setFetchError(classifySupabaseError(itemsError.message, 'Could not load workspace'));
         setLoading(false);
         return;
@@ -296,11 +429,23 @@ export function useSectionDetail(sectionId: string | undefined) {
       }));
 
       if (isStale()) return;
-      setSection({ ...sectionData, groups });
+      const next: SectionDetail = { ...sectionData, groups };
+      setSection(next);
+      sectionRef.current = next;
+      setFromCache(false);
+      setFetchError(null);
       setLoading(false);
+      void writeSectionDetailSnapshot(userId, next);
     } catch (err) {
       if (isStale()) return;
+      if (hadCache || sectionRef.current) {
+        setFetchError(null);
+        setFromCache(true);
+        setLoading(false);
+        return;
+      }
       setSection(null);
+      setFromCache(false);
       setFetchError(classifyNetworkFailure(err, 'Could not load workspace'));
       setLoading(false);
     }
@@ -472,6 +617,7 @@ export function useSectionDetail(sectionId: string | undefined) {
     clearFreeSpacePersistenceForSection(sectionId);
     setSection(null);
     sectionRef.current = null;
+    setFromCache(false);
   }, [sectionId, user]);
 
   return {
@@ -479,6 +625,7 @@ export function useSectionDetail(sectionId: string | undefined) {
     loading,
     notFound,
     fetchError,
+    fromCache,
     fetchSection,
     addItem,
     pushItem,
