@@ -91,6 +91,7 @@ export default defineConfig({
       'src/lib/focusCache/userWorkspaceStateCloud.live.test.ts',
       'src/components/notebook/HandwritingBlock.cloudHydrate.test.tsx',
       'src/sheets/**/*.test.ts',
+      'src/lib/desktopOAuthDeepLink.test.ts',
     ],
   },
 });
