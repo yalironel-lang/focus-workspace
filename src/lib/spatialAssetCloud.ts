@@ -452,20 +452,95 @@ export async function hydrateSpatialImageWithCloud(
 
 export type SpatialPdfHydrateResult = 'local_hit' | 'cloud_hit' | 'missing';
 
-/** Local IDB first; cloud on miss; schedules upload when local exists but cloud missing. */
+export type SpatialPdfHydrateOutcome = {
+  result: SpatialPdfHydrateResult;
+  /** Usable bytes for the viewer (local or freshly downloaded). */
+  blob: Blob | null;
+  /** True when local IDB already had the blob, or cloud bytes were cached successfully. */
+  cachePersisted: boolean;
+  /** Present when result is missing after a cloud attempt (auth/network/not_found). */
+  errorMessage?: string;
+};
+
+/**
+ * Local IDB first; cloud on miss.
+ * Returns the Blob for the viewer even when best-effort IDB cache write fails
+ * (Capacitor / fresh-device IndexedDB gaps). Does not change image hydrate behavior.
+ */
 export async function hydrateSpatialPdfWithCloud(
   ids: Partial<SpatialAssetIds>,
-): Promise<SpatialPdfHydrateResult> {
-  if (!idsReady(ids) || ids.assetType !== 'pdf') return 'missing';
-
-  const local = await loadLocalBlob(ids);
-  if (local && local.size > 0) {
-    await reconcileSpatialAssetWithCloud(ids, true);
-    return 'local_hit';
+): Promise<SpatialPdfHydrateOutcome> {
+  if (!idsReady(ids) || ids.assetType !== 'pdf') {
+    return { result: 'missing', blob: null, cachePersisted: false };
   }
 
-  const hydrated = await hydrateSpatialAssetFromCloud(ids);
-  return hydrated ? 'cloud_hit' : 'missing';
+  try {
+    const local = await loadLocalBlob(ids);
+    if (local && local.size > 0) {
+      try {
+        await reconcileSpatialAssetWithCloud(ids, true);
+      } catch (err) {
+        fwPersistWarn(
+          `PDF hydrate: local reconcile skipped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return { result: 'local_hit', blob: local, cachePersisted: true };
+    }
+  } catch (err) {
+    fwPersistWarn(
+      `PDF hydrate: local IDB lookup failed (will try cloud): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return {
+      result: 'missing',
+      blob: null,
+      cachePersisted: false,
+      errorMessage: 'not_configured',
+    };
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return {
+      result: 'missing',
+      blob: null,
+      cachePersisted: false,
+      errorMessage: 'offline',
+    };
+  }
+
+  const path = buildSpatialAssetPath(ids);
+  const downloaded = await downloadUserContentAsset(path);
+  if (!downloaded.ok) {
+    return {
+      result: 'missing',
+      blob: null,
+      cachePersisted: false,
+      errorMessage: downloaded.message
+        ? `${downloaded.reason}: ${downloaded.message}`
+        : downloaded.reason,
+    };
+  }
+
+  let cachePersisted = false;
+  try {
+    // Best-effort local cache only — cloud Blob is already authoritative for the viewer.
+    // Do not poison global saveStatus on IDB failure (Capacitor IndexedDB gaps).
+    await savePdfBlob(ids.sectionId, ids.objectId, downloaded.value, {
+      reportSaveStatus: false,
+    });
+    cachePersisted = true;
+  } catch (err) {
+    fwPersistWarn(
+      `PDF cloud hydrate: IDB cache write failed (viewer will still use downloaded Blob): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return {
+    result: 'cloud_hit',
+    blob: downloaded.value,
+    cachePersisted,
+  };
 }
 
 /** Local miss → cloud hydrate; local hit + cloud missing → schedule upload when referenced. */

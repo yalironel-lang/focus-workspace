@@ -231,7 +231,9 @@ describe('Free Space PDF production-path persistence', () => {
       objectId,
       assetType: 'pdf',
     });
-    expect(hydrateResult).toBe('cloud_hit');
+    expect(hydrateResult.result).toBe('cloud_hit');
+    expect(hydrateResult.blob).toBeTruthy();
+    expect(await hydrateResult.blob!.text()).toBe(pdfBytes);
     const blobB = spatialPdfMem.get(spatialPdfKey(sectionId, objectId));
     expect(blobB?.type).toBe('application/pdf');
     expect(await blobB!.text()).toBe(pdfBytes);

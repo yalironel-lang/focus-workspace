@@ -20,6 +20,13 @@ if (vercelSha && vercelSha.length >= 7) {
 
 const fwFeatureFlags = { incrementalDraft: true } as const
 
+/** Native Capacitor iOS bundle only. Unset for Vercel / `npm run build` (PWA stays on). */
+const capacitorIosBuild = process.env.CAPACITOR_IOS === '1'
+/** Tauri macOS/desktop bundle. Unset for Vercel / `npm run build` (PWA stays on). */
+const tauriDesktopBuild = process.env.TAURI_DESKTOP === '1'
+/** Disable VitePWA for native shells (Capacitor iOS + Tauri desktop). */
+const disablePwa = capacitorIosBuild || tauriDesktopBuild
+
 function debugLogIngestPlugin(): Plugin {
   const logPath = path.join(process.cwd(), '.cursor/debug-3f83e8.log')
   return {
@@ -58,7 +65,9 @@ export default defineConfig({
   plugins: [
     react(),
     debugLogIngestPlugin(),
-    VitePWA({
+    ...(disablePwa
+      ? []
+      : [VitePWA({
       // autoUpdate: new SW installs + activates silently.
       // Combined with the controllerchange reload in main.tsx, the page
       // refreshes automatically to pick up the new assets.
@@ -227,7 +236,7 @@ export default defineConfig({
         enabled: false,
         type: 'module',
       },
-    }),
+    })]),
   ],
 
   server: {

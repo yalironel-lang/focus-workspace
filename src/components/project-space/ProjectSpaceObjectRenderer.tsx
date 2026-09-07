@@ -20,6 +20,7 @@ import type {
 import { MathDeskPrototype } from './MathDeskPrototype';
 import { FreeSpaceCalculator } from './FreeSpaceCalculator';
 import { FreeSpaceGraph } from './FreeSpaceGraph';
+import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 
 import { FreeSpaceMistakeCard } from './FreeSpaceMistakeCard';
 import {
@@ -186,7 +187,7 @@ function FreeSpaceMathNotebookRenderer({
   onNotebookEditingChange,
   onRequestSelectObject,
   onCreateNotebookRecall,
-  attemptBtn,
+  onLearningAttempt,
   contentHost = 'canvas',
   onStudyLayoutChange,
   studySessionChip = null,
@@ -210,7 +211,7 @@ function FreeSpaceMathNotebookRenderer({
   onNotebookEditingChange?: (id: string, editing: boolean) => void;
   onRequestSelectObject?: (id: string) => void;
   onCreateNotebookRecall?: (sourceId: string, prompt: string) => void;
-  attemptBtn: ReactNode;
+  onLearningAttempt?: () => void;
   contentHost?: NotebookContentHost;
   onStudyLayoutChange?: (mode: StudyLayoutMode) => void;
   studySessionChip?: { subtitle: string; onOpen: () => void } | null;
@@ -298,7 +299,6 @@ function FreeSpaceMathNotebookRenderer({
   if (floatingEmbeddedNotebook) {
     return (
       <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {attemptBtn}
         <FreeSpaceNotebookSurface
           content={content}
           tokens={tokens}
@@ -312,6 +312,7 @@ function FreeSpaceMathNotebookRenderer({
           onCreateNotebookRecall={onCreateNotebookRecall}
           compositionChromeSuppressed={studyDeskQuiet}
           onExpand={() => onSetObjectPresentationMode?.(object.id, 'fullscreen')}
+          onLearningAttempt={onLearningAttempt}
           onOpenBinderStudy={onOpenBinderStudy}
         />
       </div>
@@ -320,7 +321,6 @@ function FreeSpaceMathNotebookRenderer({
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {attemptBtn}
       {useDeskPrototype && legacyOpen ? (
         <button
           type="button"
@@ -372,6 +372,12 @@ function FreeSpaceMathNotebookRenderer({
               ? 'workspace'
               : 'notebook'
           }
+          onExpand={
+            objectPresentationMode === 'floating'
+              ? () => onSetObjectPresentationMode?.(object.id, 'fullscreen')
+              : undefined
+          }
+          onLearningAttempt={onLearningAttempt}
           onOpenBinderStudy={onOpenBinderStudy}
         />
       </div>
@@ -444,7 +450,8 @@ function ProjectSpaceObjectRendererInner({
   const attemptBtn =
     !suppressLearningAttemptChip &&
     onStartLearningAttempt &&
-    (object.type === 'mistake' || object.type === 'note' || object.type === 'notebook' || object.type === 'pdf' || object.type === 'studyfile') ? (
+    object.type !== 'notebook' &&
+    (object.type === 'mistake' || object.type === 'note' || object.type === 'pdf' || object.type === 'studyfile') ? (
       <button
         type="button"
         onClick={e => {
@@ -456,11 +463,18 @@ function ProjectSpaceObjectRendererInner({
           backgroundColor: `${tokens.accent}22`,
           color: tokens.accent,
           border: `1px solid ${tokens.accent}44`,
+          minWidth: TOUCH_TARGET_MIN_PX,
+          minHeight: TOUCH_TARGET_MIN_PX,
         }}
       >
         Attempt
       </button>
     ) : null;
+
+  const notebookLearningAttempt =
+    !suppressLearningAttemptChip && onStartLearningAttempt && object.type === 'notebook'
+      ? () => onStartLearningAttempt(object.id)
+      : undefined;
 
   const wrapWithCopy = useCallback((node: ReactNode) => {
     if (!copyPayload) return node;
@@ -563,7 +577,7 @@ function ProjectSpaceObjectRendererInner({
             onNotebookEditingChange={onNotebookEditingChange}
             onRequestSelectObject={onRequestSelectObject}
             onCreateNotebookRecall={onCreateNotebookRecall}
-            attemptBtn={attemptBtn}
+            onLearningAttempt={notebookLearningAttempt}
             contentHost={contentHost}
             onStudyLayoutChange={onStudyLayoutChange}
             studySessionChip={studySessionChip}

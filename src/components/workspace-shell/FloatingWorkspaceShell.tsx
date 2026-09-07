@@ -10,9 +10,11 @@ import type { FreeSpaceBoard } from '../../hooks/useSectionFreeSpaceBoards';
 import type { FreeSpaceTemplateId } from '../../lib/sectionFreeSpaceLayoutTemplates';
 import type { ArrangeGoalId } from '../../lib/freeSpaceAutoArrange';
 import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
+import { appChromeSafePadTop, appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 import { glassIsland, shellIconBtn } from './shellGlass';
 import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
+import type { WorkspacePresentationProfile } from '../../lib/workspacePresentationProfile';
 
 const VIEW_MODES_ALL = [
   { id: 'free-space' as const, label: 'Workspace' },
@@ -20,9 +22,16 @@ const VIEW_MODES_ALL = [
   { id: 'math-zone' as const, label: '∑ Studio' },
 ] as const;
 
-const VIEW_MODES = VIEW_MODES_ALL.filter(
-  opt => opt.id !== 'math-zone' || isMathZoneDestinationEnabled(),
-);
+function viewModesForProfile(profile: WorkspacePresentationProfile) {
+  const enabled = VIEW_MODES_ALL.filter(
+    opt => opt.id !== 'math-zone' || isMathZoneDestinationEnabled(),
+  );
+  if (profile !== 'phone') return enabled;
+  // Phone: Mission Control primary; Workspace de-emphasized but available.
+  const mc = enabled.filter(o => o.id === 'work-surface');
+  const rest = enabled.filter(o => o.id !== 'work-surface');
+  return [...mc, ...rest];
+}
 
 export const WORKSPACE_CHROME_Z = 600;
 
@@ -84,6 +93,8 @@ interface Props {
   organize?: OrganizeProps;
   /** Lower visual weight while study session reader is active. */
   dimmed?: boolean;
+  /** Phone profile: Mission Control–first chrome ordering / Workspace de-emphasis. */
+  presentationProfile?: WorkspacePresentationProfile;
 }
 
 export function FloatingWorkspaceShell({
@@ -110,6 +121,7 @@ export function FloatingWorkspaceShell({
   onCreateBoard,
   organize,
   dimmed = false,
+  presentationProfile = 'desktop',
 }: Props) {
   const [searchHover, setSearchHover] = useState(false);
   const [overflowHover, setOverflowHover] = useState(false);
@@ -133,6 +145,8 @@ export function FloatingWorkspaceShell({
   const activeBoard = boards?.find(b => b.id === activeBoardId);
   const showSpace = sectionViewMode === 'free-space' && boards && activeBoardId != null && onSelectBoard;
   const showOrganize = sectionViewMode === 'free-space' && organize;
+  const phoneChrome = presentationProfile === 'phone';
+  const modeOptions = viewModesForProfile(presentationProfile);
 
   const menuPanelBg = tokens.cardBg;
 
@@ -142,12 +156,12 @@ export function FloatingWorkspaceShell({
       aria-label="Workspace controls"
       style={{
         position: 'fixed',
-        top: 0,
+        top: appConnectivityInsetTop,
         left: 0,
         right: 0,
         zIndex: WORKSPACE_CHROME_Z,
         pointerEvents: 'none',
-        padding: 'max(8px, env(safe-area-inset-top)) 16px 0',
+        padding: `${appChromeSafePadTop} 16px 0`,
       }}
     >
       <div
@@ -253,24 +267,32 @@ export function FloatingWorkspaceShell({
                 background: `${tokens.wellBg}66`,
               }}
             >
-              {VIEW_MODES.map(opt => {
+              {modeOptions.map(opt => {
                 const active = sectionViewMode === opt.id;
                 const lensActive = active && focusMode != null;
+                const secondaryWorkspace =
+                  phoneChrome && opt.id === 'free-space' && !active;
                 return (
                   <button
                     key={opt.id}
                     type="button"
                     onClick={() => onViewModeChange(opt.id)}
+                    aria-label={
+                      secondaryWorkspace
+                        ? 'Workspace (advanced)'
+                        : opt.label
+                    }
                     style={{
                       position: 'relative',
                       border: 'none',
                       borderRadius: 999,
-                      padding: '6px 10px',
-                      minHeight: 32,
+                      padding: phoneChrome ? '8px 12px' : '6px 10px',
+                      minHeight: phoneChrome ? 44 : 32,
                       cursor: 'pointer',
                       fontSize: 11,
-                      fontWeight: active ? 700 : 550,
+                      fontWeight: active ? 700 : secondaryWorkspace ? 500 : 550,
                       letterSpacing: '-0.01em',
+                      opacity: secondaryWorkspace ? 0.72 : 1,
                       backgroundColor: active
                         ? opt.id === 'free-space'
                           ? `${accent}cc`
@@ -281,7 +303,8 @@ export function FloatingWorkspaceShell({
                           ? '#0a0805'
                           : tokens.textPrimary
                         : tokens.textMuted,
-                      transition: 'background 0.15s ease, color 0.15s ease',
+                      transition: 'background 0.15s ease, color 0.15s ease, opacity 0.15s ease',
+                      touchAction: 'manipulation',
                     }}
                   >
                     {opt.label}

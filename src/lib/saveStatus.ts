@@ -16,7 +16,9 @@ export type SaveChannel =
   | 'freeSpacePrefs'
   | 'handwriting'
   | 'pdfBlob'
-  | 'imageBlob';
+  | 'imageBlob'
+  /** Local-authoritative PDF study marks + ink sidecar. */
+  | 'pdfStudyMarks';
 
 export interface SaveChannelStatus {
   pending: boolean;
@@ -41,6 +43,7 @@ const channelState = (): Record<SaveChannel, SaveChannelStatus> => ({
   handwriting: emptyChannel(),
   pdfBlob: emptyChannel(),
   imageBlob: emptyChannel(),
+  pdfStudyMarks: emptyChannel(),
 });
 
 function emptyChannel(): SaveChannelStatus {

@@ -37,6 +37,13 @@ export function flushSheetForObject(objectId: string): void {
   }
 }
 
+/** Flush every registered Sheet surface (phone canvas unmount). */
+export function flushAllRegisteredSheets(): void {
+  for (const objectId of [...byObject.keys()]) {
+    flushSheetForObject(objectId);
+  }
+}
+
 /** DEV/evidence: how many surfaces currently register a flush for an object. */
 export function countRegisteredSheetFlushes(objectId: string): number {
   return byObject.get(objectId)?.size ?? 0;

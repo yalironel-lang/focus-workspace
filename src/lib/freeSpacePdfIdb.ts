@@ -109,19 +109,35 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function savePdfBlob(sectionId: string, objectId: string, blob: Blob): Promise<void> {
+export type SavePdfBlobOptions = {
+  /**
+   * When true (default), write success/failure updates the global saveStatus ledger.
+   * Set false for best-effort cache writes (e.g. cloud hydrate) where the Blob remains
+   * authoritative elsewhere and IDB failure must not surface global "Save failed".
+   */
+  reportSaveStatus?: boolean;
+};
+
+export async function savePdfBlob(
+  sectionId: string,
+  objectId: string,
+  blob: Blob,
+  options?: SavePdfBlobOptions,
+): Promise<void> {
+  const reportSaveStatus = options?.reportSaveStatus !== false;
   const key = storeKey(sectionId, objectId);
-  markSavePending('pdfBlob');
+  if (reportSaveStatus) markSavePending('pdfBlob');
   let db: IDBDatabase;
   try {
     db = await openDb();
-    pdfUploadDiag('savePdfBlob:dbOpen', { key });
+    pdfUploadDiag('savePdfBlob:dbOpen', { key, reportSaveStatus });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    markSaveError('pdfBlob', msg);
+    if (reportSaveStatus) markSaveError('pdfBlob', msg);
     pdfUploadDiag('savePdfBlob:dbOpenFailed', {
       key,
       error: msg,
+      reportSaveStatus,
     });
     throw err;
   }
@@ -129,17 +145,18 @@ export async function savePdfBlob(sectionId: string, objectId: string, blob: Blo
     const tx = db.transaction(STORE, 'readwrite');
     tx.oncomplete = () => {
       db.close();
-      markSaveOk('pdfBlob');
-      pdfUploadDiag('savePdfBlob:txComplete', { key, blobSize: blob.size });
+      if (reportSaveStatus) markSaveOk('pdfBlob');
+      pdfUploadDiag('savePdfBlob:txComplete', { key, blobSize: blob.size, reportSaveStatus });
       resolve();
     };
     tx.onerror = () => {
       db.close();
       const msg = tx.error?.message ?? 'transaction error';
-      markSaveError('pdfBlob', msg);
+      if (reportSaveStatus) markSaveError('pdfBlob', msg);
       pdfUploadDiag('savePdfBlob:txError', {
         key,
         error: msg,
+        reportSaveStatus,
       });
       reject(tx.error);
     };

@@ -1,4 +1,5 @@
 import type { CacheNamespace, CacheNamespaceFailureReason } from '../focusCacheNamespace';
+import type { SectionDetail, SectionWithProgress } from '../../types';
 
 export type JsonPrimitive = string | number | boolean | null;
 
@@ -47,7 +48,36 @@ export type EnqueuePendingOperationInput = {
 };
 
 export const FOCUS_CACHE_DB_NAME = 'focus_cache_v1';
-export const FOCUS_CACHE_DB_VERSION = 1;
+/** v1: pending_operations. v2: additive section_snapshots (Library/section last-known). */
+export const FOCUS_CACHE_DB_VERSION = 2;
 export const PENDING_OPERATIONS_STORE = 'pending_operations';
+export const SECTION_SNAPSHOTS_STORE = 'section_snapshots';
 export const BY_ID_INDEX = 'byId';
 export const BY_NAMESPACE_INDEX = 'byNamespace';
+export const BY_USER_ID_INDEX = 'byUserId';
+
+/** Snapshot payload schema (independent of IDB DB version). */
+export const SECTION_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+
+export type SectionLibrarySnapshotRecord = {
+  id: string;
+  kind: 'library_list';
+  schemaVersion: typeof SECTION_SNAPSHOT_SCHEMA_VERSION;
+  userId: string;
+  updatedAt: string;
+  sections: SectionWithProgress[];
+};
+
+export type SectionDetailSnapshotRecord = {
+  id: string;
+  kind: 'section_detail';
+  schemaVersion: typeof SECTION_SNAPSHOT_SCHEMA_VERSION;
+  userId: string;
+  sectionId: string;
+  updatedAt: string;
+  section: SectionDetail;
+};
+
+export type SectionSnapshotRecord =
+  | SectionLibrarySnapshotRecord
+  | SectionDetailSnapshotRecord;

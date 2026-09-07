@@ -60,6 +60,8 @@ export type MissionControlPreview =
 
 export type MissionControlOpenAction =
   | { type: 'freespace-focus'; objectId: string; boardId: string }
+  /** Phone Mission Control → fullscreen content (no Free Space pan/zoom). */
+  | { type: 'direct-present'; objectId: string; boardId: string }
   | { type: 'external-url'; url: string }
   | { type: 'shelf-file'; itemId: string; filePath: string }
   | { type: 'unavailable' };

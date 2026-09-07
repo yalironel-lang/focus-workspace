@@ -143,8 +143,48 @@ async function listUploads() {
   );
 }
 
+function installTestLocalStorage(): Storage {
+  const mem = new Map<string, string>();
+  const store: Storage = {
+    getItem(key: string) {
+      return mem.has(key) ? mem.get(key)! : null;
+    },
+    setItem(key: string, value: string) {
+      mem.set(key, String(value));
+    },
+    removeItem(key: string) {
+      mem.delete(key);
+    },
+    clear() {
+      mem.clear();
+    },
+    key(i: number) {
+      return [...mem.keys()][i] ?? null;
+    },
+    get length() {
+      return mem.size;
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    enumerable: true,
+    value: store,
+    writable: true,
+  });
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      enumerable: true,
+      value: store,
+      writable: true,
+    });
+  }
+  return store;
+}
+
 describe('spatial image/pdf A→B→A persistence', () => {
   beforeEach(async () => {
+    installTestLocalStorage().clear();
     cloudStore.clear();
     spatialImageMem.clear();
     spatialPdfMem.clear();

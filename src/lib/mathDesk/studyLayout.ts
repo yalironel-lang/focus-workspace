@@ -3,6 +3,8 @@
  * Persisted on notebook content (`studyLayout`); same object, alternate host.
  */
 
+import { appConnectivityInsetTop } from '../appConnectivityInset';
+
 export type StudyLayoutMode =
   | 'canvas'
   | 'fullscreen'
@@ -46,7 +48,7 @@ export function studyLayoutLabel(mode: StudyLayoutMode): string {
 
 export type StudyLayoutPanelPlacement = {
   position: 'fixed';
-  top: number;
+  top: number | string;
   right?: number;
   left?: number;
   bottom: number;
@@ -62,20 +64,56 @@ export function getStudyLayoutPanelPlacement(mode: StudyLayoutMode): StudyLayout
     typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
 
   if (mode === 'fullscreen') {
-    return { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', zIndex: 9992 };
+    return {
+      position: 'fixed',
+      top: appConnectivityInsetTop,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100vw',
+      zIndex: 9992,
+    };
   }
 
   if (narrow && (mode === 'dock-right-third' || mode === 'dock-left-half')) {
-    return { position: 'fixed', top: 0, right: 0, bottom: 0, width: '100vw', zIndex: 9988 };
+    return {
+      position: 'fixed',
+      top: appConnectivityInsetTop,
+      right: 0,
+      bottom: 0,
+      width: '100vw',
+      zIndex: 9988,
+    };
   }
 
   switch (mode) {
     case 'dock-right-half':
-      return { position: 'fixed', top: 0, right: 0, bottom: 0, width: '50vw', zIndex: 9988 };
+      return {
+        position: 'fixed',
+        top: appConnectivityInsetTop,
+        right: 0,
+        bottom: 0,
+        width: '50vw',
+        zIndex: 9988,
+      };
     case 'dock-right-third':
-      return { position: 'fixed', top: 0, right: 0, bottom: 0, width: '33.333vw', zIndex: 9988 };
+      return {
+        position: 'fixed',
+        top: appConnectivityInsetTop,
+        right: 0,
+        bottom: 0,
+        width: '33.333vw',
+        zIndex: 9988,
+      };
     case 'dock-left-half':
-      return { position: 'fixed', top: 0, left: 0, bottom: 0, width: '50vw', zIndex: 9988 };
+      return {
+        position: 'fixed',
+        top: appConnectivityInsetTop,
+        left: 0,
+        bottom: 0,
+        width: '50vw',
+        zIndex: 9988,
+      };
     default:
       return null;
   }

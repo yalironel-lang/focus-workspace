@@ -48,6 +48,7 @@ import {
   isFreeSpacePullScopeCurrent,
   runFreeSpaceSectionPullCatchUp,
 } from '../lib/focusCache/freeSpaceObjectPull';
+import { registerFreeSpaceObjectCatchUpLifecycle } from '../lib/focusCache/freeSpaceObjectCatchUpLifecycle';
 import { subscribeFreeSpaceObjectsRealtime } from '../lib/focusCache/freeSpaceObjectRealtime';
 import { collectAcceptedGeometryPatches } from '../lib/focusCache/freeSpaceObjectGeometryLww';
 import { getActiveFreeSpaceGeometryIds } from '../lib/freeSpaceActiveGeometry';
@@ -1200,7 +1201,7 @@ export function useSectionFreeSpaceObjects(
   /**
    * PR8: drain leftover queued CREATE/UPDATE on mount, and again when the
    * browser reports online. Scope invalidate never deletes the IDB queue.
-   * Inbound catch-up stays on SUBSCRIBED in the realtime effect below.
+   * Inbound catch-up: mount + SUBSCRIBED (see realtime effect below).
    */
   useEffect(() => {
     if (!sectionId || !userId) return;
@@ -1217,8 +1218,10 @@ export function useSectionFreeSpaceObjects(
   }, [sectionId, userId]);
 
   /**
-   * PR7b: Realtime thin delivery + mandatory PR7 pull catch-up on SUBSCRIBED.
-   * Lifecycle: local hydrate → subscribe → SUBSCRIBED → pull catch-up → live INSERT/UPDATE/DELETE.
+   * PR7b: Realtime thin delivery + PR7 pull catch-up.
+   * Lifecycle: local hydrate → **mount catch-up** → subscribe → SUBSCRIBED catch-up
+   * → live INSERT/UPDATE/DELETE. Mount pull does not wait for Realtime (fresh Cap devices).
+   * Mount + SUBSCRIBED share one serialized apply queue (no destructive race).
    * Hidden-tab resume: visibility hidden → visible runs the same catch-up pull.
    * Full catch-up prunes cloud-absent objects. All applies use shared PR7 pipeline (C1/C2).
    */
@@ -1231,7 +1234,6 @@ export function useSectionFreeSpaceObjects(
       generation: persistScopeGenRef.current,
     };
     let cancelled = false;
-    let catchUpOnErrorDone = false;
     let applyChain: Promise<void> = Promise.resolve();
 
     const currentScope = () => ({
@@ -1242,6 +1244,12 @@ export function useSectionFreeSpaceObjects(
 
     const isCurrent = () =>
       !cancelled && isFreeSpacePullScopeCurrent(captured, currentScope());
+
+    /** Section catch-up may outlive a board switch; keep section+generation gate only. */
+    const isSectionCatchUpCurrent = () =>
+      !cancelled &&
+      captured.generation === persistScopeGenRef.current &&
+      captured.sectionId === scopeRef.current.sectionId;
 
     const applyContext = () => ({
       sectionId: captured.sectionId,
@@ -1312,13 +1320,22 @@ export function useSectionFreeSpaceObjects(
     };
 
     const executeCatchUpPull = async () => {
-      const result = await runFreeSpaceSectionPullCatchUp(applyContext());
+      // Multi-board SOT seed must not abort when active board changes mid-pull.
+      // React patch still goes through isCurrent (mounted-board gated).
+      const result = await runFreeSpaceSectionPullCatchUp({
+        ...applyContext(),
+        isCurrent: isSectionCatchUpCurrent,
+      });
       patchReactFromApply(result);
     };
 
     const runCatchUpPull = () => {
       enqueueApply(executeCatchUpPull);
     };
+
+    const catchUpLifecycle = registerFreeSpaceObjectCatchUpLifecycle({
+      runCatchUp: runCatchUpPull,
+    });
 
     const resumeCatchUp = createCoalescedVisibilityResumeCatchUp(() => {
       applyChain = applyChain
@@ -1340,6 +1357,9 @@ export function useSectionFreeSpaceObjects(
       isCurrent,
       runCatchUp: () => resumeCatchUp.request(),
     });
+
+    // Deterministic fresh-device pull (boards-parity) — before/alongside Realtime.
+    catchUpLifecycle.onMount();
 
     const subscription = subscribeFreeSpaceObjectsRealtime({
       sectionId: captured.sectionId,
@@ -1387,21 +1407,12 @@ export function useSectionFreeSpaceObjects(
       },
       onStatus: status => {
         if (cancelled) return;
-        if (status === 'SUBSCRIBED') {
-          // Mandatory PR7 catch-up closes the pre/during-subscribe gap.
-          runCatchUpPull();
-          return;
-        }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           fwPersistWarn(
             `Free Space realtime channel status=${status} for section "${captured.sectionId}"`,
           );
-          // Failure safety: keep PR7 pull functional if realtime cannot subscribe.
-          if (!catchUpOnErrorDone) {
-            catchUpOnErrorDone = true;
-            runCatchUpPull();
-          }
         }
+        catchUpLifecycle.onRealtimeStatus(status);
       },
     });
 

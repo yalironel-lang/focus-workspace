@@ -52,6 +52,12 @@ import {
   syncCommitCanvasSize,
   usesInkDraftPenRenderer,
 } from '../../lib/handwritingLayers';
+import {
+  getHandwritingBackingStoreDpr,
+  handwritingCanvasBitmapSize,
+  handwritingCssSizeChanged,
+  shouldReallocateHandwritingBitmap,
+} from '../../lib/handwritingCanvasBacking';
 import { getFwInkDraftMode } from '../../lib/handwritingInkDraftMode';
 import { hwPaintProfileRecord } from '../../lib/handwritingPaintProfile';
 import {
@@ -174,23 +180,33 @@ function saveVerifyWarningMessage(): string {
   return 'Save verification failed — your notes may not have persisted correctly.';
 }
 
-/** Size bitmap from painted geometry; draw in CSS pixel coordinates (DPR via transform). */
+/** Size bitmap from painted geometry; draw in CSS pixel coordinates (capped DPR via transform). */
 function syncCanvasFromRect(
   canvas: HTMLCanvasElement,
   opts?: { allowResize?: boolean },
-): { w: number; h: number; dpr: number } | null {
+): { w: number; h: number; dpr: number; resized: boolean } | null {
   const rect = canvas.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) return null;
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const bw = Math.round(rect.width * dpr);
-  const bh = Math.round(rect.height * dpr);
-  if (opts?.allowResize !== false && (canvas.width !== bw || canvas.height !== bh)) {
+  const dpr = getHandwritingBackingStoreDpr();
+  const { width: bw, height: bh } = handwritingCanvasBitmapSize(rect.width, rect.height, dpr);
+  let resized = false;
+  if (
+    opts?.allowResize !== false &&
+    shouldReallocateHandwritingBitmap({
+      nextCssW: rect.width,
+      nextCssH: rect.height,
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      devicePixelRatio: dpr,
+    })
+  ) {
     canvas.width = bw;
     canvas.height = bh;
+    resized = true;
   }
   const ctx = canvas.getContext('2d');
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { w: rect.width, h: rect.height, dpr };
+  return { w: rect.width, h: rect.height, dpr, resized };
 }
 
 function dismissEditableFocus(): void {
@@ -708,16 +724,19 @@ export function HandwritingBlock({
     if (drawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas || !dataRef.current) return;
+    const prev = layoutRef.current;
     const synced = syncCanvasFromRect(canvas);
     if (!synced) return;
-    const { w, h } = synced;
+    const { w, h, resized } = synced;
+    const cssChanged = handwritingCssSizeChanged(prev.w, prev.h, w, h);
+    if (!resized && !cssChanged) return;
     layoutRef.current = { w, h };
     const preservedHeight = dataRef.current.canvas.height;
     dataRef.current = {
       ...dataRef.current,
       canvas: { width: w, height: preservedHeight },
     };
-    invalidateCommitCache();
+    if (resized) invalidateCommitCache();
     schedulePaint();
   }, [invalidateCommitCache, schedulePaint]);
 
@@ -925,11 +944,13 @@ export function HandwritingBlock({
     if (!wrap || typeof ResizeObserver === 'undefined') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
+      if (drawingRef.current) return;
       if (timer) clearTimeout(timer);
+      // Debounce bitmap work — iOS visualViewport/layout thrash is common on phones.
       timer = setTimeout(() => {
         timer = null;
-        redrawAfterHydrate('layout');
-      }, 100);
+        syncCanvasWidthRef.current();
+      }, 150);
     });
     ro.observe(wrap);
     return () => {
@@ -942,14 +963,21 @@ export function HandwritingBlock({
     if (!loaded) return;
     const vv = window.visualViewport;
     if (!vv) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const onVvChange = () => {
-      if (!drawingRef.current) syncCanvasWidth();
+      if (drawingRef.current) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        syncCanvasWidth();
+      }, 150);
     };
     vv.addEventListener('resize', onVvChange);
     vv.addEventListener('scroll', onVvChange);
     return () => {
       vv.removeEventListener('resize', onVvChange);
       vv.removeEventListener('scroll', onVvChange);
+      if (timer) clearTimeout(timer);
     };
   }, [loaded, syncCanvasWidth]);
 

@@ -53,6 +53,70 @@ export function sectionActiveBoardKey(sectionId: string): string {
   return `fw_section_${sectionId}_active_board_v1`;
 }
 
+/**
+ * True when any Free Space **object** SOT key exists for the section (main or
+ * board-scoped). Prefs/boards/viewport alone do not count — used to decide
+ * whether an IDB-unavailable inbound pull may fresh-bootstrap from cloud.
+ */
+export function sectionHasLocalFreeSpaceObjectSot(sectionId: string): boolean {
+  if (!sectionId || typeof localStorage === 'undefined') return false;
+  const mainKey = freeSpaceStorageKeys(sectionId).objects;
+  try {
+    if (localStorage.getItem(mainKey) != null) return true;
+    const prefix = `fw_section_${sectionId}_board_`;
+    const suffix = '_objects_v1';
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix) || !k.endsWith(suffix)) continue;
+      if (localStorage.getItem(k) != null) return true;
+    }
+  } catch {
+    // Unreadable storage → treat as existing local state (fail-closed callers).
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when the given board's Free Space **object** SOT key exists.
+ * Used for per-board IDB-unavailable bootstrap vs fail-closed decisions so one
+ * board with local state does not block empty sibling boards in the same section.
+ */
+export function boardHasLocalFreeSpaceObjectSot(
+  sectionId: string,
+  boardId: string,
+): boolean {
+  if (!sectionId || typeof localStorage === 'undefined') return false;
+  try {
+    const key = boardScopedFreeSpaceKeys(sectionId, boardId).objects;
+    return localStorage.getItem(key) != null;
+  } catch {
+    // Unreadable storage → treat as existing local state (fail-closed callers).
+    return true;
+  }
+}
+
+/** Board ids from the section board list (always includes `main`). */
+export function readSectionLocalBoardIds(sectionId: string): string[] {
+  const ids = new Set<string>(['main']);
+  if (!sectionId || typeof localStorage === 'undefined') return [...ids];
+  try {
+    const raw = localStorage.getItem(sectionBoardsListKey(sectionId));
+    if (!raw) return [...ids];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...ids];
+    for (const b of parsed) {
+      if (b && typeof b === 'object' && typeof (b as { id?: unknown }).id === 'string') {
+        const id = ((b as { id: string }).id).trim();
+        if (id) ids.add(!id || id === 'main' ? 'main' : id);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return [...ids];
+}
+
 /** Removes objects, positions, viewport, and prefs for one section (dev / recovery). */
 export function clearFreeSpacePersistenceForSection(sectionId: string): void {
   if (!sectionId) {

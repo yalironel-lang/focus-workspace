@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, createContext, useContext, ReactNode 
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { getOAuthRedirectTo } from '../lib/authRedirect';
 import { hasAuthCallbackInUrl } from '../lib/authCallback';
+import {
+  isNativePlatform,
+  openNativeOAuthAuthorizeUrl,
+} from '../lib/nativeOAuthDeepLink';
+import { isTauriDesktop } from '../lib/desktopPlatform';
+import { openDesktopOAuthAuthorizeUrl } from '../lib/desktopOAuthDeepLink';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -116,13 +122,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Supabase is not configured for this deployment');
     }
     const redirectTo = getOAuthRedirectTo();
-    const { error } = await supabase.auth.signInWithOAuth({
+    const native = isNativePlatform();
+    const tauriDesktop = isTauriDesktop();
+    // External-browser OAuth: keep PKCE verifier in this app's storage namespace.
+    const externalBrowser = native || tauriDesktop;
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo,
+        skipBrowserRedirect: externalBrowser,
       },
     });
     if (error) throw error;
+    if (externalBrowser) {
+      if (!data?.url) {
+        throw new Error('OAuth did not return an authorize URL');
+      }
+      if (tauriDesktop) {
+        await openDesktopOAuthAuthorizeUrl(data.url);
+      } else {
+        await openNativeOAuthAuthorizeUrl(data.url);
+      }
+    }
   }, []);
 
   const signOut = useCallback(async () => {

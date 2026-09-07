@@ -16,6 +16,8 @@ interface Props {
   onRequestSelectObject?: (id: string) => void;
   onCreateNotebookRecall?: (sourceId: string, prompt: string) => void;
   onExpand?: () => void;
+  /** Free Space: start a learning attempt from notebook chrome (not absolute overlay). */
+  onLearningAttempt?: () => void;
   compositionChromeSuppressed?: boolean;
   onOpenBinderStudy?: (payload: {
     pdfObjectId: string;
@@ -38,6 +40,7 @@ export function FreeSpaceNotebookSurface({
   onRequestSelectObject,
   onCreateNotebookRecall,
   onExpand,
+  onLearningAttempt,
   compositionChromeSuppressed,
   onOpenBinderStudy,
 }: Props) {
@@ -78,6 +81,7 @@ export function FreeSpaceNotebookSurface({
             : undefined
         }
         onExpand={onExpand}
+        onLearningAttempt={onLearningAttempt}
         compositionChromeSuppressed={compositionChromeSuppressed}
         onOpenBinderStudy={onOpenBinderStudy}
       />

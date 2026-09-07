@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { clearPwaCachesAndReload } from '../lib/pwaRecovery';
+import {
+  clearAppConnectivityInset,
+  setAppConnectivityInsetPx,
+} from '../lib/appConnectivityInset';
 
 export function AppConnectivityBanner() {
   const [offline, setOffline] = useState(
     () => typeof navigator !== 'undefined' && !navigator.onLine,
   );
   const [resetting, setResetting] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onOnline = () => setOffline(false);
@@ -20,7 +25,33 @@ export function AppConnectivityBanner() {
   }, []);
 
   const configMissing = !isSupabaseConfigured;
-  if (!offline && !configMissing) return null;
+  const visible = offline || configMissing;
+
+  // Publish measured height to :root so fixed/portaled chrome can offset.
+  useLayoutEffect(() => {
+    if (!visible) {
+      clearAppConnectivityInset();
+      return;
+    }
+    const el = bannerRef.current;
+    if (!el) {
+      clearAppConnectivityInset();
+      return;
+    }
+    // Use viewport bottom (not height alone) so body safe-area padding is included.
+    const publish = () => setAppConnectivityInsetPx(el.getBoundingClientRect().bottom);
+    publish();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(publish) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', publish);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', publish);
+      clearAppConnectivityInset();
+    };
+  }, [visible, offline, configMissing]);
+
+  if (!visible) return null;
 
   const handleResetCache = () => {
     if (resetting) return;
@@ -30,13 +61,15 @@ export function AppConnectivityBanner() {
 
   return (
     <div
+      ref={bannerRef}
       role="status"
+      data-app-connectivity-banner=""
       style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 99999,
+        // In-flow (not fixed/absolute): reserves vertical space in the app shell.
+        position: 'relative',
+        flexShrink: 0,
+        zIndex: 1,
+        // Body already applies env(safe-area-inset-*); keep content padding only.
         padding: '10px 16px',
         fontSize: 13,
         lineHeight: 1.45,
@@ -49,6 +82,7 @@ export function AppConnectivityBanner() {
         justifyContent: 'center',
         gap: 10,
         textAlign: 'center',
+        boxSizing: 'border-box',
       }}
     >
       {configMissing ? (

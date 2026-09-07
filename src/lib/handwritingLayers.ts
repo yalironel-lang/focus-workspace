@@ -25,11 +25,12 @@ export type LayerCanvasMetrics = {
   dpr: number;
 };
 
-/** Match commit bitmap dimensions to the visible canvas (DPR-aware). */
+/** Match commit bitmap dimensions to the visible canvas (capped-DPR-aware). */
 export function syncCommitCanvasSize(
   commitCanvas: HTMLCanvasElement,
   metrics: LayerCanvasMetrics,
 ): void {
+  // `metrics.dpr` must already be capped via getHandwritingBackingStoreDpr.
   const bw = Math.round(metrics.w * metrics.dpr);
   const bh = Math.round(metrics.h * metrics.dpr);
   if (commitCanvas.width !== bw || commitCanvas.height !== bh) {

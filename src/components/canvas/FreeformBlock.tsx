@@ -159,6 +159,15 @@ export function FreeformBlock({
 
   const anchorNudge = deepFocusAnchor && !isDragging ? ' translateY(-1px)' : '';
 
+  const touchChrome = coarsePointer || (typeof liveW === 'number' && liveW > 0 && liveW < 420);
+  const headerMinH = touchChrome ? TOUCH_TARGET_MIN_PX : 28;
+  const iconBtnSize = touchChrome ? TOUCH_TARGET_MIN_PX : 28;
+
+  const startMove = (e: React.MouseEvent | React.PointerEvent) => {
+    e.stopPropagation();
+    onBlockMouseDown(id, e, 'move');
+  };
+
   let transform = `translate3d(0,0,0) scale(1)${anchorNudge}`;
   if (isConnectTargetHover) transform = `translate3d(0,-2px,0) scale(1.002)${anchorNudge}`;
   else if (isDragging && activeGesture === 'resize') transform = `translate3d(0,-2px,0) scale(1.002)${anchorNudge}`;
@@ -277,28 +286,20 @@ export function FreeformBlock({
           minHeight: 0,
         }}
       >
-        {/* Drag handle — calm chrome */}
+        {/* Header chrome — drag only via dedicated grip (not the action row). */}
         <div
-          onMouseDown={e => {
-            e.stopPropagation();
-            onBlockMouseDown(id, e, 'move');
-          }}
-          onPointerDown={e => {
-            if (e.pointerType === 'pen') return;
-            if (e.pointerType !== 'touch') return;
-            e.stopPropagation();
-            onBlockMouseDown(id, e, 'move');
-          }}
+          data-fs-block-header="1"
+          data-fs-touch-chrome={touchChrome ? '1' : '0'}
           style={{
-            height: '28px',
+            minHeight: headerMinH,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 10px',
-            cursor: 'grab',
+            padding: touchChrome ? '4px 8px' : '0 10px',
             flexShrink: 0,
-            gap: '8px',
+            gap: 8,
             userSelect: 'none',
+            flexWrap: touchChrome ? 'wrap' : 'nowrap',
             background: headerHot
               ? `linear-gradient(180deg, ${tokens.accent}0d 0%, transparent 100%)`
               : 'transparent',
@@ -309,16 +310,37 @@ export function FreeformBlock({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
-            <GripHorizontal
-              style={{
-                width: '12px',
-                height: '12px',
-                color: tokens.textGhost,
-                flexShrink: 0,
-                opacity: headerHot ? 0.42 : 0,
-                transition: `opacity 0.32s ${chromeEase}`,
+            <button
+              type="button"
+              aria-label="Drag object"
+              title="Drag"
+              data-fs-block-drag-grip="1"
+              onMouseDown={startMove}
+              onPointerDown={e => {
+                if (e.pointerType === 'pen') return;
+                startMove(e);
               }}
-            />
+              style={{
+                flexShrink: 0,
+                width: iconBtnSize,
+                height: iconBtnSize,
+                minWidth: iconBtnSize,
+                minHeight: iconBtnSize,
+                borderRadius: 7,
+                border: '1px solid transparent',
+                background: 'transparent',
+                cursor: 'grab',
+                color: tokens.textGhost,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: headerHot || touchChrome ? 0.7 : 0.35,
+                touchAction: 'none',
+                padding: 0,
+              }}
+            >
+              <GripHorizontal style={{ width: 14, height: 14 }} />
+            </button>
             {label && (
               <span
                 style={{
@@ -328,12 +350,13 @@ export function FreeformBlock({
                   letterSpacing: '0.11em',
                   textTransform: 'uppercase' as const,
                   color: selected ? tokens.textMuted : tokens.textSecondary,
-                  maxWidth: '160px',
+                  maxWidth: touchChrome ? 120 : '160px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                   opacity: headerHot || selected ? (selected ? 0.82 : 0.62) : 0,
                   transition: `opacity 0.32s ${chromeEase}`,
+                  pointerEvents: 'none',
                 }}
               >
                 {label}
@@ -341,7 +364,17 @@ export function FreeformBlock({
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+          <div
+            data-fs-block-actions="1"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: touchChrome ? 6 : 2,
+              flexShrink: 0,
+              flexWrap: touchChrome ? 'wrap' : 'nowrap',
+              justifyContent: 'flex-end',
+            }}
+          >
             {showConnectAction && (
               <button
                 type="button"
@@ -353,8 +386,10 @@ export function FreeformBlock({
                   onBeginConnect?.(id);
                 }}
                 style={{
-                  width: '30px',
-                  height: '28px',
+                  width: iconBtnSize,
+                  height: iconBtnSize,
+                  minWidth: iconBtnSize,
+                  minHeight: iconBtnSize,
                   borderRadius: '7px',
                   border: '1px solid transparent',
                   background: 'rgba(251,191,36,0.06)',
@@ -363,21 +398,10 @@ export function FreeformBlock({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  opacity: headerHot ? 1 : 0,
-                  pointerEvents: headerHot ? 'auto' : 'none',
+                  opacity: headerHot || touchChrome ? 1 : 0,
+                  pointerEvents: headerHot || touchChrome ? 'auto' : 'none',
                   transition: `opacity 0.32s ${chromeEase}, color 0.2s ease, background 0.2s ease`,
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'rgba(251,191,36,0.12)';
-                  el.style.color = 'rgba(253,186,116,0.95)';
-                  el.style.borderColor = 'rgba(251,191,36,0.2)';
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'rgba(251,191,36,0.06)';
-                  el.style.color = 'rgba(251,191,36,0.55)';
-                  el.style.borderColor = 'transparent';
+                  touchAction: 'manipulation',
                 }}
               >
                 <Link2 style={{ width: '13px', height: '13px' }} strokeWidth={2} />
@@ -387,6 +411,7 @@ export function FreeformBlock({
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginRight: 2 }}>
                 <button
                   type="button"
+                  data-fs-block-view="1"
                   onMouseDown={e => e.stopPropagation()}
                   onClick={e => {
                     e.stopPropagation();
@@ -394,9 +419,9 @@ export function FreeformBlock({
                   }}
                   title="Object view mode"
                   style={{
-                    minHeight: coarsePointer ? TOUCH_TARGET_MIN_PX : 24,
-                    height: coarsePointer ? TOUCH_TARGET_MIN_PX : 24,
-                    minWidth: coarsePointer ? TOUCH_TARGET_MIN_PX : undefined,
+                    minHeight: iconBtnSize,
+                    height: iconBtnSize,
+                    minWidth: touchChrome ? TOUCH_TARGET_MIN_PX : undefined,
                     borderRadius: '7px',
                     border: '1px solid rgba(255,255,255,0.12)',
                     background: 'rgba(255,255,255,0.04)',
@@ -405,8 +430,8 @@ export function FreeformBlock({
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    padding: coarsePointer ? '0 12px' : '0 8px',
-                    fontSize: coarsePointer ? 11 : 10,
+                    padding: touchChrome ? '0 12px' : '0 8px',
+                    fontSize: touchChrome ? 11 : 10,
                     fontWeight: 700,
                     letterSpacing: '0.05em',
                     textTransform: 'uppercase',
@@ -467,8 +492,8 @@ export function FreeformBlock({
                               color: selectedMode ? tokens.accent : tokens.textSecondary,
                               fontSize: 12,
                               fontWeight: selectedMode ? 700 : 600,
-                              minHeight: coarsePointer ? TOUCH_TARGET_MIN_PX : undefined,
-                              padding: coarsePointer ? '12px 14px' : '8px 10px',
+                              minHeight: touchChrome ? TOUCH_TARGET_MIN_PX : undefined,
+                              padding: touchChrome ? '12px 14px' : '8px 10px',
                               cursor: 'pointer',
                               touchAction: 'manipulation',
                             }}
@@ -483,98 +508,78 @@ export function FreeformBlock({
               </div>
             ) : null}
 
-          {showActions && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '3px',
-                flexShrink: 0,
-                opacity: actionOpacity,
-                pointerEvents: 'auto',
-                transition: `opacity 0.38s ${chromeEase}`,
-              }}
-            >
-              {onDuplicate && (
-                <button
-                  type="button"
-                  aria-label="Duplicate block"
-                  onMouseDown={e => e.stopPropagation()}
-                  onClick={e => {
-                    e.stopPropagation();
-                    onDuplicate(id);
-                  }}
-                  title="Duplicate"
-                  style={{
-                    width: '30px',
-                    height: '28px',
-                    borderRadius: '7px',
-                    border: '1px solid transparent',
-                    background: 'rgba(255,255,255,0.03)',
-                    cursor: 'pointer',
-                    color: tokens.textSecondary,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: `color 0.2s ${chromeEase}, background 0.2s ${chromeEase}, border-color 0.2s ${chromeEase}`,
-                  }}
-                  onMouseEnter={e => {
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.background = 'rgba(255,255,255,0.06)';
-                    el.style.color = tokens.textMuted;
-                    el.style.borderColor = 'rgba(255,255,255,0.06)';
-                  }}
-                  onMouseLeave={e => {
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.background = 'rgba(255,255,255,0.03)';
-                    el.style.color = tokens.textSecondary;
-                    el.style.borderColor = 'transparent';
-                  }}
-                >
-                  <Copy style={{ width: '12px', height: '12px', opacity: 0.92 }} />
-                </button>
-              )}
-              {onRemove && (
-                <button
-                  type="button"
-                  aria-label="Remove block"
-                  onMouseDown={e => e.stopPropagation()}
-                  onClick={e => {
-                    e.stopPropagation();
-                    onRemove(id);
-                  }}
-                  title="Remove"
-                  style={{
-                    width: '30px',
-                    height: '28px',
-                    borderRadius: '7px',
-                    border: '1px solid transparent',
-                    background: 'rgba(255,255,255,0.03)',
-                    cursor: 'pointer',
-                    color: tokens.textSecondary,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: `color 0.2s ${chromeEase}, background 0.2s ${chromeEase}, border-color 0.2s ${chromeEase}`,
-                  }}
-                  onMouseEnter={e => {
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.background = 'rgba(248,113,113,0.08)';
-                    el.style.color = '#fca5a5';
-                    el.style.borderColor = 'rgba(248,113,113,0.12)';
-                  }}
-                  onMouseLeave={e => {
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.background = 'rgba(255,255,255,0.03)';
-                    el.style.color = tokens.textSecondary;
-                    el.style.borderColor = 'transparent';
-                  }}
-                >
-                  <X style={{ width: '12px', height: '12px', opacity: 0.92 }} />
-                </button>
-              )}
-            </div>
-          )}
+            {showActions && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: touchChrome ? 6 : 3,
+                  flexShrink: 0,
+                  opacity: actionOpacity,
+                  pointerEvents: 'auto',
+                  transition: `opacity 0.38s ${chromeEase}`,
+                }}
+              >
+                {onDuplicate && (
+                  <button
+                    type="button"
+                    aria-label="Duplicate block"
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      onDuplicate(id);
+                    }}
+                    title="Duplicate"
+                    style={{
+                      width: iconBtnSize,
+                      height: iconBtnSize,
+                      minWidth: iconBtnSize,
+                      minHeight: iconBtnSize,
+                      borderRadius: '7px',
+                      border: '1px solid transparent',
+                      background: 'rgba(255,255,255,0.03)',
+                      cursor: 'pointer',
+                      color: tokens.textSecondary,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      touchAction: 'manipulation',
+                    }}
+                  >
+                    <Copy style={{ width: '12px', height: '12px', opacity: 0.92 }} />
+                  </button>
+                )}
+                {onRemove && (
+                  <button
+                    type="button"
+                    aria-label="Remove block"
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={e => {
+                      e.stopPropagation();
+                      onRemove(id);
+                    }}
+                    title="Remove"
+                    style={{
+                      width: iconBtnSize,
+                      height: iconBtnSize,
+                      minWidth: iconBtnSize,
+                      minHeight: iconBtnSize,
+                      borderRadius: '7px',
+                      border: '1px solid transparent',
+                      background: 'rgba(255,255,255,0.03)',
+                      cursor: 'pointer',
+                      color: tokens.textSecondary,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      touchAction: 'manipulation',
+                    }}
+                  >
+                    <X style={{ width: '12px', height: '12px', opacity: 0.92 }} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

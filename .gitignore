@@ -27,3 +27,10 @@ dist-ssr
 .DS_Store
 Thumbs.db
 .vercel
+
+# Capacitor iOS
+ios/App/Pods
+ios/App/output
+ios/App/App/public
+ios/DerivedData
+ios/capacitor-cordova-ios-plugins

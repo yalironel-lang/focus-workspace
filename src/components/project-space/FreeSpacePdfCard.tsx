@@ -11,16 +11,16 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  PenLine,
+  Eraser,
 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { ProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { ensureProjectObjectContent } from '../../hooks/useSectionFreeSpaceObjects';
 import { isAcceptablePdfFile, loadPdfBlob, savePdfBlobFromFile } from '../../lib/freeSpacePdfIdb';
 import { useAuth } from '../../hooks/useAuth';
-import {
-  hydrateSpatialPdfWithCloud,
-  onSpatialPdfSaved,
-} from '../../lib/spatialAssetCloud';
+import { onSpatialPdfSaved } from '../../lib/spatialAssetCloud';
+import { resolvePdfBlobForViewerOpen } from '../../lib/freeSpacePdfOpen';
 import { loadPdfThumbnail } from '../../lib/freeSpacePdfThumbIdb';
 import { pdfUploadDiag, pdfUploadDiagDump } from '../../lib/pdfUploadDiag';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
@@ -176,21 +176,22 @@ export function FreeSpacePdfCard({
       });
       setLoadState('loading');
       try {
-        let blob = await loadPdfBlob(sectionId, objectId);
-        if (!blob && user?.id) {
-          const hydrateResult = await hydrateSpatialPdfWithCloud({
-            userId: user.id,
+        const resolved = await resolvePdfBlobForViewerOpen({
+          sectionId,
+          objectId,
+          userId: user?.id ?? null,
+        });
+        if (cancelled || !mounted.current) return;
+        if (!resolved.ok) {
+          pdfUploadDiag('loadEffect:recover', {
             sectionId,
             objectId,
-            assetType: 'pdf',
+            key,
+            fileName: content.fileName,
+            reason: resolved.reason,
+            localLookupFailed: resolved.localLookupFailed,
+            hasUser: Boolean(user?.id),
           });
-          if (hydrateResult === 'cloud_hit') {
-            blob = await loadPdfBlob(sectionId, objectId);
-          }
-        }
-        if (cancelled || !mounted.current) return;
-        if (!blob) {
-          pdfUploadDiag('loadEffect:recover', { sectionId, objectId, key, fileName: content.fileName });
           setLoadState('recover');
           setObjectUrl(prev => {
             revokeIf(prev);
@@ -198,12 +199,14 @@ export function FreeSpacePdfCard({
           });
           return;
         }
-        url = URL.createObjectURL(blob);
+        url = URL.createObjectURL(resolved.blob);
         pdfUploadDiag('loadEffect:ready', {
           sectionId,
           objectId,
           key,
-          blobSize: blob.size,
+          blobSize: resolved.blob.size,
+          source: resolved.source,
+          cachePersisted: resolved.cachePersisted,
           objectUrlPrefix: url.slice(0, 24),
         });
         setObjectUrl(prev => {
@@ -233,7 +236,7 @@ export function FreeSpacePdfCard({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [sectionId, objectId, content.fileName, revokeIf]);
+  }, [sectionId, objectId, content.fileName, revokeIf, user?.id]);
 
   const viewerReadyFiredRef = useRef(false);
   useEffect(() => {
@@ -396,13 +399,63 @@ export function FreeSpacePdfCard({
     sectionId,
     objectId,
     page: visiblePage,
-    enabled: inStudySession && loadState === 'ready' && !suspendViewer,
+    enabled: loadState === 'ready' && !suspendViewer,
     onJumpToPage: jumpToPage,
     onChromeChange: onStudyMarksChromeChange,
   });
 
   const border = tokens.cardBorder;
   const well = tokens.wellBg;
+
+  const annotateToolbar = studyMarks.loaded ? (
+    <>
+      <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
+      <button
+        type="button"
+        title="View — scroll PDF (default)"
+        className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+        style={{
+          color: studyMarks.tool === 'view' ? tokens.accent : tokens.textMuted,
+          border: `1px solid ${studyMarks.tool === 'view' ? `${tokens.accent}66` : border}`,
+        }}
+        onClick={() => studyMarks.setTool('view')}
+      >
+        View
+      </button>
+      <button
+        type="button"
+        title="Annotate — Apple Pencil draws; finger still scrolls"
+        className="p-1 rounded-md inline-flex items-center gap-0.5"
+        style={{ color: studyMarks.tool === 'ink' ? tokens.accent : tokens.textMuted }}
+        onClick={() => studyMarks.setTool(studyMarks.tool === 'ink' ? 'view' : 'ink')}
+      >
+        <PenLine className="w-3.5 h-3.5" />
+        <span className="text-[10px] font-semibold">Annotate</span>
+      </button>
+      {studyMarks.tool === 'ink' || studyMarks.tool === 'eraser' ? (
+        <>
+          <button
+            type="button"
+            title="Eraser — tap a stroke to remove"
+            className="p-1 rounded-md"
+            style={{ color: studyMarks.tool === 'eraser' ? tokens.accent : tokens.textMuted }}
+            onClick={() => studyMarks.setTool(studyMarks.tool === 'eraser' ? 'ink' : 'eraser')}
+          >
+            <Eraser className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            title="Clear ink on this page"
+            className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+            style={{ color: tokens.textMuted, border: `1px solid ${border}` }}
+            onClick={() => studyMarks.clearCurrentPageInk()}
+          >
+            Clear page
+          </button>
+        </>
+      ) : null}
+    </>
+  ) : null;
 
   const hasStudyLinks = !!(linkedNotebookTitle || relatedMistakeCount > 0);
 
@@ -474,6 +527,7 @@ export function FreeSpacePdfCard({
           >
             <Highlighter className="w-3.5 h-3.5" />
           </button>
+          {annotateToolbar}
         </>
       ) : null}
     </div>
@@ -639,6 +693,7 @@ export function FreeSpacePdfCard({
           <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
             <Plus className="w-3.5 h-3.5" />
           </button>
+          {annotateToolbar}
         </div>
       ) : null}
 
@@ -704,7 +759,7 @@ export function FreeSpacePdfCard({
                 <p className="text-[12px] leading-relaxed max-w-[220px]" style={{ color: tokens.textMuted }}>
                   {loadState === 'error'
                     ? 'This PDF could not be shown inline. Try reconnecting the file or open in a new tab after reconnecting.'
-                    : 'File data is not in this browser session. Reconnect the same PDF — it stays on your device only.'}
+                    : 'This PDF couldn’t be loaded on this device. Check your connection and try again.'}
                 </p>
                 <button
                   type="button"
@@ -792,14 +847,18 @@ export function FreeSpacePdfCard({
             onPagePersist={handlePagePersist}
             onError={handleViewerError}
             renderPageOverlay={
-              inStudySession && studyMarks.loaded
-                ? () => (
+              studyMarks.loaded
+                ? pageNum => (
                     <PdfStudyMarksOverlay
+                      page={pageNum}
                       tokens={tokens}
-                      regions={studyMarks.currentRegions}
+                      regions={studyMarks.regionsForPage(pageNum)}
+                      strokes={studyMarks.strokesForPage(pageNum)}
                       tool={studyMarks.tool}
                       onAddRegion={studyMarks.addRegion}
                       onRemoveRegion={studyMarks.removeRegion}
+                      onAddStroke={studyMarks.addStroke}
+                      onRemoveStroke={studyMarks.removeStroke}
                     />
                   )
                 : undefined

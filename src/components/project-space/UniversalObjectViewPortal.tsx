@@ -10,6 +10,7 @@ import {
 } from '../../lib/ui/zIndexLayers';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import { isSheetCellEditing } from '../../sheets/components/sheetEngineLifecycle';
+import { appChromeSafePadTop, appConnectivityInsetTop } from '../../lib/appConnectivityInset';
 
 function isDomSheetEditorFocused(): boolean {
   const ae = document.activeElement;
@@ -113,7 +114,7 @@ export function UniversalObjectViewPortal({
       <div
         style={{
           position: 'fixed',
-          top: 0,
+          top: appConnectivityInsetTop,
           bottom: 0,
           left: isFullscreen || splitLeft ? 0 : undefined,
           right: isFullscreen || splitRight ? 0 : undefined,
@@ -134,7 +135,7 @@ export function UniversalObjectViewPortal({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            paddingTop: 'max(8px, env(safe-area-inset-top))',
+            paddingTop: appChromeSafePadTop,
             paddingRight: 'max(12px, env(safe-area-inset-right))',
             paddingBottom: 8,
             paddingLeft: 'max(12px, env(safe-area-inset-left))',

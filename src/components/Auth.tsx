@@ -72,9 +72,11 @@ export function Auth() {
     setLoading(true);
     try {
       await signInWithGoogle();
-      // Browser will redirect to Google — no further action needed here.
+      // Web: page navigates away. Cap native / Tauri: system or in-app browser
+      // is opened; clear loading so cancel cannot leave the button spinning.
     } catch {
       toast.error('Failed to start Google sign-in');
+    } finally {
       setLoading(false);
     }
   };

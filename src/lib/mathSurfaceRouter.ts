@@ -56,9 +56,17 @@ export function resolveMathSurfaceRouter(sectionId: string): MathSurfaceRouterRe
 /** Pick view mode on section open when not first arrival. */
 export function resolveSectionViewModeOnOpen(
   sectionId: string,
-  options?: { forceFreeSpace?: boolean },
+  options?: { forceFreeSpace?: boolean; preferWorkSurface?: boolean },
 ): SectionViewMode {
   if (options?.forceFreeSpace) return 'free-space';
+  if (options?.preferWorkSurface) {
+    const router = resolveMathSurfaceRouter(sectionId);
+    // Phone Mission Control–first: only yield to an actively preferred math zone.
+    if (router.threadSurface === 'math-zone' && isMathZoneDestinationEnabled()) {
+      return 'math-zone';
+    }
+    return 'work-surface';
+  }
   const router = resolveMathSurfaceRouter(sectionId);
   const rec = loadSectionViewModeRecord(sectionId);
   if (!rec) return router.preferredViewMode;

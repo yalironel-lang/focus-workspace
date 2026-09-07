@@ -1,3 +1,5 @@
+import { getIndexedDB } from '../indexedDbEnvironment';
+
 const DB_NAME = 'fw_knowledge_journal_v1';
 const DB_VERSION = 1;
 export const TOMBSTONES_STORE = 'tombstones';
@@ -8,8 +10,24 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error ?? new Error('Knowledge journal IndexedDB open failed'));
+    const factory = getIndexedDB();
+    if (!factory) {
+      dbPromise = null;
+      reject(new Error('idb_unavailable'));
+      return;
+    }
+    let req: IDBOpenDBRequest;
+    try {
+      req = factory.open(DB_NAME, DB_VERSION);
+    } catch (err) {
+      dbPromise = null;
+      reject(err instanceof Error ? err : new Error('db_open_failed'));
+      return;
+    }
+    req.onerror = () => {
+      dbPromise = null;
+      reject(req.error ?? new Error('Knowledge journal IndexedDB open failed'));
+    };
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(TOMBSTONES_STORE)) {
