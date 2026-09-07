@@ -1,0 +1,78 @@
+/**
+ * Notebook dialect blocks → closed TipTap JSON document (in-memory only).
+ */
+
+import type { JSONContent } from '@tiptap/core';
+import type { InlineMark } from '../notebookInlineMarks';
+import {
+  parseNotebookBody,
+  type NotebookDialectBlock,
+} from '../notebookDialect';
+import { richLineToTiptapInline } from './inlineBridge';
+
+function inlineContent(block: { text: string; marks?: InlineMark[] }): JSONContent[] {
+  return richLineToTiptapInline(block.text, block.marks);
+}
+
+export function blockToTiptapNode(block: NotebookDialectBlock): JSONContent {
+  switch (block.kind) {
+    case 'paragraph':
+      return {
+        type: 'nbParagraph',
+        attrs: { variant: block.variant ?? null },
+        content: inlineContent(block),
+      };
+    case 'title':
+      return { type: 'nbTitle', content: inlineContent(block) };
+    case 'section':
+      return { type: 'nbSection', content: inlineContent(block) };
+    case 'quote':
+      return { type: 'nbQuote', content: inlineContent(block) };
+    case 'step':
+      return { type: 'nbStep', content: inlineContent(block) };
+    case 'math':
+      return { type: 'nbMath', content: inlineContent(block) };
+    case 'bullet':
+      return {
+        type: 'nbBullet',
+        attrs: { depth: block.depth },
+        content: inlineContent(block),
+      };
+    case 'ordered':
+      return {
+        type: 'nbOrdered',
+        attrs: { number: block.number },
+        content: inlineContent(block),
+      };
+    case 'task':
+      return {
+        type: 'nbTask',
+        attrs: { checked: block.checked },
+        content: inlineContent(block),
+      };
+    case 'callout':
+      return {
+        type: 'nbCallout',
+        attrs: { tone: block.tone },
+        content: inlineContent(block),
+      };
+    case 'divider':
+      return { type: 'nbDivider' };
+    case 'image-ref':
+      return { type: 'nbImageRef', attrs: { key: block.key, alt: block.alt } };
+    case 'handwriting':
+      return { type: 'nbHandwriting', attrs: { key: block.key } };
+  }
+}
+
+export function blocksToTiptapDoc(blocks: NotebookDialectBlock[]): JSONContent {
+  return {
+    type: 'doc',
+    content: blocks.map(blockToTiptapNode),
+  };
+}
+
+/** documentBody → TipTap JSON (parse dialect, then convert). */
+export function bodyToTiptapDoc(body: string): JSONContent {
+  return blocksToTiptapDoc(parseNotebookBody(body));
+}

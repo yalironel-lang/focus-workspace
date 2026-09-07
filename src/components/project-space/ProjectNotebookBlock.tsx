@@ -162,8 +162,17 @@ import {
   attachMarksToText,
   mergeBlockMarks,
   morphBlockKind,
-  serializeBlockText,
 } from '../../lib/notebookBlockRichText';
+import {
+  normalizeNotebookSpaces,
+  parseNotebookLine,
+  normalizeOrderedSequences as normalizeOrderedDialectSequences,
+  notebookBlockToLine,
+  serializeNotebookBlocks,
+  type CalloutTone,
+  type ParagraphVariant,
+  type NotebookDialectBlock,
+} from '../../lib/notebookDialect';
 import {
   anchorFromSelection,
   computeToolbarAnchor,
@@ -213,107 +222,6 @@ import { computeDeskCheck } from '../../lib/mathDesk/deskCheck';
 import { DeskCheckRow, type DeskCheckRowState } from './desk/DeskCheckRow';
 
 type NotebookContent = Extract<ProjectObjectContent, { type: 'notebook' }>;
-
-type ParagraphVariant = 'muted' | 'fine';
-type CalloutTone = 'summary' | 'concept' | 'review' | 'definition' | 'theorem' | 'example' | 'mistake';
-
-type NotebookLine =
-  | { kind: 'blank' }
-  | { kind: 'title'; text: string }
-  | { kind: 'section'; text: string }
-  | { kind: 'divider' }
-  | { kind: 'bullet'; text: string; depth: number }
-  | { kind: 'ordered'; number: number; text: string }
-  | { kind: 'task'; checked: boolean; text: string }
-  | { kind: 'quote'; text: string }
-  | { kind: 'step'; text: string }
-  | { kind: 'callout'; tone: CalloutTone; text: string }
-  | { kind: 'math'; text: string }
-  | { kind: 'image-ref'; key: string; alt: string }
-  | { kind: 'handwriting'; key: string }
-  | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
-
-/** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
-function normalizeNotebookSpaces(s: string): string {
-  return s.replace(/\u00a0/g, ' ');
-}
-
-/**
- * Parse one storage line into a notebook line shape.
- * Used for load, preview, and paragraph→block morph. Prefixes are never part of title/section/task/quote text.
- */
-function parseNotebookLine(raw: string): NotebookLine {
-  const normalized = normalizeNotebookSpaces(raw);
-  const trimmed = normalized.trim();
-  if (trimmed === '') return { kind: 'blank' };
-  if (trimmed === '---') return { kind: 'divider' };
-
-  const sectionMatch = trimmed.match(/^##\s*(.*)$/);
-  if (sectionMatch) return { kind: 'section', text: (sectionMatch[1] ?? '').trimEnd() };
-
-  const titleMatch = trimmed.match(/^#(?!\#)\s*(.*)$/);
-  if (titleMatch) return { kind: 'title', text: (titleMatch[1] ?? '').trimEnd() };
-
-  const orderedMatch = trimmed.match(/^(\d+)\.\s*(.*)$/);
-  if (orderedMatch) {
-    return {
-      kind: 'ordered',
-      number: Math.max(1, Number(orderedMatch[1] ?? 1) || 1),
-      text: (orderedMatch[2] ?? '').trimEnd(),
-    };
-  }
-
-  const taskMatch = trimmed.match(/^- \[\s*([xX ])\s*\]\s*(.*)$/);
-  if (taskMatch) {
-    const checked = taskMatch[1]!.trim().toLowerCase() === 'x';
-    return { kind: 'task', checked, text: (taskMatch[2] ?? '').trimEnd() };
-  }
-
-  // Plain bullet: "- text" without [ ] → bullet block (depth from leading indent)
-  const bulletIndentMatch = normalized.match(/^(\s*)- (?!\[)\s*(.*)$/);
-  if (bulletIndentMatch) {
-    const depth = Math.min(2, Math.floor((bulletIndentMatch[1]?.length ?? 0) / 2));
-    return { kind: 'bullet', depth, text: (bulletIndentMatch[2] ?? '').trimEnd() };
-  }
-
-  const quoteMatch = trimmed.match(/^>\s?(.*)$/);
-  if (quoteMatch && trimmed.startsWith('>')) return { kind: 'quote', text: (quoteMatch[1] ?? '').trimEnd() };
-
-  const calloutMatch = trimmed.match(/^!(summary|concept|review|definition|theorem|example|mistake)\s*(.*)$/i);
-  if (calloutMatch) {
-    return {
-      kind: 'callout',
-      tone: calloutMatch[1]!.toLowerCase() as CalloutTone,
-      text: (calloutMatch[2] ?? '').trimEnd(),
-    };
-  }
-
-  // Slash/equation-block prefix is `$$ <latex>` (whitespace required). Wrapping
-  // `$$...$$` display math stays a paragraph and is rendered by MathRichText.
-  const mathMatch = trimmed.match(/^\$\$\s+(.*)$/);
-  if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
-
-  const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
-  if (imgMatch) return { kind: 'image-ref', key: imgMatch[1]!, alt: imgMatch[2] ?? '' };
-
-  const hwMatch = trimmed.match(/^::hw::([a-z0-9-]+)::$/);
-  if (hwMatch) return { kind: 'handwriting', key: hwMatch[1]! };
-
-  const stepMatch = trimmed.match(/^=>\s*(.*)$/);
-  if (stepMatch) return { kind: 'step', text: (stepMatch[1] ?? '').trimEnd() };
-
-  /** Pilcrow prefixes — editorial tone scale (not shown in contenteditable; storage + paste only). */
-  if (trimmed.startsWith('\u00b6\u00b6')) {
-    const rest = trimmed.slice(2).trimStart();
-    return { kind: 'paragraph', text: rest.trimEnd(), variant: 'fine' };
-  }
-  if (trimmed.startsWith('\u00b6')) {
-    const rest = trimmed.slice(1).trimStart();
-    return { kind: 'paragraph', text: rest.trimEnd(), variant: 'muted' };
-  }
-
-  return { kind: 'paragraph', text: normalized };
-}
 
 /** Preview/read paths: never show mark envelope literals. */
 function previewInlineContent(text: string): ReactNode {
@@ -530,24 +438,7 @@ function tryAcademicAutoTransform(text: string): { tone: CalloutTone; body: stri
 }
 
 function normalizeOrderedSequences(blocks: Block[]): Block[] {
-  let changed = false;
-  const out: Block[] = [];
-  for (let i = 0; i < blocks.length; i += 1) {
-    const block = blocks[i]!;
-    if (block.kind !== 'ordered') {
-      out.push(block);
-      continue;
-    }
-    const prev = out[out.length - 1];
-    const nextNumber = prev?.kind === 'ordered' ? prev.number + 1 : Math.max(1, block.number);
-    if (block.number !== nextNumber) {
-      changed = true;
-      out.push({ ...block, number: nextNumber });
-    } else {
-      out.push(block);
-    }
-  }
-  return changed ? out : blocks;
+  return normalizeOrderedDialectSequences(blocks as NotebookDialectBlock[]) as Block[];
 }
 
 function withLineMarks(b: Block): Block {
@@ -658,10 +549,6 @@ type PendingCaretIntent = {
   scroll: CaretScrollPolicy;
 };
 
-function blockTextPayload(b: { text: string; marks?: InlineMark[] }): string {
-  return serializeBlockText(b.text, b.marks);
-}
-
 /** Avoid wiping stored marks when DOM briefly reports [] without a text change. */
 function resolveBlockMarksAfterEdit(
   prevPlain: string,
@@ -676,60 +563,11 @@ function resolveBlockMarksAfterEdit(
 }
 
 function blockToLine(b: Block): string {
-  switch (b.kind) {
-    case 'title':
-      return `# ${blockTextPayload(b)}`;
-    case 'section':
-      return `## ${blockTextPayload(b)}`;
-    case 'ordered':
-      return `${b.number}. ${blockTextPayload(b)}`;
-    case 'bullet':
-      return `${'  '.repeat(b.depth)}- ${blockTextPayload(b)}`;
-    case 'task':
-      return `- [${b.checked ? 'x' : ' '}] ${blockTextPayload(b)}`;
-    case 'quote':
-      return `> ${blockTextPayload(b)}`;
-    case 'step':
-      return `=> ${blockTextPayload(b)}`;
-    case 'callout':
-      return `!${b.tone} ${blockTextPayload(b)}`;
-    case 'math':
-      return `$$ ${blockTextPayload(b)}`;
-    case 'image-ref':
-      return `::img::${b.key}::${b.alt}::`;
-    case 'handwriting':
-      return `::hw::${b.key}::`;
-    case 'divider':
-      return '---';
-    case 'paragraph':
-      if (b.variant === 'muted') return `\u00b6 ${blockTextPayload(b)}`;
-      if (b.variant === 'fine') return `\u00b6\u00b6 ${blockTextPayload(b)}`;
-      return blockTextPayload(b);
-  }
+  return notebookBlockToLine(b as NotebookDialectBlock);
 }
 
 function serializeBlocks(blocks: Block[]): string {
-  const normalized = normalizeOrderedSequences(blocks);
-  // Canonical empty document: persist as "" (no placeholder strings; parse maps back to title + body).
-  if (
-    normalized.length === 2 &&
-    normalized[0]?.kind === 'title' &&
-    normalized[0].text === '' &&
-    normalized[1]?.kind === 'paragraph' &&
-    normalized[1].text === '' &&
-    !normalized[1].variant
-  ) {
-    return '';
-  }
-  if (
-    normalized.length === 1 &&
-    normalized[0]?.kind === 'paragraph' &&
-    normalized[0].text === '' &&
-    !normalized[0].variant
-  ) {
-    return '';
-  }
-  return normalized.map(blockToLine).join('\n');
+  return serializeNotebookBlocks(blocks as NotebookDialectBlock[]);
 }
 
 function morphParagraphLine(text: string, blockId: string): Block | Block[] {

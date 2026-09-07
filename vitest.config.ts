@@ -57,6 +57,7 @@ export default defineConfig({
       'src/lib/notebookCaret.test.ts',
       'src/lib/notebookInlineMarks.sequential.test.ts',
       'src/lib/notebookFormatHistory.test.ts',
+      'src/lib/notebookTiptap/**/*.test.ts',
       'src/lib/freeSpaceScalePolicy.test.ts',
       'src/lib/deriveMissionControlContinue.test.ts',
       'src/lib/missionControlContinueOpen.test.ts',
