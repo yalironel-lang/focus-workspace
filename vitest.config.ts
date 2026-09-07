@@ -56,6 +56,7 @@ export default defineConfig({
       'src/lib/pdfStudyMarks/usePdfStudyMarks.test.tsx',
       'src/lib/pdfStudyMarks/pdfInkMountModel.test.ts',
       'src/lib/pdfCanvasRender.test.ts',
+      'src/lib/mapGetOrInsertComputedPolyfill.test.ts',
       'src/lib/pdfJsScrollViewer.zoomSharpness.test.ts',
       'src/lib/pdfPageVisibility.test.ts',
       'src/lib/pdfViewerPagePropagate.test.ts',
