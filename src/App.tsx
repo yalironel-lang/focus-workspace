@@ -23,6 +23,10 @@ const SheetEngineSpikePage = import.meta.env.DEV
 const SheetFreeSpaceIntegrationPage = import.meta.env.DEV
   ? lazy(() => import('./sheets/spike/SheetFreeSpaceIntegrationPage'))
   : null;
+/** DEV-only TipTap Notebook shadow parity harness — not a production route. */
+const NotebookTiptapParityPage = import.meta.env.DEV
+  ? lazy(() => import('./components/notebook/tiptap/NotebookTiptapParityPage'))
+  : null;
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -138,6 +142,22 @@ function AppRoutes() {
               }
             >
               <SheetFreeSpaceIntegrationPage />
+            </Suspense>
+          }
+        />
+      ) : null}
+      {import.meta.env.DEV && NotebookTiptapParityPage ? (
+        <Route
+          path="/debug/notebook-tiptap-parity"
+          element={
+            <Suspense
+              fallback={
+                <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
+                  Loading TipTap parity…
+                </div>
+              }
+            >
+              <NotebookTiptapParityPage />
             </Suspense>
           }
         />

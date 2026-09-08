@@ -17,6 +17,9 @@ export {
   ALLOWED_MARK_TYPES,
 } from './extensions';
 
+export { createNotebookTiptapViewerExtensions } from './viewerExtensions';
+export { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from './parityFixture';
+
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';
 export { richLineToTiptapInline, tiptapInlineToRichLine } from './inlineBridge';
