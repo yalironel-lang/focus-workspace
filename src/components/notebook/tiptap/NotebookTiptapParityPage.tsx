@@ -1,8 +1,7 @@
 /**
- * DEV-only TipTap Notebook visual parity harness.
- * Left: dialect preview mirroring CE preview rendering.
- * Right: TipTap/ProseMirror read-only viewer.
- * Gated by VITE_NOTEBOOK_TIPTAP_EDITOR / localStorage flag at runtime.
+ * DEV-only TipTap Notebook visual parity + editable sandbox harness.
+ * A: dialect preview | B: TipTap read-only | C: TipTap editable sandbox (memory only)
+ * Gated by VITE_NOTEBOOK_TIPTAP_EDITOR / localStorage flag.
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
@@ -10,21 +9,29 @@ import { isNotebookTiptapEditorEnabled } from '../../../lib/notebookTiptap/featu
 import { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from '../../../lib/notebookTiptap/parityFixture';
 import { NotebookDialectPreview } from './NotebookDialectPreview';
 import { NotebookTiptapReadonlyViewer } from './NotebookTiptapReadonlyViewer';
+import { NotebookTiptapSandboxEditor } from './NotebookTiptapSandboxEditor';
 
 const panelStyle: CSSProperties = {
   flex: 1,
   minWidth: 0,
   overflow: 'auto',
-  maxHeight: 'calc(100vh - 140px)',
+  maxHeight: 'calc(50vh - 80px)',
   padding: 16,
   borderRadius: 12,
   background: 'rgba(15,23,42,0.92)',
   border: '1px solid rgba(148,163,184,0.18)',
 };
 
+const sandboxPanel: CSSProperties = {
+  ...panelStyle,
+  maxHeight: 'calc(50vh - 40px)',
+  marginTop: 12,
+};
+
 export default function NotebookTiptapParityPage() {
   const enabled = isNotebookTiptapEditorEnabled();
   const [body, setBody] = useState(PARITY_FIXTURE_BODY);
+  const [resetToken, setResetToken] = useState(0);
   const bodySnapshot = useMemo(() => body, [body]);
 
   if (!enabled) {
@@ -55,35 +62,48 @@ export default function NotebookTiptapParityPage() {
   return (
     <div style={{ minHeight: '100vh', padding: 20, color: '#e2e8f0', background: '#020617', fontFamily: 'ui-sans-serif, system-ui' }}>
       <header style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Notebook TipTap shadow parity (DEV)</h1>
-        <p style={{ color: '#94a3b8', margin: '8px 0 0', fontSize: 13, maxWidth: 720 }}>
-          Left = CE dialect preview (authoritative lookalike). Right = TipTap read-only ProseMirror viewer.
-          Neither panel writes <code>documentBody</code>. Production Notebook editor is untouched.
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
+          Notebook TipTap parity + editable sandbox (DEV)
+        </h1>
+        <p style={{ color: '#94a3b8', margin: '8px 0 0', fontSize: 13, maxWidth: 800 }}>
+          A = CE dialect preview · B = TipTap read-only · C = TipTap editable sandbox (memory only).
+          Sandbox never writes <code>documentBody</code>, Supabase, or Free Space. Refresh resets to fixture.
         </p>
         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={() => setBody(PARITY_FIXTURE_BODY)}
+            onClick={() => {
+              setBody(PARITY_FIXTURE_BODY);
+              setResetToken(t => t + 1);
+            }}
             style={btnStyle}
           >
-            Reset fixture
+            Reset fixture (+ sandbox)
           </button>
           <span style={{ color: '#64748b', fontSize: 12, alignSelf: 'center' }}>
-            RTL observation lines: {RTL_OBSERVATION_LINES.length} (no RTL implementation)
+            RTL observation only — {RTL_OBSERVATION_LINES.length} Hebrew samples in fixture
           </span>
         </div>
       </header>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
         <section style={panelStyle} data-nb-parity-pane="ce-preview">
-          <h2 style={paneTitle}>CE dialect preview</h2>
+          <h2 style={paneTitle}>A · CE dialect preview</h2>
           <NotebookDialectPreview documentBody={bodySnapshot} />
         </section>
         <section style={panelStyle} data-nb-parity-pane="tiptap-readonly">
-          <h2 style={paneTitle}>TipTap read-only viewer</h2>
+          <h2 style={paneTitle}>B · TipTap read-only</h2>
           <NotebookTiptapReadonlyViewer documentBody={bodySnapshot} />
         </section>
       </div>
+
+      <section style={sandboxPanel} data-nb-parity-pane="tiptap-sandbox">
+        <h2 style={paneTitle}>C · TipTap editable sandbox (no persistence)</h2>
+        <NotebookTiptapSandboxEditor
+          initialDocumentBody={bodySnapshot}
+          resetToken={resetToken}
+        />
+      </section>
 
       <details style={{ marginTop: 16, color: '#94a3b8', fontSize: 12 }}>
         <summary>Fixture documentBody (read-only display)</summary>

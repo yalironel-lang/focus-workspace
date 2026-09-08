@@ -18,6 +18,7 @@ export {
 } from './extensions';
 
 export { createNotebookTiptapViewerExtensions } from './viewerExtensions';
+export { createNotebookTiptapSandboxExtensions } from './sandboxExtensions';
 export { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from './parityFixture';
 
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
