@@ -173,6 +173,8 @@ import {
   type ParagraphVariant,
   type NotebookDialectBlock,
 } from '../../lib/notebookDialect';
+import { isNotebookTiptapEditorEnabled } from '../../lib/notebookTiptap/featureFlag';
+import { NotebookTiptapRealShadowPanel } from '../notebook/tiptap/NotebookTiptapRealShadowPanel';
 import {
   anchorFromSelection,
   computeToolbarAnchor,
@@ -7409,6 +7411,14 @@ export function ProjectNotebookBlock({
       </NotebookBodyScroll>
       </NotebookWorkspaceLayout>
     </div>
+
+    {import.meta.env.DEV && isNotebookTiptapEditorEnabled() ? (
+      <NotebookTiptapRealShadowPanel
+        sourceDocumentBody={effectiveContent.body ?? ''}
+        pageKey={String(effectiveContent.activePageId ?? 'legacy-body')}
+        objectId={objectId}
+      />
+    ) : null}
 
     {isFocusModeOpen && typeof document !== 'undefined' ? createPortal(
       <>

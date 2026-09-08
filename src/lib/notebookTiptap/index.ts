@@ -20,6 +20,12 @@ export {
 export { createNotebookTiptapViewerExtensions } from './viewerExtensions';
 export { createNotebookTiptapSandboxExtensions } from './sandboxExtensions';
 export { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from './parityFixture';
+export {
+  buildShadowSnapshot,
+  classifyDirtyKind,
+  summarizeBodyDiff,
+  tryCanonicalBody,
+} from './shadowDiff';
 
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';
