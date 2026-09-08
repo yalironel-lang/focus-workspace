@@ -1,7 +1,8 @@
 /**
  * Editable sandbox NodeViews — always use NodeViewContent for typing.
- * Math source stays visible as text (no MathRichText takeover).
- * Media / divider / block-math are atomic (non-editable content).
+ * Inline `$...$` stays PLAIN TEXT while editing (not MathRichText / not a math node).
+ * BiDi isolation for math source is handled by NotebookSandboxInlineMathIsolate decorations.
+ * Block math / media / divider are atomic (non-editable content).
  */
 
 import type { CSSProperties } from 'react';
@@ -19,6 +20,11 @@ import {
   calloutToneTokens,
 } from './visualTokens';
 import { NotebookHandwritingReadonlyView, NotebookImageReadonlyView } from './readonlyMedia';
+import {
+  mathLtrIsolateProps,
+  notebookDirWrapperProps,
+  type NotebookTextDir,
+} from './direction';
 
 const baseText: CSSProperties = {
   fontFamily: NB_FONT_STACK,
@@ -29,14 +35,23 @@ const baseText: CSSProperties = {
   outline: 'none',
 };
 
+function dirProps(node: NodeViewProps['node']) {
+  return notebookDirWrapperProps(node.attrs.dir as NotebookTextDir, node.textContent ?? '');
+}
+
 export function SandboxParagraphView({ node }: NodeViewProps) {
   const variant = node.attrs.variant as string | null;
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbParagraph"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...baseText,
+        ...d.style,
         fontSize:
           variant === 'fine' ? NB_TYPE_SCALE.l5 : variant === 'muted' ? NB_TYPE_SCALE.l4 : NB_TYPE_SCALE.l3,
         color: variant === 'fine' || variant === 'muted' ? NB_INK.muted : NB_INK.primary,
@@ -48,13 +63,18 @@ export function SandboxParagraphView({ node }: NodeViewProps) {
   );
 }
 
-export function SandboxTitleView() {
+export function SandboxTitleView({ node }: NodeViewProps) {
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="h1"
       data-nb="nbTitle"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...baseText,
+        ...d.style,
         fontSize: NB_TYPE_SCALE.l1,
         fontWeight: 700,
         letterSpacing: '-0.03em',
@@ -67,13 +87,18 @@ export function SandboxTitleView() {
   );
 }
 
-export function SandboxSectionView() {
+export function SandboxSectionView({ node }: NodeViewProps) {
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="h2"
       data-nb="nbSection"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...baseText,
+        ...d.style,
         fontSize: NB_TYPE_SCALE.l2,
         fontWeight: 600,
         letterSpacing: '-0.02em',
@@ -86,15 +111,20 @@ export function SandboxSectionView() {
   );
 }
 
-export function SandboxQuoteView() {
+export function SandboxQuoteView({ node }: NodeViewProps) {
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="blockquote"
       data-nb="nbQuote"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...baseText,
-        borderLeft: '3px solid rgba(148,163,184,0.45)',
-        paddingLeft: 14,
+        ...d.style,
+        borderInlineStart: '3px solid rgba(148,163,184,0.45)',
+        paddingInlineStart: 14,
         color: NB_INK.secondary,
         fontStyle: 'italic',
       }}
@@ -104,10 +134,20 @@ export function SandboxQuoteView() {
   );
 }
 
-export function SandboxStepView() {
+export function SandboxStepView({ node }: NodeViewProps) {
+  const d = dirProps(node);
   return (
-    <NodeViewWrapper as="div" data-nb="nbStep" style={{ ...baseText, display: 'flex', gap: 10 }}>
-      <span style={{ color: '#34d399', fontWeight: 700, flexShrink: 0 }}>⇒</span>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbStep"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
+      style={{ ...baseText, ...d.style, display: 'flex', gap: 10 }}
+    >
+      <span contentEditable={false} style={{ color: '#34d399', fontWeight: 700, flexShrink: 0 }}>
+        ⇒
+      </span>
       <div style={{ flex: 1 }}>
         <NodeViewContent as="div" />
       </div>
@@ -117,11 +157,21 @@ export function SandboxStepView() {
 
 export function SandboxBulletView({ node }: NodeViewProps) {
   const depth = Math.min(2, Math.max(0, Number(node.attrs.depth ?? 0)));
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbBullet"
-      style={{ ...baseText, display: 'flex', gap: 10, paddingLeft: depth * 20 }}
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
+      style={{
+        ...baseText,
+        ...d.style,
+        display: 'flex',
+        gap: 10,
+        paddingInlineStart: depth * 20,
+      }}
     >
       <span contentEditable={false} style={{ color: NB_INK.muted, width: 14, flexShrink: 0 }}>
         {BULLET_GLYPHS[depth]}
@@ -135,8 +185,16 @@ export function SandboxBulletView({ node }: NodeViewProps) {
 
 export function SandboxOrderedView({ node }: NodeViewProps) {
   const number = Number(node.attrs.number ?? 1);
+  const d = dirProps(node);
   return (
-    <NodeViewWrapper as="div" data-nb="nbOrdered" style={{ ...baseText, display: 'flex', gap: 10 }}>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbOrdered"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
+      style={{ ...baseText, ...d.style, display: 'flex', gap: 10 }}
+    >
       <span contentEditable={false} style={{ color: NB_INK.muted, minWidth: 22, flexShrink: 0 }}>
         {number}.
       </span>
@@ -149,12 +207,17 @@ export function SandboxOrderedView({ node }: NodeViewProps) {
 
 export function SandboxTaskView({ node }: NodeViewProps) {
   const checked = Boolean(node.attrs.checked);
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbTask"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...baseText,
+        ...d.style,
         display: 'flex',
         gap: 10,
         textDecoration: checked ? 'line-through' : undefined,
@@ -174,15 +237,24 @@ export function SandboxTaskView({ node }: NodeViewProps) {
 export function SandboxCalloutView({ node }: NodeViewProps) {
   const tone = (node.attrs.tone ?? 'concept') as CalloutTone;
   const ct = calloutToneTokens(tone);
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbCallout"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
-        borderLeft: `3px solid ${ct.bar}`,
+        ...d.style,
+        borderInlineStart: `3px solid ${ct.bar}`,
         backgroundColor: ct.bg,
-        borderRadius: '0 12px 12px 0',
-        padding: '10px 14px',
+        borderStartStartRadius: 0,
+        borderEndStartRadius: 0,
+        borderStartEndRadius: 12,
+        borderEndEndRadius: 12,
+        paddingBlock: 10,
+        paddingInline: 14,
         margin: '8px 0',
         fontFamily: NB_FONT_STACK,
       }}
@@ -198,7 +270,7 @@ export function SandboxCalloutView({ node }: NodeViewProps) {
           marginBottom: 6,
         }}
       >
-        <span style={{ marginRight: 6 }}>{ct.glyph}</span>
+        <span style={{ marginInlineEnd: 6 }}>{ct.glyph}</span>
         {calloutLabel(tone)}
       </div>
       <div style={{ ...baseText }}>
@@ -208,11 +280,19 @@ export function SandboxCalloutView({ node }: NodeViewProps) {
   );
 }
 
-/** Block math — atomic / read-only in sandbox (safety over edit parity). */
+/** Block math — atomic / read-only in sandbox; always LTR-isolated. */
 export function SandboxMathAtomView({ node }: NodeViewProps) {
   const latex = node.textContent;
+  const isolate = mathLtrIsolateProps();
   return (
-    <NodeViewWrapper as="div" data-nb="nbMath" data-nb-sandbox-atom="math" style={{ margin: '10px 0' }}>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbMath"
+      data-nb-sandbox-atom="math"
+      dir={isolate.dir}
+      data-nb-math-isolate={isolate['data-nb-math-isolate']}
+      style={{ margin: '10px 0', ...isolate.style }}
+    >
       <KatexPreview
         latex={plainMathToLatex(latex.trim())}
         displayMode

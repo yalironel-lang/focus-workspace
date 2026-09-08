@@ -15,6 +15,11 @@ import {
 } from '../../../lib/notebookTiptap/shadowDiff';
 import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../../../lib/notebookInlineMarks';
+import {
+  hasBidiControlChars,
+  normalizeTextDir,
+  type NotebookTextDir,
+} from '../../../lib/notebookTiptap/direction';
 
 export type NotebookTiptapRealShadowPanelProps = {
   /** Same body string the CE editor uses for the active page. Never mutated. */
@@ -160,12 +165,16 @@ export function NotebookTiptapRealShadowPanel({
   const markState = useEditorState({
     editor,
     selector: ctx => {
-      if (!ctx.editor) return { bold: false, italic: false, underline: false, strike: false };
+      if (!ctx.editor) {
+        return { bold: false, italic: false, underline: false, strike: false, dir: 'auto' as NotebookTextDir };
+      }
+      const parent = ctx.editor.state.selection.$from.parent;
       return {
         bold: ctx.editor.isActive('bold'),
         italic: ctx.editor.isActive('italic'),
         underline: ctx.editor.isActive('underline'),
         strike: ctx.editor.isActive('strike'),
+        dir: normalizeTextDir(parent.attrs.dir),
       };
     },
   });
@@ -192,6 +201,9 @@ export function NotebookTiptapRealShadowPanel({
         : statusLabel === 'DIFF'
           ? '#60a5fa'
           : '#f87171';
+
+  const bodyHasBidi =
+    snap?.status === 'SAFE' && snap.body != null ? hasBidiControlChars(snap.body) : false;
 
   return (
     <div
@@ -231,6 +243,7 @@ export function NotebookTiptapRealShadowPanel({
         <div style={{ marginTop: 10 }} onKeyDown={e => e.stopPropagation()} onKeyDownCapture={e => e.stopPropagation()}>
           <p style={{ margin: '0 0 8px', fontSize: 11, color: '#94a3b8' }}>
             CE remains authoritative. Edits here never save. Page switch resets the shadow.
+            Direction is TipTap-only (not persisted).
           </p>
 
           {load.error ? (
@@ -271,6 +284,26 @@ export function NotebookTiptapRealShadowPanel({
                     <option key={n} value={n}>{n}px</option>
                   ))}
                 </select>
+                <select
+                  data-nb-shadow-dir="1"
+                  aria-label="Text direction"
+                  value={markState?.dir ?? 'auto'}
+                  style={{ ...toolBtn, fontWeight: 500, minWidth: 72 }}
+                  onMouseDown={e => e.preventDefault()}
+                  onChange={e => {
+                    if (!editor) return;
+                    const dir = normalizeTextDir(e.target.value);
+                    editor
+                      .chain()
+                      .focus()
+                      .updateAttributes(editor.state.selection.$from.parent.type.name, { dir })
+                      .run();
+                  }}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="ltr">LTR</option>
+                  <option value="rtl">RTL</option>
+                </select>
               </div>
 
               <div
@@ -295,6 +328,18 @@ export function NotebookTiptapRealShadowPanel({
                 {snap.diff.same
                   ? ' · same as source'
                   : ` · Δ lines ${snap.diff.changedLineCount} (first #${snap.diff.firstChangedLine ?? '—'})`}
+                {' · '}
+                <span data-nb-dir-persist="not-persisted" style={{ color: '#fbbf24' }}>
+                  dir not persisted
+                </span>
+                {bodyHasBidi ? (
+                  <span data-nb-bidi-controls="1" style={{ color: '#94a3b8' }}>
+                    {' '}
+                    · bidi controls present (preserved)
+                  </span>
+                ) : (
+                  <span data-nb-bidi-controls="0"> · no bidi controls</span>
+                )}
               </div>
               {snap.diff.firstChangedPreview ? (
                 <pre

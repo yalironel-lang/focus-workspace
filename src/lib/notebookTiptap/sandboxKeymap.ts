@@ -7,6 +7,7 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/core';
+import { inheritDirForNewBlock } from './direction';
 
 const LISTISH = new Set(['nbBullet', 'nbOrdered', 'nbTask', 'nbStep']);
 const EMPTY_TO_PARAGRAPH = new Set([
@@ -33,6 +34,10 @@ function parentInfo(editor: Editor) {
   };
 }
 
+function dirAttr(parentDir: unknown) {
+  return { dir: inheritDirForNewBlock(parentDir) };
+}
+
 export const NotebookSandboxKeymap = Extension.create({
   name: 'notebookSandboxKeymap',
 
@@ -51,14 +56,18 @@ export const NotebookSandboxKeymap = Extension.create({
             .focus()
             .insertContentAt(info.$from.after(), {
               type: 'nbParagraph',
-              attrs: { variant: null },
+              attrs: { variant: null, ...dirAttr(info.attrs.dir) },
               content: [],
             })
             .run();
         }
 
         if (info.empty && EMPTY_TO_PARAGRAPH.has(info.type)) {
-          return editor.chain().focus().setNode('nbParagraph', { variant: null }).run();
+          return editor
+            .chain()
+            .focus()
+            .setNode('nbParagraph', { variant: null, ...dirAttr(info.attrs.dir) })
+            .run();
         }
 
         const continueSame =
@@ -70,19 +79,24 @@ export const NotebookSandboxKeymap = Extension.create({
         if (continueSame) {
           if (info.type === 'nbBullet') {
             const depth = Math.min(2, Math.max(0, Number(info.attrs.depth ?? 0)));
-            editor.chain().focus().setNode('nbBullet', { depth }).run();
+            editor.chain().focus().setNode('nbBullet', { depth, ...dirAttr(info.attrs.dir) }).run();
           } else if (info.type === 'nbOrdered') {
             const number = Math.max(1, Number(info.attrs.number ?? 1) + 1);
-            editor.chain().focus().setNode('nbOrdered', { number }).run();
+            editor.chain().focus().setNode('nbOrdered', { number, ...dirAttr(info.attrs.dir) }).run();
           } else if (info.type === 'nbTask') {
-            editor.chain().focus().setNode('nbTask', { checked: false }).run();
+            editor.chain().focus().setNode('nbTask', { checked: false, ...dirAttr(info.attrs.dir) }).run();
           } else if (info.type === 'nbStep') {
-            editor.chain().focus().setNode('nbStep').run();
+            editor.chain().focus().setNode('nbStep', { ...dirAttr(info.attrs.dir) }).run();
           }
         } else if (info.type !== 'nbParagraph') {
           // Title/section/quote/callout/math → new paragraph (CE parity).
           // Skip when already paragraph — setNode after split is a no-op that can throw.
-          editor.chain().focus().setNode('nbParagraph', { variant: null }).run();
+          // New paragraph: inherit explicit dir only; otherwise auto.
+          editor
+            .chain()
+            .focus()
+            .setNode('nbParagraph', { variant: null, ...dirAttr(info.attrs.dir) })
+            .run();
         }
         return true;
       },
@@ -94,9 +108,17 @@ export const NotebookSandboxKeymap = Extension.create({
         if (info.type === 'nbBullet' && info.empty) {
           const depth = Number(info.attrs.depth ?? 0);
           if (depth > 0) {
-            return editor.chain().focus().setNode('nbBullet', { depth: depth - 1 }).run();
+            return editor
+              .chain()
+              .focus()
+              .setNode('nbBullet', { depth: depth - 1, ...dirAttr(info.attrs.dir) })
+              .run();
           }
-          return editor.chain().focus().setNode('nbParagraph', { variant: null }).run();
+          return editor
+            .chain()
+            .focus()
+            .setNode('nbParagraph', { variant: null, ...dirAttr(info.attrs.dir) })
+            .run();
         }
 
         if (
@@ -110,7 +132,11 @@ export const NotebookSandboxKeymap = Extension.create({
             info.type === 'nbCallout' ||
             info.type === 'nbMath')
         ) {
-          return editor.chain().focus().setNode('nbParagraph', { variant: null }).run();
+          return editor
+            .chain()
+            .focus()
+            .setNode('nbParagraph', { variant: null, ...dirAttr(info.attrs.dir) })
+            .run();
         }
 
         if (info.atStart) {

@@ -127,7 +127,18 @@ export const MathRichText = memo(function MathRichText({
         if (seg.type === 'inline') {
           plainOffset = advancePastMathSegment(text, plainOffset, seg);
           return (
-            <span key={i} style={{ display: 'inline-block', verticalAlign: 'middle', margin: '0 1px' }}>
+            <span
+              key={i}
+              dir="ltr"
+              data-nb-math-isolate="1"
+              style={{
+                display: 'inline-block',
+                verticalAlign: 'middle',
+                margin: '0 1px',
+                direction: 'ltr',
+                unicodeBidi: 'isolate',
+              }}
+            >
               <KatexPreview latex={seg.latex} displayMode={false} textColor={textColor} mutedColor={mutedColor} />
             </span>
           );
@@ -136,7 +147,18 @@ export const MathRichText = memo(function MathRichText({
         // display:block gives identical layout; avoids the "div inside p/span" HTML violation.
         plainOffset = advancePastMathSegment(text, plainOffset, seg);
         return (
-          <span key={i} style={{ display: 'block', margin: '10px 0', textAlign: 'center' }}>
+          <span
+            key={i}
+            dir="ltr"
+            data-nb-math-isolate="1"
+            style={{
+              display: 'block',
+              margin: '10px 0',
+              textAlign: 'center',
+              direction: 'ltr',
+              unicodeBidi: 'isolate',
+            }}
+          >
             <KatexPreview latex={seg.latex} displayMode textColor={textColor} mutedColor={mutedColor} />
           </span>
         );

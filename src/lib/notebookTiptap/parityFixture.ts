@@ -1,7 +1,7 @@
 /**
  * Milestone 1 visual-parity fixture — realistic Notebook body exercising
- * every supported dialect construct + Hebrew observation samples.
- * Read-only harness only; never persisted by the shadow renderer.
+ * every supported dialect construct + RTL Phase A samples.
+ * Read-only / sandbox harness only; never persisted by TipTap.
  */
 
 import { serializeRichLine } from '../notebookInlineMarks';
@@ -11,6 +11,47 @@ const mark = (
   plain: string,
   marks: { s: number; e: number; t: 'b' | 'i' | 'u' | 's' | 'fs' | 'fg' | 'bg' | 'hl'; v?: string }[],
 ) => serializeRichLine({ plain, marks });
+
+/** Dedicated RTL / BiDi probe body for parity page “Load RTL fixture”. */
+export const RTL_PHASE_A_FIXTURE_BODY = [
+  '# RTL Phase A',
+  '',
+  '## Hebrew / English',
+  'שלום עולם',
+  'שלום world',
+  'world שלום',
+  'Hello שלום world',
+  '',
+  '## Numbers & punctuation',
+  'בשנת 2026 המחיר היה 15%',
+  'תרגיל 12 בפרק 3',
+  'המחיר הוא $50 (או 50₪)',
+  'תאריך: 08/09/2026',
+  '',
+  '## Academic mixed',
+  'הפונקציה f(x) היא רציפה',
+  'אם f(x) = x² + 2x + 1 אז...',
+  'הנוסחה $a^2+b^2$ חשובה',
+  '$$ E = mc^2',
+  '',
+  '## Lists',
+  '- פריט ראשון',
+  '  - פריט מקונן',
+  '    - עומק שניים',
+  '1. סעיף א',
+  '2. סעיף ב עם English',
+  '- [ ] משימה פתוחה',
+  '- [x] משימה סגורה',
+  '',
+  '## Quote / step / callout',
+  '> ציטוט בעברית עם English',
+  '=> שלב הבא',
+  '!concept מושג חשוב עם math $x+1$',
+  '!definition הגדרה',
+  '',
+  'English only paragraph for LTR auto.',
+  '12345',
+].join('\n');
 
 /** Full parity document for side-by-side CE-preview vs TipTap viewer. */
 export const PARITY_FIXTURE_BODY = [
@@ -63,18 +104,17 @@ export const PARITY_FIXTURE_BODY = [
   '::img::parity-img-demo::parity demo image::',
   '::hw::parity-hw-demo::',
   '',
-  '## RTL observation (no RTL implementation)',
-  'שלום עולם',
-  'Hello שלום world',
-  'תרגיל 12 בפרק 3',
-  'הנוסחה $a^2+b^2$ חשובה',
-  'English with עברית mixed in.',
+  '## RTL Phase A samples',
+  ...RTL_PHASE_A_FIXTURE_BODY.split('\n').slice(2),
 ].join('\n');
 
 export const RTL_OBSERVATION_LINES = [
   'שלום עולם',
-  'Hello שלום world',
-  'תרגיל 12 בפרק 3',
+  'שלום world',
+  'world שלום',
+  'בשנת 2026 המחיר היה 15%',
+  'הפונקציה f(x) היא רציפה',
+  'אם f(x) = x² + 2x + 1 אז...',
   'הנוסחה $a^2+b^2$ חשובה',
   'English with עברית mixed in.',
 ] as const;

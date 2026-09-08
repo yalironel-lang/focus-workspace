@@ -1,6 +1,7 @@
 /**
- * Closed TipTap schema for ZIKUK Notebook dialect (Milestone 0).
- * Only constructs representable in the persisted Notebook format.
+ * Closed TipTap schema for ZIKUK Notebook dialect (Milestone 0 + RTL Phase A attrs).
+ * Only constructs representable in the persisted Notebook format for *content*.
+ * `dir` is TipTap in-memory metadata (not in dialect body) — serializers ignore it.
  */
 
 import { Node, mergeAttributes } from '@tiptap/core';
@@ -14,6 +15,7 @@ import { TextStyle, Color, FontSize, BackgroundColor } from '@tiptap/extension-t
 import Highlight from '@tiptap/extension-highlight';
 import type { CalloutTone, ParagraphVariant } from '../notebookDialect';
 import { CALLOUT_TONES } from '../notebookDialect';
+import { notebookDirAttribute } from './direction';
 
 const inlineContent = 'text*';
 
@@ -24,7 +26,7 @@ function textBlock(name: string, attrs?: Record<string, unknown>) {
     content: inlineContent,
     defining: true,
     addAttributes() {
-      return attrs ?? {};
+      return { ...notebookDirAttribute(), ...(attrs ?? {}) };
     },
     parseHTML() {
       return [{ tag: `div[data-nb="${name}"]` }];
@@ -42,6 +44,7 @@ export const NbParagraph = Node.create({
   defining: true,
   addAttributes() {
     return {
+      ...notebookDirAttribute(),
       variant: {
         default: null as ParagraphVariant | null,
         parseHTML: el => el.getAttribute('data-variant'),
@@ -61,6 +64,7 @@ export const NbTitle = textBlock('nbTitle');
 export const NbSection = textBlock('nbSection');
 export const NbQuote = textBlock('nbQuote');
 export const NbStep = textBlock('nbStep');
+/** Block math keeps dir attr for schema uniformity; NodeViews force LTR isolate visually. */
 export const NbMath = textBlock('nbMath');
 
 export const NbBullet = Node.create({
@@ -70,6 +74,7 @@ export const NbBullet = Node.create({
   defining: true,
   addAttributes() {
     return {
+      ...notebookDirAttribute(),
       depth: {
         default: 0,
         parseHTML: el => Number(el.getAttribute('data-depth') ?? 0),
@@ -92,6 +97,7 @@ export const NbOrdered = Node.create({
   defining: true,
   addAttributes() {
     return {
+      ...notebookDirAttribute(),
       number: {
         default: 1,
         parseHTML: el => Number(el.getAttribute('data-number') ?? 1),
@@ -114,6 +120,7 @@ export const NbTask = Node.create({
   defining: true,
   addAttributes() {
     return {
+      ...notebookDirAttribute(),
       checked: {
         default: false,
         parseHTML: el => el.getAttribute('data-checked') === 'true',
@@ -136,6 +143,7 @@ export const NbCallout = Node.create({
   defining: true,
   addAttributes() {
     return {
+      ...notebookDirAttribute(),
       tone: {
         default: 'concept' as CalloutTone,
         parseHTML: el => el.getAttribute('data-tone') ?? 'concept',

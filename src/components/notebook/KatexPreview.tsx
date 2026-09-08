@@ -1,5 +1,11 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, type CSSProperties } from 'react';
 import { renderKatexHtml } from '../../lib/notebookMath';
+
+/** Keep KaTeX visually LTR inside RTL/BiDi paragraphs (source latex unchanged). */
+const MATH_ISOLATE: CSSProperties = {
+  direction: 'ltr',
+  unicodeBidi: 'isolate',
+};
 
 interface Props {
   latex: string;
@@ -10,7 +16,7 @@ interface Props {
   mutedColor?: string;
   textColor?: string;
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   emptyHint?: string;
 }
 
@@ -33,7 +39,9 @@ export const KatexPreview = memo(function KatexPreview({
     return (
       <div
         className={className}
-        style={{ ...style, color: mutedColor, fontSize: 12, fontStyle: 'italic' }}
+        dir="ltr"
+        data-nb-math-isolate="1"
+        style={{ ...MATH_ISOLATE, ...style, color: mutedColor, fontSize: 12, fontStyle: 'italic' }}
       >
         {emptyHint}
       </div>
@@ -42,7 +50,7 @@ export const KatexPreview = memo(function KatexPreview({
 
   if (error) {
     return (
-      <div className={className} style={style}>
+      <div className={className} dir="ltr" data-nb-math-isolate="1" style={{ ...MATH_ISOLATE, ...style }}>
         <div
           style={{
             fontSize: 11,
@@ -65,6 +73,8 @@ export const KatexPreview = memo(function KatexPreview({
             fontFamily: "'JetBrains Mono', monospace",
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
+            direction: 'ltr',
+            unicodeBidi: 'isolate',
           }}
         >
           {latex}
@@ -78,7 +88,10 @@ export const KatexPreview = memo(function KatexPreview({
   return (
     <div
       className={[className, heroClass].filter(Boolean).join(' ') || undefined}
+      dir="ltr"
+      data-nb-math-isolate="1"
       style={{
+        ...MATH_ISOLATE,
         ...style,
         color: textColor,
         overflowX: 'auto',

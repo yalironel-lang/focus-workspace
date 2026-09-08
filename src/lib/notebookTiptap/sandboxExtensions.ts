@@ -46,6 +46,7 @@ import {
 } from './sandboxNodeViews';
 import { NotebookSandboxGuards, NotebookSandboxKeymap } from './sandboxKeymap';
 import { NotebookSandboxPaste } from './sandboxPaste';
+import { NotebookSandboxInlineMathIsolate } from './sandboxInlineMathIsolate';
 
 export type NotebookTiptapSandboxOptions = {
   objectId?: string;
@@ -60,6 +61,7 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     NotebookSandboxKeymap,
     NotebookSandboxGuards,
     NotebookSandboxPaste,
+    NotebookSandboxInlineMathIsolate,
     NbParagraph.extend({
       addNodeView() {
         return ReactNodeViewRenderer(SandboxParagraphView);

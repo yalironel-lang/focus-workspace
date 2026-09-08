@@ -15,6 +15,11 @@ import {
 import { createNotebookTiptapSandboxExtensions } from '../../../lib/notebookTiptap/sandboxExtensions';
 import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../../../lib/notebookInlineMarks';
+import {
+  hasBidiControlChars,
+  normalizeTextDir,
+  type NotebookTextDir,
+} from '../../../lib/notebookTiptap/direction';
 
 export type SerializeStatus = 'SAFE' | 'UNSERIALIZABLE';
 
@@ -143,13 +148,23 @@ export function NotebookTiptapSandboxEditor({
     editor,
     selector: ctx => {
       if (!ctx.editor) {
-        return { bold: false, italic: false, underline: false, strike: false };
+        return { bold: false, italic: false, underline: false, strike: false, dir: 'auto' as NotebookTextDir };
       }
       return {
         bold: ctx.editor.isActive('bold'),
         italic: ctx.editor.isActive('italic'),
         underline: ctx.editor.isActive('underline'),
         strike: ctx.editor.isActive('strike'),
+        dir: normalizeTextDir(ctx.editor.getAttributes('nbParagraph').dir ??
+          ctx.editor.getAttributes('nbBullet').dir ??
+          ctx.editor.getAttributes('nbOrdered').dir ??
+          ctx.editor.getAttributes('nbTask').dir ??
+          ctx.editor.getAttributes('nbTitle').dir ??
+          ctx.editor.getAttributes('nbSection').dir ??
+          ctx.editor.getAttributes('nbQuote').dir ??
+          ctx.editor.getAttributes('nbStep').dir ??
+          ctx.editor.getAttributes('nbCallout').dir ??
+          'auto'),
       };
     },
   });
@@ -162,12 +177,29 @@ export function NotebookTiptapSandboxEditor({
     [editor],
   );
 
+  const setBlockDir = useCallback(
+    (dir: NotebookTextDir) => {
+      if (!editor) return;
+      editor.chain().focus().updateAttributes(editor.state.selection.$from.parent.type.name, { dir }).run();
+    },
+    [editor],
+  );
+
+  const bodyHasBidiControls =
+    serialize.status === 'SAFE' && serialize.body != null ? hasBidiControlChars(serialize.body) : false;
+
   return (
     <div
       className={className}
       data-nb-tiptap-sandbox-root="1"
       style={{ fontFamily: NB_FONT_STACK, color: NB_INK.primary }}
     >
+      <style>{`
+        .nb-tiptap-math-src-isolate {
+          direction: ltr;
+          unicode-bidi: isolate;
+        }
+      `}</style>
       <div
         data-nb-sandbox-toolbar="1"
         style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}
@@ -294,6 +326,20 @@ export function NotebookTiptapSandboxEditor({
           <option value="nbStep">Step</option>
           <option value="nbCallout">Callout</option>
         </select>
+        <span style={{ width: 8 }} />
+        <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Dir</span>
+        <select
+          data-nb-sandbox-dir="1"
+          aria-label="Text direction"
+          value={markState?.dir ?? 'auto'}
+          style={{ ...toolBtn, fontWeight: 500, minWidth: 72 }}
+          onMouseDown={e => e.preventDefault()}
+          onChange={e => setBlockDir(normalizeTextDir(e.target.value))}
+        >
+          <option value="auto">Auto</option>
+          <option value="ltr">LTR</option>
+          <option value="rtl">RTL</option>
+        </select>
       </div>
 
       <div
@@ -308,7 +354,7 @@ export function NotebookTiptapSandboxEditor({
       </div>
 
       <div data-nb-sandbox-inspector="1" style={{ marginTop: 12, fontSize: 12 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
           <strong style={{ letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8' }}>
             Live serialize
           </strong>
@@ -321,6 +367,22 @@ export function NotebookTiptapSandboxEditor({
           >
             {serialize.status}
           </span>
+          <span
+            data-nb-dir-persist="not-persisted"
+            style={{ fontSize: 11, color: '#fbbf24' }}
+            title="Block dir attrs are TipTap-only; dialect body does not store direction yet"
+          >
+            direction metadata: not persisted
+          </span>
+          {bodyHasBidiControls ? (
+            <span data-nb-bidi-controls="1" style={{ color: '#94a3b8', fontSize: 11 }}>
+              bidi controls present (preserved; ZIKUK does not inject)
+            </span>
+          ) : (
+            <span data-nb-bidi-controls="0" style={{ color: '#64748b', fontSize: 11 }}>
+              no bidi control chars in body
+            </span>
+          )}
           {serialize.errorCode ? (
             <code style={{ color: '#fca5a5' }}>
               {serialize.errorCode}: {serialize.errorMessage}

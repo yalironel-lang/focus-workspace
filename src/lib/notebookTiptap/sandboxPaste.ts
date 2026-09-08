@@ -2,6 +2,9 @@
  * Plain-text paste for TipTap sandbox.
  * Newlines → dialect blocks (via parseNotebookLine), never hardBreak.
  * HTML-only paste is refused.
+ *
+ * Policy: do NOT strip Unicode bidi control characters from user paste.
+ * ZIKUK implements RTL via DOM dir/isolation and never injects bidi controls.
  */
 
 import { Extension } from '@tiptap/core';

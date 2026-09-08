@@ -6,7 +6,11 @@
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import { isNotebookTiptapEditorEnabled } from '../../../lib/notebookTiptap/featureFlag';
-import { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from '../../../lib/notebookTiptap/parityFixture';
+import {
+  PARITY_FIXTURE_BODY,
+  RTL_OBSERVATION_LINES,
+  RTL_PHASE_A_FIXTURE_BODY,
+} from '../../../lib/notebookTiptap/parityFixture';
 import { NotebookDialectPreview } from './NotebookDialectPreview';
 import { NotebookTiptapReadonlyViewer } from './NotebookTiptapReadonlyViewer';
 import { NotebookTiptapSandboxEditor } from './NotebookTiptapSandboxEditor';
@@ -80,12 +84,41 @@ export default function NotebookTiptapParityPage() {
           >
             Reset fixture (+ sandbox)
           </button>
+          <button
+            type="button"
+            data-nb-load-rtl-fixture="1"
+            onClick={() => {
+              setBody(RTL_PHASE_A_FIXTURE_BODY);
+              setResetToken(t => t + 1);
+            }}
+            style={btnStyle}
+          >
+            Load RTL Phase A fixture
+          </button>
           <span style={{ color: '#64748b', fontSize: 12, alignSelf: 'center' }}>
-            RTL observation only — {RTL_OBSERVATION_LINES.length} Hebrew samples in fixture
+            RTL Phase A — Auto/LTR/RTL in sandbox toolbar · {RTL_OBSERVATION_LINES.length} mixed samples
           </span>
         </div>
       </header>
 
+      <section
+        data-nb-rtl-harness="1"
+        style={{
+          marginBottom: 12,
+          padding: 12,
+          borderRadius: 12,
+          border: '1px solid rgba(251,191,36,0.35)',
+          background: 'rgba(30,41,59,0.75)',
+          fontSize: 12,
+          color: '#cbd5e1',
+        }}
+      >
+        <strong style={{ color: '#fbbf24' }}>RTL QA harness (DEV)</strong>
+        <p style={{ margin: '6px 0 0', color: '#94a3b8' }}>
+          Use panel C Dir control (Auto / LTR / RTL). Check Hebrew-only, English-first, Hebrew-first mixed,
+          numbers/%, parentheses, inline math isolation, lists, callouts. Direction is not persisted to body.
+        </p>
+      </section>
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
         <section style={panelStyle} data-nb-parity-pane="ce-preview">
           <h2 style={paneTitle}>A · CE dialect preview</h2>

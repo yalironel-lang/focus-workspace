@@ -1,5 +1,6 @@
 /**
  * React NodeViews for TipTap Notebook shadow viewer (read-only).
+ * RTL Phase A: block-level dir + logical CSS; math LTR-isolated.
  */
 
 import type { CSSProperties } from 'react';
@@ -20,6 +21,11 @@ import {
   calloutToneTokens,
 } from './visualTokens';
 import { NotebookHandwritingReadonlyView, NotebookImageReadonlyView } from './readonlyMedia';
+import {
+  mathLtrIsolateProps,
+  notebookDirWrapperProps,
+  type NotebookTextDir,
+} from './direction';
 
 function richFromNode(node: NodeViewProps['node']) {
   try {
@@ -33,6 +39,25 @@ function shouldUseMathRich(plain: string): boolean {
   return textHasMathDelimiters(plain);
 }
 
+function dirProps(node: NodeViewProps['node']) {
+  return notebookDirWrapperProps(node.attrs.dir as NotebookTextDir, node.textContent ?? '');
+}
+
+function wrapDir(
+  node: NodeViewProps['node'],
+  HTMLAttributes: Record<string, unknown> | undefined,
+  extra?: Record<string, unknown>,
+) {
+  const d = dirProps(node);
+  return {
+    ...HTMLAttributes,
+    dir: d.dir,
+    'data-nb-dir': d['data-nb-dir'],
+    'data-nb-effective-dir': d['data-nb-effective-dir'],
+    ...extra,
+  };
+}
+
 const baseText: CSSProperties = {
   fontFamily: NB_FONT_STACK,
   color: NB_INK.primary,
@@ -41,24 +66,27 @@ const baseText: CSSProperties = {
   margin: 0,
 };
 
-export function NbParagraphView({ node }: NodeViewProps) {
+export function NbParagraphView({ node, HTMLAttributes }: NodeViewProps) {
   const variant = node.attrs.variant as string | null;
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     fontSize: variant === 'fine' ? NB_TYPE_SCALE.l5 : variant === 'muted' ? NB_TYPE_SCALE.l4 : NB_TYPE_SCALE.l3,
     color: variant === 'fine' || variant === 'muted' ? NB_INK.muted : NB_INK.primary,
     minHeight: plain ? undefined : NB_TYPE_SCALE.l3 * 1.92,
   };
+  const wrap = wrapDir(node, HTMLAttributes as Record<string, unknown>);
   if (shouldUseMathRich(plain)) {
     return (
-      <NodeViewWrapper as="div" data-nb="nbParagraph" style={style}>
+      <NodeViewWrapper as="div" {...wrap} style={style}>
         <MathRichText text={plain} marks={marks} textColor={NB_INK.primary} mutedColor={NB_INK.muted} />
       </NodeViewWrapper>
     );
   }
   return (
-    <NodeViewWrapper as="div" data-nb="nbParagraph" style={style}>
+    <NodeViewWrapper as="div" {...wrap} style={style}>
       <NodeViewContent as="div" />
     </NodeViewWrapper>
   );
@@ -66,8 +94,10 @@ export function NbParagraphView({ node }: NodeViewProps) {
 
 export function NbTitleView({ node }: NodeViewProps) {
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     fontSize: NB_TYPE_SCALE.l1,
     fontWeight: 700,
     letterSpacing: '-0.03em',
@@ -76,13 +106,13 @@ export function NbTitleView({ node }: NodeViewProps) {
   };
   if (shouldUseMathRich(plain)) {
     return (
-      <NodeViewWrapper as="h1" data-nb="nbTitle" style={style}>
+      <NodeViewWrapper as="h1" data-nb="nbTitle" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
         <MathRichText text={plain} marks={marks} textColor={NB_INK.headline} mutedColor={NB_INK.muted} />
       </NodeViewWrapper>
     );
   }
   return (
-    <NodeViewWrapper as="h1" data-nb="nbTitle" style={style}>
+    <NodeViewWrapper as="h1" data-nb="nbTitle" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <NodeViewContent as="div" />
     </NodeViewWrapper>
   );
@@ -90,8 +120,10 @@ export function NbTitleView({ node }: NodeViewProps) {
 
 export function NbSectionView({ node }: NodeViewProps) {
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     fontSize: NB_TYPE_SCALE.l2,
     fontWeight: 600,
     letterSpacing: '-0.02em',
@@ -100,13 +132,13 @@ export function NbSectionView({ node }: NodeViewProps) {
   };
   if (shouldUseMathRich(plain)) {
     return (
-      <NodeViewWrapper as="h2" data-nb="nbSection" style={style}>
+      <NodeViewWrapper as="h2" data-nb="nbSection" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
         <MathRichText text={plain} marks={marks} textColor={NB_INK.section} mutedColor={NB_INK.muted} />
       </NodeViewWrapper>
     );
   }
   return (
-    <NodeViewWrapper as="h2" data-nb="nbSection" style={style}>
+    <NodeViewWrapper as="h2" data-nb="nbSection" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <NodeViewContent as="div" />
     </NodeViewWrapper>
   );
@@ -114,22 +146,24 @@ export function NbSectionView({ node }: NodeViewProps) {
 
 export function NbQuoteView({ node }: NodeViewProps) {
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
-    borderLeft: '3px solid rgba(148,163,184,0.45)',
-    paddingLeft: 14,
+    ...d.style,
+    borderInlineStart: '3px solid rgba(148,163,184,0.45)',
+    paddingInlineStart: 14,
     color: NB_INK.secondary,
     fontStyle: 'italic',
   };
   if (shouldUseMathRich(plain)) {
     return (
-      <NodeViewWrapper as="blockquote" data-nb="nbQuote" style={style}>
+      <NodeViewWrapper as="blockquote" data-nb="nbQuote" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
         <MathRichText text={plain} marks={marks} textColor={NB_INK.secondary} mutedColor={NB_INK.muted} />
       </NodeViewWrapper>
     );
   }
   return (
-    <NodeViewWrapper as="blockquote" data-nb="nbQuote" style={style}>
+    <NodeViewWrapper as="blockquote" data-nb="nbQuote" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <NodeViewContent as="div" />
     </NodeViewWrapper>
   );
@@ -137,14 +171,16 @@ export function NbQuoteView({ node }: NodeViewProps) {
 
 export function NbStepView({ node }: NodeViewProps) {
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     display: 'flex',
     gap: 10,
     alignItems: 'flex-start',
   };
   return (
-    <NodeViewWrapper as="div" data-nb="nbStep" style={style}>
+    <NodeViewWrapper as="div" data-nb="nbStep" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <span style={{ color: '#34d399', fontWeight: 700, flexShrink: 0 }}>⇒</span>
       <div style={{ flex: 1 }}>
         {shouldUseMathRich(plain) ? (
@@ -159,8 +195,15 @@ export function NbStepView({ node }: NodeViewProps) {
 
 export function NbMathView({ node }: NodeViewProps) {
   const { plain } = richFromNode(node);
+  const isolate = mathLtrIsolateProps();
   return (
-    <NodeViewWrapper as="div" data-nb="nbMath" style={{ margin: '10px 0' }}>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbMath"
+      dir={isolate.dir}
+      data-nb-math-isolate={isolate['data-nb-math-isolate']}
+      style={{ margin: '10px 0', ...isolate.style }}
+    >
       <KatexPreview
         latex={plainMathToLatex(plain.trim())}
         displayMode
@@ -175,15 +218,17 @@ export function NbMathView({ node }: NodeViewProps) {
 export function NbBulletView({ node }: NodeViewProps) {
   const depth = Math.min(2, Math.max(0, Number(node.attrs.depth ?? 0)));
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     display: 'flex',
     gap: 10,
-    paddingLeft: depth * 20,
+    paddingInlineStart: depth * 20,
     alignItems: 'flex-start',
   };
   return (
-    <NodeViewWrapper as="div" data-nb="nbBullet" style={style}>
+    <NodeViewWrapper as="div" data-nb="nbBullet" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <span style={{ color: NB_INK.muted, width: 14, flexShrink: 0 }}>{BULLET_GLYPHS[depth]}</span>
       <div style={{ flex: 1 }}>
         {shouldUseMathRich(plain) ? (
@@ -199,14 +244,16 @@ export function NbBulletView({ node }: NodeViewProps) {
 export function NbOrderedView({ node }: NodeViewProps) {
   const number = Number(node.attrs.number ?? 1);
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     display: 'flex',
     gap: 10,
     alignItems: 'flex-start',
   };
   return (
-    <NodeViewWrapper as="div" data-nb="nbOrdered" style={style}>
+    <NodeViewWrapper as="div" data-nb="nbOrdered" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <span style={{ color: NB_INK.muted, minWidth: 22, flexShrink: 0 }}>{number}.</span>
       <div style={{ flex: 1 }}>
         {shouldUseMathRich(plain) ? (
@@ -222,8 +269,10 @@ export function NbOrderedView({ node }: NodeViewProps) {
 export function NbTaskView({ node }: NodeViewProps) {
   const checked = Boolean(node.attrs.checked);
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   const style: CSSProperties = {
     ...baseText,
+    ...d.style,
     display: 'flex',
     gap: 10,
     alignItems: 'flex-start',
@@ -231,7 +280,7 @@ export function NbTaskView({ node }: NodeViewProps) {
     color: checked ? NB_INK.muted : NB_INK.primary,
   };
   return (
-    <NodeViewWrapper as="div" data-nb="nbTask" style={style}>
+    <NodeViewWrapper as="div" data-nb="nbTask" dir={d.dir} data-nb-dir={d['data-nb-dir']} data-nb-effective-dir={d['data-nb-effective-dir']} style={style}>
       <span aria-hidden style={{ flexShrink: 0 }}>
         {checked ? '☑' : '☐'}
       </span>
@@ -250,15 +299,24 @@ export function NbCalloutView({ node }: NodeViewProps) {
   const tone = (node.attrs.tone ?? 'concept') as CalloutTone;
   const ct = calloutToneTokens(tone);
   const { plain, marks } = richFromNode(node);
+  const d = dirProps(node);
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbCallout"
+      dir={d.dir}
+      data-nb-dir={d['data-nb-dir']}
+      data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
-        borderLeft: `3px solid ${ct.bar}`,
+        ...d.style,
+        borderInlineStart: `3px solid ${ct.bar}`,
         backgroundColor: ct.bg,
-        borderRadius: '0 12px 12px 0',
-        padding: '10px 14px',
+        borderStartStartRadius: 0,
+        borderEndStartRadius: 0,
+        borderStartEndRadius: 12,
+        borderEndEndRadius: 12,
+        paddingBlock: 10,
+        paddingInline: 14,
         margin: '8px 0',
         fontFamily: NB_FONT_STACK,
       }}
@@ -273,7 +331,7 @@ export function NbCalloutView({ node }: NodeViewProps) {
           marginBottom: 6,
         }}
       >
-        <span style={{ marginRight: 6 }}>{ct.glyph}</span>
+        <span style={{ marginInlineEnd: 6 }}>{ct.glyph}</span>
         {calloutLabel(tone)}
       </div>
       <div style={{ ...baseText, color: NB_INK.primary }}>

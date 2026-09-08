@@ -19,13 +19,22 @@ export {
 
 export { createNotebookTiptapViewerExtensions } from './viewerExtensions';
 export { createNotebookTiptapSandboxExtensions } from './sandboxExtensions';
-export { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES } from './parityFixture';
+export { findDelimitedMathSourceRanges } from './sandboxInlineMathIsolate';
+export { PARITY_FIXTURE_BODY, RTL_OBSERVATION_LINES, RTL_PHASE_A_FIXTURE_BODY } from './parityFixture';
 export {
   buildShadowSnapshot,
   classifyDirtyKind,
   summarizeBodyDiff,
   tryCanonicalBody,
 } from './shadowDiff';
+export {
+  detectFirstStrongDirection,
+  resolveEffectiveDir,
+  hasBidiControlChars,
+  normalizeTextDir,
+  inheritDirForNewBlock,
+  type NotebookTextDir,
+} from './direction';
 
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';
