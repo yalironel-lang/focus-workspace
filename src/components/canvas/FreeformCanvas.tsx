@@ -199,6 +199,9 @@ interface Props {
   onSelect:     (id: string | null, opts?: { toggle?: boolean }) => void;
   onRemoveModule:  (id: string) => void;
   onRemoveBlock:   (id: string) => void;
+  onRenameBlock?: (id: string) => void;
+  onCloseNotebook?: (id: string) => void;
+  onDeleteNotebook?: (id: string) => void;
   onRemoveTool:    (id: string) => void;
   onDuplicateBlock: (id: string) => void;
   onOpenAdd:    () => void;
@@ -416,6 +419,9 @@ export function FreeformCanvas({
   onSelect,
   onRemoveModule,
   onRemoveBlock,
+  onRenameBlock,
+  onCloseNotebook,
+  onDeleteNotebook,
   onRemoveTool,
   onDuplicateBlock,
   onOpenAdd,
@@ -2294,6 +2300,7 @@ export function FreeformCanvas({
           const blockH = pos.h > 0 ? pos.h : 220;
           const focusSurfaceActive = !hasDeepFocus || focusEditingId === item.id;
 
+          const isNotebook = item.kind === 'block' && blocks.find(b => b.id === item.id)?.type === 'notebook';
           const handleRemove = () => {
             if (item.kind === 'module') onRemoveModule(item.id);
             else if (item.kind === 'block') onRemoveBlock(item.id);
@@ -2526,7 +2533,10 @@ export function FreeformCanvas({
                   deepFocusAnchor={deepFocusAtmosphere && focusEditingId === item.id}
                   onBlockMouseDown={onBlockMouseDown}
                   onSelect={handleBlockSelect}
-                  onRemove={handleRemove}
+                  onRemove={isNotebook && onCloseNotebook ? onCloseNotebook : handleRemove}
+                  removeLabel={isNotebook && onCloseNotebook ? 'Close Notebook' : undefined}
+                  onDelete={isNotebook ? onDeleteNotebook : undefined}
+                  onRename={isNotebook ? onRenameBlock : undefined}
                   onDuplicate={handleDuplicate}
                   {...(item.kind === 'block' && freeSpaceConnectionsEnabled
                     ? {

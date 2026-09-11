@@ -1,3 +1,6 @@
+import { flushAllFreeSpacePersistence } from '../lib/freeSpacePersistFlush';
+import { projectLiveBoardMissionControlItems } from '../lib/missionControl/projectFreeSpace';
+import { closeNotebook, isObjectActive, notebookTitle, reopenNotebook } from '../lib/notebookLifecycle';
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { useRecentWorkspaces } from '../hooks/useRecentWorkspaces';
 import { useFocusMode } from '../hooks/useFocusMode';
@@ -606,6 +609,13 @@ export function SectionPage() {
       ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: isCourseEntryBehaviorV1Enabled() })
       : 'free-space';
   });
+  const refreshMissionControl = missionControlIndex.refresh;
+  useEffect(() => {
+    if (sectionViewMode !== 'work-surface') return;
+    // Include completed closes/renames on previously visited boards.
+    flushAllFreeSpacePersistence();
+    refreshMissionControl();
+  }, [sectionViewMode, refreshMissionControl]);
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const studySessionPrimary = useStudySessionPrimary();
   const [activeStudySession, setActiveStudySession] = useState<StudySessionRecord | null>(null);
@@ -2577,7 +2587,7 @@ export function SectionPage() {
   }, [id, freeSpaceObjectIdsKey, sectionPositions.seedMissingPositions]);
 
   useEffect(() => {
-    const valid = new Set(sectionObjects.objects.map(o => o.id));
+    const valid = new Set(sectionObjects.objects.filter(isObjectActive).map(o => o.id));
     setSpaceSelectedIds((prev) => prev.filter((id) => valid.has(id)));
     if (spaceSelectedId && !valid.has(spaceSelectedId)) setSpaceSelectedId(null);
     if (spaceEditingId && !valid.has(spaceEditingId)) setSpaceEditingId(null);
@@ -3239,6 +3249,8 @@ export function SectionPage() {
     }
 
     if (phase === 'wait-object') return;
+    const reopening = pending && sectionObjects.getObject(pending.objectId);
+    if (reopening && reopenNotebook(reopening, sectionObjects.updateObjectFields)) return;
 
     if (phase === 'wait-position' && pending) {
       seedMissingPositions([pending.objectId]);
@@ -3303,7 +3315,9 @@ export function SectionPage() {
     if (!objectId) return;
     // Cross-board pending owns floating+focus sequencing for this id.
     if (pendingNotebookFocusRef.current?.objectId === objectId) return;
-    if (!sectionObjects.getObject(objectId)) return;
+    const reopening = sectionObjects.getObject(objectId);
+    if (!reopening) return;
+    reopenNotebook(reopening, sectionObjects.updateObjectFields);
     setObjectPresentationMode(objectId, 'floating');
     pendingMcFloatingRef.current = null;
   }, [sectionObjects.objects, sectionObjects, setObjectPresentationMode]);
@@ -3454,7 +3468,7 @@ export function SectionPage() {
     ): React.ReactNode | null => {
       const store = sectionObjectsRef.current;
       const obj = store.getObject(objectId);
-      if (!obj) return null;
+      if (!obj || !isObjectActive(obj)) return null;
 
       const inStudySession =
         studySessionPrimary &&
@@ -3589,7 +3603,7 @@ export function SectionPage() {
 
   const studyDockedNotebooks = useMemo(() => {
     return sectionObjects.objects.filter(o => {
-      if (o.type !== 'notebook') return false;
+      if (o.type !== 'notebook' || !isObjectActive(o)) return false;
       const c = ensureProjectObjectContent('notebook', o.content);
       return c.type === 'notebook' && isStudyLayoutDocked(sanitizeStudyLayout(c.studyLayout));
     });
@@ -3794,7 +3808,7 @@ export function SectionPage() {
         organize={
           sectionViewMode === 'free-space'
             ? {
-                objectCount: sectionObjects.objects.length,
+                objectCount: sectionObjects.objects.filter(isObjectActive).length,
                 selectedCount: spaceSelectedIds.length,
                 onApplyTemplate: handleApplySpaceTemplate,
                 onAutoArrange: handleAutoArrange,
@@ -3891,6 +3905,7 @@ export function SectionPage() {
               livingEnvironment={livingEnvironment}
               modules={[]}
               blocks={sectionObjects.objects.filter(o => {
+                if (!isObjectActive(o)) return false;
                 if (activeStudySession) return true;
                 if (!supportsUniversalPresentation(o)) return true;
                 return (o.viewMode ?? 'floating') === 'floating';
@@ -3906,6 +3921,31 @@ export function SectionPage() {
               onSetPos={setSpacePos}
               onSelect={handleSpaceSelection}
               onRemoveModule={() => {}}
+              onDeleteNotebook={id => {
+                const object = sectionObjects.getObject(id);
+                if (object?.type !== 'notebook') return;
+                if (!window.confirm(`Delete “${object.title || 'Notebook'}”? This deletes the Notebook and its assets. Recovery through Recently Deleted may be incomplete. Use Close to keep it safely.`)) return;
+                sectionObjects.removeObject(id);
+                sectionPositions.removePos(id);
+              }}
+              onRenameBlock={id => {
+                const object = sectionObjects.getObject(id);
+                if (object?.type !== 'notebook') return;
+                const title = window.prompt('Rename Notebook', object.title);
+                if (title !== null) sectionObjects.updateObjectFields(id, { title: notebookTitle(title) });
+              }}
+              onCloseNotebook={id => {
+                if (sectionObjects.getObject(id)?.type === 'notebook') {
+                  void closeNotebook(id, {
+                    flush: flushAllHandwritingForObject,
+                    update: sectionObjects.updateObjectFields,
+                  }).then(() => {
+                    setSpaceEditingId(current => current === id ? null : current);
+                    setSpaceSelectedId(current => current === id ? null : current);
+                    setSpaceSelectedIds(ids => ids.filter(value => value !== id));
+                  }).catch(() => toast.error('Could not close Notebook. Please try again.'));
+                }
+              }}
               onRemoveBlock={id => { sectionObjects.removeObject(id); sectionPositions.removePos(id); }}
               onRemoveTool={() => {}}
               onDuplicateBlock={id => {
@@ -3946,7 +3986,7 @@ export function SectionPage() {
           </FreeSpaceCanvasErrorBoundary>
 
           {freeSpaceSurfaceVisible && !activeStudySession && (() => {
-            const eligible = sectionObjects.objects.filter(o => supportsUniversalPresentation(o));
+            const eligible = sectionObjects.objects.filter(o => isObjectActive(o) && supportsUniversalPresentation(o));
             const fullscreen = eligible
               .filter(o => (o.viewMode ?? 'floating') === 'fullscreen')
               .sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -4404,7 +4444,14 @@ export function SectionPage() {
             <MissionControlView
               sectionTitle={section.title}
               sectionIcon={customization.icon}
-              items={missionControlIndex.items}
+              items={projectLiveBoardMissionControlItems({
+                items: missionControlIndex.items,
+                sectionId,
+                boardId: sectionBoards.activeBoardId,
+                objects: sectionObjects.objects,
+                boards: sectionBoards.boards,
+                sectionTitle: section.title,
+              })}
               completeness={missionControlIndex.completeness}
               status={missionControlIndex.status}
               onOpenItem={handleMissionControlOpenItem}

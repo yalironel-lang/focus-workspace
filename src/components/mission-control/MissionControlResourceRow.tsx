@@ -28,7 +28,11 @@ function MissionControlResourceRowInner({
   const canOpen = item.capabilities.open && item.openAction.type !== 'unavailable';
   const offerShow = shouldOfferShowInWorkspace(item);
   const time = formatMissionControlTime(item, now);
-  const metaBits = [contextLabelForItem(item), item.subtitle].filter(Boolean);
+  const location = item.workspaceContext
+    ? `${item.category === 'notebook' ? 'Notebook' : item.subtitle || contextLabelForItem(item)} → ${item.workspaceContext}`
+    : contextLabelForItem(item);
+  const state = item.lifecycleState === 'closed' ? 'Closed' : item.lifecycleState === 'active' ? 'Active' : undefined;
+  const metaBits = [location, item.workspaceContext ? undefined : item.subtitle, state].filter(Boolean);
 
   return (
     <li>
@@ -55,6 +59,12 @@ function MissionControlResourceRowInner({
           <p className="mc-row-title">{item.title}</p>
           <p className="mc-row-meta">{metaBits.join(' · ')}</p>
         </div>
+        {item.lifecycleState === 'closed' && canOpen && (
+          <button type="button" onClick={e => { e.stopPropagation(); onOpen(item); }}
+            onKeyDown={e => e.stopPropagation()} className="mc-row-menu-btn" aria-label={`Reopen ${item.title}`}>
+            Reopen
+          </button>
+        )}
         {time && <span className="mc-row-time">{time}</span>}
         {offerShow && (
           <MissionControlResourceMenu

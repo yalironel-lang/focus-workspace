@@ -230,6 +230,8 @@ export interface ProjectSpaceObject {
   content: ProjectObjectContent;
   /** Other Free Space object ids this object is linked to (directed; persisted in localStorage). */
   connections?: string[];
+  /** Missing means active. Closed objects remain canonical and synced, never deleted. */
+  lifecycleState?: 'active' | 'closed';
   /** Universal object presentation mode (canvas default is floating). */
   viewMode?: UniversalObjectViewMode;
   /** Split-side preference when in split mode. */
@@ -710,6 +712,7 @@ export function normalizeProjectSpaceObject(raw: unknown): ProjectSpaceObject | 
     type,
     title,
     content,
+    ...(o.lifecycleState === 'closed' ? { lifecycleState: 'closed' as const } : {}),
     ...(viewMode !== 'floating' ? { viewMode } : {}),
     ...(splitSide !== 'right' ? { splitSide } : {}),
     createdAt,
@@ -958,6 +961,7 @@ export interface SectionFreeSpaceObjectsState {
     fields: {
       title?: string;
       content?: ProjectObjectContent;
+      lifecycleState?: 'active' | 'closed';
       viewMode?: UniversalObjectViewMode;
       splitSide?: UniversalObjectSplitSide;
     },
@@ -1737,6 +1741,7 @@ export function useSectionFreeSpaceObjects(
       fields: {
         title?: string;
         content?: ProjectObjectContent;
+        lifecycleState?: 'active' | 'closed';
         viewMode?: UniversalObjectViewMode;
         splitSide?: UniversalObjectSplitSide;
       },
@@ -1747,6 +1752,7 @@ export function useSectionFreeSpaceObjects(
         const o = prev[i];
         const nextObj: ProjectSpaceObject = {
           ...o,
+          ...(fields.lifecycleState !== undefined ? { lifecycleState: fields.lifecycleState } : {}),
           ...(fields.title !== undefined ? { title: fields.title } : {}),
           ...(fields.content !== undefined ? { content: fields.content } : {}),
           ...(fields.viewMode !== undefined

@@ -49,6 +49,9 @@ interface Props {
   onBlockMouseDown: (id: string, e: React.MouseEvent | React.PointerEvent, type: 'move' | 'resize') => void;
   onSelect: (id: string, opts?: { toggle?: boolean }) => void;
   onRemove?: (id: string) => void;
+  removeLabel?: string;
+  onRename?: (id: string) => void;
+  onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   /** Free Space: enter “connect to…” mode from this object */
   onBeginConnect?: (id: string) => void;
@@ -99,6 +102,9 @@ export function FreeformBlock({
   onBlockMouseDown,
   onSelect,
   onRemove,
+  removeLabel,
+  onRename,
+  onDelete,
   onDuplicate,
   onBeginConnect,
   connectionChrome = 'neutral',
@@ -534,16 +540,32 @@ export function FreeformBlock({
                   <Copy style={{ width: '12px', height: '12px', opacity: 0.92 }} />
                 </button>
               )}
+              {onRename && (
+                <button type="button" aria-label="Rename Notebook" title="Rename Notebook"
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); onRename(id); }}
+                  style={{ color: tokens.textSecondary, padding: '4px 8px', fontSize: 11 }}>
+                  Rename
+                </button>
+              )}
+              {onDelete && (
+                <button type="button" aria-label="Delete Notebook" title="Delete Notebook"
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); onDelete(id); }}
+                  style={{ color: tokens.textSecondary, padding: '4px 8px', fontSize: 11 }}>
+                  Delete
+                </button>
+              )}
               {onRemove && (
                 <button
                   type="button"
-                  aria-label="Remove block"
+                  aria-label={removeLabel ?? "Remove block"}
                   onMouseDown={e => e.stopPropagation()}
                   onClick={e => {
                     e.stopPropagation();
                     onRemove(id);
                   }}
-                  title="Remove"
+                  title={removeLabel ?? "Remove"}
                   style={{
                     width: '30px',
                     height: '28px',

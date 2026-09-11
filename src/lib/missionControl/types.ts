@@ -88,6 +88,8 @@ export type MissionControlIndexCompleteness =
   | 'local-only';
 
 export interface MissionControlItem {
+  lifecycleState?: 'active' | 'closed';
+  workspaceContext?: string;
   id: string;
   source: MissionControlSource;
   sourceId: string;

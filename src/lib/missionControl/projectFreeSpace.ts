@@ -287,6 +287,7 @@ export function projectFreeSpaceEntry(
   return {
     id: missionControlItemId('freespace', object.id),
     source: 'freespace',
+    lifecycleState: object.lifecycleState === 'closed' ? 'closed' : 'active',
     sourceId: object.id,
     sectionId,
     sourceKind: { source: 'freespace', type: object.type },
@@ -316,4 +317,24 @@ export function projectFreeSpaceEntries(
     if (item) out.push(item);
   }
   return out;
+}
+
+/** Overlay mounted-board edits immediately; other boards remain in the section index. */
+export function projectLiveBoardMissionControlItems(input: {
+  items: readonly MissionControlItem[];
+  sectionId: string;
+  boardId: string;
+  objects: readonly ProjectSpaceObject[];
+  boards: readonly { id: string; name: string }[];
+  sectionTitle: string;
+}): MissionControlItem[] {
+  return [
+    ...input.items.filter(item => item.source !== 'freespace' || item.boardId !== input.boardId),
+    ...projectFreeSpaceEntries(input.sectionId, input.objects.map(object => ({ boardId: input.boardId, object }))),
+  ].map(item => ({
+    ...item,
+    workspaceContext: item.source === 'freespace'
+      ? input.boards.find(board => board.id === item.boardId)?.name ?? (item.boardId === 'main' ? 'Main' : input.sectionTitle)
+      : undefined,
+  })).sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
 }
