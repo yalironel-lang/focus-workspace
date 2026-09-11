@@ -2,6 +2,11 @@
  * ZIKUK-aligned Enter / Backspace / Tab keymaps for the TipTap editable sandbox.
  * Mirrors ProjectNotebookBlock CE semantics where practical.
  * Shift+Enter (CE soft-break) is blocked — hardBreak cannot serialize.
+ *
+ * PRODUCT (M4.2): There is intentionally NO academic typed-prefix auto-transform.
+ * Typing "Definition:" / "Theorem:" / etc. stays ordinary paragraph text.
+ * Academic blocks are created only via explicit toolbar / block commands.
+ * Existing stored `!definition …` callouts still load via dialect parse.
  */
 
 import { Extension } from '@tiptap/core';
@@ -102,6 +107,8 @@ export const NotebookSandboxKeymap = Extension.create({
       },
 
       Backspace: ({ editor }) => {
+        // Range deletion takes precedence over empty-block/caret transformations.
+        if (!editor.state.selection.empty) return editor.commands.deleteSelection();
         const info = parentInfo(editor);
         if (!info.atStart) return false;
 

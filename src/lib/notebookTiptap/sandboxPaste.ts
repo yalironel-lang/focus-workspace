@@ -53,7 +53,14 @@ export const NotebookSandboxPaste = Extension.create({
             }
             if (!pmNodes.length) return true;
             const fragment = Fragment.fromArray(pmNodes);
-            const slice = new Slice(fragment, 0, 0);
+            // Plain paragraph edges should join the surrounding text, just like
+            // native text paste. Keep explicit dialect block edges closed so
+            // pasting a list/callout still inserts that existing block type.
+            const first = pmNodes[0];
+            const last = pmNodes[pmNodes.length - 1];
+            const openStart = first.type.name === 'nbParagraph' && first.attrs.variant == null ? 1 : 0;
+            const openEnd = last.type.name === 'nbParagraph' && last.attrs.variant == null ? 1 : 0;
+            const slice = new Slice(fragment, openStart, openEnd);
             view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
             return true;
           },

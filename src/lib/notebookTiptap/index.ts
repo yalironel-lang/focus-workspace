@@ -9,7 +9,7 @@ export {
   type NotebookTiptapErrorCode,
 } from './errors';
 
-export { isNotebookTiptapEditorEnabled } from './featureFlag';
+export { isNotebookTiptapEditorEnabled, isNotebookTiptapCandidateEnabled, isNotebookTiptapCandidateActive } from './featureFlag';
 
 export {
   createNotebookTiptapExtensions,
@@ -35,6 +35,23 @@ export {
   inheritDirForNewBlock,
   type NotebookTextDir,
 } from './direction';
+
+export {
+  runCandidateFormatCommand,
+  readCandidateFormatState,
+  applyCandidateFontSize,
+  CANDIDATE_FONT_SIZE_PRESETS,
+  type CandidateFormatCommand,
+  type CandidateFormatState,
+} from './candidateFormatCommands';
+
+export {
+  runCandidateBlockCommand,
+  readCandidateBlockKind,
+  CANDIDATE_BLOCK_MENU,
+  textLooksLikeAcademicTypedLabel,
+  type CandidateBlockTarget,
+} from './candidateBlockCommands';
 
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';

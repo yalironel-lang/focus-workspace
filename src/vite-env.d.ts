@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_PENCILKIT_SPIKE_BOOT?: string;
   readonly VITE_PENCILKIT_INK_PAGE?: string;
   readonly VITE_NOTEBOOK_TIPTAP_EDITOR?: string;
+  readonly VITE_NOTEBOOK_TIPTAP_CANDIDATE?: string;
 }
 
 interface ImportMeta {

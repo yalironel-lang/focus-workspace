@@ -173,8 +173,9 @@ import {
   type ParagraphVariant,
   type NotebookDialectBlock,
 } from '../../lib/notebookDialect';
-import { isNotebookTiptapEditorEnabled } from '../../lib/notebookTiptap/featureFlag';
+import { isNotebookTiptapEditorEnabled, isNotebookTiptapCandidateActive } from '../../lib/notebookTiptap/featureFlag';
 import { NotebookTiptapRealShadowPanel } from '../notebook/tiptap/NotebookTiptapRealShadowPanel';
+import { NotebookTiptapCandidateEditor } from '../notebook/tiptap/NotebookTiptapCandidateEditor';
 import {
   anchorFromSelection,
   computeToolbarAnchor,
@@ -1224,6 +1225,8 @@ export function ProjectNotebookBlock({
   const { user } = useAuth();
   const handwritingUserId = user?.id;
   const v1PagesShell = isNotebookV1PagesEnabled();
+  /** Milestone 4: TipTap as visible body editor (DEV + flag). Memory-only. */
+  const tipTapCandidateActive = isNotebookTiptapCandidateActive();
   /** Device-local active page — avoids cloud LWW fights from passive navigation. */
   const navigationActivePageIdRef = useRef<string | null>(null);
   const [navigationOverlay, setNavigationOverlay] = useState<Partial<NotebookContent> | null>(
@@ -5633,7 +5636,7 @@ export function ProjectNotebookBlock({
           ) : null}
         </div>
       ) : null}
-      {editorMode === 'edit' && selectionToolbar && !isDeskPresentation ? (
+      {editorMode === 'edit' && selectionToolbar && !isDeskPresentation && !tipTapCandidateActive ? (
         <NotebookSelectionToolbar
           tokens={tokens}
           selection={selectionToolbar}
@@ -5888,12 +5891,12 @@ export function ProjectNotebookBlock({
           aria-multiline
           aria-label={isDeskPresentation ? 'Math work surface' : 'Notebook'}
           tabIndex={-1}
-          onCopy={handleEditorCopy}
-          onKeyDownCapture={handleEditorKeyCapture}
-          onFocusCapture={handleSurfaceFocusIn}
-          onBlur={handleSurfaceBlur}
-          onPointerDownCapture={handleNotebookTextPenGuard}
-          onPointerUpCapture={handleNotebookTextPenUp}
+          onCopy={tipTapCandidateActive ? undefined : handleEditorCopy}
+          onKeyDownCapture={tipTapCandidateActive ? undefined : handleEditorKeyCapture}
+          onFocusCapture={tipTapCandidateActive ? undefined : handleSurfaceFocusIn}
+          onBlur={tipTapCandidateActive ? undefined : handleSurfaceBlur}
+          onPointerDownCapture={tipTapCandidateActive ? undefined : handleNotebookTextPenGuard}
+          onPointerUpCapture={tipTapCandidateActive ? undefined : handleNotebookTextPenUp}
           className="nb-document-surface"
           data-nb-surface={notebookSurface}
           data-nb-block-pen-text={!showInkMode ? '1' : undefined}
@@ -5993,6 +5996,12 @@ export function ProjectNotebookBlock({
               </p>
               ) : null}
             </div>
+          ) : tipTapCandidateActive ? (
+            <NotebookTiptapCandidateEditor
+              sourceDocumentBody={effectiveContent.body ?? ''}
+              pageKey={String(effectiveContent.activePageId ?? 'legacy-body')}
+              objectId={objectId}
+            />
           ) : (
           <>
           {isMathNotebook && !isDeskPresentation ? (
@@ -7412,7 +7421,9 @@ export function ProjectNotebookBlock({
       </NotebookWorkspaceLayout>
     </div>
 
-    {import.meta.env.DEV && isNotebookTiptapEditorEnabled() ? (
+    {import.meta.env.DEV &&
+    isNotebookTiptapEditorEnabled() &&
+    !tipTapCandidateActive ? (
       <NotebookTiptapRealShadowPanel
         sourceDocumentBody={effectiveContent.body ?? ''}
         pageKey={String(effectiveContent.activePageId ?? 'legacy-body')}

@@ -240,7 +240,7 @@ export function NotebookTiptapRealShadowPanel({
       </div>
 
       {open ? (
-        <div style={{ marginTop: 10 }} onKeyDown={e => e.stopPropagation()} onKeyDownCapture={e => e.stopPropagation()}>
+        <div style={{ marginTop: 10 }} onKeyDown={e => e.stopPropagation()}>
           <p style={{ margin: '0 0 8px', fontSize: 11, color: '#94a3b8' }}>
             CE remains authoritative. Edits here never save. Page switch resets the shadow.
             Direction is TipTap-only (not persisted).
