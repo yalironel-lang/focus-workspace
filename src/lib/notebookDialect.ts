@@ -1,3 +1,4 @@
+import { assertNotebookTextCodec, decodeNotebookTextV1, encodeNotebookTextV1 } from './notebookTextCodec';
 /**
  * Pure ZIKUK Notebook dialect parse/serialize.
  * Authoritative line grammar shared by the CE editor and TipTap adapters.
@@ -203,7 +204,9 @@ export function notebookLineToBlock(line: NotebookLine, id?: string): NotebookDi
 }
 
 /** Parse body → dialect blocks (no React id-reuse). Empty → title + blank paragraph. */
-export function parseNotebookBody(body: string): NotebookDialectBlock[] {
+export function parseNotebookBody(body: string, codecVersion?: number): NotebookDialectBlock[] {
+  assertNotebookTextCodec(codecVersion);
+  if (codecVersion === 1) return decodeNotebookTextV1(body);
   if (body.trim().length === 0) {
     return [
       { id: 'empty-title', kind: 'title', text: '' },
@@ -277,7 +280,9 @@ export function notebookBlockToLine(b: NotebookDialectBlock): string {
 }
 
 /** Canonical body serialization (matches ProjectNotebookBlock.serializeBlocks). */
-export function serializeNotebookBlocks(blocks: NotebookDialectBlock[]): string {
+export function serializeNotebookBlocks(blocks: NotebookDialectBlock[], codecVersion?: number): string {
+  assertNotebookTextCodec(codecVersion);
+  if (codecVersion === 1) return encodeNotebookTextV1(blocks);
   const normalized = normalizeOrderedSequences(blocks);
   if (
     normalized.length === 2 &&

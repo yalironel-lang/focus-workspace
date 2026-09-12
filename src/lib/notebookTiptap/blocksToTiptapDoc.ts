@@ -66,13 +66,14 @@ export function blockToTiptapNode(block: NotebookDialectBlock): JSONContent {
 }
 
 export function blocksToTiptapDoc(blocks: NotebookDialectBlock[]): JSONContent {
+  const nodes = blocks.map(blockToTiptapNode);
   return {
     type: 'doc',
-    content: blocks.map(blockToTiptapNode),
+    content: nodes.length > 0 ? nodes : [{ type: 'nbParagraph' }],
   };
 }
 
 /** documentBody → TipTap JSON (parse dialect, then convert). */
-export function bodyToTiptapDoc(body: string): JSONContent {
-  return blocksToTiptapDoc(parseNotebookBody(body));
+export function bodyToTiptapDoc(body: string, codecVersion?: number): JSONContent {
+  return blocksToTiptapDoc(parseNotebookBody(body, codecVersion));
 }

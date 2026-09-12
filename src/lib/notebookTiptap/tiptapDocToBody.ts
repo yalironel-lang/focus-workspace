@@ -232,6 +232,6 @@ function assertNoHardBreak(node: JSONContent): void {
 }
 
 /** TipTap JSON → canonical documentBody. Throws NotebookTiptapConversionError on lossy input. */
-export function tiptapDocToBody(doc: JSONContent): string {
-  return serializeNotebookBlocks(tiptapDocToBlocks(doc));
+export function tiptapDocToBody(doc: JSONContent, codecVersion?: number): string {
+  return serializeNotebookBlocks(tiptapDocToBlocks(doc), codecVersion);
 }

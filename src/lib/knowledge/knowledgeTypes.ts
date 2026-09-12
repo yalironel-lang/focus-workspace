@@ -42,6 +42,7 @@ export interface NotebookSnapshot {
   objectId: string;
   objectTitle: string;
   body: string;
+  bodyCodecVersion?: number;
   createdAt: number;
   /** Approximate edit generation when snapshot was taken */
   editGeneration: number;

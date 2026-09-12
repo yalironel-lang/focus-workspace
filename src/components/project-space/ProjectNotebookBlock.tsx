@@ -1,3 +1,4 @@
+import { parseNotebookBody as parseCanonicalNotebookBody } from '../../lib/notebookDialect';
 import {
   Fragment,
   useRef,
@@ -80,7 +81,7 @@ import { MathEditableParagraph } from '../notebook/MathEditableParagraph';
 import { MathStudyInsight } from '../notebook/MathStudyInsight';
 import { KatexPreview } from '../notebook/KatexPreview';
 import { textHasMathDelimiters } from '../../lib/notebookMath';
-import { renderInlineFormatted } from '../../lib/mathZoneInlineFormat';
+import { renderInlineFormatted, renderPlainWithMarks } from '../../lib/mathZoneInlineFormat';
 import { parseRichLine } from '../../lib/notebookInlineMarks';
 import {
   hydrateNotebookImages,
@@ -504,7 +505,13 @@ function blockKindsAlign(a: Block, b: Block): boolean {
   return true;
 }
 
-function parseBodyToBlocks(body: string, prev?: Block[]): Block[] {
+function parseBodyToBlocksForCodec(body: string, prev?: Block[], codecVersion?: number): Block[] {
+  if (codecVersion !== undefined) {
+    return parseCanonicalNotebookBody(body, codecVersion).map((block, index) => ({
+      ...block,
+      id: prev?.[index] && blockKindsAlign(prev[index], block as Block) ? prev[index].id : newBlockId(),
+    })) as Block[];
+  }
   // Empty document: title row + body row (storage is "# \n" — no placeholder text persisted).
   if (body.trim().length === 0) {
     const defaults: Block[] = [
@@ -567,10 +574,6 @@ function resolveBlockMarksAfterEdit(
 
 function blockToLine(b: Block): string {
   return notebookBlockToLine(b as NotebookDialectBlock);
-}
-
-function serializeBlocks(blocks: Block[]): string {
-  return serializeNotebookBlocks(blocks as NotebookDialectBlock[]);
 }
 
 function morphParagraphLine(text: string, blockId: string): Block | Block[] {
@@ -1259,6 +1262,13 @@ export function ProjectNotebookBlock({
   );
   const contentRef = useRef(content);
   contentRef.current = effectiveContent;
+  // Both editors decode and serialize the exact projected page's codec.
+  function parseBodyToBlocks(body: string, prev?: Block[], version = contentRef.current.bodyCodecVersion): Block[] {
+    return parseBodyToBlocksForCodec(body, prev, version);
+  }
+  function serializeBlocks(value: Block[]): string {
+    return serializeNotebookBlocks(value as NotebookDialectBlock[], contentRef.current.bodyCodecVersion);
+  }
   const isDeskPresentation = presentation === 'desk';
   const isWorkspacePresentation = presentation === 'workspace';
   const isEmbeddedPresentation = presentation === 'embedded';
@@ -1282,7 +1292,9 @@ export function ProjectNotebookBlock({
   const deskFormattingV1 = useDeskFormattingV1();
   const deskFormattingActive = isDeskPresentation && deskFormattingV1;
   const sessionRestoreAppliedRef = useRef(false);
+  const isVersionedPage = effectiveContent.bodyCodecVersion !== undefined;
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
+  const effectiveEditorMode = isVersionedPage && !tipTapCandidateActive ? 'preview' : editorMode;
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
   const [, bumpNotebookImageCache] = useState(0);
   const [slashMenu, setSlashMenu] = useState<{
@@ -1637,7 +1649,7 @@ export function ProjectNotebookBlock({
       if (!page) return;
       navigationActivePageIdRef.current = activePageId;
       const body = page.kind === 'document' ? page.documentBody ?? '' : migrated.body ?? '';
-      setNavigationOverlay({ activeSectionId, activePageId, body, pages });
+      setNavigationOverlay({ activeSectionId, activePageId, body, pages, bodyCodecVersion: page.kind === 'document' ? page.documentBodyCodecVersion : migrated.bodyCodecVersion });
     };
 
     if (freeSpaceSectionId && objectId) {
@@ -1718,6 +1730,7 @@ export function ProjectNotebookBlock({
             activeSectionId: sectionId,
             activePageId: pageId,
             body: persistedNext.body ?? '',
+            bodyCodecVersion: persistedNext.bodyCodecVersion,
             pages: persistedNext.pages,
           });
         }
@@ -1731,6 +1744,7 @@ export function ProjectNotebookBlock({
             objectId,
             objectTitle: objectTitle ?? 'Notebook',
             body: persistedNext.body ?? '',
+            bodyCodecVersion: persistedNext.bodyCodecVersion,
             editGeneration: notebookEditCountRef.current,
           });
         });
@@ -1793,15 +1807,16 @@ export function ProjectNotebookBlock({
             activeSectionId: next.activeSectionId,
             activePageId: next.activePageId,
             body: next.body,
+            bodyCodecVersion: next.bodyCodecVersion,
             pages: next.pages,
           });
-          setBlocks(parseBodyToBlocks(next.body ?? ''));
+          setBlocks(parseBodyToBlocksForCodec(next.body ?? '', undefined, next.bodyCodecVersion));
           return;
         }
 
         persistNotebookContent(next, next.activePageId ?? null);
         setNavigationOverlay(null);
-        setBlocks(parseBodyToBlocks(next.body ?? ''));
+        setBlocks(parseBodyToBlocksForCodec(next.body ?? '', undefined, next.bodyCodecVersion));
       })();
     },
     [
@@ -2149,7 +2164,7 @@ export function ProjectNotebookBlock({
       if (toolbarActiveBlockIdRef.current != null) return prev;
       return parseBodyToBlocks(body, prev);
     });
-  }, [effectiveContent.body, isNotebookEditorFocused, isDomTextCommitLocked]);
+  }, [effectiveContent.body, effectiveContent.bodyCodecVersion, isNotebookEditorFocused, isDomTextCommitLocked]);
 
   useEffect(() => {
     if (!morphPulseId) return;
@@ -2178,12 +2193,12 @@ export function ProjectNotebookBlock({
   const notebookMode = content.notebookMode ?? 'normal';
   const writingMode: NotebookWritingMode = content.writingMode ?? 'text';
   const showInkMode = workspaceBinderMode
-    ? activePageKind === 'write' && !isFocusModeOpen && editorMode === 'edit'
-    : writingMode === 'ink' && !isFocusModeOpen && editorMode === 'edit';
+    ? activePageKind === 'write' && !isFocusModeOpen && effectiveEditorMode === 'edit'
+    : writingMode === 'ink' && !isFocusModeOpen && effectiveEditorMode === 'edit';
   const isMathNotebook = notebookMode === 'math' || notebookMode === 'math-workspace';
   const compositionActive =
     isMathNotebook &&
-    editorMode === 'edit' &&
+    effectiveEditorMode === 'edit' &&
     !compositionChromeSuppressed &&
     !workspaceBinderMode;
   const compositionUiVisible = useMemo(() => {
@@ -2197,7 +2212,7 @@ export function ProjectNotebookBlock({
   const showMathStartGuide =
     !isDeskPresentation &&
     isMathNotebook &&
-    editorMode === 'edit' &&
+    effectiveEditorMode === 'edit' &&
     !isFocusModeOpen &&
     isMathNotebookStarterContent(content.body ?? '');
 
@@ -2363,24 +2378,24 @@ export function ProjectNotebookBlock({
   /** New empty doc: title + first body line, both empty (not legacy single empty paragraph). */
   const isStarterNotebook = useMemo(
     () =>
-      editorMode === 'edit' &&
+      effectiveEditorMode === 'edit' &&
       blocks.length === 2 &&
       blocks[0]?.kind === 'title' &&
       blocks[0].text === '' &&
       blocks[1]?.kind === 'paragraph' &&
       blocks[1].text === '' &&
       !blocks[1].variant,
-    [editorMode, blocks],
+    [effectiveEditorMode, blocks],
   );
 
   const isLegacySingleEmptyParagraph = useMemo(
     () =>
-      editorMode === 'edit' &&
+      effectiveEditorMode === 'edit' &&
       blocks.length === 1 &&
       blocks[0]?.kind === 'paragraph' &&
       blocks[0].text === '' &&
       !blocks[0].variant,
-    [editorMode, blocks],
+    [effectiveEditorMode, blocks],
   );
 
   const setFocusIndexById = useCallback(
@@ -2725,12 +2740,12 @@ export function ProjectNotebookBlock({
   }, [effectiveContent.activePageId, objectId]);
 
   useLayoutEffect(() => {
-    if (editorMode !== 'edit') {
+    if (effectiveEditorMode !== 'edit') {
       setSelectionToolbar(null);
       selectionSnapshotRef.current = null;
       pendingCaretRef.current = null;
     }
-  }, [editorMode]);
+  }, [effectiveEditorMode]);
 
   const dismissSelectionToolbar = useCallback(() => {
     setSelectionToolbar(null);
@@ -2831,7 +2846,7 @@ export function ProjectNotebookBlock({
   }, [showInkMode]);
 
   useEffect(() => {
-    if (showInkMode || editorMode !== 'edit') return;
+    if (showInkMode || effectiveEditorMode !== 'edit') return;
     const onBeforeInput = (e: Event) => {
       const t = e.target;
       if (!(t instanceof Element) || !t.closest('[data-nb-editor-root="1"]')) return;
@@ -2855,7 +2870,7 @@ export function ProjectNotebookBlock({
     };
     document.addEventListener('beforeinput', onBeforeInput, { capture: true });
     return () => document.removeEventListener('beforeinput', onBeforeInput, { capture: true });
-  }, [showInkMode, editorMode]);
+  }, [showInkMode, effectiveEditorMode]);
 
   useEffect(() => {
     if (!isInkPenTraceEnabled()) return;
@@ -2959,7 +2974,7 @@ export function ProjectNotebookBlock({
         dismissSelectionToolbar();
         return;
       }
-      if (editorMode !== 'edit' || slashMenu) {
+      if (effectiveEditorMode !== 'edit' || slashMenu) {
         dismissSelectionToolbar();
         return;
       }
@@ -3094,7 +3109,7 @@ export function ProjectNotebookBlock({
       });
     },
     [
-      editorMode,
+      effectiveEditorMode,
       slashMenu,
       getEditorRoot,
       dismissSelectionToolbar,
@@ -3145,11 +3160,11 @@ export function ProjectNotebookBlock({
   }, [isDeskPresentation, deskFormattingV1, dismissSelectionToolbar]);
 
   useEffect(() => {
-    if (editorMode !== 'edit') return;
+    if (effectiveEditorMode !== 'edit') return;
     const onSel = () => syncSelectionToolbar();
     document.addEventListener('selectionchange', onSel);
     return () => document.removeEventListener('selectionchange', onSel);
-  }, [editorMode, syncSelectionToolbar]);
+  }, [effectiveEditorMode, syncSelectionToolbar]);
 
   const captureFormatHistorySnapshot = useCallback((): NotebookFormatHistoryEntry => {
     const snap = selectionSnapshotRef.current;
@@ -3379,8 +3394,10 @@ export function ProjectNotebookBlock({
 
   const previewLines = useMemo(() => {
     const body = content.body ?? '';
-    return body.split(/\r?\n/).map(parseNotebookLine);
-  }, [content.body]);
+    return content.bodyCodecVersion === undefined
+      ? body.split(/\r?\n/).map(parseNotebookLine)
+      : parseCanonicalNotebookBody(body, content.bodyCodecVersion);
+  }, [content.body, content.bodyCodecVersion]);
 
   const fontStack = "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
   const typeScale = useMemo(() => {
@@ -3558,6 +3575,9 @@ export function ProjectNotebookBlock({
 
   const updateBlockText = useCallback(
     (id: string, rawText: string, marksOverride?: InlineMark[]) => {
+      if (contentRef.current.bodyCodecVersion !== undefined) {
+        return;
+      }
       const snap = selectionSnapshotRef.current;
       if (snap?.blockId === id && rawText !== snap.plain && isDomTextCommitLocked()) {
         return;
@@ -3865,7 +3885,7 @@ export function ProjectNotebookBlock({
 
   const openDocumentSelectionSession = useCallback(() => {
     const root = getEditorRoot();
-    if (!root || editorMode !== 'edit') return false;
+    if (!root || effectiveEditorMode !== 'edit') return false;
     const doc = selectNotebookDocument(root, blocksRef.current);
     if (!doc || !doc.documentPlain) return false;
     const firstBlk = blocksRef.current.find(b => b.id === doc.firstBlockId);
@@ -3893,7 +3913,7 @@ export function ProjectNotebookBlock({
     toolbarActiveBlockIdRef.current = snapshot.blockId;
     setSelectionToolbar({ ...snapshot, anchor });
     return true;
-  }, [getEditorRoot, editorMode]);
+  }, [getEditorRoot, effectiveEditorMode]);
 
   const handleMultiClickSelect = useCallback(
     (payload: { blockId: string; kind: 'block' | 'document' }) => {
@@ -3936,7 +3956,7 @@ export function ProjectNotebookBlock({
 
   const handleEditorCopy = useCallback(
     (e: React.ClipboardEvent) => {
-      if (editorMode !== 'edit' || showInkMode) return;
+      if (effectiveEditorMode !== 'edit' || showInkMode) return;
       const snap = selectionSnapshotRef.current;
       if (snap && selectionToolbarRef.current) {
         const text =
@@ -3956,7 +3976,7 @@ export function ProjectNotebookBlock({
       e.preventDefault();
       e.clipboardData.setData('text/plain', text);
     },
-    [editorMode, showInkMode, getEditorRoot],
+    [effectiveEditorMode, showInkMode, getEditorRoot],
   );
 
   const toggleTask = useCallback(
@@ -4219,7 +4239,7 @@ export function ProjectNotebookBlock({
 
   const handleEditorKeyCapture = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (editorMode !== 'edit') return;
+      if (effectiveEditorMode !== 'edit' || contentRef.current.bodyCodecVersion !== undefined) return;
       if (!['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
         noteNotebookKeyboardTyping();
       }
@@ -4762,7 +4782,7 @@ export function ProjectNotebookBlock({
       }
     },
     [
-      editorMode,
+      effectiveEditorMode,
       isMathNotebook,
       isDeskPresentation,
       surfaceFocusBlockId,
@@ -5384,7 +5404,7 @@ export function ProjectNotebookBlock({
               fontSize: 10, fontWeight: 500, letterSpacing: '0.04em', transition: 'color 0.15s',
             }}
           >Plain</button>
-          {editorMode === 'edit' && !isFocusModeOpen ? (
+          {effectiveEditorMode === 'edit' && !isFocusModeOpen ? (
             <NotebookWritingModeToggle
               mode={writingMode}
               onChange={handleWritingModeChange}
@@ -5394,7 +5414,9 @@ export function ProjectNotebookBlock({
           {notebookMode !== 'math-workspace' && (
             <button
               type="button"
+              disabled={isVersionedPage && !tipTapCandidateActive}
               onClick={() => {
+                if (isVersionedPage && !tipTapCandidateActive) return;
                 void (async () => {
                   if (editorMode === 'edit') {
                     await flushHandwritingBeforeTransition();
@@ -5402,13 +5424,21 @@ export function ProjectNotebookBlock({
                   setEditorMode(editorMode === 'edit' ? 'preview' : 'edit');
                 })();
               }}
-              title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
+              title={
+                isVersionedPage && !tipTapCandidateActive
+                  ? 'Versioned notebook page (read-only in legacy view)'
+                  : effectiveEditorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'
+              }
               style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
-                borderRadius: 4, color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+                background: 'none', border: 'none',
+                cursor: isVersionedPage && !tipTapCandidateActive ? 'default' : 'pointer',
+                padding: '3px 5px',
+                borderRadius: 4,
+                color: effectiveEditorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+                opacity: isVersionedPage && !tipTapCandidateActive ? 0.6 : 1,
                 fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
               }}
-            >{editorMode === 'edit' ? 'Preview' : 'Edit'}</button>
+            >{effectiveEditorMode === 'edit' ? 'Preview' : 'Edit'}</button>
           )}
           <NotebookModeSelect
             mode={notebookMode}
@@ -5636,7 +5666,7 @@ export function ProjectNotebookBlock({
           ) : null}
         </div>
       ) : null}
-      {editorMode === 'edit' && selectionToolbar && !isDeskPresentation && !tipTapCandidateActive ? (
+      {effectiveEditorMode === 'edit' && selectionToolbar && !isDeskPresentation && !tipTapCandidateActive ? (
         <NotebookSelectionToolbar
           tokens={tokens}
           selection={selectionToolbar}
@@ -5647,7 +5677,7 @@ export function ProjectNotebookBlock({
         />
       ) : null}
 
-      {editorMode === 'edit' && slashMenu && typeof document !== 'undefined'
+      {effectiveEditorMode === 'edit' && slashMenu && typeof document !== 'undefined'
         ? createPortal(
             <div
               data-nb-slash-menu
@@ -5788,7 +5818,7 @@ export function ProjectNotebookBlock({
             borderBottom: '1px solid rgba(255,255,255,0.04)',
           }}
         >
-          {editorMode === 'edit' ? (
+          {effectiveEditorMode === 'edit' ? (
             <button
               type="button"
               title="Focus mode"
@@ -5812,7 +5842,7 @@ export function ProjectNotebookBlock({
               </svg>
             </button>
           ) : null}
-          {editorMode === 'edit' && !isFocusModeOpen ? (
+          {effectiveEditorMode === 'edit' && !isFocusModeOpen ? (
             <NotebookWritingModeToggle
               mode={writingMode}
               onChange={handleWritingModeChange}
@@ -5821,7 +5851,9 @@ export function ProjectNotebookBlock({
           ) : null}
           <button
             type="button"
+            disabled={isVersionedPage && !tipTapCandidateActive}
             onClick={() => {
+              if (isVersionedPage && !tipTapCandidateActive) return;
               void (async () => {
                 if (editorMode === 'edit') {
                   await flushHandwritingBeforeTransition();
@@ -5829,19 +5861,24 @@ export function ProjectNotebookBlock({
                 setEditorMode(editorMode === 'edit' ? 'preview' : 'edit');
               })();
             }}
-            title={editorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'}
+            title={
+              isVersionedPage && !tipTapCandidateActive
+                ? 'Versioned notebook page (read-only in legacy view)'
+                : effectiveEditorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'
+            }
             style={{
               background: 'none',
               border: 'none',
-              cursor: 'pointer',
+              cursor: isVersionedPage && !tipTapCandidateActive ? 'default' : 'pointer',
               padding: '3px 5px',
               borderRadius: 4,
-              color: editorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+              color: effectiveEditorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
+              opacity: isVersionedPage && !tipTapCandidateActive ? 0.6 : 1,
               fontSize: 12,
               fontWeight: 500,
             }}
           >
-            {editorMode === 'edit' ? 'Preview' : 'Edit'}
+            {effectiveEditorMode === 'edit' ? 'Preview' : 'Edit'}
           </button>
         </div>
       ) : null}
@@ -5882,7 +5919,7 @@ export function ProjectNotebookBlock({
           alignItems: undefined,
         }}
       >
-      {editorMode === 'edit' && !isFocusModeOpen ? (
+      {effectiveEditorMode === 'edit' && !isFocusModeOpen ? (
         <div
           ref={editorRootRef}
           data-nb-editor-root="1"
@@ -5999,6 +6036,7 @@ export function ProjectNotebookBlock({
           ) : tipTapCandidateActive ? (
             <NotebookTiptapCandidateEditor
               sourceDocumentBody={effectiveContent.body ?? ''}
+              sourceBodyCodecVersion={effectiveContent.bodyCodecVersion}
               pageKey={String(effectiveContent.activePageId ?? 'legacy-body')}
               objectId={objectId}
             />
@@ -6861,6 +6899,15 @@ export function ProjectNotebookBlock({
                     : line.kind === 'handwriting'
                       ? `handwriting-${index}-${line.key}`
                       : `${line.kind}-${index}-${line.text.slice(0, 24)}`;
+            const versioned = content.bodyCodecVersion !== undefined;
+            const previewMarks: InlineMark[] = 'marks' in line ? (line as NotebookDialectBlock & { marks?: InlineMark[] }).marks ?? [] : [];
+            const previewInlineContent = (text: string) => versioned
+              ? renderPlainWithMarks(text, previewMarks) : renderInlineFormatted(text);
+            const previewPlainForMath = (text: string) => versioned ? text : parseRichLine(text).plain;
+            const renderPreviewLine = (text: string, opts: Parameters<typeof previewLineWithMath>[1]) =>
+              versioned
+                ? <MathRichText text={text} marks={previewMarks} autoPlainMath={mathLineAutoPlain(text, opts.isMathNotebook)} textColor={opts.textColor} mutedColor={opts.mutedColor} />
+                : previewLineWithMath(text, opts);
             const prevLine = index > 0 ? previewLines[index - 1] : undefined;
             const prevKind =
               prevLine && prevLine.kind !== 'blank' ? prevLine.kind : undefined;
@@ -6961,7 +7008,7 @@ export function ProjectNotebookBlock({
                       lineHeight: 1.84,
                     }}
                   >
-                    {previewLineWithMath(line.text, {
+                    {renderPreviewLine(line.text, {
                       isMathNotebook,
                       textColor: ink.primary,
                       mutedColor: tokens.textMuted,
@@ -7011,7 +7058,7 @@ export function ProjectNotebookBlock({
                     {line.checked ? '✓' : ''}
                   </span>
                   <span style={{ flex: 1, whiteSpace: 'pre-wrap', fontSize: `${typeScale.l3}px`, lineHeight: 1.84 }}>
-                    {previewLineWithMath(line.text, {
+                    {renderPreviewLine(line.text, {
                       isMathNotebook,
                       textColor: ink.primary,
                       mutedColor: tokens.textMuted,
@@ -7053,7 +7100,7 @@ export function ProjectNotebookBlock({
                     fontWeight: 400,
                   }}>
                     {line.text
-                      ? previewLineWithMath(line.text, {
+                      ? renderPreviewLine(line.text, {
                           isMathNotebook,
                           textColor: ink.primary,
                           mutedColor: tokens.textMuted,
@@ -7084,7 +7131,7 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {previewLineWithMath(line.text, {
+                  {renderPreviewLine(line.text, {
                     isMathNotebook,
                     textColor: ink.secondary,
                     mutedColor: tokens.textMuted,
@@ -7189,7 +7236,7 @@ export function ProjectNotebookBlock({
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {previewLineWithMath(line.text, {
+                    {renderPreviewLine(line.text, {
                       isMathNotebook,
                       textColor: ink.primary,
                       mutedColor: tokens.textMuted,
@@ -7316,7 +7363,7 @@ export function ProjectNotebookBlock({
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {previewLineWithMath(line.text, {
+                  {renderPreviewLine(line.text, {
                     isMathNotebook,
                     textColor: fine ? ink.muted : muted ? ink.secondary : ink.primary,
                     mutedColor: tokens.textMuted,
@@ -7656,13 +7703,13 @@ export function ProjectNotebookBlock({
       </>,
       document.body,
     ) : null}
-    {compositionUiVisible && editorMode === 'edit' ? (
+    {compositionUiVisible && effectiveEditorMode === 'edit' ? (
       <CompositionOverlays
         props={{
           tokens,
           notebookMode,
           active: compositionUiVisible,
-          editorMode,
+          editorMode: effectiveEditorMode,
           editorRoot: getEditorRoot(),
           writingColumnEl: isFocusModeOpen ? focusWritingColumnEl : writingColumnEl,
           chipAnchorEl: isFocusModeOpen ? null : notebookBodyHostEl,

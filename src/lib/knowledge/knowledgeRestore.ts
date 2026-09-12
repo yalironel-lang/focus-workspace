@@ -1,6 +1,6 @@
 import { boardScopedFreeSpaceKeys, fwPersistWarn, sanitizePositionMap } from '../freeSpacePersistence';
 import type { BlockPos } from '../../hooks/useBlockPositions';
-import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
+import type { ProjectObjectContent, ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
 import { serializeBlockSnapshot } from '../notebookBlockRichText';
 import { deleteTombstone } from './tombstoneStore';
 import type {
@@ -9,6 +9,9 @@ import type {
   NotebookBlockTombstone,
   NotebookSnapshot,
 } from './knowledgeTypes';
+import { resolvePageForBodyProjection } from '../notebookPages/hydrate';
+import { replaceNotebookPageBody } from '../notebookPages/bodyCodec';
+import type { NotebookPage } from '../notebookPages/types';
 
 function loadObjectsSync(sectionId: string, boardId: string): ProjectSpaceObject[] {
   try {
@@ -129,9 +132,26 @@ export async function restoreNotebookSnapshot(snapshot: NotebookSnapshot): Promi
   }
   const nextObjects = objects.map(o => {
     if (o.id !== objectId) return o;
+    const notebookContent = notebook.content as Extract<ProjectObjectContent, { type: 'notebook' }>;
+    const pages = Array.isArray(notebookContent.pages) ? (notebookContent.pages as NotebookPage[]) : undefined;
+    let nextPages = pages;
+    if (pages && pages.length > 0) {
+      const activePage = resolvePageForBodyProjection(notebookContent);
+      if (activePage && activePage.kind === 'document') {
+        nextPages = pages.map(p =>
+          p.id === activePage.id ? replaceNotebookPageBody(p, body, snapshot.bodyCodecVersion) : p,
+        );
+      }
+    }
+    const { bodyCodecVersion: _oldCodec, ...restContent } = notebookContent;
     return {
       ...o,
-      content: { ...notebook.content, body },
+      content: {
+        ...restContent,
+        ...(nextPages !== undefined ? { pages: nextPages } : {}),
+        body,
+        ...(snapshot.bodyCodecVersion !== undefined ? { bodyCodecVersion: snapshot.bodyCodecVersion } : {}),
+      },
       updatedAt: Date.now(),
     };
   });

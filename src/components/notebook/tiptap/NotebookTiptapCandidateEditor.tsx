@@ -43,6 +43,7 @@ export type CandidateSerializeSnapshot = {
 export type NotebookTiptapCandidateEditorProps = {
   /** Real active-page body (same as CE). Never mutated / never written back. */
   sourceDocumentBody: string;
+  sourceBodyCodecVersion?: number;
   /** Changes on Notebook page switch — discards candidate edits. */
   pageKey: string;
   objectId?: string;
@@ -61,9 +62,10 @@ export type NotebookTiptapCandidateEditorProps = {
 function attemptSerialize(
   doc: JSONContent,
   userEdited: boolean,
+  codecVersion?: number,
 ): CandidateSerializeSnapshot {
   try {
-    const body = tiptapDocToBody(doc);
+    const body = tiptapDocToBody(doc, codecVersion);
     return {
       status: 'SAFE',
       body,
@@ -114,6 +116,7 @@ const toolBtn: CSSProperties = {
  */
 export function NotebookTiptapCandidateEditor({
   sourceDocumentBody,
+  sourceBodyCodecVersion,
   pageKey,
   objectId,
   className,
@@ -144,14 +147,14 @@ export function NotebookTiptapCandidateEditor({
 
   const load = useMemo(() => {
     try {
-      return { content: bodyToTiptapDoc(pageSource), error: null as string | null };
+      return { content: bodyToTiptapDoc(pageSource, sourceBodyCodecVersion), error: null as string | null };
     } catch (err) {
       return {
         content: bodyToTiptapDoc(''),
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }, [pageSource, pageKey]);
+  }, [pageSource, pageKey, sourceBodyCodecVersion]);
 
   const editor = useEditor(
     {
@@ -176,7 +179,7 @@ export function NotebookTiptapCandidateEditor({
         if (!transaction.docChanged) return;
         userEditedRef.current = true;
         setUserEdited(true);
-        const next = attemptSerialize(ed.getJSON(), true);
+        const next = attemptSerialize(ed.getJSON(), true, sourceBodyCodecVersion);
         setSnap(next);
         onSnapshot?.(next);
       },
@@ -194,10 +197,10 @@ export function NotebookTiptapCandidateEditor({
       return;
     }
     editor.commands.setContent(load.content, { emitUpdate: false });
-    const next = attemptSerialize(editor.getJSON(), false);
+    const next = attemptSerialize(editor.getJSON(), false, sourceBodyCodecVersion);
     setSnap(next);
     onSnapshot?.(next);
-  }, [editor, pageKey, pageSource, load.content, load.error, onSnapshot]);
+  }, [editor, pageKey, pageSource, sourceBodyCodecVersion, load.content, load.error, onSnapshot]);
 
   useEffect(() => {
     if (!onReady) return;

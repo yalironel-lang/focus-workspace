@@ -1,4 +1,5 @@
-import { migrateLegacyNotebook, serializePageToBody } from './hydrate';
+import { notebookPageBodyProjection, replaceNotebookPageBody } from './bodyCodec';
+import { migrateLegacyNotebook } from './hydrate';
 import {
   NOTEBOOK_SCHEMA_VERSION_V1,
   type NotebookContentWithPages,
@@ -47,13 +48,14 @@ export function saveNotebookPageBody<T extends NotebookContentWithPages>(
   }
   const pages = (migrated.pages ?? []).map(p => {
     if (p.id !== activePageId) return p;
-    if (p.kind === 'document') return { ...p, documentBody: currentBody };
+    if (p.kind === 'document') return replaceNotebookPageBody(p, currentBody, content.bodyCodecVersion);
     return p;
   });
   return {
     ...migrated,
     pages,
     body: currentBody,
+    bodyCodecVersion: content.bodyCodecVersion,
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
   } as T;
 }
@@ -69,12 +71,13 @@ export function switchNotebookPage<T extends NotebookContentWithPages>(
   if (!page) return saved;
   const section = (saved.sections ?? []).find(s => s.id === page.sectionId);
   if (!section) return saved;
-  const body = serializePageToBody(page, '');
+  const projection = notebookPageBodyProjection(page);
   return {
     ...saved,
     activeSectionId: section.id,
     activePageId: page.id,
-    body,
+    ...projection,
+    bodyCodecVersion: projection.bodyCodecVersion,
   } as T;
 }
 
@@ -121,6 +124,7 @@ export function addNotebookSection<T extends NotebookContentWithPages>(
     activeSectionId: sectionId,
     activePageId: pageId,
     body: '',
+    bodyCodecVersion: undefined,
   } as T;
 }
 
@@ -163,6 +167,7 @@ export function addNotebookPage<T extends NotebookContentWithPages>(
     activeSectionId: sectionId,
     activePageId: pageId,
     body: '',
+    bodyCodecVersion: undefined,
   } as T;
 }
 
@@ -214,7 +219,7 @@ export function renameNotebookPage<T extends NotebookContentWithPages>(
 function resolveActiveAfterDelete(
   content: NotebookContentWithPages,
   deletedPageId: string,
-): Pick<NotebookContentWithPages, 'activeSectionId' | 'activePageId' | 'body'> {
+): Pick<NotebookContentWithPages, 'activeSectionId' | 'activePageId' | 'body' | 'bodyCodecVersion'> {
   const sections = content.sections ?? [];
   const pages = content.pages ?? [];
   if (content.activePageId !== deletedPageId) {
@@ -222,7 +227,8 @@ function resolveActiveAfterDelete(
     return {
       activeSectionId: content.activeSectionId,
       activePageId: content.activePageId,
-      body: active ? serializePageToBody(active, content.body ?? '') : content.body ?? '',
+      ...(active ? notebookPageBodyProjection(active, content) : { body: content.body }),
+      bodyCodecVersion: active ? notebookPageBodyProjection(active, content).bodyCodecVersion : content.bodyCodecVersion,
     };
   }
   const section = sections.find(s => s.pageIds.includes(deletedPageId));
@@ -233,7 +239,8 @@ function resolveActiveAfterDelete(
     return {
       activeSectionId: firstSection?.id,
       activePageId: firstPageId,
-      body: firstPage ? serializePageToBody(firstPage, '') : '',
+      ...(firstPage ? notebookPageBodyProjection(firstPage) : { body: '' }),
+      bodyCodecVersion: firstPage?.documentBodyCodecVersion,
     };
   }
   const idx = section.pageIds.indexOf(deletedPageId);
@@ -245,7 +252,8 @@ function resolveActiveAfterDelete(
   return {
     activeSectionId: fallbackSection?.id,
     activePageId: fallbackPage?.id,
-    body: fallbackPage ? serializePageToBody(fallbackPage, '') : '',
+    ...(fallbackPage ? notebookPageBodyProjection(fallbackPage) : { body: '' }),
+    bodyCodecVersion: fallbackPage?.documentBodyCodecVersion,
   };
 }
 

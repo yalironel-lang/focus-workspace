@@ -1,3 +1,4 @@
+import { notebookPageBodyProjection, replaceNotebookBodyProjection, replaceNotebookPageBody } from './bodyCodec';
 import { PAGE_INK_BLOCK_KEY } from '../handwritingTypes';
 import { inkPageKeyForNotebookPage } from './inkPageKey';
 import { isNotebookV1PagesEnabled } from './featureFlag';
@@ -51,6 +52,7 @@ export function sanitizeNotebookPage(raw: unknown): NotebookPage | null {
     kind,
     ...(title !== undefined ? { title } : {}),
     ...(documentBody !== undefined ? { documentBody } : {}),
+    ...(typeof r.documentBodyCodecVersion === 'number' ? { documentBodyCodecVersion: r.documentBodyCodecVersion } : {}),
     ...(inkPageKey !== undefined ? { inkPageKey } : {}),
     ...(linkedPdfObjectId !== undefined ? { linkedPdfObjectId } : {}),
   };
@@ -75,6 +77,7 @@ export function sanitizeNotebookPagesFields(raw: Record<string, unknown>): Noteb
     typeof raw.activePageId === 'string' && raw.activePageId ? raw.activePageId : undefined;
   return {
     ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+    ...(typeof raw.bodyCodecVersion === 'number' ? { bodyCodecVersion: raw.bodyCodecVersion } : {}),
     ...(sections.length > 0 ? { sections } : {}),
     ...(pages.length > 0 ? { pages } : {}),
     ...(activeSectionId !== undefined ? { activeSectionId } : {}),
@@ -128,9 +131,10 @@ function withPageDocumentBody(
   content: NotebookContentWithPages,
   pageId: string,
   documentBody: string,
+  codecVersion?: number,
 ): NotebookContentWithPages {
   const pages = (content.pages ?? []).map(p =>
-    p.id === pageId && p.kind === 'document' ? { ...p, documentBody } : p,
+    p.id === pageId && p.kind === 'document' ? replaceNotebookPageBody(p, documentBody, codecVersion) : p,
   );
   return { ...content, pages };
 }
@@ -163,6 +167,7 @@ function buildLegacyDefaultPages(content: NotebookContentWithPages): NotebookCon
           kind: 'document',
           title: LEGACY_DEFAULT_PAGE_TITLE,
           documentBody: body,
+          ...(content.bodyCodecVersion !== undefined ? { documentBodyCodecVersion: content.bodyCodecVersion } : {}),
         };
   const section: NotebookSection = {
     id: LEGACY_DEFAULT_SECTION_ID,
@@ -197,9 +202,9 @@ function ensureWritePageInkKeys<T extends NotebookContentWithPages>(content: T):
 export function deriveBodyFromActivePage<T extends NotebookContentWithPages>(content: T): T {
   const page = resolvePageForBodyProjection(content);
   if (!page) return content;
-  const body = serializePageToBody(page, content.body ?? '');
-  if (body === (content.body ?? '')) return content;
-  return { ...content, body } as T;
+  const projection = notebookPageBodyProjection(page, content);
+  if (projection.body === content.body && projection.bodyCodecVersion === content.bodyCodecVersion) return content;
+  return replaceNotebookBodyProjection(content, projection);
 }
 
 /** One-time legacy shape → Section "Notes" / Page 1. Idempotent when V1 pages already valid. */
@@ -243,13 +248,14 @@ export function dualWriteNotebookPages<T extends NotebookContentWithPages>(conte
     return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1 } as T;
   }
   const editorBody = content.body ?? '';
-  if ((editorPage.documentBody ?? '') === editorBody) {
+  if ((editorPage.documentBody ?? '') === editorBody && editorPage.documentBodyCodecVersion === content.bodyCodecVersion) {
     return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1, body: editorBody } as T;
   }
   return {
-    ...withPageDocumentBody(migrated, editorPage.id, editorBody),
+    ...withPageDocumentBody(migrated, editorPage.id, editorBody, content.bodyCodecVersion),
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
     body: editorBody,
+    bodyCodecVersion: content.bodyCodecVersion,
   } as T;
 }
 

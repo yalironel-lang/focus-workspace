@@ -1,4 +1,5 @@
-import { serializePageToBody, resolvePageForBodyProjection } from './hydrate';
+import { notebookPageBodyProjection, replaceNotebookBodyProjection } from './bodyCodec';
+import { resolvePageForBodyProjection } from './hydrate';
 import type { NotebookContentWithPages, NotebookPage, NotebookSection } from './types';
 
 /** Stable fingerprint of persisted notebook manifest (excludes navigation + derived body). */
@@ -25,6 +26,7 @@ function pageFingerprint(p: NotebookPage): {
   kind: string;
   title: string | null;
   documentBody: string | null;
+  documentBodyCodecVersion?: number;
   inkPageKey: string | null;
   linkedPdfObjectId: string | null;
 } {
@@ -34,6 +36,7 @@ function pageFingerprint(p: NotebookPage): {
     kind: p.kind,
     title: p.title ?? null,
     documentBody: p.documentBody ?? null,
+    ...(p.documentBodyCodecVersion !== undefined ? { documentBodyCodecVersion: p.documentBodyCodecVersion } : {}),
     inkPageKey: p.inkPageKey ?? null,
     linkedPdfObjectId: p.linkedPdfObjectId ?? null,
   };
@@ -55,10 +58,7 @@ export function prepareNotebookForCloudPersist<T extends NotebookContentWithPage
   const activePage =
     (pageId ? (content.pages ?? []).find(p => p.id === pageId) ?? null : null) ??
     resolvePageForBodyProjection(content);
-  const body =
-    activePage && activePage.kind === 'document'
-      ? serializePageToBody(activePage, '')
-      : content.body ?? '';
+  const projection = activePage ? notebookPageBodyProjection(activePage, content) : { body: content.body, bodyCodecVersion: content.bodyCodecVersion };
   const { activeSectionId: _s, activePageId: _p, ...rest } = content;
-  return { ...rest, body } as T;
+  return replaceNotebookBodyProjection(rest as T, projection);
 }

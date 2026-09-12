@@ -22,6 +22,8 @@ export interface NotebookPage {
   title?: string;
   /** Document page body (serialized blocks). */
   documentBody?: string;
+  /** Codec for this exact documentBody; absent is legacy. */
+  documentBodyCodecVersion?: number;
   /** Write page IDB ink key (legacy alias: page-ink). */
   inkPageKey?: string;
   /** Optional PDF on canvas for past-exam practice (write pages only). */
@@ -29,6 +31,8 @@ export interface NotebookPage {
 }
 
 export interface NotebookPagesFields {
+  /** Codec for top-level body projection only, never a global page codec. */
+  bodyCodecVersion?: number;
   schemaVersion?: number;
   sections?: NotebookSection[];
   pages?: NotebookPage[];

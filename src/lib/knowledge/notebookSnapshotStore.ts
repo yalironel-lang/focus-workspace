@@ -26,6 +26,7 @@ type PendingSnapshot = {
   objectId: string;
   objectTitle: string;
   body: string;
+  bodyCodecVersion?: number;
   editGeneration: number;
 };
 
@@ -66,9 +67,10 @@ export async function writeNotebookSnapshot(input: {
   objectId: string;
   objectTitle: string;
   body: string;
+  bodyCodecVersion?: number;
   editGeneration: number;
 }): Promise<void> {
-  const { sectionId, boardId, objectId, objectTitle, body, editGeneration } = input;
+  const { sectionId, boardId, objectId, objectTitle, body, bodyCodecVersion, editGeneration } = input;
   if (!sectionId || !objectId || !body.trim()) return;
   const snapshot: NotebookSnapshot = {
     id: newSnapshotId(),
@@ -77,6 +79,7 @@ export async function writeNotebookSnapshot(input: {
     objectId,
     objectTitle: objectTitle || 'Notebook',
     body,
+    ...(bodyCodecVersion !== undefined ? { bodyCodecVersion } : {}),
     createdAt: Date.now(),
     editGeneration,
   };
@@ -97,6 +100,7 @@ export function scheduleNotebookSnapshot(input: {
   objectId: string;
   objectTitle: string;
   body: string;
+  bodyCodecVersion?: number;
   editGeneration: number;
 }): void {
   const { objectId, editGeneration } = input;
