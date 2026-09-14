@@ -139,7 +139,14 @@ export async function restoreNotebookSnapshot(snapshot: NotebookSnapshot): Promi
       const activePage = resolvePageForBodyProjection(notebookContent);
       if (activePage && activePage.kind === 'document') {
         nextPages = pages.map(p =>
-          p.id === activePage.id ? replaceNotebookPageBody(p, body, snapshot.bodyCodecVersion) : p,
+          p.id === activePage.id
+            ? replaceNotebookPageBody(p, {
+                body,
+                ...(snapshot.bodyCodecVersion !== undefined
+                  ? { codecVersion: snapshot.bodyCodecVersion }
+                  : {}),
+              })
+            : p,
         );
       }
     }

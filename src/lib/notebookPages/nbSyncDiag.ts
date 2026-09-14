@@ -32,6 +32,7 @@ function pageSummary(p: NotebookPage): Record<string, unknown> {
     kind: p.kind,
     title: p.title ?? null,
     documentBody: p.documentBody ?? null,
+    documentBodyCodecVersion: p.documentBodyCodecVersion ?? null,
     inkPageKey: p.inkPageKey ?? null,
   };
 }

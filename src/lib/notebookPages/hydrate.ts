@@ -1,4 +1,10 @@
-import { notebookPageBodyProjection, replaceNotebookBodyProjection, replaceNotebookPageBody } from './bodyCodec';
+import {
+  notebookPageBodyProjection,
+  replaceNotebookBodyProjection,
+  replaceNotebookPageBody,
+  type NotebookBodyRepresentation,
+} from './bodyCodec';
+
 import { PAGE_INK_BLOCK_KEY } from '../handwritingTypes';
 import { inkPageKeyForNotebookPage } from './inkPageKey';
 import { isNotebookV1PagesEnabled } from './featureFlag';
@@ -130,14 +136,14 @@ export function resolvePageForBodyProjection(content: NotebookPagesFields): Note
 function withPageDocumentBody(
   content: NotebookContentWithPages,
   pageId: string,
-  documentBody: string,
-  codecVersion?: number,
+  rep: NotebookBodyRepresentation,
 ): NotebookContentWithPages {
   const pages = (content.pages ?? []).map(p =>
-    p.id === pageId && p.kind === 'document' ? replaceNotebookPageBody(p, documentBody, codecVersion) : p,
+    p.id === pageId && p.kind === 'document' ? replaceNotebookPageBody(p, rep) : p,
   );
   return { ...content, pages };
 }
+
 
 /** Map a page record to the legacy `body` string the UI reads. */
 export function serializePageToBody(page: NotebookPage, legacyBody = ''): string {
@@ -240,26 +246,46 @@ export function hydrateNotebookPages<T extends NotebookContentWithPages>(
  * Write editor body onto active document page; documentBody is authoritative.
  * `body` is a derived projection for the active page editor.
  */
-export function dualWriteNotebookPages<T extends NotebookContentWithPages>(content: T): T {
+export function dualWriteNotebookPages<T extends NotebookContentWithPages>(
+  content: T,
+  editorRep?: NotebookBodyRepresentation,
+): T {
   if (!isNotebookV1PagesEnabled()) return content;
   const migrated = migrateLegacyNotebook(content);
   const editorPage = findActivePage(migrated) ?? resolvePageForBodyProjection(migrated);
   if (!editorPage || editorPage.kind !== 'document') {
     return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1 } as T;
   }
-  const editorBody = content.body ?? '';
-  if ((editorPage.documentBody ?? '') === editorBody && editorPage.documentBodyCodecVersion === content.bodyCodecVersion) {
-    return { ...migrated, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1, body: editorBody } as T;
+  const rep: NotebookBodyRepresentation = editorRep ?? {
+    body: content.body ?? '',
+    ...(content.bodyCodecVersion !== undefined ? { codecVersion: content.bodyCodecVersion } : {}),
+  };
+  const editorBody = rep.body;
+  if (
+    (editorPage.documentBody ?? '') === editorBody &&
+    editorPage.documentBodyCodecVersion === rep.codecVersion
+  ) {
+    const { bodyCodecVersion: _old, ...rest } = migrated;
+    return {
+      ...rest,
+      schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
+      body: editorBody,
+      ...(rep.codecVersion !== undefined ? { bodyCodecVersion: rep.codecVersion } : {}),
+    } as T;
   }
+  const { bodyCodecVersion: _old, ...rest } = withPageDocumentBody(migrated, editorPage.id, rep);
   return {
-    ...withPageDocumentBody(migrated, editorPage.id, editorBody, content.bodyCodecVersion),
+    ...rest,
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
     body: editorBody,
-    bodyCodecVersion: content.bodyCodecVersion,
+    ...(rep.codecVersion !== undefined ? { bodyCodecVersion: rep.codecVersion } : {}),
   } as T;
 }
 
 /** Persist hook for notebook editors — dual-write when V1 pages enabled. */
-export function applyNotebookPersist<T extends NotebookContentWithPages>(content: T): T {
-  return dualWriteNotebookPages(content);
+export function applyNotebookPersist<T extends NotebookContentWithPages>(
+  content: T,
+  editorRep?: NotebookBodyRepresentation,
+): T {
+  return dualWriteNotebookPages(content, editorRep);
 }

@@ -4,6 +4,7 @@ import type { ToolbarAnchor } from './notebookSelectionToolbar';
 /** One undo/redo step for inline formatting (not persistence/autosave). */
 export type NotebookFormatHistoryEntry = {
   body: string;
+  bodyCodecVersion?: number;
   session: StoredNotebookSelection | null;
   toolbarOpen: boolean;
   toolbarAnchor: ToolbarAnchor | null;

@@ -1,4 +1,8 @@
-import { notebookPageBodyProjection, replaceNotebookPageBody } from './bodyCodec';
+import {
+  notebookPageBodyProjection,
+  replaceNotebookPageBody,
+  type NotebookBodyRepresentation,
+} from './bodyCodec';
 import { migrateLegacyNotebook } from './hydrate';
 import {
   NOTEBOOK_SCHEMA_VERSION_V1,
@@ -40,32 +44,50 @@ export function sectionDisplayTitle(section: NotebookSection, index: number): st
 export function saveNotebookPageBody<T extends NotebookContentWithPages>(
   content: T,
   currentBody: string,
+  currentCodecVersion?: number,
 ): T {
   const migrated = migrateLegacyNotebook(content);
   const activePageId = migrated.activePageId;
   if (!activePageId) {
-    return { ...migrated, body: currentBody, schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1 } as T;
+    return {
+      ...migrated,
+      body: currentBody,
+      ...(currentCodecVersion !== undefined
+        ? { bodyCodecVersion: currentCodecVersion }
+        : content.bodyCodecVersion !== undefined
+          ? { bodyCodecVersion: content.bodyCodecVersion }
+          : {}),
+      schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
+    } as T;
   }
+  const codecVersion =
+    currentCodecVersion !== undefined ? currentCodecVersion : content.bodyCodecVersion;
+  const rep: NotebookBodyRepresentation = {
+    body: currentBody,
+    ...(codecVersion !== undefined ? { codecVersion } : {}),
+  };
   const pages = (migrated.pages ?? []).map(p => {
     if (p.id !== activePageId) return p;
-    if (p.kind === 'document') return replaceNotebookPageBody(p, currentBody, content.bodyCodecVersion);
+    if (p.kind === 'document') return replaceNotebookPageBody(p, rep);
     return p;
   });
   return {
     ...migrated,
     pages,
     body: currentBody,
-    bodyCodecVersion: content.bodyCodecVersion,
+    ...(codecVersion !== undefined ? { bodyCodecVersion: codecVersion } : {}),
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
   } as T;
 }
+
 
 export function switchNotebookPage<T extends NotebookContentWithPages>(
   content: T,
   pageId: string,
   currentBody: string,
+  currentCodecVersion?: number,
 ): T {
-  const saved = saveNotebookPageBody(content, currentBody);
+  const saved = saveNotebookPageBody(content, currentBody, currentCodecVersion);
   if (pageId === saved.activePageId) return saved;
   const page = (saved.pages ?? []).find(p => p.id === pageId);
   if (!page) return saved;
@@ -85,20 +107,22 @@ export function setActiveNotebookSection<T extends NotebookContentWithPages>(
   content: T,
   sectionId: string,
   currentBody: string,
+  currentCodecVersion?: number,
 ): T {
-  const saved = saveNotebookPageBody(content, currentBody);
+  const saved = saveNotebookPageBody(content, currentBody, currentCodecVersion);
   const section = (saved.sections ?? []).find(s => s.id === sectionId);
   if (!section || section.pageIds.length === 0) return saved;
   if (sectionId === saved.activeSectionId && saved.activePageId) return saved;
-  return switchNotebookPage(saved, section.pageIds[0]!, currentBody);
+  return switchNotebookPage(saved, section.pageIds[0]!, currentBody, currentCodecVersion);
 }
 
 export function addNotebookSection<T extends NotebookContentWithPages>(
   content: T,
   currentBody: string,
   title?: string,
+  currentCodecVersion?: number,
 ): T {
-  const saved = saveNotebookPageBody(content, currentBody);
+  const saved = saveNotebookPageBody(content, currentBody, currentCodecVersion);
   const sections = saved.sections ?? [];
   const sectionIndex = sections.length + 1;
   const sectionId = newNotebookSectionId();
@@ -134,8 +158,9 @@ export function addNotebookPage<T extends NotebookContentWithPages>(
   currentBody: string,
   title?: string,
   kind: NotebookPageKind = 'document',
+  currentCodecVersion?: number,
 ): T {
-  const saved = saveNotebookPageBody(content, currentBody);
+  const saved = saveNotebookPageBody(content, currentBody, currentCodecVersion);
   const section = (saved.sections ?? []).find(s => s.id === sectionId);
   if (!section) return saved;
   const pageIndex = section.pageIds.length + 1;
@@ -262,8 +287,9 @@ export function deleteNotebookPage<T extends NotebookContentWithPages>(
   content: T,
   pageId: string,
   currentBody: string,
+  currentCodecVersion?: number,
 ): { content: T; deletedInkKeys: string[] } {
-  const saved = saveNotebookPageBody(content, currentBody);
+  const saved = saveNotebookPageBody(content, currentBody, currentCodecVersion);
   const page = (saved.pages ?? []).find(p => p.id === pageId);
   if (!page) return { content: saved, deletedInkKeys: [] };
 

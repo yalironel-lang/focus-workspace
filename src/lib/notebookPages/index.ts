@@ -62,3 +62,10 @@ export {
   clearNotebookActivePage,
   type NotebookActivePageState,
 } from './notebookActivePage';
+export {
+  replaceNotebookPageBody,
+  replaceNotebookBodyProjection,
+  notebookPageBodyProjection,
+  type NotebookBodyRepresentation,
+  type NotebookBodyProjection,
+} from './bodyCodec';

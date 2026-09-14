@@ -236,4 +236,46 @@ describe('NotebookTiptapCandidateEditor', () => {
       ed.destroy();
     }
   });
+
+  it('M5.2: onUserEdit prop activates guarded persistence mode on the component', async () => {
+    const onReady = vi.fn();
+    const onUserEdit = vi.fn();
+    let editorInstance: import('@tiptap/core').Editor | null = null;
+    mount(
+      createElement(NotebookTiptapCandidateEditor, {
+        sourceDocumentBody: 'Original page text',
+        pageKey: 'persist-test',
+        onReady,
+        onEditorReady: (ed: import('@tiptap/core').Editor | null) => {
+          editorInstance = ed;
+        },
+        onUserEdit,
+      }),
+    );
+    await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
+    expect(onReady.mock.calls[0]![0].persistence).toBe(true);
+    expect(host!.querySelector('[data-nb-candidate-persistence="guarded"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-candidate-badge="1"]')?.textContent).toContain('M5.2 Guarded Persist');
+    expect(host!.querySelector('[data-nb-dir-persist="guarded"]')).toBeTruthy();
+
+    // Opening/mounting MUST NOT call onUserEdit
+    expect(onUserEdit).not.toHaveBeenCalled();
+
+    // Mutate document via editorInstance
+    await vi.waitFor(() => expect(editorInstance).toBeTruthy());
+    act(() => {
+      editorInstance!.commands.focus('end');
+      editorInstance!.commands.insertContent(' added');
+    });
+
+    await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
+    expect(onUserEdit).toHaveBeenCalledWith(expect.any(String), 1);
+    const [persistedBody, codecVersion] = onUserEdit.mock.calls[0]!;
+    expect(codecVersion).toBe(1);
+    expect(persistedBody.startsWith('~nb1:')).toBe(true);
+    expect(persistedBody).toContain('Original page text added');
+
+    // UI dirty label updates to saving
+    expect(host!.querySelector('[data-nb-candidate-dirty="EDITED (saving…)"]')).toBeTruthy();
+  });
 });

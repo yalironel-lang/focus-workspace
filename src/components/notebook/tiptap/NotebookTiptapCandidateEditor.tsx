@@ -26,6 +26,13 @@ import {
   type CandidateBlockTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
 
+import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
+import {
+  type NotebookQaDiagContext,
+  buildNotebookQaDiagSnapshot,
+  recordTransitionIfNeeded,
+} from '../../../lib/notebookTiptap/candidateQaDiagnostics';
+
 export type CandidateSerializeStatus = 'SAFE' | 'UNSERIALIZABLE';
 
 export type CandidateDirtyKind = 'pristine' | 'user_edit' | 'unserializable';
@@ -52,11 +59,24 @@ export type NotebookTiptapCandidateEditorProps = {
     editable: true;
     pageKey: string;
     sourceLength: number;
-    persistence: false;
+    persistence: boolean;
   }) => void;
   /** Test/DEV hook — TipTap editor instance (memory-only). */
   onEditorReady?: (editor: import('@tiptap/core').Editor | null) => void;
   onSnapshot?: (snap: CandidateSerializeSnapshot) => void;
+  /**
+   * M5.2 — guarded real persistence callback.
+   * Called ONLY when:
+   *   1. A genuine user content mutation occurs (transaction.docChanged)
+   *   2. Serialization to canonical body succeeds (fail-closed)
+   *   3. This prop is provided (persistence flag ON at mount site)
+   *
+   * The body is always codec V1. Caller routes through existing pushContent pipeline.
+   * NOT called on: mount, hydration, programmatic setContent, selection, focus, blur.
+   */
+  onUserEdit?: (body: string, codecVersion: number) => void;
+  /** DEV-only diagnostics context for copying in-memory snapshot and transition trace */
+  qaDiagContext?: NotebookQaDiagContext;
 };
 
 function attemptSerialize(
@@ -112,7 +132,9 @@ const toolBtn: CSSProperties = {
 
 /**
  * TipTap candidate editor for the real Notebook writing column.
- * Intentionally has NO persistence callback props.
+ * When onUserEdit is provided (M5.2 persist flag ON), genuine user edits are
+ * routed through the existing pushContent persistence pipeline via that callback.
+ * When absent, behavior is memory-only (M4 contract).
  */
 export function NotebookTiptapCandidateEditor({
   sourceDocumentBody,
@@ -123,6 +145,8 @@ export function NotebookTiptapCandidateEditor({
   onReady,
   onEditorReady,
   onSnapshot,
+  onUserEdit,
+  qaDiagContext,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
@@ -134,10 +158,28 @@ export function NotebookTiptapCandidateEditor({
     [pageKey, sourceDocumentBody],
   );
 
+  const prevPageKeyRef = useRef(pageKey);
+  type CandidateEmittedItem = {
+    pageKey: string;
+    body: string;
+    codecVersion: number;
+    emittedAt: number;
+  };
+  const recentEmissionsRef = useRef<CandidateEmittedItem[]>([]);
+
+  if (prevPageKeyRef.current !== pageKey) {
+    prevPageKeyRef.current = pageKey;
+    recentEmissionsRef.current = [];
+  }
+
   useEffect(() => {
+    if (prevPageKeyRef.current !== pageKey) {
+      prevPageKeyRef.current = pageKey;
+      recentEmissionsRef.current = [];
+      userEditedRef.current = false;
+      setUserEdited(false);
+    }
     sourceRef.current = pageSource;
-    userEditedRef.current = false;
-    setUserEdited(false);
   }, [pageKey, pageSource]);
 
   const extensions = useMemo(
@@ -146,15 +188,43 @@ export function NotebookTiptapCandidateEditor({
   );
 
   const load = useMemo(() => {
+    // Render-time self-echo guard: if this update matches what this exact editor instance recently emitted
+    // for this page, allow load to interpret the body using the known emitted codec version even if
+    // the parent reflection temporarily arrived with undefined codecVersion.
+    const matchingEcho = recentEmissionsRef.current.find(
+      e => e.pageKey === pageKey && e.body === pageSource,
+    );
+    const isRenderSelfEcho = matchingEcho !== undefined;
+
+    const effectiveCodecVersion =
+      isRenderSelfEcho && sourceBodyCodecVersion === undefined
+        ? matchingEcho.codecVersion
+        : sourceBodyCodecVersion;
+
     try {
-      return { content: bodyToTiptapDoc(pageSource, sourceBodyCodecVersion), error: null as string | null };
+      // DEV fail-closed guard: versioned text record (~nb1:) must NEVER be parsed with undefined codecVersion
+      if (effectiveCodecVersion === undefined && pageSource.includes('~nb1:')) {
+        throw new Error('Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion');
+      }
+      return {
+        content: bodyToTiptapDoc(pageSource, effectiveCodecVersion),
+        error: null as string | null,
+        isSelfEcho: isRenderSelfEcho,
+        matchedEchoCodecVersion: matchingEcho?.codecVersion,
+      };
     } catch (err) {
       return {
         content: bodyToTiptapDoc(''),
         error: err instanceof Error ? err.message : String(err),
+        isSelfEcho: false,
+        matchedEchoCodecVersion: undefined,
       };
     }
   }, [pageSource, pageKey, sourceBodyCodecVersion]);
+
+  // Stable ref so closure in onUpdate always has the latest prop without re-creating editor.
+  const onUserEditRef = useRef(onUserEdit);
+  onUserEditRef.current = onUserEdit;
 
   const editor = useEditor(
     {
@@ -179,9 +249,36 @@ export function NotebookTiptapCandidateEditor({
         if (!transaction.docChanged) return;
         userEditedRef.current = true;
         setUserEdited(true);
-        const next = attemptSerialize(ed.getJSON(), true, sourceBodyCodecVersion);
+        const targetCodec = onUserEditRef.current ? 1 : sourceBodyCodecVersion;
+        const next = attemptSerialize(ed.getJSON(), true, targetCodec);
         setSnap(next);
         onSnapshot?.(next);
+        // M5.2 — guarded real persistence (fail-closed).
+        // Only fires when: docChanged + serialization succeeded + prop provided.
+        // Does NOT fire on: mount, setContent, selection, focus, blur.
+        if (next.status === 'SAFE' && next.body !== null) {
+          const persistFn = onUserEditRef.current;
+          if (persistFn) {
+            recentEmissionsRef.current = [
+              { pageKey, body: next.body, codecVersion: 1, emittedAt: Date.now() },
+              ...recentEmissionsRef.current.slice(0, 9),
+            ];
+            try {
+              persistFn(next.body, 1);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error('[TipTap M5.2] onUserEdit threw — persistence skipped', err);
+            }
+          }
+        } else if (next.status === 'UNSERIALIZABLE') {
+          // Fail-closed: log error but do NOT call onUserEdit; previous valid body remains intact.
+          // eslint-disable-next-line no-console
+          console.error(
+            '[TipTap M5.2] Serialization failed — persistence blocked to protect existing body',
+            next.errorCode,
+            next.errorMessage,
+          );
+        }
       },
     },
     [extensions],
@@ -189,13 +286,37 @@ export function NotebookTiptapCandidateEditor({
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
-    userEditedRef.current = false;
-    setUserEdited(false);
     editor.setEditable(!load.error);
     if (load.error) {
       setSnap(null);
       return;
     }
+
+    // Self-echo guard: if this update matches what this exact editor instance recently emitted
+    // for this page, skip setContent to preserve live editor state, selection, and undo history.
+    const matchingEcho = recentEmissionsRef.current.find(
+      e =>
+        e.pageKey === pageKey &&
+        e.body === pageSource &&
+        e.codecVersion === (sourceBodyCodecVersion ?? e.codecVersion),
+    );
+    const isSelfEcho = load.isSelfEcho || matchingEcho !== undefined;
+
+    if (isSelfEcho) {
+      // Update snapshot without resetting editor doc
+      const next = attemptSerialize(
+        editor.getJSON(),
+        userEditedRef.current,
+        sourceBodyCodecVersion ?? load.matchedEchoCodecVersion ?? matchingEcho?.codecVersion ?? 1,
+      );
+      setSnap(next);
+      onSnapshot?.(next);
+      return;
+    }
+
+    // Genuine external update, page switch, or initial load:
+    userEditedRef.current = false;
+    setUserEdited(false);
     editor.commands.setContent(load.content, { emitUpdate: false });
     const next = attemptSerialize(editor.getJSON(), false, sourceBodyCodecVersion);
     setSnap(next);
@@ -208,9 +329,9 @@ export function NotebookTiptapCandidateEditor({
       editable: true,
       pageKey,
       sourceLength: pageSource.length,
-      persistence: false,
+      persistence: Boolean(onUserEdit),
     });
-  }, [onReady, pageKey, pageSource.length]);
+  }, [onReady, pageKey, pageSource.length, onUserEdit]);
 
   useEffect(() => {
     onEditorReady?.(editor ?? null);
@@ -236,19 +357,77 @@ export function NotebookTiptapCandidateEditor({
     [editor],
   );
 
+  const persistenceMode = onUserEdit ? 'guarded' : 'never';
+
   const dirtyLabel =
     snap?.dirtyKind === 'unserializable'
       ? 'UNSERIALIZABLE'
       : snap?.dirtyKind === 'user_edit' || userEdited
-        ? 'EDITED (memory only)'
+        ? onUserEdit
+          ? 'EDITED (saving…)'
+          : 'EDITED (memory only)'
         : 'PRISTINE';
+
+  const candidateInfo = useMemo(
+    () => ({
+      pageKey,
+      sourceBody: pageSource,
+      sourceBodyCodecVersion,
+      failClosed: Boolean(load.error),
+      failClosedMessage: load.error,
+    }),
+    [pageKey, pageSource, sourceBodyCodecVersion, load.error],
+  );
+
+  // DEV-only transition trace recording
+  if (qaDiagContext) {
+    recordTransitionIfNeeded(
+      qaDiagContext,
+      candidateInfo,
+      load.error ? 'fail-closed' : 'render',
+      editor,
+    );
+  }
+
+  const getSnapshot = useCallback(() => {
+    if (!qaDiagContext) {
+      const fallbackCtx: NotebookQaDiagContext = {
+        objectId: objectId ?? 'unknown',
+        propsContent: {
+          activePageId: pageKey,
+          body: pageSource,
+          bodyCodecVersion: sourceBodyCodecVersion,
+        },
+        migratedContent: {
+          id: objectId ?? 'unknown',
+          pages: [],
+          activePageId: pageKey,
+          body: pageSource,
+          bodyCodecVersion: sourceBodyCodecVersion,
+        },
+        navigationOverlay: null,
+        effectiveContent: {
+          activePageId: pageKey,
+          body: pageSource,
+          bodyCodecVersion: sourceBodyCodecVersion,
+        },
+        resolvedNavigation: {
+          activePageId: pageKey,
+          activeSectionId: null,
+        },
+      };
+      return buildNotebookQaDiagSnapshot(fallbackCtx, candidateInfo, editor);
+    }
+    return buildNotebookQaDiagSnapshot(qaDiagContext, candidateInfo, editor);
+  }, [qaDiagContext, candidateInfo, editor, objectId, pageKey, pageSource, sourceBodyCodecVersion]);
 
   return (
     <div
       className={className}
       data-nb-tiptap-candidate-root="1"
       data-nb-candidate-page={pageKey}
-      data-nb-candidate-persistence="never"
+      data-nb-candidate-source-codec={sourceBodyCodecVersion !== undefined ? String(sourceBodyCodecVersion) : 'undefined'}
+      data-nb-candidate-persistence={persistenceMode}
       /* Bubble-phase only: let TipTap receive keys first; then keep CE/ancestors from seeing them.
          Never stopPropagation in capture — that blocks ProseMirror before it handles Enter. */
       onKeyDown={e => e.stopPropagation()}
@@ -285,8 +464,13 @@ export function NotebookTiptapCandidateEditor({
           color: '#fbbf24',
         }}
       >
-        TipTap candidate · Unsaved
+        TipTap candidate · {onUserEdit ? 'M5.2 Guarded Persist' : 'Unsaved'}
       </div>
+
+      <NotebookCandidateQaPanel
+        getSnapshot={getSnapshot}
+        failClosed={Boolean(load.error)}
+      />
 
       {load.error ? (
         <div
@@ -401,7 +585,7 @@ export function NotebookTiptapCandidateEditor({
             {snap.errorCode ? ` (${snap.errorCode})` : ''}
           </span>
         ) : null}
-        <span data-nb-dir-persist="not-persisted">dir not persisted</span>
+        <span data-nb-dir-persist={persistenceMode}>{onUserEdit ? 'persist: guarded' : 'dir not persisted'}</span>
         <span>page={pageKey}</span>
       </div>
     </div>
