@@ -59,7 +59,10 @@ export function blockToTiptapNode(block: NotebookDialectBlock): JSONContent {
     case 'divider':
       return { type: 'nbDivider' };
     case 'image-ref':
-      return { type: 'nbImageRef', attrs: { key: block.key, alt: block.alt } };
+      return {
+        type: 'nbImageRef',
+        attrs: { key: block.key, alt: block.alt, width: block.width ?? null },
+      };
     case 'handwriting':
       return { type: 'nbHandwriting', attrs: { key: block.key } };
   }

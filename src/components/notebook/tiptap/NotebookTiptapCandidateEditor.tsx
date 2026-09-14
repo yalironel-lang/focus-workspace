@@ -425,23 +425,37 @@ export function NotebookTiptapCandidateEditor({
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!editor || editor.isDestroyed || !editor.isEditable) return;
       const target = e.target as HTMLElement | null;
-      // Do not intercept clicks on controls, toolbars, QA panel, or atom blocks themselves
+      // 1. Target check: Do not intercept clicks on controls, toolbars, QA panel, ProseMirror content, or node views
       if (
         target?.closest(
-          'button, select, input, [role="toolbar"], [data-nb-candidate-toolbar], [data-nb-candidate-qa-panel], [data-nb-candidate-badge], [data-nb="nbImageRef"], [data-nb="nbHandwriting"], [data-nb="nbDivider"], [data-nb="nbMath"], .nb-img-block',
+          '.ProseMirror, button, select, input, [role="toolbar"], [data-nb-candidate-toolbar], [data-nb-candidate-qa-panel], [data-nb-candidate-badge], [data-nb="nbImageRef"], [data-nb="nbHandwriting"], [data-nb="nbDivider"], [data-nb="nbMath"], [data-nb-node-view-wrapper], [data-node-view-wrapper], [data-nb-resize-handle], [data-nb-image-reset], .nb-img-block',
         )
       ) {
         return;
       }
+
+      // 2. Geometry check: click MUST be strictly below the ProseMirror document bottom boundary.
+      // Clicks on horizontal whitespace or page padding beside paragraphs must NOT hijack caret.
+      const editorDom = editor.view?.dom;
+      if (editorDom) {
+        const rect = editorDom.getBoundingClientRect();
+        if ((rect.height > 0 || rect.bottom > 0) && e.clientY <= rect.bottom) {
+          return;
+        }
+      }
+
       const { doc } = editor.state;
       const last = doc.lastChild;
-      if (
+      const lastIsAtom =
         last &&
         (last.type.name === 'nbImageRef' ||
           last.type.name === 'nbHandwriting' ||
           last.type.name === 'nbDivider' ||
-          last.type.name === 'nbMath')
-      ) {
+          last.type.name === 'nbMath' ||
+          last.isAtom);
+
+      if (lastIsAtom) {
+        // Final document node is an atom: append and focus one editable paragraph at the end
         const insertPos = doc.content.size;
         editor
           .chain()
@@ -454,6 +468,8 @@ export function NotebookTiptapCandidateEditor({
           .setTextSelection(insertPos + 1)
           .run();
       } else {
+        // Document already ends in an editable paragraph: focus its end position;
+        // DO NOT create duplicate blank paragraphs!
         editor.chain().focus('end').run();
       }
     },

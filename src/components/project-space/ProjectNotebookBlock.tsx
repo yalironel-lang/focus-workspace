@@ -366,7 +366,7 @@ type Block =
   | ({ id: string; kind: 'step'; text: string } & BlockMarks)
   | ({ id: string; kind: 'callout'; tone: CalloutTone; text: string } & BlockMarks)
   | ({ id: string; kind: 'math'; text: string } & BlockMarks)
-  | ({ id: string; kind: 'image-ref'; key: string; alt: string })
+  | ({ id: string; kind: 'image-ref'; key: string; alt: string; width?: number | null })
   | ({ id: string; kind: 'handwriting'; key: string })
   | ({ id: string; kind: 'divider' })
   | ({ id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
@@ -480,7 +480,13 @@ function lineToBlock(line: string): Block {
     case 'math':
       return withLineMarks({ id, kind: 'math', text: parsed.text });
     case 'image-ref':
-      return { id, kind: 'image-ref', key: parsed.key, alt: parsed.alt };
+      return {
+        id,
+        kind: 'image-ref',
+        key: parsed.key,
+        alt: parsed.alt,
+        ...(parsed.width ? { width: parsed.width } : {}),
+      };
     case 'handwriting':
       return { id, kind: 'handwriting', key: parsed.key };
     case 'paragraph':
@@ -2045,6 +2051,7 @@ export function ProjectNotebookBlock({
   }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
 
   const candidateLiveRepresentationRef = useRef<NotebookBodyRepresentation | null>(null);
+  const candidateEditorRef = useRef<import('@tiptap/core').Editor | null>(null);
 
   const effectivePageKey = effectiveContent.activePageId ?? 'legacy-body';
   const prevEffectivePageKeyRef = useRef(effectivePageKey);
@@ -2391,6 +2398,17 @@ export function ProjectNotebookBlock({
   }, [pushContent]);
 
   const insertImageBlock = useCallback((key: string, alt: string) => {
+    if (tipTapCandidateActive && candidateEditorRef.current && !candidateEditorRef.current.isDestroyed) {
+      const ed = candidateEditorRef.current;
+      ed.chain()
+        .focus()
+        .insertContent({
+          type: 'nbImageRef',
+          attrs: { key, alt: alt || '', width: null },
+        })
+        .run();
+      return;
+    }
     const focusedId = surfaceFocusBlockId ?? (blocksRef.current.length > 0 ? blocksRef.current[blocksRef.current.length - 1]!.id : null);
     const newBlock: Block = { id: newBlockId(), kind: 'image-ref', key, alt };
     const prev = blocksRef.current;
@@ -2399,7 +2417,7 @@ export function ProjectNotebookBlock({
     const next = [...prev];
     next.splice(insertIdx, 0, newBlock);
     commitBlocks(next);
-  }, [surfaceFocusBlockId, commitBlocks]);
+  }, [tipTapCandidateActive, surfaceFocusBlockId, commitBlocks]);
 
   const handleNotebookPaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items ?? []);
@@ -6526,6 +6544,9 @@ export function ProjectNotebookBlock({
                   'legacy-body',
               )}
               objectId={objectId}
+              onEditorReady={ed => {
+                candidateEditorRef.current = ed;
+              }}
               onUserEdit={tipTapPersistActive ? handleCandidateUserEdit : undefined}
               qaDiagContext={{
                 objectId: String(objectId),

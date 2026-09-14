@@ -173,6 +173,11 @@ function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
     case 'nbImageRef': {
       const key = String(node.attrs?.key ?? '');
       const alt = String(node.attrs?.alt ?? '');
+      const rawWidth = node.attrs?.width;
+      let width: number | null = null;
+      if (typeof rawWidth === 'number' && Number.isFinite(rawWidth) && rawWidth >= 50 && rawWidth <= 3000) {
+        width = Math.round(rawWidth);
+      }
       if (!/^[a-z0-9-]+$/.test(key)) {
         throw new NotebookTiptapConversionError(
           'malformed_input',
@@ -180,7 +185,7 @@ function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
           key,
         );
       }
-      return { kind: 'image-ref', key, alt };
+      return { kind: 'image-ref', key, alt, ...(width !== null ? { width } : {}) };
     }
     case 'nbHandwriting': {
       const key = String(node.attrs?.key ?? '');

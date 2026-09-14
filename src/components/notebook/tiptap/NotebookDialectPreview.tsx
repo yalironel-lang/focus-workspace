@@ -199,7 +199,7 @@ function renderBlock(block: NotebookDialectBlock, objectId?: string) {
     case 'image-ref':
       return (
         <div style={{ margin: '10px 0' }}>
-          <NotebookImageReadonlyView imageKey={block.key} alt={block.alt} />
+          <NotebookImageReadonlyView imageKey={block.key} alt={block.alt} width={block.width} />
         </div>
       );
     case 'handwriting':

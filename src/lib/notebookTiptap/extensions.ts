@@ -182,6 +182,7 @@ export const NbImageRef = Node.create({
     return {
       key: { default: '' },
       alt: { default: '' },
+      width: { default: null },
     };
   },
   parseHTML() {

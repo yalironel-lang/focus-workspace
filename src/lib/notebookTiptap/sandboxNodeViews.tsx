@@ -5,7 +5,7 @@
  * Block math / media / divider are atomic (non-editable content).
  */
 
-import type { CSSProperties } from 'react';
+import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import type { NodeViewProps } from '@tiptap/react';
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react';
 import { KatexPreview } from '../../components/notebook/KatexPreview';
@@ -337,23 +337,246 @@ export function SandboxDividerView({ selected }: NodeViewProps) {
   );
 }
 
-export function SandboxImageRefView({ node, selected }: NodeViewProps) {
+export function SandboxImageRefView({
+  node,
+  selected,
+  updateAttributes,
+  editor,
+  getPos,
+}: NodeViewProps) {
+  const persistedWidth =
+    typeof node.attrs.width === 'number' && Number.isFinite(node.attrs.width)
+      ? node.attrs.width
+      : null;
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const displayWidth = liveWidth ?? persistedWidth;
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingRef = useRef(false);
+
+  const handleClick = useCallback(
+    (_e: React.MouseEvent) => {
+      if (isDraggingRef.current) return;
+      const pos = typeof getPos === 'function' ? getPos() : undefined;
+      if (typeof pos === 'number' && editor) {
+        editor.commands.setNodeSelection(pos);
+      }
+    },
+    [editor, getPos],
+  );
+
+  const startResize = useCallback(
+    (edge: 'right' | 'left' | 'se' | 'sw') => (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const target = e.currentTarget as HTMLElement;
+      try {
+        target.setPointerCapture(e.pointerId);
+      } catch {}
+
+      isDraggingRef.current = true;
+      const startX = e.clientX;
+      const el = containerRef.current;
+      const initialWidth = el ? el.getBoundingClientRect().width : (displayWidth ?? 400);
+      const parentWidth = el?.parentElement ? el.parentElement.getBoundingClientRect().width : 800;
+      const minWidth = 100;
+      const maxWidth = Math.max(minWidth, Math.min(1200, parentWidth));
+
+      let lastClamped = initialWidth;
+      setLiveWidth(initialWidth);
+
+      const onPointerMove = (moveEvt: PointerEvent) => {
+        const dx = moveEvt.clientX - startX;
+        let targetWidth = initialWidth;
+        if (edge === 'right' || edge === 'se') {
+          targetWidth = initialWidth + dx;
+        } else {
+          targetWidth = initialWidth - dx;
+        }
+        const clamped = Math.max(minWidth, Math.min(maxWidth, Math.round(targetWidth)));
+        lastClamped = clamped;
+        setLiveWidth(clamped);
+      };
+
+      const onPointerUp = (upEvt: PointerEvent) => {
+        isDraggingRef.current = false;
+        setLiveWidth(null);
+        try {
+          target.releasePointerCapture(upEvt.pointerId);
+        } catch {}
+        target.removeEventListener('pointermove', onPointerMove);
+        target.removeEventListener('pointerup', onPointerUp);
+        target.removeEventListener('pointercancel', onPointerUp);
+
+        const rounded = Math.round(lastClamped);
+        if (rounded !== node.attrs.width) {
+          updateAttributes({ width: rounded });
+        }
+      };
+
+      target.addEventListener('pointermove', onPointerMove);
+      target.addEventListener('pointerup', onPointerUp);
+      target.addEventListener('pointercancel', onPointerUp);
+    },
+    [displayWidth, node.attrs.width, updateAttributes],
+  );
+
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbImageRef"
       data-nb-sandbox-atom="image"
       data-nb-selected={selected ? 'true' : undefined}
+      data-nb-image-width={displayWidth ?? undefined}
       style={{
-        margin: '10px 0',
-        outline: selected ? '2px solid #38bdf8' : 'none',
-        outlineOffset: '2px',
-        borderRadius: 10,
-        transition: 'outline 0.1s ease',
-        cursor: 'default',
+        margin: '12px 0',
+        display: 'block',
+        userSelect: 'none',
       }}
     >
-      <NotebookImageReadonlyView imageKey={String(node.attrs.key ?? '')} alt={String(node.attrs.alt ?? '')} />
+      <div
+        ref={containerRef}
+        onClick={handleClick}
+        style={{
+          position: 'relative',
+          display: 'inline-block',
+          width: displayWidth ? `${displayWidth}px` : '100%',
+          maxWidth: '100%',
+          outline: selected ? '2px solid #38bdf8' : 'none',
+          outlineOffset: '2px',
+          borderRadius: 10,
+          transition: isDraggingRef.current ? 'none' : 'outline 0.1s ease',
+          cursor: 'default',
+          lineHeight: 0,
+        }}
+      >
+        <NotebookImageReadonlyView
+          imageKey={String(node.attrs.key ?? '')}
+          alt={String(node.attrs.alt ?? '')}
+          width={displayWidth}
+        />
+
+        {selected && (
+          <>
+            {/* Right edge handle */}
+            <div
+              data-nb-resize-handle="right"
+              onPointerDown={startResize('right')}
+              title="Drag to resize"
+              style={{
+                position: 'absolute',
+                top: '50%',
+                right: -5,
+                transform: 'translateY(-50%)',
+                width: 8,
+                height: 36,
+                borderRadius: 4,
+                background: '#38bdf8',
+                cursor: 'ew-resize',
+                zIndex: 20,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}
+            />
+
+            {/* Left edge handle */}
+            <div
+              data-nb-resize-handle="left"
+              onPointerDown={startResize('left')}
+              title="Drag to resize"
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: -5,
+                transform: 'translateY(-50%)',
+                width: 8,
+                height: 36,
+                borderRadius: 4,
+                background: '#38bdf8',
+                cursor: 'ew-resize',
+                zIndex: 20,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}
+            />
+
+            {/* Bottom-right corner handle */}
+            <div
+              data-nb-resize-handle="se"
+              onPointerDown={startResize('se')}
+              title="Drag to resize"
+              style={{
+                position: 'absolute',
+                bottom: -5,
+                right: -5,
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                background: '#38bdf8',
+                border: '2px solid white',
+                cursor: 'nwse-resize',
+                zIndex: 21,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}
+            />
+
+            {/* Bottom-left corner handle */}
+            <div
+              data-nb-resize-handle="sw"
+              onPointerDown={startResize('sw')}
+              title="Drag to resize"
+              style={{
+                position: 'absolute',
+                bottom: -5,
+                left: -5,
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                background: '#38bdf8',
+                border: '2px solid white',
+                cursor: 'nesw-resize',
+                zIndex: 21,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
+              }}
+            />
+
+            {/* Contextual Reset Size button if custom width is set */}
+            {persistedWidth != null && (
+              <button
+                type="button"
+                data-nb-image-reset="true"
+                title="Reset to natural size"
+                onClick={e => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  updateAttributes({ width: null });
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  zIndex: 25,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '3px 8px',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  lineHeight: '14px',
+                  color: '#f8fafc',
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(6px)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  userSelect: 'none',
+                }}
+              >
+                Reset size
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </NodeViewWrapper>
   );
 }

@@ -14,9 +14,11 @@ import { emptyHandwritingData } from '../handwritingTypes';
 export function NotebookImageReadonlyView({
   imageKey,
   alt,
+  width,
 }: {
   imageKey: string;
   alt: string;
+  width?: number | null;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeNotebookImages(() => bump(n => n + 1)), []);
@@ -48,7 +50,14 @@ export function NotebookImageReadonlyView({
       className="nb-img-block"
       src={src}
       alt={alt}
-      style={{ maxWidth: '100%', borderRadius: 10, display: 'block' }}
+      draggable={false}
+      style={{
+        width: width ? `${width}px` : '100%',
+        maxWidth: '100%',
+        height: 'auto',
+        borderRadius: 10,
+        display: 'block',
+      }}
     />
   );
 }

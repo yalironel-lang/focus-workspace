@@ -356,7 +356,11 @@ export function NbDividerView() {
 export function NbImageRefView({ node }: NodeViewProps) {
   return (
     <NodeViewWrapper as="div" data-nb="nbImageRef" style={{ margin: '10px 0' }}>
-      <NotebookImageReadonlyView imageKey={String(node.attrs.key ?? '')} alt={String(node.attrs.alt ?? '')} />
+      <NotebookImageReadonlyView
+        imageKey={String(node.attrs.key ?? '')}
+        alt={String(node.attrs.alt ?? '')}
+        width={typeof node.attrs.width === 'number' ? node.attrs.width : null}
+      />
     </NodeViewWrapper>
   );
 }

@@ -37,7 +37,17 @@ export function encodeNotebookTextV1(blocks: readonly NotebookDialectBlock[]): s
   return blocks.map(block => {
     if (block.kind === 'divider') return '---';
     if (block.kind === 'handwriting') return `::hw::${key(block.key)}::`;
-    if (block.kind === 'image-ref') return `::img::${key(block.key)}::${JSON.stringify(block.alt)}::`;
+    if (block.kind === 'image-ref') {
+      const k = key(block.key);
+      const a = JSON.stringify(block.alt);
+      let line = `::img::${k}::${a}::`;
+      if (block.width != null) {
+        if (!Number.isInteger(block.width) || block.width < 50 || block.width > 3000) return invalid();
+        line = `::img::${k}::${a}::${block.width}::`;
+      }
+      decodeNotebookTextV1(line);
+      return line;
+    }
     const detail = block.kind === 'paragraph' ? block.variant ?? null
       : block.kind === 'bullet' ? block.depth : block.kind === 'ordered' ? block.number
         : block.kind === 'task' ? block.checked : block.kind === 'callout' ? block.tone : null;
@@ -54,6 +64,14 @@ export function decodeNotebookTextV1(body: string): NotebookDialectBlock[] {
     if (line === '---') return { id, kind: 'divider' };
     const hw = /^::hw::([a-z0-9-]+)::$/.exec(line);
     if (hw) return { id, kind: 'handwriting', key: hw[1] };
+    const imgWithWidth = /^::img::([a-z0-9-]+)::(.+)::([0-9]+)::$/.exec(line);
+    if (imgWithWidth) {
+      const alt: unknown = JSON.parse(imgWithWidth[2]);
+      if (typeof alt !== 'string') return invalid();
+      const width = parseInt(imgWithWidth[3], 10);
+      if (!Number.isInteger(width) || width < 50 || width > 3000) return invalid();
+      return { id, kind: 'image-ref', key: imgWithWidth[1], alt, width };
+    }
     const image = /^::img::([a-z0-9-]+)::(.*)::$/.exec(line);
     if (image) {
       const alt: unknown = JSON.parse(image[2]);

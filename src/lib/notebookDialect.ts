@@ -40,7 +40,7 @@ export type NotebookLine =
   | { kind: 'step'; text: string }
   | { kind: 'callout'; tone: CalloutTone; text: string }
   | { kind: 'math'; text: string }
-  | { kind: 'image-ref'; key: string; alt: string }
+  | { kind: 'image-ref'; key: string; alt: string; width?: number | null }
   | { kind: 'handwriting'; key: string }
   | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
@@ -57,7 +57,7 @@ export type NotebookDialectBlock =
   | ({ id?: string; kind: 'step'; text: string } & BlockMarks)
   | ({ id?: string; kind: 'callout'; tone: CalloutTone; text: string } & BlockMarks)
   | ({ id?: string; kind: 'math'; text: string } & BlockMarks)
-  | { id?: string; kind: 'image-ref'; key: string; alt: string }
+  | { id?: string; kind: 'image-ref'; key: string; alt: string; width?: number | null }
   | { id?: string; kind: 'handwriting'; key: string }
   | { id?: string; kind: 'divider' }
   | ({ id?: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
@@ -119,6 +119,17 @@ export function parseNotebookLine(raw: string): NotebookLine {
   // Slash/equation-block prefix is `$$ <latex>` (whitespace required).
   const mathMatch = trimmed.match(/^\$\$\s+(.*)$/);
   if (mathMatch) return { kind: 'math', text: (mathMatch[1] ?? '').trimEnd() };
+
+  const imgWithWidth = trimmed.match(/^::img::([a-z0-9-]+)::(.+)::([0-9]+)::$/);
+  if (imgWithWidth) {
+    const w = parseInt(imgWithWidth[3]!, 10);
+    return {
+      kind: 'image-ref',
+      key: imgWithWidth[1]!,
+      alt: imgWithWidth[2]!,
+      ...(Number.isInteger(w) && w >= 50 && w <= 3000 ? { width: w } : {}),
+    };
+  }
 
   const imgMatch = trimmed.match(/^::img::([a-z0-9-]+)::(.*)::$/);
   if (imgMatch) return { kind: 'image-ref', key: imgMatch[1]!, alt: imgMatch[2] ?? '' };
@@ -190,7 +201,13 @@ export function notebookLineToBlock(line: NotebookLine, id?: string): NotebookDi
     case 'math':
       return withLineMarks({ id, kind: 'math' as const, text: line.text });
     case 'image-ref':
-      return { id, kind: 'image-ref', key: line.key, alt: line.alt };
+      return {
+        id,
+        kind: 'image-ref',
+        key: line.key,
+        alt: line.alt,
+        ...(line.width ? { width: line.width } : {}),
+      };
     case 'handwriting':
       return { id, kind: 'handwriting', key: line.key };
     case 'paragraph':
@@ -267,7 +284,7 @@ export function notebookBlockToLine(b: NotebookDialectBlock): string {
     case 'math':
       return `$$ ${blockTextPayload(b)}`;
     case 'image-ref':
-      return `::img::${b.key}::${b.alt}::`;
+      return b.width ? `::img::${b.key}::${b.alt}::${b.width}::` : `::img::${b.key}::${b.alt}::`;
     case 'handwriting':
       return `::hw::${b.key}::`;
     case 'divider':
