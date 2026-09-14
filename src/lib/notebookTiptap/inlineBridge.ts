@@ -23,6 +23,7 @@ const MARK_TYPE_ORDER: Record<InlineMarkType, number> = {
   fg: 5,
   bg: 6,
   hl: 7,
+  m: 8,
 };
 
 /** Merge touching/overlapping ranges of the same type+value (TipTap segments fragment spans). */
@@ -96,6 +97,7 @@ function segmentToTiptapMarks(
   if (types.has('i')) marks.push({ type: 'italic' });
   if (types.has('u')) marks.push({ type: 'underline' });
   if (types.has('s')) marks.push({ type: 'strike' });
+  if (types.has('m')) marks.push({ type: 'math' });
 
   const fs = types.get('fs');
   const fg = types.get('fg');
@@ -120,6 +122,14 @@ export function richLineToTiptapInline(plain: string, marks: InlineMark[] = []):
   const segments = buildSegments(sortMarks(marks), plain.length);
   return segments.map(seg => {
     const text = plain.slice(seg.start, seg.end);
+    if (seg.types.has('m')) {
+      const nonMathTypes = new Map(seg.types);
+      nonMathTypes.delete('m');
+      const otherMarks = segmentToTiptapMarks(nonMathTypes);
+      return otherMarks
+        ? { type: 'nbInlineMath', attrs: { text }, marks: otherMarks }
+        : { type: 'nbInlineMath', attrs: { text } };
+    }
     const nodeMarks = segmentToTiptapMarks(seg.types);
     return nodeMarks ? { type: 'text', text, marks: nodeMarks } : { type: 'text', text };
   });
@@ -154,6 +164,9 @@ function tiptapMarkToInline(
       break;
     case 'strike':
       out.push({ s: start, e: end, t: 's' });
+      break;
+    case 'math':
+      out.push({ s: start, e: end, t: 'm' });
       break;
     case 'textStyle': {
       const attrs = mark.attrs ?? {};
@@ -213,6 +226,27 @@ export function tiptapInlineToRichLine(nodes: JSONContent[] | undefined): {
         'hard_break',
         'hardBreak is unsupported in Notebook dialect (newline is a block boundary)',
       );
+    }
+    if (node.type === 'nbInlineMath') {
+      const mathText = node.attrs?.text;
+      if (typeof mathText !== 'string') {
+        throw new NotebookTiptapConversionError(
+          'malformed_input',
+          'nbInlineMath node missing required string text attribute',
+          'nbInlineMath',
+        );
+      }
+      if (!mathText) continue;
+      const start = plain.length;
+      const end = start + mathText.length;
+      plain += mathText;
+      marks.push({ s: start, e: end, t: 'm' });
+      for (const mark of node.marks ?? []) {
+        if (mark.type !== 'math') {
+          tiptapMarkToInline(mark, start, end, marks);
+        }
+      }
+      continue;
     }
     if (node.type !== 'text') {
       throw new NotebookTiptapConversionError(

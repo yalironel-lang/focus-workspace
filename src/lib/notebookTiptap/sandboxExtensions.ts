@@ -29,6 +29,8 @@ import {
   NbStep,
   NbTask,
   NbTitle,
+  MathMark,
+  NbInlineMath,
 } from './extensions';
 import {
   SandboxBulletView,
@@ -55,6 +57,7 @@ import { NotebookSandboxInlineMathIsolate } from './sandboxInlineMathIsolate';
 
 export type NotebookTiptapSandboxOptions = {
   objectId?: string;
+  enableDelimiterMathIsolate?: boolean;
 };
 
 export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSandboxOptions = {}) {
@@ -68,7 +71,7 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     NotebookSandboxGuards,
     NotebookSandboxDocumentFlow,
     NotebookSandboxPaste,
-    NotebookSandboxInlineMathIsolate,
+    ...(options.enableDelimiterMathIsolate ? [NotebookSandboxInlineMathIsolate] : []),
     NbParagraph.extend({
       addNodeView() {
         return ReactNodeViewRenderer(SandboxParagraphView);
@@ -143,6 +146,7 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
         return ReactNodeViewRenderer(hwView);
       },
     }),
+    NbInlineMath,
     Bold,
     Italic,
     Strike,
@@ -152,5 +156,6 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     FontSize,
     BackgroundColor,
     Highlight.configure({ multicolor: true }),
+    MathMark,
   ];
 }

@@ -15,6 +15,8 @@ import {
   TEXT_COLOR_PRESETS,
   HIGHLIGHT_PRESETS,
 } from './notebookInlineMarks';
+import { KatexPreview } from '../components/notebook/KatexPreview';
+import { plainMathToLatex } from './mathInputAssistant';
 
 export { TEXT_COLOR_PRESETS, HIGHLIGHT_PRESETS };
 
@@ -225,7 +227,7 @@ function wrapSegmentReact(
   key: string,
 ): ReactNode {
   let node: ReactNode = text;
-  const order: InlineMarkType[] = ['fs', 'fg', 'hl', 'b', 'i', 'u'];
+  const order: InlineMarkType[] = ['fs', 'fg', 'hl', 'b', 'i', 'u', 's', 'm'];
   for (const t of order) {
     if (!types.has(t)) continue;
     const v = types.get(t);
@@ -243,6 +245,9 @@ function wrapSegmentReact(
           <u style={{ textDecoration: 'underline', textUnderlineOffset: '2px' }}>{node}</u>
         );
         break;
+      case 's':
+        node = <s style={{ textDecoration: 'line-through' }}>{node}</s>;
+        break;
       case 'fs':
         node = <span style={{ fontSize: `${v ?? DEFAULT_FONT_SIZE_PX}px` }}>{node}</span>;
         break;
@@ -254,6 +259,22 @@ function wrapSegmentReact(
           <mark style={{ backgroundColor: v, color: 'inherit', borderRadius: 2, padding: '0 1px' }}>
             {node}
           </mark>
+        );
+        break;
+      case 'm':
+        node = (
+          <span
+            dir="ltr"
+            data-nb-math-isolate="1"
+            style={{
+              display: 'inline-block',
+              verticalAlign: 'middle',
+              direction: 'ltr',
+              unicodeBidi: 'isolate',
+            }}
+          >
+            <KatexPreview latex={plainMathToLatex(text)} displayMode={false} style={{ display: 'inline-block' }} />
+          </span>
         );
         break;
       default:

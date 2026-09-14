@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useRef, useState, type CSSProperties } from 'react';
+import type { Editor } from '@tiptap/core';
 import type { NodeViewProps } from '@tiptap/react';
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react';
 import { KatexPreview } from '../../components/notebook/KatexPreview';
@@ -280,16 +281,39 @@ export function SandboxCalloutView({ node }: NodeViewProps) {
   );
 }
 
+function selectBlockAtom(
+  editor: Editor | undefined,
+  getPos: NodeViewProps['getPos'],
+  e: React.MouseEvent,
+) {
+  e.preventDefault();
+  const pos = typeof getPos === 'function' ? getPos() : undefined;
+  if (typeof pos === 'number' && editor) {
+    editor.chain().setNodeSelection(pos).focus().run();
+  }
+}
+
 /** Block math — atomic / read-only in sandbox; always LTR-isolated. */
-export function SandboxMathAtomView({ node, selected }: NodeViewProps) {
+export function SandboxMathAtomView({ node, selected, editor, getPos }: NodeViewProps) {
   const latex = node.textContent;
   const isolate = mathLtrIsolateProps();
+
+  const handleSelect = useCallback(
+    (e: React.MouseEvent) => {
+      selectBlockAtom(editor, getPos, e);
+    },
+    [editor, getPos],
+  );
+
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbMath"
       data-nb-sandbox-atom="math"
       data-nb-selected={selected ? 'true' : undefined}
+      onMouseDown={handleSelect}
+      onClick={handleSelect}
+      contentEditable={false}
       dir={isolate.dir}
       data-nb-math-isolate={isolate['data-nb-math-isolate']}
       style={{
@@ -297,6 +321,8 @@ export function SandboxMathAtomView({ node, selected }: NodeViewProps) {
         outline: selected ? '2px solid #38bdf8' : 'none',
         outlineOffset: '2px',
         borderRadius: 8,
+        cursor: 'default',
+        userSelect: 'none',
         ...isolate.style,
       }}
     >
@@ -308,7 +334,6 @@ export function SandboxMathAtomView({ node, selected }: NodeViewProps) {
         mutedColor={NB_INK.muted}
       />
       <div
-        contentEditable={false}
         style={{ fontSize: 11, color: NB_INK.ghost, marginTop: 4, fontFamily: 'ui-monospace, monospace' }}
       >
         $$ {latex} <em>(read-only in sandbox)</em>
@@ -317,19 +342,30 @@ export function SandboxMathAtomView({ node, selected }: NodeViewProps) {
   );
 }
 
-export function SandboxDividerView({ selected }: NodeViewProps) {
+export function SandboxDividerView({ selected, editor, getPos }: NodeViewProps) {
+  const handleSelect = useCallback(
+    (e: React.MouseEvent) => {
+      selectBlockAtom(editor, getPos, e);
+    },
+    [editor, getPos],
+  );
+
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbDivider"
       data-nb-sandbox-atom="divider"
       data-nb-selected={selected ? 'true' : undefined}
+      onMouseDown={handleSelect}
+      onClick={handleSelect}
+      contentEditable={false}
       style={{
         margin: '14px 0',
         outline: selected ? '2px solid #38bdf8' : 'none',
         outlineOffset: '4px',
         borderRadius: 4,
         cursor: 'default',
+        userSelect: 'none',
       }}
     >
       <hr style={{ border: 'none', borderTop: '1px solid rgba(148,163,184,0.28)', margin: 0 }} />
@@ -354,13 +390,10 @@ export function SandboxImageRefView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
 
-  const handleClick = useCallback(
-    (_e: React.MouseEvent) => {
+  const handleSelect = useCallback(
+    (e: React.MouseEvent) => {
       if (isDraggingRef.current) return;
-      const pos = typeof getPos === 'function' ? getPos() : undefined;
-      if (typeof pos === 'number' && editor) {
-        editor.commands.setNodeSelection(pos);
-      }
+      selectBlockAtom(editor, getPos, e);
     },
     [editor, getPos],
   );
@@ -436,7 +469,8 @@ export function SandboxImageRefView({
     >
       <div
         ref={containerRef}
-        onClick={handleClick}
+        onMouseDown={handleSelect}
+        onClick={handleSelect}
         style={{
           position: 'relative',
           display: 'inline-block',
@@ -582,19 +616,30 @@ export function SandboxImageRefView({
 }
 
 export function createSandboxHandwritingView(objectId?: string) {
-  return function SandboxHandwritingView({ node, selected }: NodeViewProps) {
+  return function SandboxHandwritingView({ node, selected, editor, getPos }: NodeViewProps) {
+    const handleSelect = useCallback(
+      (e: React.MouseEvent) => {
+        selectBlockAtom(editor, getPos, e);
+      },
+      [editor, getPos],
+    );
+
     return (
       <NodeViewWrapper
         as="div"
         data-nb="nbHandwriting"
         data-nb-sandbox-atom="handwriting"
         data-nb-selected={selected ? 'true' : undefined}
+        onMouseDown={handleSelect}
+        onClick={handleSelect}
+        contentEditable={false}
         style={{
           margin: '10px 0',
           outline: selected ? '2px solid #38bdf8' : 'none',
           outlineOffset: '2px',
           borderRadius: 10,
           cursor: 'default',
+          userSelect: 'none',
         }}
       >
         <NotebookHandwritingReadonlyView objectId={objectId} blockKey={String(node.attrs.key ?? '')} />

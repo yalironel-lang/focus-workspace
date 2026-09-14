@@ -94,7 +94,7 @@ export function NotebookTiptapSandboxEditor({
   onSerializeAttempt,
 }: NotebookTiptapSandboxEditorProps) {
   const extensions = useMemo(
-    () => createNotebookTiptapSandboxExtensions({ objectId }),
+    () => createNotebookTiptapSandboxExtensions({ objectId, enableDelimiterMathIsolate: true }),
     [objectId],
   );
 

@@ -6,7 +6,7 @@ export const NOTEBOOK_TEXT_CODEC_V1 = 1;
 const PREFIX = '~nb1:';
 const tones = new Set(['summary', 'concept', 'review', 'definition', 'theorem', 'example', 'mistake']);
 const kinds = new Set(['paragraph', 'title', 'section', 'bullet', 'ordered', 'task', 'quote', 'step', 'callout', 'math']);
-const markTypes = new Set(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl']);
+const markTypes = new Set(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl', 'm']);
 function invalid(): never { throw new Error('Invalid versioned Notebook text record'); }
 export function assertNotebookTextCodec(version?: number): void {
   if (version !== undefined && version !== NOTEBOOK_TEXT_CODEC_V1) throw new Error(`Unsupported Notebook text codec: ${version}`);

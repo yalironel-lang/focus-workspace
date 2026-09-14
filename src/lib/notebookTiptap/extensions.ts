@@ -4,7 +4,8 @@
  * `dir` is TipTap in-memory metadata (not in dialect body) — serializers ignore it.
  */
 
-import { Node, mergeAttributes } from '@tiptap/core';
+import { Node, Mark, mergeAttributes } from '@tiptap/core';
+import { Selection } from '@tiptap/pm/state';
 import Document from '@tiptap/extension-document';
 import Text from '@tiptap/extension-text';
 import Bold from '@tiptap/extension-bold';
@@ -16,8 +17,10 @@ import Highlight from '@tiptap/extension-highlight';
 import type { CalloutTone, ParagraphVariant } from '../notebookDialect';
 import { CALLOUT_TONES } from '../notebookDialect';
 import { notebookDirAttribute } from './direction';
+import { plainMathToLatex } from '../mathInputAssistant';
+import { renderKatexHtml } from '../notebookMath';
 
-const inlineContent = 'text*';
+const inlineContent = 'inline*';
 
 function textBlock(name: string, attrs?: Record<string, unknown>) {
   return Node.create({
@@ -211,6 +214,236 @@ export const NbHandwriting = Node.create({
   },
 });
 
+export const MathMark = Mark.create({
+  name: 'math',
+  inclusive: false,
+  parseHTML() {
+    return [
+      {
+        tag: 'span[data-nb-math="true"]',
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        'data-nb-math': 'true',
+        dir: 'ltr',
+        style: 'direction: ltr; unicode-bidi: isolate;',
+      }),
+      0,
+    ];
+  },
+});
+
+export const NbInlineMath = Node.create({
+  name: 'nbInlineMath',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  marks: '_',
+  addAttributes() {
+    return {
+      text: {
+        default: '',
+        parseHTML: el => el.getAttribute('data-text') ?? '',
+        renderHTML: attrs => ({ 'data-text': attrs.text }),
+      },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: 'span[data-nb-inline-math="true"]',
+        getAttrs: el => {
+          const elem = el as HTMLElement;
+          return { text: elem.getAttribute('data-text') ?? elem.textContent ?? '' };
+        },
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes, node }) {
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        'data-nb': 'nbInlineMath',
+        'data-nb-inline-math': 'true',
+        'data-text': node.attrs.text,
+        dir: 'ltr',
+        style: 'direction: ltr; unicode-bidi: isolate; display: inline-block; vertical-align: middle;',
+      }),
+      node.attrs.text,
+    ];
+  },
+  addNodeView() {
+    return ({ node, editor, getPos }) => {
+      let currentNode = node;
+      let isEditing = false;
+
+      const dom = document.createElement('span');
+      dom.className = 'nb-inline-math-atom';
+      dom.setAttribute('data-nb', 'nbInlineMath');
+      dom.setAttribute('data-nb-inline-math', 'true');
+      dom.setAttribute('data-text', currentNode.attrs.text);
+      dom.setAttribute('dir', 'ltr');
+      dom.style.direction = 'ltr';
+      dom.style.unicodeBidi = 'isolate';
+      dom.style.display = 'inline-block';
+      dom.style.verticalAlign = 'middle';
+      dom.style.margin = '0 1px';
+      dom.style.padding = '0 2px';
+      dom.style.cursor = editor.isEditable ? 'pointer' : 'default';
+      dom.title = editor.isEditable ? 'Double-click to edit formula' : '';
+
+      const render = () => {
+        dom.innerHTML = '';
+        const latex = plainMathToLatex(currentNode.attrs.text);
+        const { html, error } = renderKatexHtml(latex, false);
+        if (error) {
+          dom.textContent = currentNode.attrs.text;
+        } else {
+          dom.innerHTML = html;
+        }
+      };
+      render();
+
+      dom.addEventListener('dblclick', (e) => {
+        if (!editor.isEditable || isEditing) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        isEditing = true;
+        dom.setAttribute('data-nb-editing', 'true');
+        dom.style.outline = 'none';
+
+        const currentText = currentNode.attrs.text;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentText;
+        input.className = 'nb-inline-math-editing';
+        input.style.cssText = [
+          'border: 1.5px solid #38bdf8',
+          'border-radius: 4px',
+          'padding: 0 5px',
+          'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          'font-size: 0.9em',
+          'outline: none',
+          'background-color: #0f172a',
+          'color: #f8fafc',
+          'caret-color: #38bdf8',
+          'margin: 0 2px',
+          'direction: ltr',
+          'unicode-bidi: isolate',
+          'box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25)',
+        ].join('; ');
+        input.style.minWidth = '40px';
+        input.style.width = `${Math.max(4, currentText.length + 1)}ch`;
+
+        let finished = false;
+        const finish = (apply: boolean) => {
+          if (finished) return;
+          finished = true;
+          isEditing = false;
+          dom.removeAttribute('data-nb-editing');
+
+          const next = input.value.trim();
+          // Empty or whitespace-only formula safely cancels edit and preserves original formula.
+          if (apply && next && next !== currentText) {
+            const pos = typeof getPos === 'function' ? getPos() : undefined;
+            if (typeof pos === 'number' && pos >= 0) {
+              const tr = editor.state.tr.setNodeMarkup(pos, undefined, { text: next });
+              const targetPos = Math.min(pos + 1, tr.doc.content.size);
+              tr.setSelection(Selection.near(tr.doc.resolve(targetPos)));
+              editor.view.dispatch(tr);
+              editor.view.focus();
+              return;
+            }
+          }
+
+          render();
+          editor.view.focus();
+        };
+
+        const stopPropagation = (ev: Event) => ev.stopPropagation();
+        input.addEventListener('keydown', (ke) => {
+          ke.stopPropagation();
+          if (ke.key === 'Enter') {
+            ke.preventDefault();
+            finish(true);
+          } else if (ke.key === 'Escape') {
+            ke.preventDefault();
+            finish(false);
+          }
+        });
+        input.addEventListener('beforeinput', stopPropagation);
+        input.addEventListener('input', (ev) => {
+          ev.stopPropagation();
+          input.style.width = `${Math.max(4, input.value.length + 1)}ch`;
+        });
+        input.addEventListener('keyup', stopPropagation);
+        input.addEventListener('keypress', stopPropagation);
+        input.addEventListener('mousedown', stopPropagation);
+        input.addEventListener('mouseup', stopPropagation);
+        input.addEventListener('click', stopPropagation);
+        input.addEventListener('dblclick', stopPropagation);
+
+        input.addEventListener('blur', () => {
+          finish(true);
+        });
+
+        dom.innerHTML = '';
+        dom.appendChild(input);
+        input.focus();
+        input.select();
+      });
+
+      return {
+        dom,
+        update(newNode) {
+          if (newNode.type !== currentNode.type) return false;
+          currentNode = newNode;
+          dom.setAttribute('data-text', currentNode.attrs.text);
+          if (!isEditing) {
+            render();
+          }
+          return true;
+        },
+        selectNode() {
+          if (!isEditing) {
+            dom.style.outline = '2px solid #38bdf8';
+            dom.style.borderRadius = '3px';
+          }
+        },
+        deselectNode() {
+          dom.style.outline = 'none';
+        },
+        stopEvent(event) {
+          if (isEditing) return true;
+          const target = event.target as HTMLElement | null;
+          if (
+            target &&
+            (target.tagName === 'INPUT' ||
+              target.tagName === 'TEXTAREA' ||
+              target.closest('input, textarea'))
+          ) {
+            return true;
+          }
+          return false;
+        },
+        ignoreMutation() {
+          return true;
+        },
+        destroy() {
+          isEditing = false;
+        },
+      };
+    };
+  },
+});
+
 /**
  * Closed extension set for a future TipTap Notebook editor.
  * No hardBreak, link, table, codeBlock, or deep lists.
@@ -233,6 +466,7 @@ export function createNotebookTiptapExtensions() {
     NbDivider,
     NbImageRef,
     NbHandwriting,
+    NbInlineMath,
     Bold,
     Italic,
     Strike,
@@ -242,6 +476,7 @@ export function createNotebookTiptapExtensions() {
     FontSize,
     BackgroundColor,
     Highlight.configure({ multicolor: true }),
+    MathMark,
   ];
 }
 
@@ -269,4 +504,5 @@ export const ALLOWED_MARK_TYPES = new Set([
   'strike',
   'textStyle',
   'highlight',
+  'math',
 ]);

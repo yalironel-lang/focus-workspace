@@ -26,6 +26,7 @@ import {
   NbStep,
   NbTask,
   NbTitle,
+  NbInlineMath,
 } from './extensions';
 import {
   NbBulletView,
@@ -41,6 +42,7 @@ import {
   NbTaskView,
   NbTitleView,
   createNbHandwritingView,
+  NbInlineMathView,
 } from './nodeViews';
 
 export type NotebookTiptapViewerOptions = {
@@ -117,6 +119,11 @@ export function createNotebookTiptapViewerExtensions(options: NotebookTiptapView
     NbHandwriting.extend({
       addNodeView() {
         return ReactNodeViewRenderer(hwView);
+      },
+    }),
+    NbInlineMath.extend({
+      addNodeView() {
+        return ReactNodeViewRenderer(NbInlineMathView);
       },
     }),
     Bold,

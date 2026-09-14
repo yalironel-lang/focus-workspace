@@ -87,6 +87,41 @@
   box-shadow: inset 0 0 0 1px rgba(146, 64, 14, 0.1);
 }
 
+/* ── Inline Math Active Editor Input ────────────────────────────────────────── */
+[data-nb="nbInlineMath"][data-nb-editing="true"],
+.nb-inline-math-editing {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #38bdf8 !important;
+  caret-color: #38bdf8 !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
+}
+
+[data-desk-surface='1'] [data-nb="nbInlineMath"][data-nb-editing="true"],
+[data-desk-surface='1'] .nb-inline-math-editing,
+[data-theme='light'] [data-nb="nbInlineMath"][data-nb-editing="true"],
+[data-theme='light'] .nb-inline-math-editing {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #0284c7 !important;
+  caret-color: #0284c7 !important;
+  box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.2) !important;
+}
+
+[data-nb="nbInlineMath"][data-nb-editing="true"] input,
+.nb-inline-math-editing input {
+  color: inherit !important;
+  caret-color: inherit !important;
+  background: transparent !important;
+}
+
+[data-nb="nbInlineMath"][data-nb-editing="true"] input::selection,
+.nb-inline-math-editing::selection,
+.nb-inline-math-editing input::selection {
+  background-color: rgba(56, 189, 248, 0.35) !important;
+  color: #ffffff !important;
+}
+
 /* ── Design System Tokens ─────────────────────────────────────────────────── */
 :root {
   /* Shadows — 4-level depth system */

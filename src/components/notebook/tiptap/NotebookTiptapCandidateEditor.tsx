@@ -338,6 +338,8 @@ export function NotebookTiptapCandidateEditor({
     return () => onEditorReady?.(null);
   }, [editor, onEditorReady]);
 
+
+
   const markState = useEditorState({
     editor,
     selector: ctx => {
@@ -499,6 +501,13 @@ export function NotebookTiptapCandidateEditor({
         .nb-tiptap-math-src-isolate {
           direction: ltr;
           unicode-bidi: isolate;
+        }
+        span[data-nb-math="true"] {
+          direction: ltr;
+          unicode-bidi: isolate;
+          font-family: 'KaTeX_Math', 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', serif;
+          font-style: italic;
+          letter-spacing: 0.02em;
         }
         .ProseMirror-gapcursor {
           display: none;

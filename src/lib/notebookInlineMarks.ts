@@ -3,7 +3,7 @@
  * Marks are stored as character offsets over plain text (no TipTap).
  */
 
-export type InlineMarkType = 'b' | 'i' | 'u' | 's' | 'fs' | 'fg' | 'bg' | 'hl';
+export type InlineMarkType = 'b' | 'i' | 'u' | 's' | 'fs' | 'fg' | 'bg' | 'hl' | 'm';
 
 export interface InlineMark {
   s: number;
@@ -20,7 +20,7 @@ export interface RichTextLine {
 const MARK_PREFIX_OPEN = '\u27e8m\u27e9';
 const MARK_PREFIX_CLOSE = '\u27e8/m\u27e9';
 
-const VALID_TYPES = new Set<InlineMarkType>(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl']);
+const VALID_TYPES = new Set<InlineMarkType>(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl', 'm']);
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));

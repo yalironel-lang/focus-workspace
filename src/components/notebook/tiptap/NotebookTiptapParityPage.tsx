@@ -95,6 +95,17 @@ export default function NotebookTiptapParityPage() {
           >
             Load RTL Phase A fixture
           </button>
+          <button
+            type="button"
+            data-nb-load-math-fixture="1"
+            onClick={() => {
+              setBody('⟨m⟩[{"s":12,"e":15,"t":"m"}]⟨/m⟩he is worth 3/5 today');
+              setResetToken(t => t + 1);
+            }}
+            style={btnStyle}
+          >
+            Load Inline Math fixture
+          </button>
           <span style={{ color: '#64748b', fontSize: 12, alignSelf: 'center' }}>
             RTL Phase A — Auto/LTR/RTL in sandbox toolbar · {RTL_OBSERVATION_LINES.length} mixed samples
           </span>

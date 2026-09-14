@@ -10,22 +10,28 @@
  */
 
 import { Extension } from '@tiptap/core';
-import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state';
+import { EditorState, NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { inheritDirForNewBlock } from './direction';
 
-export const PROTECTED_BLOCK_ATOMS = new Set([
+export const PROTECTED_ATOMS = new Set([
   'nbImageRef',
   'nbHandwriting',
   'nbDivider',
   'nbMath',
+  'nbInlineMath',
 ]);
 
 export function isProtectedBlockAtom(node: ProseMirrorNode | null | undefined): boolean {
   if (!node) return false;
-  return (node.isBlock && node.isAtom) || PROTECTED_BLOCK_ATOMS.has(node.type.name);
+  return (node.isBlock && node.isAtom) || (PROTECTED_ATOMS.has(node.type.name) && node.isBlock);
+}
+
+export function isProtectedAtom(node: ProseMirrorNode | null | undefined): boolean {
+  if (!node) return false;
+  return node.isAtom || PROTECTED_ATOMS.has(node.type.name);
 }
 
 const LISTISH = new Set(['nbBullet', 'nbOrdered', 'nbTask', 'nbStep']);
@@ -68,6 +74,27 @@ export const NotebookSandboxKeymap = Extension.create({
       Enter: ({ editor }) => {
         if (editor.state.selection instanceof NodeSelection) {
           const sel = editor.state.selection as NodeSelection;
+          if (sel.node.isInline) {
+            return editor.commands.setTextSelection(sel.to);
+          }
+          if (isProtectedBlockAtom(sel.node)) {
+            const { doc } = editor.state;
+            const afterPos = sel.to;
+            const $after = doc.resolve(afterPos);
+            const blockIndex = $after.index(0);
+            const hasNext = blockIndex < doc.childCount;
+            const nextBlock = hasNext ? doc.child(blockIndex) : null;
+            if (nextBlock && nextBlock.type.name === 'nbParagraph' && nextBlock.textContent === '') {
+              return editor
+                .chain()
+                .command(({ tr }) => {
+                  tr.setSelection(TextSelection.create(tr.doc, afterPos + 1));
+                  return true;
+                })
+                .focus()
+                .run();
+            }
+          }
           const insertPos = sel.to;
           return editor
             .chain()
@@ -141,6 +168,9 @@ export const NotebookSandboxKeymap = Extension.create({
       Backspace: ({ editor }) => {
         if (editor.state.selection instanceof NodeSelection) {
           const sel = editor.state.selection as NodeSelection;
+          if (sel.node.isInline) {
+            return editor.commands.deleteSelection();
+          }
           if (editor.state.doc.childCount <= 1) {
             return editor
               .chain()
@@ -355,15 +385,46 @@ export const NotebookSandboxGuards = Extension.create({
   },
 });
 
-function insertTextAdjacentToProtectedAtom(
+export function getProtectedAtomInSelection(
+  state: EditorState,
+): { node: ProseMirrorNode; pos: number; to: number } | null {
+  const { selection } = state;
+  if (selection instanceof NodeSelection) {
+    if (isProtectedAtom(selection.node)) {
+      return { node: selection.node, pos: selection.from, to: selection.to };
+    }
+  }
+  const { $from, $to } = selection;
+  if ($from.sameParent($to) && $from.parent.type.name === 'doc') {
+    const node = $from.nodeAfter;
+    if (
+      node &&
+      isProtectedBlockAtom(node) &&
+      selection.from === $from.pos &&
+      selection.to === $from.pos + node.nodeSize
+    ) {
+      return { node, pos: selection.from, to: selection.to };
+    }
+  }
+  return null;
+}
+
+export function insertTextAdjacentToProtectedAtom(
   view: EditorView,
-  sel: NodeSelection,
+  atomInfo: { node: ProseMirrorNode; pos: number; to: number },
   text: string,
 ): boolean {
-  if (!isProtectedBlockAtom(sel.node)) return false;
+  if (atomInfo.node.isInline) {
+    const afterPos = atomInfo.to;
+    const tr = view.state.tr.insertText(text, afterPos);
+    tr.setSelection(TextSelection.create(tr.doc, afterPos + text.length));
+    view.dispatch(tr);
+    view.focus();
+    return true;
+  }
 
   const { doc } = view.state;
-  const afterPos = sel.to;
+  const afterPos = atomInfo.to;
   const $after = doc.resolve(afterPos);
   const blockIndex = $after.index(0);
   const hasNext = blockIndex < doc.childCount;
@@ -395,41 +456,80 @@ function insertTextAdjacentToProtectedAtom(
   return true;
 }
 
+export const notebookSandboxDocumentFlowPluginKey = new PluginKey('notebookSandboxDocumentFlow');
+
 /** M6.0 / M6.1: Document flow & safe typing guards around atom blocks. */
+function isDomInputEvent(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    Boolean(target.closest('input, textarea'))
+  );
+}
+
 export const NotebookSandboxDocumentFlow = Extension.create({
   name: 'notebookSandboxDocumentFlow',
+  priority: 1000,
 
   addProseMirrorPlugins() {
     return [
       new Plugin({
+        key: notebookSandboxDocumentFlowPluginKey,
         props: {
           handleKeyDown(view, event) {
-            // Ordinary printable typing on NodeSelection must not replace the atom node.
-            if (
-              event.key.length === 1 &&
-              !event.ctrlKey &&
-              !event.metaKey &&
-              !event.altKey &&
-              view.state.selection instanceof NodeSelection
-            ) {
-              const sel = view.state.selection as NodeSelection;
-              if (isProtectedBlockAtom(sel.node)) {
-                event.preventDefault();
-                return insertTextAdjacentToProtectedAtom(view, sel, event.key);
-              }
+            // Typing inside a native form control (e.g. inline formula edit input) belongs to that input.
+            if (isDomInputEvent(event.target)) {
+              return false;
+            }
+
+            const atomInfo = getProtectedAtomInSelection(view.state);
+            const isPrintable =
+              event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+            // Ordinary printable typing on protected atom selection must not replace the atom node.
+            if (isPrintable && atomInfo) {
+              event.preventDefault();
+              return insertTextAdjacentToProtectedAtom(view, atomInfo, event.key);
             }
             return false;
           },
 
           handleTextInput(view, _from, _to, text) {
-            // Guard against direct textInput / IME replacing a selected atom node.
-            if (view.state.selection instanceof NodeSelection) {
-              const sel = view.state.selection as NodeSelection;
-              if (isProtectedBlockAtom(sel.node)) {
-                return insertTextAdjacentToProtectedAtom(view, sel, text);
-              }
+            if (isDomInputEvent(document.activeElement)) {
+              return false;
+            }
+
+            const atomInfo = getProtectedAtomInSelection(view.state);
+            if (atomInfo) {
+              return insertTextAdjacentToProtectedAtom(view, atomInfo, text);
             }
             return false;
+          },
+
+          handleDOMEvents: {
+            beforeinput(view, event) {
+              if (isDomInputEvent(event.target)) {
+                return false;
+              }
+
+              const inputEvent = event as InputEvent;
+              if (
+                inputEvent.inputType === 'insertText' ||
+                inputEvent.inputType === 'insertReplacementText'
+              ) {
+                const atomInfo = getProtectedAtomInSelection(view.state);
+                if (atomInfo) {
+                  event.preventDefault();
+                  const text = inputEvent.data ?? '';
+                  if (text) {
+                    insertTextAdjacentToProtectedAtom(view, atomInfo, text);
+                  }
+                  return true;
+                }
+              }
+              return false;
+            },
           },
 
           handleClick(view, pos, event) {

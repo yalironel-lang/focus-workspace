@@ -72,7 +72,7 @@ describe('candidate block picker UX', () => {
     expect(menu.querySelector('[data-nb-candidate-block="callout:definition"]')?.getAttribute('aria-pressed')).toBe('false');
   });
 
-  const nodes: Record<string, string> = { paragraph: 'nbParagraph', title: 'nbTitle', section: 'nbSection', bullet: 'nbBullet', ordered: 'nbOrdered', task: 'nbTask', quote: 'nbQuote', step: 'nbStep' };
+  const nodes: Record<string, string> = { paragraph: 'nbParagraph', title: 'nbTitle', section: 'nbSection', bullet: 'nbBullet', ordered: 'nbOrdered', task: 'nbTask', quote: 'nbQuote', step: 'nbStep', math: 'nbMath' };
   it.each(CANDIDATE_BLOCK_MENU)('$label uses the existing command once and preserves selection/text', async item => {
     const ed = await mount(item.id === 'paragraph' ? '# שלום $x$ world' : 'שלום $x$ world');
     const storage = vi.fn(); const network = vi.fn(); const db = vi.fn();

@@ -73,15 +73,15 @@ function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
   }
 
   // Nested block content (e.g. multi-paragraph list items) is never allowed.
-  if (node.content?.some(c => c.type && c.type !== 'text' && c.type !== 'hardBreak')) {
-    const bad = node.content.find(c => c.type && c.type !== 'text');
+  if (node.content?.some(c => c.type && c.type !== 'text' && c.type !== 'nbInlineMath' && c.type !== 'hardBreak')) {
+    const bad = node.content.find(c => c.type && c.type !== 'text' && c.type !== 'nbInlineMath');
     if (bad?.type === 'hardBreak') {
       throw new NotebookTiptapConversionError(
         'hard_break',
         'hardBreak is unsupported in Notebook dialect (newline is a block boundary)',
       );
     }
-    if (bad && bad.type !== 'text') {
+    if (bad && bad.type !== 'text' && bad.type !== 'nbInlineMath') {
       throw new NotebookTiptapConversionError(
         'multi_block_list_item',
         `Block "${node.type}" may only contain inline text; found "${bad.type}"`,

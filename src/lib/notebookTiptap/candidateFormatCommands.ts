@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from '@tiptap/core';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../notebookInlineMarks';
 
 /** Student-oriented size presets for the candidate toolbar. */
@@ -16,6 +17,7 @@ export type CandidateFormatCommand =
   | { type: 'toggleItalic' }
   | { type: 'toggleUnderline' }
   | { type: 'toggleStrike' }
+  | { type: 'toggleMath' }
   | { type: 'setFontSize'; px: number }
   | { type: 'setTextColor'; color: string }
   | { type: 'setHighlight'; color: string }
@@ -27,6 +29,7 @@ export type CandidateFormatState = {
   italic: boolean;
   underline: boolean;
   strike: boolean;
+  math: boolean;
   /** Unambiguous size in px, or null when default / unset. */
   fontSizePx: number | null;
   fontSizeMixed: boolean;
@@ -118,6 +121,25 @@ export function readCandidateFormatState(editor: Editor): CandidateFormatState {
     italic: editor.isActive('italic'),
     underline: editor.isActive('underline'),
     strike: editor.isActive('strike'),
+    math: (() => {
+      if (editor.isActive('math')) return true;
+      const mathNodeType = editor.state.schema.nodes.nbInlineMath;
+      if (!mathNodeType) return false;
+      if (editor.state.selection instanceof NodeSelection && editor.state.selection.node.type === mathNodeType) {
+        return true;
+      }
+      if (!empty && to > from) {
+        let found = false;
+        editor.state.doc.nodesBetween(from, to, node => {
+          if (node.type === mathNodeType) {
+            found = true;
+            return false;
+          }
+        });
+        return found;
+      }
+      return false;
+    })(),
     fontSizePx,
     fontSizeMixed,
     color,
@@ -144,6 +166,71 @@ export function applyCandidateFontSize(editor: Editor, px: number): boolean {
   return editor.chain().focus().setFontSize(`${px}px`).run();
 }
 
+export function toggleCandidateMath(editor: Editor): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  const { state, view } = editor;
+  const { from, to, empty } = state.selection;
+  const mathNodeType = state.schema.nodes.nbInlineMath;
+  if (!mathNodeType) return false;
+
+  // Case 1: NodeSelection on an nbInlineMath node
+  if (state.selection instanceof NodeSelection && state.selection.node.type === mathNodeType) {
+    const node = state.selection.node;
+    const text = (node.attrs.text as string) ?? '';
+    const marks = (node.marks ?? []).filter(m => m.type.name !== 'math');
+    const tr = state.tr.replaceWith(from, to, state.schema.text(text, marks));
+    tr.setSelection(TextSelection.create(tr.doc, from, from + text.length));
+    view.dispatch(tr);
+    return true;
+  }
+
+  // Case 2: Selection encompasses or overlaps nbInlineMath node(s)
+  const mathNodes: { pos: number; nodeSize: number; text: string; marks: any[] }[] = [];
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type === mathNodeType) {
+      mathNodes.push({
+        pos,
+        nodeSize: node.nodeSize,
+        text: (node.attrs.text as string) ?? '',
+        marks: (node.marks ?? []).filter(m => m.type.name !== 'math'),
+      });
+      return false;
+    }
+  });
+
+  if (mathNodes.length > 0) {
+    const tr = state.tr;
+    for (let i = mathNodes.length - 1; i >= 0; i--) {
+      const { pos, nodeSize, text, marks } = mathNodes[i]!;
+      tr.replaceWith(pos, pos + nodeSize, state.schema.text(text, marks));
+    }
+    view.dispatch(tr);
+    return true;
+  }
+
+  // Case 3: Text range selected -> convert to nbInlineMath
+  if (!empty && to > from) {
+    const selectedText = state.doc.textBetween(from, to);
+    if (!selectedText.trim()) return false;
+
+    const $from = state.doc.resolve(from);
+    const existingMarks = $from.marks().filter(m => m.type.name !== 'math');
+
+    const inlineMathNode = mathNodeType.create(
+      { text: selectedText },
+      null,
+      existingMarks,
+    );
+    const tr = state.tr.replaceWith(from, to, inlineMathNode);
+    const afterPos = from + inlineMathNode.nodeSize;
+    tr.setSelection(TextSelection.create(tr.doc, afterPos, afterPos));
+    view.dispatch(tr);
+    return true;
+  }
+
+  return false;
+}
+
 export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCommand): boolean {
   if (editor.isDestroyed || !editor.isEditable || editor.state.selection.empty) return false;
 
@@ -156,6 +243,8 @@ export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCo
       return editor.chain().focus().toggleUnderline().run();
     case 'toggleStrike':
       return editor.chain().focus().toggleStrike().run();
+    case 'toggleMath':
+      return toggleCandidateMath(editor);
     case 'setFontSize':
       return applyCandidateFontSize(editor, cmd.px);
     case 'setTextColor':
@@ -169,12 +258,21 @@ export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCo
         const { from, to } = tr.selection;
         state.doc.nodesBetween(from, to, (node, pos) => {
           // Block math and media are opaque; clear only editable inline presentation.
-          if (node.isAtom && !node.isText) return false;
+          if (node.isAtom && !node.isText) {
+            if (node.type.name === 'nbInlineMath') {
+              const text = (node.attrs.text as string) ?? '';
+              const marks = (node.marks ?? []).filter(m => m.type.name !== 'math');
+              tr.replaceWith(pos, pos + node.nodeSize, state.schema.text(text, marks));
+            }
+            return false;
+          }
           if (!node.isText) return;
           const start = Math.max(from, pos);
           const end = Math.min(to, pos + node.nodeSize);
-          for (const name of ['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight']) {
-            tr.removeMark(start, end, state.schema.marks[name]);
+          for (const name of ['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight', 'math']) {
+            if (state.schema.marks[name]) {
+              tr.removeMark(start, end, state.schema.marks[name]);
+            }
           }
         });
         return true;

@@ -13,6 +13,7 @@ import {
   Italic,
   Underline,
   Strikethrough,
+  Sigma,
   Eraser,
   Highlighter,
   Baseline,
@@ -413,6 +414,9 @@ export function NotebookTiptapCandidateSelectionToolbar({
             </FormatBtn>
             <FormatBtn title="Strike" testId="strike" active={fmt.strike} onAction={() => runFmt({ type: 'toggleStrike' })}>
               <Strikethrough size={14} strokeWidth={2.5} />
+            </FormatBtn>
+            <FormatBtn title="Math" testId="math" active={fmt.math} onAction={() => runFmt({ type: 'toggleMath' })}>
+              <Sigma size={14} strokeWidth={2.5} />
             </FormatBtn>
 
             <div className="nb-toolbar-divider" />

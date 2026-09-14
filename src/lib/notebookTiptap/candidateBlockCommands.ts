@@ -17,7 +17,8 @@ export type CandidateBasicBlockTarget =
   | 'ordered'
   | 'task'
   | 'quote'
-  | 'step';
+  | 'step'
+  | 'math';
 
 export type CandidateAcademicBlockTarget = `callout:${CalloutTone}`;
 
@@ -39,6 +40,7 @@ export const CANDIDATE_BLOCK_MENU: readonly CandidateBlockMenuItem[] = [
   { id: 'task', label: 'Task', group: 'basic' },
   { id: 'quote', label: 'Quote', group: 'basic' },
   { id: 'step', label: 'Step', group: 'basic' },
+  { id: 'math', label: 'Math Block', group: 'basic' },
   ...CALLOUT_TONES.map(
     (tone): CandidateBlockMenuItem => ({
       id: `callout:${tone}`,
@@ -76,6 +78,7 @@ export function readCandidateBlockKind(editor: Editor): {
     nbTask: 'Task',
     nbQuote: 'Quote',
     nbStep: 'Step',
+    nbMath: 'Math Block',
   };
   return { type, tone: null, label: labels[type] ?? type };
 }
@@ -114,6 +117,8 @@ export function runCandidateBlockCommand(editor: Editor, target: CandidateBlockT
       return editor.chain().focus().setNode('nbQuote', { ...dir }).run();
     case 'step':
       return editor.chain().focus().setNode('nbStep', { ...dir }).run();
+    case 'math':
+      return editor.chain().focus().setNode('nbMath', { ...dir }).run();
     default:
       return false;
   }
