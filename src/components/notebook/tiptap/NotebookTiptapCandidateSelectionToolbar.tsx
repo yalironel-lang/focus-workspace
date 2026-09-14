@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorState } from '@tiptap/react';
 import { posToDOMRect, type Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
 import {
   Bold,
   Italic,
@@ -51,6 +52,7 @@ function preventToolbarEvent(e: React.PointerEvent | React.MouseEvent): void {
 
 function selectionShouldShowToolbar(editor: Editor): boolean {
   if (!editor.isEditable || editor.isDestroyed) return false;
+  if (editor.state.selection instanceof NodeSelection) return false;
   const { empty, from, to } = editor.state.selection;
   return !empty && to > from;
 }

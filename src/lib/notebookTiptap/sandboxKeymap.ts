@@ -10,7 +10,7 @@
  */
 
 import { Extension } from '@tiptap/core';
-import { Plugin, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/core';
 import { inheritDirForNewBlock } from './direction';
 
@@ -52,6 +52,24 @@ export const NotebookSandboxKeymap = Extension.create({
       'Shift-Enter': () => true,
 
       Enter: ({ editor }) => {
+        if (editor.state.selection instanceof NodeSelection) {
+          const sel = editor.state.selection as NodeSelection;
+          const insertPos = sel.to;
+          return editor
+            .chain()
+            .command(({ tr, state }) => {
+              const pNode = state.schema.nodes.nbParagraph.create({
+                variant: null,
+                dir: 'auto',
+              });
+              tr.insert(insertPos, pNode);
+              tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
+              return true;
+            })
+            .focus()
+            .run();
+        }
+
         const info = parentInfo(editor);
         if (info.type === 'doc') return false;
 
@@ -107,6 +125,26 @@ export const NotebookSandboxKeymap = Extension.create({
       },
 
       Backspace: ({ editor }) => {
+        if (editor.state.selection instanceof NodeSelection) {
+          const sel = editor.state.selection as NodeSelection;
+          if (editor.state.doc.childCount <= 1) {
+            return editor
+              .chain()
+              .command(({ tr, state }) => {
+                const pNode = state.schema.nodes.nbParagraph.create({
+                  variant: null,
+                  dir: 'auto',
+                });
+                tr.replaceWith(sel.from, sel.to, pNode);
+                tr.setSelection(TextSelection.create(tr.doc, 1));
+                return true;
+              })
+              .focus()
+              .run();
+          }
+          return editor.commands.deleteSelection();
+        }
+
         // Range deletion takes precedence over empty-block/caret transformations.
         if (!editor.state.selection.empty) return editor.commands.deleteSelection();
         const info = parentInfo(editor);
@@ -148,6 +186,32 @@ export const NotebookSandboxKeymap = Extension.create({
 
         if (info.atStart) {
           return editor.commands.joinBackward();
+        }
+        return false;
+      },
+
+      Delete: ({ editor }) => {
+        if (editor.state.selection instanceof NodeSelection) {
+          const sel = editor.state.selection as NodeSelection;
+          if (editor.state.doc.childCount <= 1) {
+            return editor
+              .chain()
+              .command(({ tr, state }) => {
+                const pNode = state.schema.nodes.nbParagraph.create({
+                  variant: null,
+                  dir: 'auto',
+                });
+                tr.replaceWith(sel.from, sel.to, pNode);
+                tr.setSelection(TextSelection.create(tr.doc, 1));
+                return true;
+              })
+              .focus()
+              .run();
+          }
+          return editor.commands.deleteSelection();
+        }
+        if (!editor.state.selection.empty) {
+          return editor.commands.deleteSelection();
         }
         return false;
       },
@@ -194,6 +258,45 @@ export const NotebookSandboxGuards = Extension.create({
             return ok;
           });
           return ok;
+        },
+      }),
+    ];
+  },
+});
+
+/** M6.0: Ensure clicks below the last atom block in ProseMirror append an editable paragraph. */
+export const NotebookSandboxDocumentFlow = Extension.create({
+  name: 'notebookSandboxDocumentFlow',
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handleClick(view, pos, event) {
+            const { doc } = view.state;
+            const last = doc.lastChild;
+            if (!last) return false;
+
+            const isLastAtom =
+              last.type.name === 'nbImageRef' ||
+              last.type.name === 'nbHandwriting' ||
+              last.type.name === 'nbDivider';
+
+            if (!isLastAtom) return false;
+
+            if (event.target === view.dom || pos >= doc.content.size) {
+              const insertPos = doc.content.size;
+              const tr = view.state.tr.insert(
+                insertPos,
+                view.state.schema.nodes.nbParagraph.create({ variant: null, dir: 'auto' })
+              );
+              tr.setSelection(TextSelection.create(tr.doc, insertPos + 1));
+              view.dispatch(tr);
+              view.focus();
+              return true;
+            }
+            return false;
+          },
         },
       }),
     ];

@@ -13,6 +13,7 @@ import Underline from '@tiptap/extension-underline';
 import { TextStyle, Color, FontSize, BackgroundColor } from '@tiptap/extension-text-style';
 import Highlight from '@tiptap/extension-highlight';
 import { UndoRedo } from '@tiptap/extensions';
+import Gapcursor from '@tiptap/extension-gapcursor';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import {
   NbBullet,
@@ -44,7 +45,11 @@ import {
   SandboxTitleView,
   createSandboxHandwritingView,
 } from './sandboxNodeViews';
-import { NotebookSandboxGuards, NotebookSandboxKeymap } from './sandboxKeymap';
+import {
+  NotebookSandboxDocumentFlow,
+  NotebookSandboxGuards,
+  NotebookSandboxKeymap,
+} from './sandboxKeymap';
 import { NotebookSandboxPaste } from './sandboxPaste';
 import { NotebookSandboxInlineMathIsolate } from './sandboxInlineMathIsolate';
 
@@ -57,9 +62,11 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
   return [
     Document,
     Text,
+    Gapcursor,
     UndoRedo,
     NotebookSandboxKeymap,
     NotebookSandboxGuards,
+    NotebookSandboxDocumentFlow,
     NotebookSandboxPaste,
     NotebookSandboxInlineMathIsolate,
     NbParagraph.extend({

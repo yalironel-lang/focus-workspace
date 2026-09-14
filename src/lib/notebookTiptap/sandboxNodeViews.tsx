@@ -281,7 +281,7 @@ export function SandboxCalloutView({ node }: NodeViewProps) {
 }
 
 /** Block math — atomic / read-only in sandbox; always LTR-isolated. */
-export function SandboxMathAtomView({ node }: NodeViewProps) {
+export function SandboxMathAtomView({ node, selected }: NodeViewProps) {
   const latex = node.textContent;
   const isolate = mathLtrIsolateProps();
   return (
@@ -289,9 +289,16 @@ export function SandboxMathAtomView({ node }: NodeViewProps) {
       as="div"
       data-nb="nbMath"
       data-nb-sandbox-atom="math"
+      data-nb-selected={selected ? 'true' : undefined}
       dir={isolate.dir}
       data-nb-math-isolate={isolate['data-nb-math-isolate']}
-      style={{ margin: '10px 0', ...isolate.style }}
+      style={{
+        margin: '10px 0',
+        outline: selected ? '2px solid #38bdf8' : 'none',
+        outlineOffset: '2px',
+        borderRadius: 8,
+        ...isolate.style,
+      }}
     >
       <KatexPreview
         latex={plainMathToLatex(latex.trim())}
@@ -310,30 +317,62 @@ export function SandboxMathAtomView({ node }: NodeViewProps) {
   );
 }
 
-export function SandboxDividerView() {
+export function SandboxDividerView({ selected }: NodeViewProps) {
   return (
-    <NodeViewWrapper as="div" data-nb="nbDivider" data-nb-sandbox-atom="divider" style={{ margin: '14px 0' }}>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbDivider"
+      data-nb-sandbox-atom="divider"
+      data-nb-selected={selected ? 'true' : undefined}
+      style={{
+        margin: '14px 0',
+        outline: selected ? '2px solid #38bdf8' : 'none',
+        outlineOffset: '4px',
+        borderRadius: 4,
+        cursor: 'default',
+      }}
+    >
       <hr style={{ border: 'none', borderTop: '1px solid rgba(148,163,184,0.28)', margin: 0 }} />
     </NodeViewWrapper>
   );
 }
 
-export function SandboxImageRefView({ node }: NodeViewProps) {
+export function SandboxImageRefView({ node, selected }: NodeViewProps) {
   return (
-    <NodeViewWrapper as="div" data-nb="nbImageRef" data-nb-sandbox-atom="image" style={{ margin: '10px 0' }}>
+    <NodeViewWrapper
+      as="div"
+      data-nb="nbImageRef"
+      data-nb-sandbox-atom="image"
+      data-nb-selected={selected ? 'true' : undefined}
+      style={{
+        margin: '10px 0',
+        outline: selected ? '2px solid #38bdf8' : 'none',
+        outlineOffset: '2px',
+        borderRadius: 10,
+        transition: 'outline 0.1s ease',
+        cursor: 'default',
+      }}
+    >
       <NotebookImageReadonlyView imageKey={String(node.attrs.key ?? '')} alt={String(node.attrs.alt ?? '')} />
     </NodeViewWrapper>
   );
 }
 
 export function createSandboxHandwritingView(objectId?: string) {
-  return function SandboxHandwritingView({ node }: NodeViewProps) {
+  return function SandboxHandwritingView({ node, selected }: NodeViewProps) {
     return (
       <NodeViewWrapper
         as="div"
         data-nb="nbHandwriting"
         data-nb-sandbox-atom="handwriting"
-        style={{ margin: '10px 0' }}
+        data-nb-selected={selected ? 'true' : undefined}
+        style={{
+          margin: '10px 0',
+          outline: selected ? '2px solid #38bdf8' : 'none',
+          outlineOffset: '2px',
+          borderRadius: 10,
+          cursor: 'default',
+        }}
       >
         <NotebookHandwritingReadonlyView objectId={objectId} blockKey={String(node.attrs.key ?? '')} />
       </NodeViewWrapper>

@@ -399,7 +399,7 @@ export function NotebookTiptapCandidateEditor({
           bodyCodecVersion: sourceBodyCodecVersion,
         },
         migratedContent: {
-          id: objectId ?? 'unknown',
+          type: 'notebook',
           pages: [],
           activePageId: pageKey,
           body: pageSource,
@@ -421,6 +421,45 @@ export function NotebookTiptapCandidateEditor({
     return buildNotebookQaDiagSnapshot(qaDiagContext, candidateInfo, editor);
   }, [qaDiagContext, candidateInfo, editor, objectId, pageKey, pageSource, sourceBodyCodecVersion]);
 
+  const handleContainerClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!editor || editor.isDestroyed || !editor.isEditable) return;
+      const target = e.target as HTMLElement | null;
+      // Do not intercept clicks on controls, toolbars, QA panel, or atom blocks themselves
+      if (
+        target?.closest(
+          'button, select, input, [role="toolbar"], [data-nb-candidate-toolbar], [data-nb-candidate-qa-panel], [data-nb-candidate-badge], [data-nb="nbImageRef"], [data-nb="nbHandwriting"], [data-nb="nbDivider"], [data-nb="nbMath"], .nb-img-block',
+        )
+      ) {
+        return;
+      }
+      const { doc } = editor.state;
+      const last = doc.lastChild;
+      if (
+        last &&
+        (last.type.name === 'nbImageRef' ||
+          last.type.name === 'nbHandwriting' ||
+          last.type.name === 'nbDivider' ||
+          last.type.name === 'nbMath')
+      ) {
+        const insertPos = doc.content.size;
+        editor
+          .chain()
+          .focus()
+          .insertContentAt(insertPos, {
+            type: 'nbParagraph',
+            attrs: { variant: null, dir: 'auto' },
+            content: [],
+          })
+          .setTextSelection(insertPos + 1)
+          .run();
+      } else {
+        editor.chain().focus('end').run();
+      }
+    },
+    [editor],
+  );
+
   return (
     <div
       className={className}
@@ -432,6 +471,7 @@ export function NotebookTiptapCandidateEditor({
          Never stopPropagation in capture — that blocks ProseMirror before it handles Enter. */
       onKeyDown={e => e.stopPropagation()}
       onCopy={e => e.stopPropagation()}
+      onClick={handleContainerClick}
       style={{
         fontFamily: NB_FONT_STACK,
         color: 'inherit',
@@ -443,6 +483,28 @@ export function NotebookTiptapCandidateEditor({
         .nb-tiptap-math-src-isolate {
           direction: ltr;
           unicode-bidi: isolate;
+        }
+        .ProseMirror-gapcursor {
+          display: none;
+          pointer-events: none;
+          position: absolute;
+        }
+        .ProseMirror-gapcursor:after {
+          content: "";
+          display: block;
+          position: absolute;
+          top: -2px;
+          width: 20px;
+          border-top: 1px solid #38bdf8;
+          animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+        }
+        @keyframes ProseMirror-cursor-blink {
+          to {
+            visibility: hidden;
+          }
+        }
+        .ProseMirror-focused .ProseMirror-gapcursor {
+          display: block;
         }
       `}</style>
 
