@@ -9,7 +9,7 @@ export {
   type NotebookTiptapErrorCode,
 } from './errors';
 
-export { isNotebookTiptapEditorEnabled, isNotebookTiptapCandidateEnabled, isNotebookTiptapCandidateActive } from './featureFlag';
+export { isNotebookTiptapEditorEnabled, isNotebookTiptapCandidateEnabled, isNotebookTiptapCandidateActive, isNotebookTiptapPersistEnabled, isNotebookTiptapPersistActive, isNotebookLegacyCeForced } from './featureFlag';
 
 export {
   createNotebookTiptapExtensions,

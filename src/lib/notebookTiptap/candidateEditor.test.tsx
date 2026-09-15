@@ -38,7 +38,7 @@ afterEach(() => {
   host = null;
 });
 
-describe('candidate feature flag defaults OFF', () => {
+describe('candidate feature flag defaults (M7.1A)', () => {
   const mem = new Map<string, string>();
   beforeEach(() => {
     mem.clear();
@@ -57,18 +57,20 @@ describe('candidate feature flag defaults OFF', () => {
     vi.unstubAllGlobals();
   });
 
-  it('candidate and shadow flags default off', () => {
-    expect(isNotebookTiptapCandidateEnabled()).toBe(false);
+  it('candidate defaults ON; shadow/parity editor stays OFF', () => {
+    expect(isNotebookTiptapCandidateEnabled()).toBe(true);
+    expect(isNotebookTiptapCandidateActive()).toBe(true);
     expect(isNotebookTiptapEditorEnabled()).toBe(false);
   });
 
-  it('candidate active requires DEV + flag', () => {
+  it('candidate active follows enable flag (no DEV gate); explicit OFF works', () => {
+    expect(isNotebookTiptapCandidateActive()).toBe(true);
+    localStorage.setItem('notebookTiptapCandidate', '0');
+    expect(isNotebookTiptapCandidateEnabled()).toBe(false);
     expect(isNotebookTiptapCandidateActive()).toBe(false);
     localStorage.setItem('notebookTiptapCandidate', '1');
     expect(isNotebookTiptapCandidateEnabled()).toBe(true);
-    expect(isNotebookTiptapCandidateActive()).toBe(Boolean(import.meta.env.DEV));
-    localStorage.setItem('notebookTiptapCandidate', '0');
-    expect(isNotebookTiptapCandidateEnabled()).toBe(false);
+    expect(isNotebookTiptapCandidateActive()).toBe(true);
   });
 });
 

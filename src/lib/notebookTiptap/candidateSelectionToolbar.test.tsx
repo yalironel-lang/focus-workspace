@@ -382,9 +382,9 @@ describe('candidate flag OFF leaves CE path conceptually unchanged', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults off', () => {
-    expect(isNotebookTiptapCandidateEnabled()).toBe(false);
-    expect(isNotebookTiptapCandidateActive()).toBe(false);
+  it('defaults ON (M7.1A body editor)', () => {
+    expect(isNotebookTiptapCandidateEnabled()).toBe(true);
+    expect(isNotebookTiptapCandidateActive()).toBe(true);
   });
 });
 

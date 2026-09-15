@@ -74,16 +74,16 @@ function simulateCandidateUserEdit(
 }
 
 // ---------------------------------------------------------------------------
-// Feature Flags: 3 states, default-OFF, DEV guard
+// Feature Flags: 3 states (M7.1A defaults ON; no DEV gate) — detailed coverage in featureFlag.m71a.test.ts
 // ---------------------------------------------------------------------------
-describe('Feature flags — 3 states and DEV gating', () => {
+describe('Feature flags — 3 states (M7.1A)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('persist flag defaults to OFF', () => {
-    expect(isNotebookTiptapPersistEnabled()).toBe(false);
-    expect(isNotebookTiptapPersistActive()).toBe(false);
+  it('persist flag defaults to ON with TipTap active', () => {
+    expect(isNotebookTiptapPersistEnabled()).toBe(true);
+    expect(isNotebookTiptapPersistActive()).toBe(true);
   });
 
   it('State 1: Candidate OFF → persistActive is false even if persist flag is set', () => {
@@ -103,12 +103,12 @@ describe('Feature flags — 3 states and DEV gating', () => {
     expect(isNotebookTiptapPersistActive()).toBe(false);
   });
 
-  it('State 3: Candidate ON + Persist ON → persistActive is true in DEV', () => {
+  it('State 3: Candidate ON + Persist ON → persistActive is true (no DEV gate)', () => {
     vi.stubEnv('VITE_NOTEBOOK_TIPTAP_CANDIDATE', 'true');
     vi.stubEnv('VITE_NOTEBOOK_TIPTAP_PERSIST', 'true');
     expect(isNotebookTiptapCandidateEnabled()).toBe(true);
     expect(isNotebookTiptapPersistEnabled()).toBe(true);
-    expect(isNotebookTiptapPersistActive()).toBe(Boolean(import.meta.env.DEV));
+    expect(isNotebookTiptapPersistActive()).toBe(true);
   });
 });
 

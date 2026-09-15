@@ -1246,12 +1246,11 @@ export function ProjectNotebookBlock({
   const { user } = useAuth();
   const handwritingUserId = user?.id;
   const v1PagesShell = isNotebookV1PagesEnabled();
-  /** Milestone 4: TipTap as visible body editor (DEV + flag). Memory-only. */
+  /** M7.1A: TipTap body editor (default ON). Legacy CE when isNotebookLegacyCeForced(). */
   const tipTapCandidateActive = isNotebookTiptapCandidateActive();
   /**
-   * Milestone 5.2: Guarded real persistence for the TipTap candidate.
-   * Separate flag — both candidate AND persist must be ON.
-   * Default OFF. Production behavior unchanged when OFF.
+   * M7.1A / M5.2: Guarded TipTap → canonical persistence (default ON when TipTap active).
+   * Wired only when Active; never TipTap JSON SOT.
    */
   const tipTapPersistActive = isNotebookTiptapPersistActive();
   /** Device-local active page — avoids cloud LWW fights from passive navigation. */
