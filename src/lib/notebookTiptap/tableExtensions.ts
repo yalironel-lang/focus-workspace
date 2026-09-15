@@ -21,11 +21,11 @@ import { TableCell } from '@tiptap/extension-table/cell';
 import { TableHeader } from '@tiptap/extension-table/header';
 import { isSelectionInsideTable, navigateNotebookTableCell } from './tableCommands';
 
-/** Minimal grid chrome so empty cells are distinguishable (content rendering only). */
+/** Product-facing grid chrome (M6.4C) — restrained document table, not a spreadsheet. */
 export const NB_TABLE_ELEMENT_STYLE =
-  'border-collapse:collapse;width:100%;margin:0.5em 0;table-layout:fixed;';
+  'border-collapse:collapse;width:100%;margin:0.65em 0;table-layout:fixed;border:1px solid rgba(148,163,184,0.55);';
 export const NB_TABLE_CELL_ELEMENT_STYLE =
-  'border:1px solid rgba(148,163,184,0.9);min-width:3rem;min-height:1.75rem;padding:6px 8px;vertical-align:top;';
+  'border:1px solid rgba(148,163,184,0.55);min-width:3.25rem;min-height:2rem;padding:8px 10px;vertical-align:top;';
 
 export const NbTable = Table.extend({
   name: 'nbTable',

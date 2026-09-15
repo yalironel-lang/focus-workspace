@@ -225,6 +225,26 @@ function requireEditable(editor: Editor): boolean {
 }
 
 /**
+ * Top-level insert position for a new nbTable: immediately AFTER the current
+ * top-level block that contains the selection/caret.
+ *
+ * Table is a block insertion — never replace/split selected inline text.
+ * If selection is already a whole-table NodeSelection, insert after that table.
+ */
+export function resolveNotebookTableInsertPos(editor: Editor): number {
+  const { selection, doc } = editor.state;
+  if (selection instanceof NodeSelection && selection.node.type.name === 'nbTable') {
+    return selection.to;
+  }
+  const { $from } = selection;
+  if ($from.depth >= 1) {
+    return $from.after(1);
+  }
+  // Gapcursor / doc-level: insert at the gap position (clamped).
+  return Math.max(0, Math.min($from.pos, doc.content.size));
+}
+
+/**
  * Run a Notebook table command. Returns false on no-op / invalid context.
  * Insert always uses header-free cells (never TipTap withHeaderRow default).
  */
@@ -236,8 +256,13 @@ export function runCandidateTableCommand(editor: Editor, cmd: CandidateTableComm
       const rows = cmd.rows ?? DEFAULT_INSERT_TABLE_ROWS;
       const cols = cmd.cols ?? DEFAULT_INSERT_TABLE_COLS;
       if (!isValidTableSize(rows, cols)) return false;
-      // Prefer manual JSON insert so we never depend on TipTap's withHeaderRow default.
-      const ok = editor.chain().focus().insertContent(createNotebookTableJson(rows, cols)).run();
+      // Insert AFTER the current top-level block — never replace a text selection.
+      const insertPos = resolveNotebookTableInsertPos(editor);
+      const ok = editor
+        .chain()
+        .focus()
+        .insertContentAt(insertPos, createNotebookTableJson(rows, cols))
+        .run();
       if (!ok) return false;
       return assertSerializableOrUndo(editor);
     }

@@ -47,10 +47,26 @@ function pressKey(editor: Editor, key: string, opts: KeyboardEventInit = {}): bo
 }
 
 function focusFirstCell(editor: Editor) {
-  // Position inside first cell paragraph (after table+row+cell opens).
-  const table = editor.state.doc.child(0);
-  expect(table.type.name).toBe('nbTable');
-  editor.commands.setTextSelection(4);
+  let cellPos: number | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (cellPos != null) return false;
+    if (node.type.name === 'nbTableCell') {
+      cellPos = pos + 2;
+      return false;
+    }
+    return true;
+  });
+  expect(cellPos).not.toBeNull();
+  editor.commands.setTextSelection(cellPos!);
+}
+
+function firstTablePos(editor: Editor): number {
+  let tablePos = -1;
+  editor.state.doc.forEach((node, pos) => {
+    if (tablePos < 0 && node.type.name === 'nbTable') tablePos = pos;
+  });
+  expect(tablePos).toBeGreaterThanOrEqual(0);
+  return tablePos;
 }
 
 describe('M6.4B insert', () => {
@@ -62,9 +78,10 @@ describe('M6.4B insert', () => {
     expect(ctx.cols).toBe(DEFAULT_INSERT_TABLE_COLS);
     expect(countHeaders(editor)).toBe(0);
     const body = tiptapDocToBody(editor.getJSON(), 1);
-    expect(body.startsWith('~nb1:["table"')).toBe(true);
-    expect(JSON.parse(body.slice(5))[3].rows).toHaveLength(3);
-    expect(JSON.parse(body.slice(5))[3].rows[0]).toHaveLength(3);
+    expect(body).toContain('~nb1:["table"');
+    const tableLine = body.split('\n').find(l => l.includes('~nb1:["table"'))!;
+    expect(JSON.parse(tableLine.slice(5))[3].rows).toHaveLength(3);
+    expect(JSON.parse(tableLine.slice(5))[3].rows[0]).toHaveLength(3);
     editor.destroy();
   });
 
@@ -236,20 +253,23 @@ describe('M6.4B document flow', () => {
   it('29-30. Enter / typing on selected table preserves table', () => {
     const editor = ed();
     runCandidateTableCommand(editor, { type: 'insertTable', rows: 1, cols: 1 });
-    const tablePos = 0;
+    const tablePos = firstTablePos(editor);
     editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, tablePos)));
     expect(editor.state.selection instanceof NodeSelection).toBe(true);
 
     pressKey(editor, 'Enter');
     expect(editor.state.doc.childCount).toBeGreaterThanOrEqual(2);
-    expect(editor.state.doc.child(0).type.name).toBe('nbTable');
-    expect(editor.state.doc.child(1).type.name).toBe('nbParagraph');
+    expect(firstTablePos(editor)).toBeGreaterThanOrEqual(0);
 
-    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 0)));
-    const before = tiptapDocToBody(editor.getJSON(), 1);
+    const tablePos2 = firstTablePos(editor);
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, tablePos2)));
+    const beforeTableLine = tiptapDocToBody(editor.getJSON(), 1)
+      .split('\n')
+      .find(l => l.includes('~nb1:["table"'))!;
     pressKey(editor, 'x');
-    expect(editor.state.doc.child(0).type.name).toBe('nbTable');
-    expect(tiptapDocToBody(editor.getJSON(), 1).startsWith(before.split('\n')[0]!)).toBe(true);
+    const after = tiptapDocToBody(editor.getJSON(), 1);
+    expect(after).toContain('~nb1:["table"');
+    expect(after).toContain(beforeTableLine);
     editor.destroy();
   });
 
@@ -475,8 +495,12 @@ describe('M6.4B paste', () => {
     expect(readTableContext(editor)?.rows).toBe(1);
     expect(readTableContext(editor)?.cols).toBe(1);
     const body = tiptapDocToBody(editor.getJSON(), 1);
-    expect(body.split('\n')).toHaveLength(1);
+    const tableLines = body.split('\n').filter(l => l.includes('~nb1:["table"'));
+    expect(tableLines).toHaveLength(1);
     expect(body).toContain('hello world foo');
+    // Still a single 1×1 table — paste must not invent rows/cols/top-level blocks.
+    expect(readTableContext(editor)?.rows).toBe(1);
+    expect(readTableContext(editor)?.cols).toBe(1);
     // HTML-only refused
     expect(paste('', '<table><tr><td>x</td></tr></table>')).toBe(true);
     expect(readTableContext(editor)?.rows).toBe(1);

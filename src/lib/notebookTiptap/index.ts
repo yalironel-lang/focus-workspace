@@ -65,10 +65,17 @@ export {
   navigateNotebookTableCell,
   readCandidateTableState,
   readTableContext,
+  resolveNotebookTableInsertPos,
   runCandidateTableCommand,
   type CandidateTableCommand,
   type CandidateTableState,
 } from './tableCommands';
+
+export {
+  TABLE_CONTEXT_MENU_ACTIONS,
+  TABLE_SIZE_PICKER_MAX,
+  formatTableSizeLabel,
+} from './candidateTableUi';
 
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';

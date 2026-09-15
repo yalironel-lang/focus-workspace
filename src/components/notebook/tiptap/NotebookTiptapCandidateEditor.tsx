@@ -548,9 +548,9 @@ export function NotebookTiptapCandidateEditor({
         .ProseMirror-focused .ProseMirror-gapcursor {
           display: block;
         }
-        /* M6.4B: TipTap tables ship without borders — empty grid must stay visible. */
+        /* M6.4C: restrained document table chrome (visible grid, not spreadsheet). */
         .nb-tiptap-candidate-prosemirror .tableWrapper {
-          margin: 0.5em 0;
+          margin: 0.65em 0;
           overflow-x: auto;
         }
         .nb-tiptap-candidate-prosemirror table.nb-table,
@@ -558,16 +558,26 @@ export function NotebookTiptapCandidateEditor({
           border-collapse: collapse;
           width: 100%;
           table-layout: fixed;
+          border: 1px solid rgba(148, 163, 184, 0.55);
         }
         .nb-tiptap-candidate-prosemirror td.nb-table-cell,
         .nb-tiptap-candidate-prosemirror th.nb-table-header,
         .nb-tiptap-candidate-prosemirror td[data-nb="nbTableCell"],
         .nb-tiptap-candidate-prosemirror th[data-nb="nbTableHeader"] {
-          border: 1px solid rgba(148, 163, 184, 0.9);
-          min-width: 3rem;
-          min-height: 1.75rem;
-          padding: 6px 8px;
+          border: 1px solid rgba(148, 163, 184, 0.55);
+          min-width: 3.25rem;
+          min-height: 2rem;
+          padding: 8px 10px;
           vertical-align: top;
+        }
+        .nb-tiptap-candidate-prosemirror .tableWrapper.ProseMirror-selectednode,
+        .nb-tiptap-candidate-prosemirror table.ProseMirror-selectednode {
+          outline: 2px solid rgba(56, 189, 248, 0.55);
+          outline-offset: 2px;
+        }
+        .nb-tiptap-candidate-prosemirror td.nb-table-cell:focus-within,
+        .nb-tiptap-candidate-prosemirror th.nb-table-header:focus-within {
+          background: rgba(56, 189, 248, 0.06);
         }
       `}</style>
 

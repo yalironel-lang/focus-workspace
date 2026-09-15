@@ -23,6 +23,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  Plus,
 } from 'lucide-react';
 import { sanitizeUrl } from '../../../lib/urlSanitizer';
 import {
@@ -46,8 +47,17 @@ import {
   runCandidateBlockCommand,
   type CandidateBlockTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
+import {
+  isSelectionInsideTable,
+  readCandidateTableState,
+  runCandidateTableCommand,
+  type CandidateTableCommand,
+} from '../../../lib/notebookTiptap/tableCommands';
+import type { TableMenuAction } from '../../../lib/notebookTiptap/candidateTableUi';
 import '../notebookToolbar.css';
 import { NotebookTiptapCandidateBlockPicker } from './NotebookTiptapCandidateBlockPicker';
+import { NotebookTiptapCandidateTableSizePicker } from './NotebookTiptapCandidateTableSizePicker';
+import { NotebookTiptapCandidateTableMenu } from './NotebookTiptapCandidateTableMenu';
 
 export const candidateSelectionToolbarBusyRef = { current: false };
 
@@ -56,11 +66,17 @@ function preventToolbarEvent(e: React.PointerEvent | React.MouseEvent): void {
   e.stopPropagation();
 }
 
-function selectionShouldShowToolbar(editor: Editor): boolean {
+/** Show for text ranges, active links, in-table caret, or whole-table NodeSelection. */
+export function selectionShouldShowToolbar(editor: Editor): boolean {
   if (!editor.isEditable || editor.isDestroyed) return false;
-  if (editor.state.selection instanceof NodeSelection) return false;
-  const { empty, from, to } = editor.state.selection;
-  return (!empty && to > from) || editor.isActive('link');
+  const { selection } = editor.state;
+  if (selection instanceof NodeSelection) {
+    return selection.node.type.name === 'nbTable';
+  }
+  const { empty, from, to } = selection;
+  if ((!empty && to > from) || editor.isActive('link')) return true;
+  // Contextual Table ▾ while editing inside a cell (collapsed caret).
+  return isSelectionInsideTable(editor);
 }
 
 function CaptureBtn({
@@ -218,10 +234,14 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const [sizeOpen, setSizeOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
   const [isEditingLink, setIsEditingLink] = useState(false);
   const linkInputRef = useRef<HTMLInputElement>(null);
+  /** Preserve caret/selection inside the intended table while the Table menu is open. */
+  const tableTargetPosRef = useRef<number | null>(null);
   const [diag, setDiag] = useState({
     empty: true,
     from: 0,
@@ -236,6 +256,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
     selector: ({ editor: ed }) => ({
       ...readCandidateFormatState(ed),
       block: readCandidateBlockKind(ed),
+      table: readCandidateTableState(ed),
     }),
   });
 
@@ -252,6 +273,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
       setSizeOpen(false);
       setBlockOpen(false);
       setLinkOpen(false);
+      setTablePickerOpen(false);
+      setTableMenuOpen(false);
       return;
     }
 
@@ -300,17 +323,19 @@ export function NotebookTiptapCandidateSelectionToolbar({
   }, [editor, syncFromEditor]);
 
   useEffect(() => {
-    if (!sizeOpen && !blockOpen && !linkOpen) return;
+    if (!sizeOpen && !blockOpen && !linkOpen && !tablePickerOpen && !tableMenuOpen) return;
     const onDoc = (e: MouseEvent) => {
       if (!toolbarRef.current?.contains(e.target as Node)) {
         setSizeOpen(false);
         setBlockOpen(false);
         setLinkOpen(false);
+        setTablePickerOpen(false);
+        setTableMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [sizeOpen, blockOpen, linkOpen]);
+  }, [sizeOpen, blockOpen, linkOpen, tablePickerOpen, tableMenuOpen]);
 
   useEffect(() => {
     if (linkOpen) {
@@ -386,6 +411,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
     }
     setSizeOpen(false);
     setBlockOpen(false);
+    setTablePickerOpen(false);
+    setTableMenuOpen(false);
     const editing = fmt.link;
     setIsEditingLink(editing);
     setLinkUrl(editing ? (fmt.linkHref ?? '') : '');
@@ -445,6 +472,63 @@ export function NotebookTiptapCandidateSelectionToolbar({
       syncFromEditor();
     },
     [editor, ensureSelection, releaseBusy, syncFromEditor],
+  );
+
+  const restoreTableTargetSelection = useCallback(() => {
+    candidateSelectionToolbarBusyRef.current = true;
+    const pos = tableTargetPosRef.current;
+    if (pos != null && pos >= 0 && pos <= editor.state.doc.content.size) {
+      try {
+        editor.chain().focus().setTextSelection(pos).run();
+      } catch {
+        editor.commands.focus();
+      }
+    } else {
+      editor.commands.focus();
+    }
+  }, [editor]);
+
+  const runTableInsert = useCallback(
+    (cols: number, rows: number) => {
+      const before = ensureSelection();
+      const cmd: CandidateTableCommand = { type: 'insertTable', rows, cols };
+      const ok = runCandidateTableCommand(editor, cmd);
+      setCmdDiag({
+        cmd: `table:insertTable:${rows}x${cols}`,
+        ok,
+        skippedEmpty: false,
+        beforeFrom: before.from,
+        beforeTo: before.to,
+        afterFrom: editor.state.selection.from,
+        afterTo: editor.state.selection.to,
+      });
+      setTablePickerOpen(false);
+      releaseBusy();
+      syncFromEditor();
+    },
+    [editor, ensureSelection, releaseBusy, syncFromEditor],
+  );
+
+  const runTableAction = useCallback(
+    (action: TableMenuAction) => {
+      restoreTableTargetSelection();
+      const before = editor.state.selection;
+      const cmd: CandidateTableCommand = { type: action.cmd };
+      const ok = runCandidateTableCommand(editor, cmd);
+      setCmdDiag({
+        cmd: `table:${action.cmd}`,
+        ok,
+        skippedEmpty: false,
+        beforeFrom: before.from,
+        beforeTo: before.to,
+        afterFrom: editor.state.selection.from,
+        afterTo: editor.state.selection.to,
+      });
+      setTableMenuOpen(false);
+      releaseBusy();
+      syncFromEditor();
+    },
+    [editor, releaseBusy, restoreTableTargetSelection, syncFromEditor],
   );
 
   const showToolbar = open && anchor != null;
@@ -631,6 +715,9 @@ export function NotebookTiptapCandidateSelectionToolbar({
                 active={!fmt.fontSizeMixed && fmt.fontSizePx != null}
                 onAction={() => {
                   setBlockOpen(false);
+                  setLinkOpen(false);
+                  setTablePickerOpen(false);
+                  setTableMenuOpen(false);
                   setSizeOpen(v => !v);
                 }}
                 style={{ minWidth: 44, gap: 2, fontSize: 11, fontWeight: 700 }}
@@ -715,10 +802,64 @@ export function NotebookTiptapCandidateSelectionToolbar({
             <NotebookTiptapCandidateBlockPicker
               open={blockOpen}
               label={fmt.block?.label ?? 'Block'}
-              onToggle={() => { setSizeOpen(false); setBlockOpen(value => !value); }}
+              onToggle={() => {
+                setSizeOpen(false);
+                setLinkOpen(false);
+                setTablePickerOpen(false);
+                setTableMenuOpen(false);
+                setBlockOpen(value => !value);
+              }}
               onClose={() => setBlockOpen(false)}
               onSelect={runBlock}
             />
+
+            <div className="nb-toolbar-divider" />
+
+            <div style={{ position: 'relative' }} data-nb-candidate-table-insert="1">
+              <FormatBtn
+                title="Insert table"
+                testId="tableInsert"
+                active={tablePickerOpen}
+                onAction={() => {
+                  setSizeOpen(false);
+                  setBlockOpen(false);
+                  setLinkOpen(false);
+                  setTableMenuOpen(false);
+                  setTablePickerOpen(v => !v);
+                }}
+                style={{ minWidth: 58, gap: 3, fontSize: 11, fontWeight: 700 }}
+              >
+                <Plus size={13} strokeWidth={2.6} aria-hidden />
+                Table
+              </FormatBtn>
+              <NotebookTiptapCandidateTableSizePicker
+                open={tablePickerOpen}
+                borderColor={borderColor}
+                onClose={() => setTablePickerOpen(false)}
+                onPick={runTableInsert}
+              />
+            </div>
+
+            {fmt.table?.inTable ? (
+              <>
+                <div className="nb-toolbar-divider" />
+                <NotebookTiptapCandidateTableMenu
+                  open={tableMenuOpen}
+                  state={fmt.table}
+                  borderColor={borderColor}
+                  onToggle={() => {
+                    setSizeOpen(false);
+                    setBlockOpen(false);
+                    setLinkOpen(false);
+                    setTablePickerOpen(false);
+                    tableTargetPosRef.current = editor.state.selection.from;
+                    setTableMenuOpen(v => !v);
+                  }}
+                  onClose={() => setTableMenuOpen(false)}
+                  onAction={runTableAction}
+                />
+              </>
+            ) : null}
 
             <div className="nb-toolbar-divider" />
 
