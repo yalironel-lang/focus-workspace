@@ -2,6 +2,7 @@
  * Closed TipTap schema for ZIKUK Notebook dialect (Milestone 0 + RTL Phase A attrs).
  * Only constructs representable in the persisted Notebook format for *content*.
  * `dir` is TipTap in-memory metadata (not in dialect body) — serializers ignore it.
+ * Tables (M6.4A): nested nbTable structure; canonical persist is still one ~nb1 table block.
  */
 
 import { Node, Mark, mergeAttributes } from '@tiptap/core';
@@ -20,6 +21,7 @@ import { notebookDirAttribute } from './direction';
 import { plainMathToLatex } from '../mathInputAssistant';
 import { renderKatexHtml } from '../notebookMath';
 import { sanitizeUrl } from './urlSanitizer';
+import { createNotebookTableExtensions } from './tableExtensions';
 
 const inlineContent = 'inline*';
 
@@ -540,7 +542,8 @@ export const NbInlineMath = Node.create({
 
 /**
  * Closed extension set for a future TipTap Notebook editor.
- * No hardBreak, link, table, codeBlock, or deep lists.
+ * No hardBreak, codeBlock, or deep lists.
+ * Tables use Notebook-named TipTap table nodes (M6.4A).
  * hardBreak is omitted from the schema; serializers also fail-close if present in JSON.
  */
 export function createNotebookTiptapExtensions() {
@@ -560,6 +563,7 @@ export function createNotebookTiptapExtensions() {
     NbDivider,
     NbImageRef,
     NbHandwriting,
+    ...createNotebookTableExtensions(),
     NbInlineMath,
     Bold,
     Italic,
@@ -575,7 +579,7 @@ export function createNotebookTiptapExtensions() {
   ];
 }
 
-/** Node type names allowed in TipTap JSON for this dialect. */
+/** Node type names allowed as top-level TipTap JSON blocks for this dialect. */
 export const ALLOWED_BLOCK_TYPES = new Set([
   'nbParagraph',
   'nbTitle',
@@ -590,6 +594,7 @@ export const ALLOWED_BLOCK_TYPES = new Set([
   'nbDivider',
   'nbImageRef',
   'nbHandwriting',
+  'nbTable',
 ]);
 
 export const ALLOWED_MARK_TYPES = new Set([

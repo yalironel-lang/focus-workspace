@@ -65,6 +65,23 @@ export function blockToTiptapNode(block: NotebookDialectBlock): JSONContent {
       };
     case 'handwriting':
       return { type: 'nbHandwriting', attrs: { key: block.key } };
+    case 'table': {
+      return {
+        type: 'nbTable',
+        content: block.rows.map(row => ({
+          type: 'nbTableRow',
+          content: row.map(cell => ({
+            type: 'nbTableCell',
+            content: [
+              {
+                type: 'nbParagraph',
+                content: inlineContent({ text: cell.t, marks: cell.m }),
+              },
+            ],
+          })),
+        })),
+      };
+    }
   }
 }
 

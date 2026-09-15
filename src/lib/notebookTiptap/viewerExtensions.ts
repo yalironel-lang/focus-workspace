@@ -29,6 +29,7 @@ import {
   NbInlineMath,
   LinkMark,
 } from './extensions';
+import { createNotebookTableExtensions } from './tableExtensions';
 import {
   NbBulletView,
   NbCalloutView,
@@ -122,6 +123,7 @@ export function createNotebookTiptapViewerExtensions(options: NotebookTiptapView
         return ReactNodeViewRenderer(hwView);
       },
     }),
+    ...createNotebookTableExtensions(),
     NbInlineMath.extend({
       addNodeView() {
         return ReactNodeViewRenderer(NbInlineMathView);

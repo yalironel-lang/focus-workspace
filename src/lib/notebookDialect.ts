@@ -7,6 +7,7 @@ import { assertNotebookTextCodec, decodeNotebookTextV1, encodeNotebookTextV1 } f
 
 import type { InlineMark } from './notebookInlineMarks';
 import { attachMarksToText, serializeBlockText } from './notebookBlockRichText';
+import type { TableCellV1 } from './notebookTableCodec';
 
 export type ParagraphVariant = 'muted' | 'fine';
 export type CalloutTone =
@@ -63,6 +64,8 @@ export type NotebookDialectBlock =
   | { id?: string; kind: 'image-ref'; key: string; alt: string; width?: number | null }
   | { id?: string; kind: 'handwriting'; key: string }
   | { id?: string; kind: 'divider' }
+  /** In-memory table block = validated TablePayloadV1 rows only (`v` lives on the wire). */
+  | { id?: string; kind: 'table'; rows: TableCellV1[][] }
   | ({ id?: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks & BlockAlignment);
 
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
@@ -307,6 +310,8 @@ export function notebookBlockToLine(b: NotebookDialectBlock): string {
       return `::hw::${b.key}::`;
     case 'divider':
       return '---';
+    case 'table':
+      throw new Error('Table blocks require Notebook text codec V1');
     case 'paragraph':
       if (b.variant === 'muted') return `\u00b6 ${blockTextPayload(b)}`;
       if (b.variant === 'fine') return `\u00b6\u00b6 ${blockTextPayload(b)}`;

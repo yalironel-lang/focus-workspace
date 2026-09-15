@@ -33,6 +33,7 @@ import {
   NbInlineMath,
   LinkMark,
 } from './extensions';
+import { createNotebookTableExtensions } from './tableExtensions';
 import {
   SandboxBulletView,
   SandboxCalloutView,
@@ -147,6 +148,7 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
         return ReactNodeViewRenderer(hwView);
       },
     }),
+    ...createNotebookTableExtensions(),
     NbInlineMath,
     Bold,
     Italic,

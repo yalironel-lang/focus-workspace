@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useMemo, useRef } from 'react';
+import type { JSONContent } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { bodyToTiptapDoc } from '../../../lib/notebookTiptap/blocksToTiptapDoc';
 import { createNotebookTiptapViewerExtensions } from '../../../lib/notebookTiptap/viewerExtensions';
@@ -14,12 +15,26 @@ export type NotebookTiptapReadonlyViewerProps = {
   documentBody: string;
   /** Optional codec version for versioned body decoding */
   codecVersion?: number;
-  /** Optional object id for local handwriting cache paint. */
+  /** Optional notebook object id for local handwriting cache paint. */
   objectId?: string;
   className?: string;
   /** Test/debug: called once with whether editor.isEditable === false. */
   onReady?: (info: { editable: false; docChildCount: number }) => void;
 };
+
+function safeBodyToDoc(documentBody: string, codecVersion?: number): {
+  content: JSONContent;
+  error: string | null;
+} {
+  try {
+    return { content: bodyToTiptapDoc(documentBody, codecVersion), error: null };
+  } catch (err) {
+    return {
+      content: { type: 'doc', content: [{ type: 'nbParagraph' }] },
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 export function NotebookTiptapReadonlyViewer({
   documentBody,
@@ -36,15 +51,15 @@ export function NotebookTiptapReadonlyViewer({
     [objectId],
   );
 
-  const initialContent = useMemo(
-    () => bodyToTiptapDoc(documentBody, codecVersion),
+  const loaded = useMemo(
+    () => safeBodyToDoc(documentBody, codecVersion),
     [documentBody, codecVersion],
   );
 
   const editor = useEditor(
     {
       extensions,
-      content: initialContent,
+      content: loaded.content,
       editable: false,
       immediatelyRender: false,
       editorProps: {
@@ -67,10 +82,11 @@ export function NotebookTiptapReadonlyViewer({
   // Sync content when documentBody prop changes without mutating the source string.
   useEffect(() => {
     if (!editor) return;
-    const next = bodyToTiptapDoc(documentBody, codecVersion);
+    const next = safeBodyToDoc(documentBody, codecVersion);
+    if (next.error) return;
     const current = editor.getJSON();
-    if (JSON.stringify(current) !== JSON.stringify(next)) {
-      editor.commands.setContent(next, { emitUpdate: false });
+    if (JSON.stringify(current) !== JSON.stringify(next.content)) {
+      editor.commands.setContent(next.content, { emitUpdate: false });
     }
   }, [editor, documentBody, codecVersion]);
 
@@ -92,13 +108,29 @@ export function NotebookTiptapReadonlyViewer({
     <div
       className={className}
       data-nb-tiptap-viewer="readonly"
+      {...(loaded.error ? { 'data-nb-tiptap-viewer-error': '1' } : {})}
       style={{
         fontFamily: NB_FONT_STACK,
         color: NB_INK.primary,
         padding: '8px 4px',
       }}
     >
-      <EditorContent editor={editor} />
+      {loaded.error ? (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 8,
+            background: 'rgba(248,113,113,0.12)',
+            color: '#b91c1c',
+            fontSize: 13,
+          }}
+        >
+          Fail-closed: cannot render this Notebook body.
+          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{loaded.error}</pre>
+        </div>
+      ) : (
+        <EditorContent editor={editor} />
+      )}
     </div>
   );
 }

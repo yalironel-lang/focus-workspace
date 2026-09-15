@@ -1,12 +1,25 @@
 /** Versioned canonical text records. Never infer the codec from body contents. */
 import type { NotebookDialectBlock } from './notebookDialect';
 import type { InlineMark } from './notebookInlineMarks';
+import { canonicalizeTablePayloadV1, validateTablePayloadV1 } from './notebookTableCodec';
 import { isCanonicalUrl } from './urlSanitizer';
 
 export const NOTEBOOK_TEXT_CODEC_V1 = 1;
 const PREFIX = '~nb1:';
 const tones = new Set(['summary', 'concept', 'review', 'definition', 'theorem', 'example', 'mistake']);
-const kinds = new Set(['paragraph', 'title', 'section', 'bullet', 'ordered', 'task', 'quote', 'step', 'callout', 'math']);
+const kinds = new Set([
+  'paragraph',
+  'title',
+  'section',
+  'bullet',
+  'ordered',
+  'task',
+  'quote',
+  'step',
+  'callout',
+  'math',
+  'table',
+]);
 const markTypes = new Set(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl', 'm', 'a']);
 function invalid(): never { throw new Error('Invalid versioned Notebook text record'); }
 export function assertNotebookTextCodec(version?: number): void {
@@ -47,6 +60,16 @@ export function encodeNotebookTextV1(blocks: readonly NotebookDialectBlock[]): s
         if (!Number.isInteger(block.width) || block.width < 50 || block.width > 3000) return invalid();
         line = `::img::${k}::${a}::${block.width}::`;
       }
+      decodeNotebookTextV1(line);
+      return line;
+    }
+    if (block.kind === 'table') {
+      // In-memory `{ kind:'table', rows }` is the V1 rows carrier only.
+      // Emitting `v:1` is safe solely because decode rejected any other payload version.
+      // Future TablePayloadV2 must not reuse this path without version-aware handling.
+      const payload = canonicalizeTablePayloadV1({ v: 1, rows: block.rows });
+      const row: unknown[] = ['table', '', [], payload];
+      const line = PREFIX + JSON.stringify(row);
       decodeNotebookTextV1(line);
       return line;
     }
@@ -94,6 +117,16 @@ export function decodeNotebookTextV1(body: string): NotebookDialectBlock[] {
     if (!Array.isArray(row) || (row.length !== 4 && row.length !== 5)) return invalid();
     const [kind, text, rawMarks, detail, rawAlign] = row;
     if (!kinds.has(kind) || typeof text !== 'string') return invalid();
+    if (kind === 'table') {
+      // Tables never use the M6.3 fifth alignment tuple element.
+      if (row.length !== 4) return invalid();
+      if (text !== '') return invalid();
+      const tableMarks = marks(rawMarks, 0);
+      if (tableMarks.length !== 0) return invalid();
+      // `v` is validated then intentionally dropped: in-memory table block = V1 rows only.
+      const payload = validateTablePayloadV1(detail);
+      return { id, kind: 'table', rows: payload.rows };
+    }
     if (row.length === 5) {
       if (rawAlign !== 'left' && rawAlign !== 'center' && rawAlign !== 'right') return invalid();
       if (kind !== 'paragraph' && kind !== 'title' && kind !== 'section' && kind !== 'quote') return invalid();

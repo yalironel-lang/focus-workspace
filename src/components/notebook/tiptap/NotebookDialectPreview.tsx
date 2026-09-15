@@ -209,6 +209,39 @@ function renderBlock(block: NotebookDialectBlock, objectId?: string) {
           <NotebookHandwritingReadonlyView objectId={objectId} blockKey={block.key} />
         </div>
       );
+    case 'table':
+      return (
+        <table
+          data-nb-preview-table="1"
+          style={{
+            borderCollapse: 'collapse',
+            width: '100%',
+            margin: '10px 0',
+            fontFamily: NB_FONT_STACK,
+            fontSize: NB_TYPE_SCALE.l3,
+            color: NB_INK.primary,
+          }}
+        >
+          <tbody>
+            {block.rows.map((row, ri) => (
+              <tr key={`r-${ri}`}>
+                {row.map((cell, ci) => (
+                  <td
+                    key={`c-${ri}-${ci}`}
+                    style={{
+                      border: '1px solid rgba(148,163,184,0.45)',
+                      padding: '6px 8px',
+                      verticalAlign: 'top',
+                    }}
+                  >
+                    <LineBody text={cell.t} marks={cell.m} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
   }
 }
 
@@ -223,16 +256,39 @@ export function NotebookDialectPreview({
   objectId?: string;
   className?: string;
 }) {
-  const blocks = parseNotebookBody(documentBody, codecVersion);
+  let blocks: NotebookDialectBlock[] = [];
+  let loadError: string | null = null;
+  try {
+    blocks = parseNotebookBody(documentBody, codecVersion);
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : String(err);
+  }
+
   return (
     <div
       className={className}
       data-nb-dialect-preview="1"
+      {...(loadError ? { 'data-nb-dialect-preview-error': '1' } : {})}
       style={{ fontFamily: NB_FONT_STACK, color: NB_INK.primary, padding: '8px 4px' }}
     >
-      {blocks.map((b, i) => (
-        <div key={`${b.kind}-${i}`}>{renderBlock(b, objectId)}</div>
-      ))}
+      {loadError ? (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 8,
+            background: 'rgba(248,113,113,0.12)',
+            color: '#b91c1c',
+            fontSize: 13,
+          }}
+        >
+          Fail-closed: cannot preview this Notebook body.
+          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{loadError}</pre>
+        </div>
+      ) : (
+        blocks.map((b, i) => (
+          <div key={`${b.kind}-${i}`}>{renderBlock(b, objectId)}</div>
+        ))
+      )}
     </div>
   );
 }

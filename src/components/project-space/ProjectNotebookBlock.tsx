@@ -369,7 +369,18 @@ type Block =
   | ({ id: string; kind: 'image-ref'; key: string; alt: string; width?: number | null })
   | ({ id: string; kind: 'handwriting'; key: string })
   | ({ id: string; kind: 'divider' })
+  | ({ id: string; kind: 'table'; rows: import('../../lib/notebookTableCodec').TableCellV1[][] })
   | ({ id: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
+
+type TextualBlock = Extract<Block, { text: string }>;
+
+function isNonTextBlock(b: Block): b is Exclude<Block, TextualBlock> {
+  return b.kind === 'divider' || b.kind === 'image-ref' || b.kind === 'handwriting' || b.kind === 'table';
+}
+
+function isTextualBlock(b: Block): b is TextualBlock {
+  return !isNonTextBlock(b);
+}
 
 let blockIdSeq = 0;
 /** Stable list keys even if block ids collide after parse/reuse. */
@@ -449,7 +460,7 @@ function normalizeOrderedSequences(blocks: Block[]): Block[] {
 }
 
 function withLineMarks(b: Block): Block {
-  if (b.kind === 'divider' || b.kind === 'image-ref' || b.kind === 'handwriting') return b;
+  if (isNonTextBlock(b)) return b;
   return attachMarksToText(b) as Block;
 }
 
@@ -556,7 +567,7 @@ function parseBodyToBlocksForCodec(body: string, prev?: Block[], codecVersion?: 
 }
 
 function clampCaretOffset(block: Block, offset: number): number {
-  if (block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') return 0;
+  if (isNonTextBlock(block)) return 0;
   return Math.max(0, Math.min(offset, block.text.length));
 }
 
@@ -686,18 +697,18 @@ function applyVisualEditToStructuredBlock(block: EditableBlock, rawSingleLine: s
 }
 
 function blockTextLen(b: Block): number {
-  if (b.kind === 'divider' || b.kind === 'image-ref' || b.kind === 'handwriting') return 0;
+  if (isNonTextBlock(b)) return 0;
   return b.text.length;
 }
 
 const SOFT_BREAK = '\u2028';
 
 function mergeBlocks(prev: Block, next: Block): Block {
-  if (prev.kind === 'divider' || prev.kind === 'image-ref' || prev.kind === 'handwriting') return next;
+  if (isNonTextBlock(prev)) return next;
   const nextText =
-    next.kind === 'divider' || next.kind === 'image-ref' || next.kind === 'handwriting' ? '' : next.text;
+    isNonTextBlock(next) ? '' : next.text;
   const nextMarks =
-    next.kind === 'divider' || next.kind === 'image-ref' || next.kind === 'handwriting' ? undefined : next.marks;
+    isNonTextBlock(next) ? undefined : next.marks;
   const merged = mergeBlockMarks(prev.text, prev.marks, nextText, nextMarks);
   switch (prev.kind) {
     case 'title':
@@ -729,8 +740,6 @@ function mergeBlocks(prev: Block, next: Block): Block {
       };
   }
 }
-
-/** Typography scale rail + Alt+↑↓ — maps to block kinds / paragraph variants. */
 function getBlockLevel(b: Block): 1 | 2 | 3 | 4 | 5 | null {
   if (b.kind === 'title') return 1;
   if (b.kind === 'section') return 2;
@@ -2296,11 +2305,11 @@ export function ProjectNotebookBlock({
   }, [isDeskPresentation, onDeskFocusedLine, activeNotebookBlock]);
 
   const activeRecallPrompt = useMemo(() => {
-    const focused = activeNotebookBlock && activeNotebookBlock.kind !== 'divider' && activeNotebookBlock.kind !== 'image-ref' && activeNotebookBlock.kind !== 'handwriting'
+    const focused = activeNotebookBlock && isTextualBlock(activeNotebookBlock)
       ? activeNotebookBlock
       : null;
     const fallback = blocks[focusIndexRef.current];
-    const source = focused ?? (fallback && fallback.kind !== 'divider' && fallback.kind !== 'image-ref' && fallback.kind !== 'handwriting' ? fallback : null);
+    const source = focused ?? (fallback && isTextualBlock(fallback) ? fallback : null);
     if (!source) return '';
     return normalizeRecallPromptText(source.text);
   }, [activeNotebookBlock, blocks]);
@@ -2543,7 +2552,7 @@ export function ProjectNotebookBlock({
       const i = prev.findIndex((b) => b.id === blockId);
       if (i === -1) return;
       const cur = prev[i]!;
-      if (cur.kind === 'divider' || cur.kind === 'image-ref' || cur.kind === 'handwriting') return;
+      if (isNonTextBlock(cur)) return;
       const text = cur.text;
       let nb: Block;
       if (level === 1) nb = { id: blockId, kind: 'title', text };
@@ -2868,7 +2877,7 @@ export function ProjectNotebookBlock({
 
   const handlePreviewActivate = useCallback((lineIndex: number) => {
     const block = blocksRef.current[lineIndex];
-    if (!block || block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') return;
+    if (!block || isNonTextBlock(block)) return;
     pendingCaretRef.current = {
       id: block.id,
       offset: 0,
@@ -2893,7 +2902,7 @@ export function ProjectNotebookBlock({
 
   const previewLineActivateProps = useCallback(
     (lineIndex: number, kind: string): { 'data-nb-preview-line'?: number } => {
-      if (kind === 'blank' || kind === 'divider' || kind === 'image-ref' || kind === 'handwriting') return {};
+      if (kind === 'blank' || kind === 'divider' || kind === 'image-ref' || kind === 'handwriting' || kind === 'table') return {};
       return { 'data-nb-preview-line': lineIndex };
     },
     [],
@@ -3373,7 +3382,7 @@ export function ProjectNotebookBlock({
     (snapshot: StoredNotebookSelection) => {
       const blk = blocksRef.current.find(b => b.id === snapshot.blockId);
       const blkMarks =
-        blk && blk.kind !== 'divider' && blk.kind !== 'image-ref' && blk.kind !== 'handwriting'
+        blk && isTextualBlock(blk)
           ? (blk.marks ?? [])
           : [];
       const marks = blkMarks.length > 0 ? blkMarks : snapshot.marks;
@@ -3498,7 +3507,7 @@ export function ProjectNotebookBlock({
         return;
       }
       const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') {
+      if (!blk || isNonTextBlock(blk)) {
         dismissSelectionToolbar();
         return;
       }
@@ -3639,11 +3648,11 @@ export function ProjectNotebookBlock({
         if (entry.session) {
           const blk = nextBlocks.find(b => b.id === entry.session!.blockId);
           const plain =
-            blk && blk.kind !== 'divider' && blk.kind !== 'image-ref' && blk.kind !== 'handwriting'
+            blk && isTextualBlock(blk)
               ? blk.text
               : entry.session.plain;
           const marks =
-            blk && blk.kind !== 'divider' && blk.kind !== 'image-ref' && blk.kind !== 'handwriting'
+            blk && isTextualBlock(blk)
               ? (blk.marks ?? [])
               : entry.session.marks;
           const session: StoredNotebookSelection = {
@@ -3739,7 +3748,7 @@ export function ProjectNotebookBlock({
           const i = prev.findIndex(b => b.id === blockId);
           if (i === -1) return prev;
           const block = prev[i]!;
-          if (block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') {
+          if (isNonTextBlock(block)) {
             return prev;
           }
           const plainText = snapshot?.blockId === blockId ? snapshot.plain : block.text;
@@ -3777,7 +3786,7 @@ export function ProjectNotebookBlock({
       pushContent(nextContent);
       if (snapshot?.blockId === blockId) {
         const nextMarks =
-          nextBlock.kind !== 'divider' && nextBlock.kind !== 'image-ref' && nextBlock.kind !== 'handwriting'
+          isTextualBlock(nextBlock)
             ? (nextBlock.marks ?? [])
             : [];
         selectionSnapshotRef.current = {
@@ -3838,12 +3847,22 @@ export function ProjectNotebookBlock({
     [slashMenu, isMathNotebook],
   );
 
-  const previewLines = useMemo(() => {
+  const previewState = useMemo(() => {
     const body = content.body ?? '';
-    return content.bodyCodecVersion === undefined
-      ? body.split(/\r?\n/).map(parseNotebookLine)
-      : parseCanonicalNotebookBody(body, content.bodyCodecVersion);
+    try {
+      const lines =
+        content.bodyCodecVersion === undefined
+          ? body.split(/\r?\n/).map(parseNotebookLine)
+          : parseCanonicalNotebookBody(body, content.bodyCodecVersion);
+      return { lines, error: null as string | null };
+    } catch (err) {
+      return {
+        lines: [] as ReturnType<typeof parseCanonicalNotebookBody>,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }, [content.body, content.bodyCodecVersion]);
+  const previewLines = previewState.lines;
 
   const fontStack = "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif";
   const typeScale = useMemo(() => {
@@ -4033,7 +4052,7 @@ export function ProjectNotebookBlock({
       const i = prev.findIndex((b) => b.id === id);
       if (i === -1) return;
       const block = prev[i]!;
-      if (block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') return;
+      if (isNonTextBlock(block)) return;
 
       if (isDeskPresentation && (block.kind === 'paragraph' || block.kind === 'step')) {
         setDeskChecks(prev => {
@@ -4068,7 +4087,7 @@ export function ProjectNotebookBlock({
               : {}),
           });
           const last = transformed[transformed.length - 1]!;
-          if (caretBefore !== null && last.kind !== 'divider' && last.kind !== 'image-ref' && last.kind !== 'handwriting') {
+          if (caretBefore !== null && isTextualBlock(last)) {
             scheduleCaret(last, caretBefore);
           }
           const firstMorphed = transformed.find(b => b.kind !== 'divider' && b.kind !== 'paragraph');
@@ -4101,7 +4120,7 @@ export function ProjectNotebookBlock({
             ? { bodyCodecVersion: contentRef.current.bodyCodecVersion }
             : {}),
         });
-        if (caretBefore !== null && withMarks.kind !== 'divider' && withMarks.kind !== 'image-ref' && withMarks.kind !== 'handwriting') {
+        if (caretBefore !== null && isTextualBlock(withMarks)) {
           scheduleCaret(withMarks, caretBefore);
         }
         if (withMarks.kind !== 'paragraph') setMorphPulseId(withMarks.id);
@@ -4184,7 +4203,7 @@ export function ProjectNotebookBlock({
               const i = next.findIndex(b => b.id === id);
               if (i === -1) continue;
               const block = next[i]!;
-              if (block.kind === 'divider' || block.kind === 'image-ref' || block.kind === 'handwriting') {
+              if (isNonTextBlock(block)) {
                 continue;
               }
               const start = 0;
@@ -4399,7 +4418,7 @@ export function ProjectNotebookBlock({
       }
       const root = getEditorRoot();
       const blk = blocksRef.current.find(b => b.id === payload.blockId);
-      if (!root || !blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') {
+      if (!root || !blk || isNonTextBlock(blk)) {
         return;
       }
       const el = findRichEditable(root, payload.blockId);
@@ -4537,7 +4556,7 @@ export function ProjectNotebookBlock({
       }
       const focusIdx = Math.max(0, index - 1);
       const focusBlock = filled[focusIdx];
-      if (focusBlock && focusBlock.kind !== 'divider' && focusBlock.kind !== 'image-ref' && focusBlock.kind !== 'handwriting') {
+      if (focusBlock && isTextualBlock(focusBlock)) {
         pendingCaretRef.current = {
           id: focusBlock.id,
           offset: focusBlock.text.length,
@@ -4555,7 +4574,7 @@ export function ProjectNotebookBlock({
       });
       return;
     }
-    if (block.kind === 'image-ref' || block.kind === 'handwriting') return;
+    if (isNonTextBlock(block)) return;
     const o = clampCaretOffset(block, offset);
     userControlledScrollRef.current = false;
     pendingCaretRef.current = { id: block.id, offset: o, scroll: 'ifNeeded' };
@@ -4568,7 +4587,7 @@ export function ProjectNotebookBlock({
   const scheduleMathLineFocus = useCallback(
     (blockId: string, offset: number) => {
       const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') return;
+      if (!blk || isNonTextBlock(blk)) return;
       setSurfaceFocusBlockId(blockId);
       const o = clampCaretOffset(blk, offset);
       pendingCaretRef.current = { id: blockId, offset: o, scroll: 'never' };
@@ -4592,7 +4611,7 @@ export function ProjectNotebookBlock({
       const blockId = blockIdOverride ?? surfaceFocusBlockId ?? lastFocusedMathBlockIdRef.current;
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') return;
+      if (!blk || isNonTextBlock(blk)) return;
       if (blk.kind === 'math') {
         const latex = plainMathToLatex(snippet);
         updateBlockText(blockId, latex);
@@ -4617,7 +4636,7 @@ export function ProjectNotebookBlock({
       const blockId = blockIdOverride ?? surfaceFocusBlockId ?? lastFocusedMathBlockIdRef.current;
       if (!blockId) return;
       const blk = blocksRef.current.find(b => b.id === blockId);
-      if (!blk || blk.kind === 'divider' || blk.kind === 'image-ref' || blk.kind === 'handwriting') return;
+      if (!blk || isNonTextBlock(blk)) return;
       if (blk.kind === 'math') {
         const latex = template.buildLatex(values);
         updateBlockText(blockId, latex);
@@ -4929,7 +4948,7 @@ export function ProjectNotebookBlock({
                 e.preventDefault();
                 const tb = blocks[ti]!;
                 const off =
-                  tb.kind === 'divider' || tb.kind === 'image-ref' || tb.kind === 'handwriting'
+                  isNonTextBlock(tb)
                     ? 0
                     : e.key === 'ArrowUp'
                       ? tb.text.length
@@ -4947,7 +4966,7 @@ export function ProjectNotebookBlock({
       const index = blocks.findIndex((b) => b.id === id);
       if (index === -1) return;
       const block = blocks[index]!;
-      if (block.kind === 'image-ref' || block.kind === 'handwriting') return;
+      if (isNonTextBlock(block)) return;
 
       if (
         editable.getAttribute('data-rich-editable') === '1' &&
@@ -4960,7 +4979,7 @@ export function ProjectNotebookBlock({
           k === 'b' ? 'b' : k === 'i' ? 'i' : k === 'u' ? 'u' : null;
         if (markKey) {
           const offsets = getSelectionOffsetsIn(editable);
-          if (offsets && !offsets.collapsed && block.kind !== 'divider') {
+          if (offsets && !offsets.collapsed) {
             e.preventDefault();
             const plainText = block.text;
             const blockMarks = block.marks ?? [];
@@ -4984,7 +5003,6 @@ export function ProjectNotebookBlock({
       }
 
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
-        if (block.kind === 'divider') return;
         const prompt = normalizeRecallPromptText(block.text);
         if (!prompt || !onCreateRecallItem) return;
         e.preventDefault();
@@ -5030,7 +5048,7 @@ export function ProjectNotebookBlock({
           e.preventDefault();
           const pb = blocks[pi]!;
           const col =
-            pb.kind === 'divider' || pb.kind === 'image-ref' || pb.kind === 'handwriting'
+            isNonTextBlock(pb)
               ? 0
               : Math.min(offset, pb.text.length);
           focusEditableBlock(root, pb, col);
@@ -5042,7 +5060,7 @@ export function ProjectNotebookBlock({
         e.preventDefault();
         const nb = blocks[ni]!;
         const col =
-          nb.kind === 'divider' || nb.kind === 'image-ref' || nb.kind === 'handwriting'
+          isNonTextBlock(nb)
             ? 0
             : Math.min(offset, nb.text.length);
         focusEditableBlock(root, nb, col);
@@ -5050,7 +5068,6 @@ export function ProjectNotebookBlock({
       }
 
       if (e.key === 'Enter' && e.shiftKey) {
-        if (block.kind === 'divider') return;
         e.preventDefault();
         const offset = getCaretOffsetIn(editable);
         const text = editable.textContent ?? '';
@@ -5111,14 +5128,6 @@ export function ProjectNotebookBlock({
         }
 
         e.preventDefault();
-
-        if (block.kind === 'divider') {
-          const fresh: Block = { id: newBlockId(), kind: 'paragraph', text: '' };
-          const next = [...blocks.slice(0, index + 1), fresh, ...blocks.slice(index + 1)];
-          persist(next);
-          pendingCaretRef.current = { id: fresh.id, offset: 0, scroll: 'force' };
-          return;
-        }
 
         if (
           block.kind === 'title' ||
@@ -5195,7 +5204,7 @@ export function ProjectNotebookBlock({
 
       // ── Arrow text transforms on Space ──────────────────────────────────────
       // ->→  =>→  <=>↔  <=←  <-←
-      if (e.key === ' ' && block.kind !== 'divider') {
+      if (e.key === ' ' && isTextualBlock(block)) {
         const offset = getCaretOffsetIn(editable);
         const text   = editable.textContent ?? '';
         const before = text.slice(0, offset);
@@ -5275,7 +5284,7 @@ export function ProjectNotebookBlock({
           pendingCaretRef.current = {
             id: merged.id,
             offset:
-              prev.kind === 'image-ref' || prev.kind === 'handwriting' ? 0 : prev.text.length,
+              isNonTextBlock(prev) ? 0 : prev.text.length,
             scroll: 'ifNeeded',
           };
         }
@@ -5471,6 +5480,41 @@ export function ProjectNotebookBlock({
           />
         );
       }
+      if (block.kind === 'table') {
+        return (
+          <table
+            key={listKey}
+            data-nb-edit-table="1"
+            style={{
+              borderCollapse: 'collapse',
+              width: '100%',
+              margin: '10px 0',
+              fontSize: `${typeScale.l3}px`,
+              color: ink.primary,
+            }}
+          >
+            <tbody>
+              {block.rows.map((row, ri) => (
+                <tr key={`${block.id}-r-${ri}`}>
+                  {row.map((cell, ci) => (
+                    <td
+                      key={`${block.id}-c-${ri}-${ci}`}
+                      style={{
+                        border: '1px solid rgba(148,163,184,0.45)',
+                        padding: '6px 8px',
+                        verticalAlign: 'top',
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {renderPlainWithMarks(cell.t, cell.m ?? [])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
       // Step block — continuous derivation flow (no card, no counter, faint left rail)
       if (block.kind === 'step') {
         let stepIndex = 1;
@@ -5558,6 +5602,7 @@ export function ProjectNotebookBlock({
       }
 
       // Default: paragraph (non-math) and other block kinds (quote, bullet, etc.)
+      if (!isTextualBlock(block)) return null;
       return (
         <NotebookLineEditor
           key={listKey}
@@ -7254,6 +7299,46 @@ export function ProjectNotebookBlock({
               );
             }
 
+            if (block.kind === 'table') {
+              return row(
+                <table
+                  key={listKey}
+                  data-nb-edit-table="1"
+                  style={{
+                    borderCollapse: 'collapse',
+                    width: '100%',
+                    margin: `${typeScale.s4}px 0`,
+                    fontSize: `${typeScale.l3}px`,
+                    color: ink.primary,
+                  }}
+                >
+                  <tbody>
+                    {block.rows.map((rowCells, ri) => (
+                      <tr key={`${block.id}-r-${ri}`}>
+                        {rowCells.map((cell, ci) => (
+                          <td
+                            key={`${block.id}-c-${ri}-${ci}`}
+                            style={{
+                              border: '1px solid rgba(148,163,184,0.45)',
+                              padding: '6px 8px',
+                              verticalAlign: 'top',
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {renderPlainWithMarks(cell.t, cell.m ?? [])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>,
+              );
+            }
+
+            if (block.kind !== 'paragraph') {
+              return row(null);
+            }
+
             const paraMuted = block.variant === 'muted';
             const paraFine = block.variant === 'fine';
             const paraTop =
@@ -7408,6 +7493,21 @@ export function ProjectNotebookBlock({
           ) : null}
           {(content.body ?? '').trim() === ''
             ? null
+            : previewState.error ? (
+              <div
+                data-nb-preview-load-error="1"
+                style={{
+                  padding: 12,
+                  borderRadius: 8,
+                  background: 'rgba(248,113,113,0.12)',
+                  color: '#b91c1c',
+                  fontSize: 13,
+                }}
+              >
+                Fail-closed: cannot preview this Notebook body.
+                <pre style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{previewState.error}</pre>
+              </div>
+            )
             : previewLines.map((line, index) => {
             const lineKey =
               line.kind === 'blank'
@@ -7418,7 +7518,9 @@ export function ProjectNotebookBlock({
                     ? `image-ref-${index}-${line.key}`
                     : line.kind === 'handwriting'
                       ? `handwriting-${index}-${line.key}`
-                      : `${line.kind}-${index}-${line.text.slice(0, 24)}`;
+                      : line.kind === 'table'
+                        ? `table-${index}-${line.rows.length}x${line.rows[0]?.length ?? 0}`
+                        : `${line.kind}-${index}-${'text' in line ? line.text.slice(0, 24) : ''}`;
             const versioned = content.bodyCodecVersion !== undefined;
             const previewMarks: InlineMark[] = 'marks' in line ? (line as NotebookDialectBlock & { marks?: InlineMark[] }).marks ?? [] : [];
             const previewInlineContent = (text: string) => versioned
@@ -7860,6 +7962,43 @@ export function ProjectNotebookBlock({
                   tokens={tokens}
                   readOnly
                 />
+              );
+            }
+            if (line.kind === 'table') {
+              return (
+                <table
+                  key={lineKey}
+                  data-nb-preview-table="1"
+                  style={{
+                    borderCollapse: 'collapse',
+                    width: '100%',
+                    margin: `${typeScale.s4}px 0`,
+                    fontSize: `${typeScale.l3}px`,
+                    color: ink.primary,
+                  }}
+                >
+                  <tbody>
+                    {line.rows.map((row, ri) => (
+                      <tr key={`${lineKey}-r-${ri}`}>
+                        {row.map((cell, ci) => (
+                          <td
+                            key={`${lineKey}-c-${ri}-${ci}`}
+                            style={{
+                              border: '1px solid rgba(148,163,184,0.45)',
+                              padding: '6px 8px',
+                              verticalAlign: 'top',
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {versioned
+                              ? renderPlainWithMarks(cell.t, cell.m ?? [])
+                              : cell.t}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               );
             }
             if (line.kind === 'paragraph') {

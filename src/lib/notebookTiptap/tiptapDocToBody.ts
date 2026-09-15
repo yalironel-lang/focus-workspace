@@ -13,6 +13,8 @@ import {
   type ParagraphVariant,
   type TextAlignment,
 } from '../notebookDialect';
+import type { TableCellV1 } from '../notebookTableCodec';
+import { MAX_TABLE_COLS, MAX_TABLE_ROWS, validateTablePayloadV1 } from '../notebookTableCodec';
 import { NotebookTiptapConversionError } from './errors';
 import { ALLOWED_BLOCK_TYPES } from './extensions';
 import { tiptapInlineToRichLine } from './inlineBridge';
@@ -53,6 +55,156 @@ function richFromContent(node: JSONContent): { text: string; marks?: InlineMark[
   return marks.length ? { text: plain, marks } : { text: plain };
 }
 
+/**
+ * M6.4A TablePayloadV1 supports only a simple rectangular grid of normal cells.
+ * Structural attrs beyond schema defaults, and header cells, MUST fail closed —
+ * never flatten into ordinary `{ t, m? }` cells.
+ */
+function assertSupportedTableCellAttrs(attrs: Record<string, unknown> | undefined): void {
+  const colspan = attrs?.colspan === undefined ? 1 : attrs.colspan;
+  const rowspan = attrs?.rowspan === undefined ? 1 : attrs.rowspan;
+  const colwidth = attrs?.colwidth === undefined ? null : attrs.colwidth;
+  const align = attrs?.align === undefined ? null : attrs.align;
+
+  if (colspan !== 1) {
+    throw new NotebookTiptapConversionError(
+      'unsupported_attr',
+      `Table cell colspan ${String(colspan)} is not supported by TablePayloadV1`,
+      String(colspan),
+    );
+  }
+  if (rowspan !== 1) {
+    throw new NotebookTiptapConversionError(
+      'unsupported_attr',
+      `Table cell rowspan ${String(rowspan)} is not supported by TablePayloadV1`,
+      String(rowspan),
+    );
+  }
+  if (colwidth != null) {
+    throw new NotebookTiptapConversionError(
+      'unsupported_attr',
+      'Table cell colwidth is not supported by TablePayloadV1',
+      JSON.stringify(colwidth),
+    );
+  }
+  if (align != null) {
+    throw new NotebookTiptapConversionError(
+      'unsupported_attr',
+      `Table cell align "${String(align)}" is not supported by TablePayloadV1`,
+      String(align),
+    );
+  }
+}
+
+function tipTapTableToBlock(node: JSONContent): NotebookDialectBlock {
+  const rowsJson = node.content ?? [];
+  if (rowsJson.length < 1 || rowsJson.length > MAX_TABLE_ROWS) {
+    throw new NotebookTiptapConversionError(
+      'malformed_input',
+      `Table must have 1–${MAX_TABLE_ROWS} rows`,
+      String(rowsJson.length),
+    );
+  }
+
+  const rows: TableCellV1[][] = [];
+  let colCount: number | null = null;
+
+  for (const rowNode of rowsJson) {
+    if (!rowNode || rowNode.type !== 'nbTableRow') {
+      throw new NotebookTiptapConversionError(
+        'unsupported_node',
+        `Unsupported table child "${rowNode?.type ?? 'unknown'}"`,
+        rowNode?.type,
+      );
+    }
+    const cellNodes = rowNode.content ?? [];
+    if (cellNodes.length < 1 || cellNodes.length > MAX_TABLE_COLS) {
+      throw new NotebookTiptapConversionError(
+        'malformed_input',
+        `Table row must have 1–${MAX_TABLE_COLS} cells`,
+        String(cellNodes.length),
+      );
+    }
+    if (colCount === null) colCount = cellNodes.length;
+    else if (cellNodes.length !== colCount) {
+      throw new NotebookTiptapConversionError(
+        'malformed_input',
+        'Table rows must be rectangular',
+        String(cellNodes.length),
+      );
+    }
+
+    const row: TableCellV1[] = [];
+    for (const cellNode of cellNodes) {
+      if (!cellNode || typeof cellNode.type !== 'string') {
+        throw new NotebookTiptapConversionError(
+          'unsupported_node',
+          'Unsupported table cell "unknown"',
+          'unknown',
+        );
+      }
+      // TablePayloadV1 has no header semantics — never flatten headers to ordinary cells.
+      if (cellNode.type === 'nbTableHeader') {
+        throw new NotebookTiptapConversionError(
+          'unsupported_node',
+          'nbTableHeader is not supported by TablePayloadV1 (header semantics cannot be persisted)',
+          'nbTableHeader',
+        );
+      }
+      if (cellNode.type !== 'nbTableCell') {
+        throw new NotebookTiptapConversionError(
+          'unsupported_node',
+          `Unsupported table cell "${cellNode.type}"`,
+          cellNode.type,
+        );
+      }
+      assertSupportedTableCellAttrs(cellNode.attrs as Record<string, unknown> | undefined);
+
+      const paragraphs = cellNode.content ?? [];
+      if (paragraphs.length !== 1 || paragraphs[0]?.type !== 'nbParagraph') {
+        throw new NotebookTiptapConversionError(
+          'malformed_input',
+          'Table cell must contain exactly one nbParagraph',
+          paragraphs[0]?.type ?? 'empty',
+        );
+      }
+      const para = paragraphs[0]!;
+      // Cell paragraph may not carry block-level align in M6.4A canonical payload.
+      if (para.attrs?.align != null && para.attrs.align !== '' && para.attrs.align !== 'start') {
+        throw new NotebookTiptapConversionError(
+          'unsupported_attr',
+          'Alignment is not supported inside table cells',
+          String(para.attrs.align),
+        );
+      }
+      if (para.attrs?.variant != null && para.attrs.variant !== '') {
+        throw new NotebookTiptapConversionError(
+          'unsupported_attr',
+          'Paragraph variants are not supported inside table cells',
+          String(para.attrs.variant),
+        );
+      }
+      const nested = para.content ?? [];
+      if (nested.some(c => c.type && c.type !== 'text' && c.type !== 'nbInlineMath')) {
+        const bad = nested.find(c => c.type && c.type !== 'text' && c.type !== 'nbInlineMath');
+        throw new NotebookTiptapConversionError(
+          'unsupported_node',
+          `Unsupported inline in table cell: "${bad?.type ?? 'unknown'}"`,
+          bad?.type,
+        );
+      }
+      const rich = richFromContent(para);
+      row.push(rich.marks ? { t: rich.text, m: rich.marks } : { t: rich.text });
+    }
+    rows.push(row);
+  }
+
+  // Re-validate as TablePayloadV1. In-memory `{ kind:'table', rows }` represents ONLY v:1.
+  // Encoder may re-emit `v:1` solely because this block shape is the V1 rows carrier.
+  validateTablePayloadV1({ v: 1, rows });
+  return { kind: 'table', rows };
+}
+
 function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
   if (!node || typeof node !== 'object' || typeof node.type !== 'string') {
     throw new NotebookTiptapConversionError(
@@ -73,6 +225,10 @@ function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
       'malformed_input',
       'Unexpected nested doc node',
     );
+  }
+
+  if (node.type === 'nbTable') {
+    return tipTapTableToBlock(node);
   }
 
   if (!ALLOWED_BLOCK_TYPES.has(node.type)) {
