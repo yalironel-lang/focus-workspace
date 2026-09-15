@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'happy-dom',
-    setupFiles: ['fake-indexeddb/auto'],
+    setupFiles: ['fake-indexeddb/auto', 'src/test/localStorageSetup.ts'],
     include: [
       'src/lib/katexVisualExtract/**/*.test.ts',
       'src/lib/persistenceQa.test.ts',
@@ -48,6 +48,7 @@ export default defineConfig({
       'src/lib/spatialAssetCloud.crossDevice.delete.integration.test.ts',
       'src/lib/spatialAssetCloud.crossDevice.pdfDelete.integration.test.ts',
       'src/lib/notebookDeleteCascade.test.ts',
+      'src/lib/knowledge/**/*.test.ts',
       'src/lib/notebookPages.persistence.test.ts',
       'src/lib/notebookPages.crossDevice.integration.test.ts',
       'src/lib/notebookPages.live.test.ts',

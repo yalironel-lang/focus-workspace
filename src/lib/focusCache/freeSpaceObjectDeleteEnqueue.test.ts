@@ -25,7 +25,7 @@ vi.mock('../sync/cloudSyncStatus', () => ({
 import { enqueuePendingOperation, listPendingOperations, removePendingOperation } from './pendingOperations';
 import { notifyFreeSpacePendingEnqueue } from './freeSpacePendingFlushTrigger';
 import { noteCloudOpEnqueued, noteCloudOpResolved } from '../sync/cloudSyncStatus';
-import { enqueueFreeSpaceObjectDelete } from './freeSpaceObjectDeleteEnqueue';
+import { enqueueFreeSpaceObjectDelete, cancelPendingFreeSpaceObjectDeletes } from './freeSpaceObjectDeleteEnqueue';
 
 const listMock = vi.mocked(listPendingOperations);
 const removeMock = vi.mocked(removePendingOperation);
@@ -176,5 +176,31 @@ describe('enqueueFreeSpaceObjectDelete', () => {
     expect(enqueueMock).toHaveBeenCalledWith(
       expect.objectContaining({ entityId: 'obj-1', operationType: 'delete' }),
     );
+  });
+});
+
+describe('cancelPendingFreeSpaceObjectDeletes', () => {
+  it('removes pending DELETE for restored entity and leaves writes', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        op({ id: 'del-1', entityId: 'obj-1', operationType: 'delete' }),
+        op({ id: 'up-1', entityId: 'obj-1', operationType: 'update' }),
+        op({ id: 'del-2', entityId: 'other', operationType: 'delete' }),
+      ],
+    });
+    const result = await cancelPendingFreeSpaceObjectDeletes({
+      userId: USER,
+      sectionId: SECTION,
+      entityIds: ['obj-1'],
+    });
+    expect(result).toEqual({ ok: true, removed: 1 });
+    expect(removeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER, workspaceId: SECTION }),
+      'del-1',
+    );
+    expect(removeMock).not.toHaveBeenCalledWith(expect.anything(), 'up-1');
+    expect(removeMock).not.toHaveBeenCalledWith(expect.anything(), 'del-2');
+    expect(resolvedNote).toHaveBeenCalledWith('del-1');
   });
 });

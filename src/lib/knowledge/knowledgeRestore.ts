@@ -12,6 +12,8 @@ import type {
 import { resolvePageForBodyProjection } from '../notebookPages/hydrate';
 import { replaceNotebookPageBody } from '../notebookPages/bodyCodec';
 import type { NotebookPage } from '../notebookPages/types';
+import { cancelPendingFreeSpaceObjectDeletes } from '../focusCache/freeSpaceObjectDeleteEnqueue';
+import { enqueueFreeSpaceObjectCreate } from '../focusCache/freeSpaceObjectCreateEnqueue';
 
 function loadObjectsSync(sectionId: string, boardId: string): ProjectSpaceObject[] {
   try {
@@ -32,13 +34,29 @@ function loadObjectsSync(sectionId: string, boardId: string): ProjectSpaceObject
   }
 }
 
-function saveObjectsSync(sectionId: string, boardId: string, objects: ProjectSpaceObject[]): void {
+/**
+ * Restore-only durable write. Does not change other Free Space persist callers.
+ * Returns failure on throw OR when the expected object is missing after write.
+ */
+function trySaveObjectsForRestore(
+  sectionId: string,
+  boardId: string,
+  objects: ProjectSpaceObject[],
+  expectedObjectId: string,
+): { ok: true } | { ok: false; reason: string } {
   const keys = boardScopedFreeSpaceKeys(sectionId, boardId);
   try {
     localStorage.setItem(keys.objects, JSON.stringify(objects));
   } catch (e) {
     fwPersistWarn(`Could not save objects during restore: ${String(e)}`);
+    return { ok: false, reason: 'Could not save the restored object. Try again.' };
   }
+  const verified = loadObjectsSync(sectionId, boardId);
+  if (!verified.some(o => o.id === expectedObjectId)) {
+    fwPersistWarn(`Restore verify failed: object "${expectedObjectId}" missing after write`);
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+  return { ok: true };
 }
 
 function loadPositionsSync(sectionId: string, boardId: string): Record<string, BlockPos> {
@@ -54,7 +72,8 @@ function loadPositionsSync(sectionId: string, boardId: string): Record<string, B
   }
 }
 
-function savePositionSync(
+/** Best-effort position write — must not gate restore success. */
+function savePositionBestEffort(
   sectionId: string,
   boardId: string,
   objectId: string,
@@ -79,35 +98,134 @@ function insertBlockIntoBody(body: string, blockIndex: number, blockLine: string
 
 export type RestoreResult = { ok: true } | { ok: false; reason: string };
 
-export async function restoreFromTombstone(tombstone: KnowledgeTombstone): Promise<RestoreResult> {
+export type RestoreFromTombstoneOptions = {
+  /** Used to cancel pending cloud DELETE and re-enqueue CREATE after local restore. */
+  userId?: string | null;
+};
+
+async function finalizeCloudAfterLocalObjectRestore(input: {
+  userId?: string | null;
+  sectionId: string;
+  boardId: string;
+  object: ProjectSpaceObject;
+}): Promise<void> {
+  const { userId, sectionId, boardId, object } = input;
+  if (!userId) return;
+  try {
+    await cancelPendingFreeSpaceObjectDeletes({
+      userId,
+      sectionId,
+      entityIds: [object.id],
+    });
+  } catch (e) {
+    fwPersistWarn(`Restore cancel pending delete failed for "${object.id}": ${String(e)}`);
+  }
+  try {
+    await enqueueFreeSpaceObjectCreate({
+      userId,
+      sectionId,
+      boardId,
+      object,
+    });
+  } catch (e) {
+    fwPersistWarn(`Restore re-enqueue create failed for "${object.id}": ${String(e)}`);
+  }
+}
+
+export async function restoreFromTombstone(
+  tombstone: KnowledgeTombstone,
+  options?: RestoreFromTombstoneOptions,
+): Promise<RestoreResult> {
   if (tombstone.kind === 'free_space_object') {
-    return restoreFreeSpaceObject(tombstone);
+    return restoreFreeSpaceObject(tombstone, options);
   }
   return restoreNotebookBlock(tombstone);
 }
 
-async function restoreFreeSpaceObject(tombstone: FreeSpaceObjectTombstone): Promise<RestoreResult> {
+/**
+ * True only when the live object is the same recovery payload (ignore updatedAt).
+ * Same-id alone is NOT enough — a stale/partial/conflicting object must not clear the tombstone.
+ */
+function isEquivalentRestoredObject(
+  existing: ProjectSpaceObject,
+  payload: ProjectSpaceObject,
+): boolean {
+  if (existing.id !== payload.id || existing.type !== payload.type) return false;
+  try {
+    const a = { ...existing, updatedAt: 0 };
+    const b = { ...payload, updatedAt: 0 };
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+async function restoreFreeSpaceObject(
+  tombstone: FreeSpaceObjectTombstone,
+  options?: RestoreFromTombstoneOptions,
+): Promise<RestoreResult> {
   const { sectionId, boardId, payload, position, objectId } = tombstone;
+  if (!payload || typeof payload !== 'object' || payload.id !== objectId) {
+    return { ok: false, reason: 'This recovery record is incomplete and cannot be restored safely.' };
+  }
+  if (typeof payload.type !== 'string' || !payload.type) {
+    return { ok: false, reason: 'This recovery record is incomplete and cannot be restored safely.' };
+  }
+
   const objects = loadObjectsSync(sectionId, boardId);
-  if (objects.some(o => o.id === objectId)) {
-    return { ok: false, reason: 'An object with this id already exists in the workspace.' };
+  const existing = objects.find(o => o.id === objectId);
+  if (existing) {
+    if (!isEquivalentRestoredObject(existing, payload)) {
+      return {
+        ok: false,
+        reason: 'An object with this id already exists in the workspace and does not match the recovery copy.',
+      };
+    }
+    // Idempotent: prior restore persisted, but tombstone cleanup failed.
+    await finalizeCloudAfterLocalObjectRestore({
+      userId: options?.userId,
+      sectionId,
+      boardId,
+      object: existing,
+    });
+    await deleteTombstone(tombstone.id);
+    return { ok: true };
   }
-  objects.push({ ...payload, updatedAt: Date.now() });
-  saveObjectsSync(sectionId, boardId, objects);
+
+  const restored: ProjectSpaceObject = { ...payload, updatedAt: Date.now() };
+  const nextObjects = [...objects, restored];
+  const saved = trySaveObjectsForRestore(sectionId, boardId, nextObjects, objectId);
+  if (!saved.ok) {
+    return saved;
+  }
+
   if (position) {
-    savePositionSync(sectionId, boardId, objectId, position);
+    savePositionBestEffort(sectionId, boardId, objectId, position);
   }
+
+  await finalizeCloudAfterLocalObjectRestore({
+    userId: options?.userId,
+    sectionId,
+    boardId,
+    object: restored,
+  });
+
   await deleteTombstone(tombstone.id);
   return { ok: true };
 }
 
 async function restoreNotebookBlock(tombstone: NotebookBlockTombstone): Promise<RestoreResult> {
   const { sectionId, boardId, objectId, blockIndex, block } = tombstone;
+  if (!block || typeof block !== 'object' || typeof block.id !== 'string' || !block.id) {
+    return { ok: false, reason: 'This recovery record is incomplete and cannot be restored safely.' };
+  }
+
   const objects = loadObjectsSync(sectionId, boardId);
   const notebook = objects.find(o => o.id === objectId && o.content.type === 'notebook');
   if (!notebook || notebook.content.type !== 'notebook') {
     return { ok: false, reason: 'The parent notebook no longer exists in this workspace.' };
   }
+
   const line = serializeBlockSnapshot(block);
   const nextBody = insertBlockIntoBody(notebook.content.body ?? '', blockIndex, line);
   const nextObjects = objects.map(o => {
@@ -118,7 +236,22 @@ async function restoreNotebookBlock(tombstone: NotebookBlockTombstone): Promise<
       updatedAt: Date.now(),
     };
   });
-  saveObjectsSync(sectionId, boardId, nextObjects);
+
+  const saved = trySaveObjectsForRestore(sectionId, boardId, nextObjects, objectId);
+  if (!saved.ok) {
+    return saved;
+  }
+
+  const verified = loadObjectsSync(sectionId, boardId).find(
+    o => o.id === objectId && o.content.type === 'notebook',
+  );
+  if (!verified || verified.content.type !== 'notebook') {
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+  if (!(verified.content.body ?? '').includes(line)) {
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+
   await deleteTombstone(tombstone.id);
   return { ok: true };
 }
@@ -162,6 +295,9 @@ export async function restoreNotebookSnapshot(snapshot: NotebookSnapshot): Promi
       updatedAt: Date.now(),
     };
   });
-  saveObjectsSync(sectionId, boardId, nextObjects);
+  const saved = trySaveObjectsForRestore(sectionId, boardId, nextObjects, objectId);
+  if (!saved.ok) {
+    return saved;
+  }
   return { ok: true };
 }

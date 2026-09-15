@@ -170,6 +170,52 @@ export async function enqueueFreeSpaceObjectDelete(
 }
 
 /**
+ * Remove pending free_space_object DELETE ops for restored entities (M7.0).
+ * Does not cancel create|update — use cancelPendingFreeSpaceObjectWrites for that.
+ */
+export async function cancelPendingFreeSpaceObjectDeletes(input: {
+  userId: string | null | undefined;
+  sectionId: string;
+  entityIds: readonly string[];
+}): Promise<
+  | { ok: true; removed: number }
+  | { ok: false; reason: PendingQueueFailureReason | 'unexpected_error' | 'auth_or_workspace'; removed: number }
+> {
+  let removed = 0;
+  try {
+    const ids = input.entityIds.filter(
+      (id): id is string => typeof id === 'string' && id.length > 0 && id === id.trim(),
+    );
+    if (ids.length === 0) return { ok: true, removed: 0 };
+
+    const ns = resolveCacheNamespace(input.userId, input.sectionId);
+    if (!ns.ok) {
+      return { ok: false, reason: 'auth_or_workspace', removed: 0 };
+    }
+
+    const listed = await listPendingOperations(ns.namespace);
+    if (!listed.ok) {
+      fwPersistWarn(`pending delete cancel list failed: reason=${listed.reason}`);
+      return { ok: false, reason: listed.reason, removed: 0 };
+    }
+
+    const idSet = new Set(ids);
+    const deletes = listed.value.filter(
+      op => isFreeSpaceDeleteOp(op) && idSet.has(op.entityId),
+    );
+    const cancel = await removeMatchingOps(ns.namespace, deletes);
+    removed = cancel.removed;
+    if (cancel.failed) {
+      return { ok: false, reason: 'transaction_failed', removed };
+    }
+    return { ok: true, removed };
+  } catch {
+    fwPersistWarn('pending delete cancel failed: reason=unexpected_error');
+    return { ok: false, reason: 'unexpected_error', removed };
+  }
+}
+
+/**
  * Fire-and-observe after durable local delete persist.
  * Retries stay with the hook's pendingCancelIds drain pattern.
  */

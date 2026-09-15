@@ -72,3 +72,16 @@ export async function idbDelete(storeName: string, key: string): Promise<void> {
     tx.objectStore(storeName).delete(key);
   });
 }
+
+/** Test helper: close cached DB handle so deleteDatabase/reopen works. */
+export async function resetKnowledgeJournalDbForTests(): Promise<void> {
+  if (dbPromise) {
+    try {
+      const db = await dbPromise;
+      db.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  dbPromise = null;
+}

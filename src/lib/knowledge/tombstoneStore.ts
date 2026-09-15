@@ -161,10 +161,18 @@ export async function purgeExpiredTombstones(): Promise<number> {
   return purged;
 }
 
+export type DeleteTombstonePermanentlyOptions = {
+  /** Used for notebook asset cloud delete enqueue when cascading. */
+  userId?: string | null;
+};
+
 /** Permanently remove tombstone and associated blobs (when applicable). */
-export async function deleteTombstonePermanently(tombstone: KnowledgeTombstone): Promise<void> {
+export async function deleteTombstonePermanently(
+  tombstone: KnowledgeTombstone,
+  options?: DeleteTombstonePermanentlyOptions,
+): Promise<void> {
   if (tombstone.kind === 'free_space_object') {
-    const { sectionId, objectId, objectType } = tombstone;
+    const { sectionId, objectId, objectType, payload } = tombstone;
     if (objectType === 'pdf') {
       const { deletePdfBlob } = await import('../freeSpacePdfIdb');
       await deletePdfBlob(sectionId, objectId).catch(() => undefined);
@@ -176,6 +184,21 @@ export async function deleteTombstonePermanently(tombstone: KnowledgeTombstone):
     } else if (objectType === 'studyfile') {
       const { deleteStudyFileBlob } = await import('../freeSpaceStudyFileIdb');
       await deleteStudyFileBlob(sectionId, objectId).catch(() => undefined);
+    } else if (objectType === 'notebook') {
+      // M7.0: soft-delete keeps assets; permanent delete / expiry destroys them.
+      // Cascade must succeed before tombstone removal so cleanup remains retryable.
+      const { cascadeDeleteNotebookAssets } = await import('../notebookDeleteCascade');
+      try {
+        await cascadeDeleteNotebookAssets({
+          userId: options?.userId,
+          sectionId,
+          objectId,
+          content: payload?.content,
+        });
+      } catch (e) {
+        fwPersistWarn(`Notebook asset cascade on permanent delete failed: ${String(e)}`);
+        throw e instanceof Error ? e : new Error(String(e));
+      }
     }
   }
   await deleteTombstone(tombstone.id);

@@ -1,14 +1,16 @@
 /**
- * Cascade-delete notebook-owned user-content assets when notebook object removed.
+ * Cascade-delete notebook-owned user-content assets.
+ * M7.0: call ONLY on permanent delete / tombstone expiry — never on soft-delete.
  */
 
 import { collectNotebookPageInkKeys } from './notebookPages';
 import type { NotebookContentWithPages } from './notebookPages';
 import { referencedHandwritingKeys } from './handwritingTypes';
-import { collectNotebookImageKeys } from './notebookImageRefs';
+import { collectNotebookImageKeys, referencedNotebookImageKeys } from './notebookImageRefs';
 import { deleteNotebookImageAsset } from './notebookImageCloud';
 import { enqueueHandwritingCloudDelete } from './notebookHandwritingCloud';
 import { hwDelete, listHandwritingBlockKeysForObject } from './notebookHandwritingStore';
+import { nbImageDelete } from './notebookImageStore';
 
 function isNotebookContent(content: unknown): content is NotebookContentWithPages {
   return (
@@ -18,8 +20,12 @@ function isNotebookContent(content: unknown): content is NotebookContentWithPage
   );
 }
 
+/**
+ * Destroy notebook-owned handwriting + inline images.
+ * When userId is missing, local assets are still removed; cloud enqueue is skipped.
+ */
 export async function cascadeDeleteNotebookAssets(input: {
-  userId: string;
+  userId?: string | null;
   sectionId: string;
   objectId: string;
   content: unknown;
@@ -43,13 +49,26 @@ export async function cascadeDeleteNotebookAssets(input: {
 
   for (const blockKey of hwKeys) {
     await hwDelete(objectId, blockKey);
-    await enqueueHandwritingCloudDelete({ userId, sectionId, objectId, blockKey });
+    if (userId) {
+      await enqueueHandwritingCloudDelete({ userId, sectionId, objectId, blockKey });
+    }
     handwriting += 1;
   }
 
-  const imageKeys = collectNotebookImageKeys({ body });
-  for (const imageKey of imageKeys) {
-    await deleteNotebookImageAsset({ userId, sectionId, objectId, imageKey });
+  const imageKeySet = new Set(collectNotebookImageKeys({ body }));
+  if (content?.pages) {
+    for (const page of content.pages) {
+      if (page.kind === 'document' && typeof page.documentBody === 'string') {
+        for (const k of referencedNotebookImageKeys(page.documentBody)) imageKeySet.add(k);
+      }
+    }
+  }
+  for (const imageKey of imageKeySet) {
+    if (userId) {
+      await deleteNotebookImageAsset({ userId, sectionId, objectId, imageKey });
+    } else {
+      await nbImageDelete(imageKey);
+    }
     images += 1;
   }
 

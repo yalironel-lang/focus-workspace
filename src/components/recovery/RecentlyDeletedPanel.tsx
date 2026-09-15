@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
+import { useAuth } from '../../hooks/useAuth';
 import { restoreFromTombstone } from '../../lib/knowledge/knowledgeRestore';
 import { deleteTombstonePermanently, listTombstones } from '../../lib/knowledge/tombstoneStore';
 import type { KnowledgeTombstone } from '../../lib/knowledge/knowledgeTypes';
@@ -36,6 +37,7 @@ export function RecentlyDeletedPanel({
   sectionTitles,
   onRestoreComplete,
 }: Props) {
+  const { user } = useAuth();
   const [rows, setRows] = useState<KnowledgeTombstone[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -55,21 +57,23 @@ export function RecentlyDeletedPanel({
     async (row: KnowledgeTombstone) => {
       setBusyId(row.id);
       try {
-        const result = await restoreFromTombstone(row);
+        const result = await restoreFromTombstone(row, { userId: user?.id ?? null });
         if (!result.ok) {
-          toast(result.reason, { duration: 4500 });
+          toast.error(result.reason, { duration: 4500 });
+          await refresh();
           return;
         }
         toast.success('Restored. Reloading…');
         onRestoreComplete?.();
         window.setTimeout(() => window.location.reload(), 350);
       } catch {
-        toast('Restore failed. Try again.', { duration: 4000 });
+        toast.error('Restore failed. Try again.', { duration: 4000 });
+        await refresh();
       } finally {
         setBusyId(null);
       }
     },
-    [onRestoreComplete],
+    [onRestoreComplete, refresh, user?.id],
   );
 
   const onPermanentDelete = useCallback(
@@ -78,16 +82,16 @@ export function RecentlyDeletedPanel({
       if (!ok) return;
       setBusyId(row.id);
       try {
-        await deleteTombstonePermanently(row);
+        await deleteTombstonePermanently(row, { userId: user?.id ?? null });
         await refresh();
         toast.success('Removed from recently deleted');
       } catch {
-        toast('Could not remove item.', { duration: 4000 });
+        toast.error('Could not remove item.', { duration: 4000 });
       } finally {
         setBusyId(null);
       }
     },
-    [refresh],
+    [refresh, user?.id],
   );
 
   const border = tokens.cardBorder;

@@ -1858,16 +1858,8 @@ export function useSectionFreeSpaceObjects(
             });
           });
         }
-        if (userId && victim.type === 'notebook') {
-          void import('../lib/notebookDeleteCascade').then(({ cascadeDeleteNotebookAssets }) =>
-            cascadeDeleteNotebookAssets({
-              userId,
-              sectionId,
-              objectId: victim.id,
-              content: victim.content,
-            }),
-          );
-        }
+        // M7.0: do NOT cascade-delete notebook ink/images on soft-delete.
+        // Assets remain until permanent delete / tombstone expiry (deleteTombstonePermanently).
       }
       const rest = prev.filter(o => o.id !== id);
       const next = pruneConnectionsFromObjects(rest, id);
