@@ -17,6 +17,8 @@ function mount(element: ReturnType<typeof createElement>) {
   act(() => root!.render(element));
 }
 it('legacy reader displays decoded literal mark envelopes and never saves on open', async () => {
+  // M7.1A+: TipTap is default ON; force legacy CE to exercise the versioned CE reader path.
+  vi.stubEnv('VITE_NOTEBOOK_LEGACY_CE', 'true');
   const onChange = vi.fn();
   mount(createElement(ProjectNotebookBlock, {
     content: { type: 'notebook', body, bodyCodecVersion: 1, notebookMode: 'normal' },
@@ -25,7 +27,7 @@ it('legacy reader displays decoded literal mark envelopes and never saves on ope
   }));
   expect(host!.textContent).toContain(literal);
   expect(host!.textContent).not.toContain('~nb1:["paragraph"');
-  // ContentEditable editing surface is not mounted for versioned pages without candidate editor active
+  // ContentEditable editing surface is not mounted for versioned pages under CE rollback
   expect(host!.querySelector('[data-nb-editor-root="1"]')).toBeNull();
   expect(host!.querySelector('[data-nb-editor-root="1"] [contenteditable="true"]')).toBeNull();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
