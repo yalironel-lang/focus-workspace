@@ -44,23 +44,26 @@ export type NotebookLine =
   | { kind: 'handwriting'; key: string }
   | { kind: 'paragraph'; text: string; variant?: ParagraphVariant };
 
+export type TextAlignment = 'left' | 'center' | 'right';
+
 type BlockMarks = { marks?: InlineMark[] };
+type BlockAlignment = { align?: TextAlignment };
 
 /** Block shape used for dialect serialize (ids optional for adapter paths). */
 export type NotebookDialectBlock =
-  | ({ id?: string; kind: 'title'; text: string } & BlockMarks)
-  | ({ id?: string; kind: 'section'; text: string } & BlockMarks)
+  | ({ id?: string; kind: 'title'; text: string } & BlockMarks & BlockAlignment)
+  | ({ id?: string; kind: 'section'; text: string } & BlockMarks & BlockAlignment)
   | ({ id?: string; kind: 'bullet'; text: string; depth: number } & BlockMarks)
   | ({ id?: string; kind: 'ordered'; number: number; text: string } & BlockMarks)
   | ({ id?: string; kind: 'task'; text: string; checked: boolean } & BlockMarks)
-  | ({ id?: string; kind: 'quote'; text: string } & BlockMarks)
+  | ({ id?: string; kind: 'quote'; text: string } & BlockMarks & BlockAlignment)
   | ({ id?: string; kind: 'step'; text: string } & BlockMarks)
   | ({ id?: string; kind: 'callout'; tone: CalloutTone; text: string } & BlockMarks)
   | ({ id?: string; kind: 'math'; text: string } & BlockMarks)
   | { id?: string; kind: 'image-ref'; key: string; alt: string; width?: number | null }
   | { id?: string; kind: 'handwriting'; key: string }
   | { id?: string; kind: 'divider' }
-  | ({ id?: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks);
+  | ({ id?: string; kind: 'paragraph'; text: string; variant?: ParagraphVariant } & BlockMarks & BlockAlignment);
 
 /** Normalize invisible spaces so markdown-lite lines classify reliably (e.g. NBSP from paste). */
 export function normalizeNotebookSpaces(s: string): string {
@@ -220,9 +223,24 @@ export function notebookLineToBlock(line: NotebookLine, id?: string): NotebookDi
   }
 }
 
+/**
+ * Detects whether body contains an actual versioned Notebook record (~nb1:).
+ * Versioned records strictly begin a line (at the start of the body or following LF/CRLF).
+ * Ordinary text that merely mentions "~nb1:" within a line does NOT trigger this.
+ */
+export function hasVersionedNotebookRecord(body: string): boolean {
+  for (const line of body.split(/\r?\n/)) {
+    if (line.startsWith('~nb1:')) return true;
+  }
+  return false;
+}
+
 /** Parse body → dialect blocks (no React id-reuse). Empty → title + blank paragraph. */
 export function parseNotebookBody(body: string, codecVersion?: number): NotebookDialectBlock[] {
   assertNotebookTextCodec(codecVersion);
+  if (codecVersion === undefined && hasVersionedNotebookRecord(body)) {
+    throw new Error('Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion');
+  }
   if (codecVersion === 1) return decodeNotebookTextV1(body);
   if (body.trim().length === 0) {
     return [

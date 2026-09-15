@@ -19,15 +19,15 @@ export function blockToTiptapNode(block: NotebookDialectBlock): JSONContent {
     case 'paragraph':
       return {
         type: 'nbParagraph',
-        attrs: { variant: block.variant ?? null },
+        attrs: { variant: block.variant ?? null, align: block.align ?? null },
         content: inlineContent(block),
       };
     case 'title':
-      return { type: 'nbTitle', content: inlineContent(block) };
+      return { type: 'nbTitle', attrs: { align: block.align ?? null }, content: inlineContent(block) };
     case 'section':
-      return { type: 'nbSection', content: inlineContent(block) };
+      return { type: 'nbSection', attrs: { align: block.align ?? null }, content: inlineContent(block) };
     case 'quote':
-      return { type: 'nbQuote', content: inlineContent(block) };
+      return { type: 'nbQuote', attrs: { align: block.align ?? null }, content: inlineContent(block) };
     case 'step':
       return { type: 'nbStep', content: inlineContent(block) };
     case 'math':

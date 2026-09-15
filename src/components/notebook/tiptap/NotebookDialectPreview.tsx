@@ -69,6 +69,7 @@ function renderBlock(block: NotebookDialectBlock, objectId?: string) {
     lineHeight: 1.92,
     color: NB_INK.primary,
     margin: '4px 0',
+    textAlign: ('align' in block ? block.align : undefined) ?? 'start',
   };
 
   switch (block.kind) {
@@ -213,14 +214,16 @@ function renderBlock(block: NotebookDialectBlock, objectId?: string) {
 
 export function NotebookDialectPreview({
   documentBody,
+  codecVersion,
   objectId,
   className,
 }: {
   documentBody: string;
+  codecVersion?: number;
   objectId?: string;
   className?: string;
 }) {
-  const blocks = parseNotebookBody(documentBody);
+  const blocks = parseNotebookBody(documentBody, codecVersion);
   return (
     <div
       className={className}

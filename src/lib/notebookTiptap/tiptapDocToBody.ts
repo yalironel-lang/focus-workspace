@@ -11,6 +11,7 @@ import {
   type CalloutTone,
   type NotebookDialectBlock,
   type ParagraphVariant,
+  type TextAlignment,
 } from '../notebookDialect';
 import { NotebookTiptapConversionError } from './errors';
 import { ALLOWED_BLOCK_TYPES } from './extensions';
@@ -33,6 +34,16 @@ function asParagraphVariant(raw: unknown): ParagraphVariant | undefined {
   throw new NotebookTiptapConversionError(
     'unsupported_attr',
     `Invalid paragraph variant "${String(raw)}"`,
+    String(raw),
+  );
+}
+
+function asAlignment(raw: unknown): TextAlignment | undefined {
+  if (raw == null || raw === '' || raw === 'start') return undefined;
+  if (raw === 'left' || raw === 'center' || raw === 'right') return raw;
+  throw new NotebookTiptapConversionError(
+    'unsupported_attr',
+    `Invalid text alignment "${String(raw)}"`,
     String(raw),
   );
 }
@@ -90,28 +101,61 @@ function tipTapNodeToBlock(node: JSONContent): NotebookDialectBlock {
     }
   }
 
+  const allowsAlign =
+    node.type === 'nbParagraph' ||
+    node.type === 'nbTitle' ||
+    node.type === 'nbSection' ||
+    node.type === 'nbQuote';
+  if (!allowsAlign && node.attrs?.align != null && node.attrs.align !== '' && node.attrs.align !== 'start') {
+    throw new NotebookTiptapConversionError(
+      'unsupported_attr',
+      `Alignment is not supported on block "${node.type}"`,
+      String(node.attrs.align),
+    );
+  }
+
   switch (node.type) {
     case 'nbParagraph': {
       const rich = richFromContent(node);
       const variant = asParagraphVariant(node.attrs?.variant);
+      const align = asAlignment(node.attrs?.align);
       return {
         kind: 'paragraph',
         text: rich.text,
         ...(rich.marks ? { marks: rich.marks } : {}),
         ...(variant ? { variant } : {}),
+        ...(align ? { align } : {}),
       };
     }
     case 'nbTitle': {
       const rich = richFromContent(node);
-      return { kind: 'title', text: rich.text, ...(rich.marks ? { marks: rich.marks } : {}) };
+      const align = asAlignment(node.attrs?.align);
+      return {
+        kind: 'title',
+        text: rich.text,
+        ...(rich.marks ? { marks: rich.marks } : {}),
+        ...(align ? { align } : {}),
+      };
     }
     case 'nbSection': {
       const rich = richFromContent(node);
-      return { kind: 'section', text: rich.text, ...(rich.marks ? { marks: rich.marks } : {}) };
+      const align = asAlignment(node.attrs?.align);
+      return {
+        kind: 'section',
+        text: rich.text,
+        ...(rich.marks ? { marks: rich.marks } : {}),
+        ...(align ? { align } : {}),
+      };
     }
     case 'nbQuote': {
       const rich = richFromContent(node);
-      return { kind: 'quote', text: rich.text, ...(rich.marks ? { marks: rich.marks } : {}) };
+      const align = asAlignment(node.attrs?.align);
+      return {
+        kind: 'quote',
+        text: rich.text,
+        ...(rich.marks ? { marks: rich.marks } : {}),
+        ...(align ? { align } : {}),
+      };
     }
     case 'nbStep': {
       const rich = richFromContent(node);

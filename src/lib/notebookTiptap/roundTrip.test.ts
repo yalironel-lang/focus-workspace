@@ -154,13 +154,13 @@ describe('fail-closed conversion', () => {
     expect(() => tiptapDocToBody(doc)).toThrow(NotebookTiptapConversionError);
   });
 
-  it('rejects link mark', () => {
+  it('rejects unsupported code mark', () => {
     const doc: JSONContent = {
       type: 'doc',
       content: [
         {
           type: 'nbParagraph',
-          content: [{ type: 'text', text: 'x', marks: [{ type: 'link', attrs: { href: 'https://x' } }] }],
+          content: [{ type: 'text', text: 'x', marks: [{ type: 'code' }] }],
         },
       ],
     };

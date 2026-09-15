@@ -11,7 +11,7 @@ import type { NodeViewProps } from '@tiptap/react';
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react';
 import { KatexPreview } from '../../components/notebook/KatexPreview';
 import { plainMathToLatex } from '../mathInputAssistant';
-import type { CalloutTone } from '../notebookDialect';
+import type { CalloutTone, TextAlignment } from '../notebookDialect';
 import {
   BULLET_GLYPHS,
   NB_FONT_STACK,
@@ -37,7 +37,11 @@ const baseText: CSSProperties = {
 };
 
 function dirProps(node: NodeViewProps['node']) {
-  return notebookDirWrapperProps(node.attrs.dir as NotebookTextDir, node.textContent ?? '');
+  return notebookDirWrapperProps(
+    node.attrs.dir as NotebookTextDir,
+    node.textContent ?? '',
+    node.attrs.align as TextAlignment | undefined,
+  );
 }
 
 export function SandboxParagraphView({ node }: NodeViewProps) {

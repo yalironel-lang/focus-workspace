@@ -27,6 +27,7 @@ import {
   NbTask,
   NbTitle,
   NbInlineMath,
+  LinkMark,
 } from './extensions';
 import {
   NbBulletView,
@@ -135,5 +136,6 @@ export function createNotebookTiptapViewerExtensions(options: NotebookTiptapView
     FontSize,
     BackgroundColor,
     Highlight.configure({ multicolor: true }),
+    LinkMark,
   ];
 }

@@ -31,6 +31,7 @@ import {
   NbTitle,
   MathMark,
   NbInlineMath,
+  LinkMark,
 } from './extensions';
 import {
   SandboxBulletView,
@@ -157,5 +158,6 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     BackgroundColor,
     Highlight.configure({ multicolor: true }),
     MathMark,
+    LinkMark,
   ];
 }

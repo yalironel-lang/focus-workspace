@@ -19,6 +19,7 @@ import {
   normalizeTextDir,
   type NotebookTextDir,
 } from '../../../lib/notebookTiptap/direction';
+import { hasVersionedNotebookRecord } from '../../../lib/notebookDialect';
 import { NotebookTiptapCandidateSelectionToolbar } from './NotebookTiptapCandidateSelectionToolbar';
 import {
   CANDIDATE_BLOCK_MENU,
@@ -203,7 +204,7 @@ export function NotebookTiptapCandidateEditor({
 
     try {
       // DEV fail-closed guard: versioned text record (~nb1:) must NEVER be parsed with undefined codecVersion
-      if (effectiveCodecVersion === undefined && pageSource.includes('~nb1:')) {
+      if (effectiveCodecVersion === undefined && hasVersionedNotebookRecord(pageSource)) {
         throw new Error('Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion');
       }
       return {
@@ -243,6 +244,22 @@ export function NotebookTiptapCandidateEditor({
             'min-height: 240px',
             'caret-color: currentColor',
           ].join(';'),
+        },
+        handleDOMEvents: {
+          click: (_view, event) => {
+            if ((event.target as HTMLElement | null)?.closest('a')) {
+              event.preventDefault();
+              return true;
+            }
+            return false;
+          },
+        },
+        handleClick: (_view, _pos, event) => {
+          if ((event.target as HTMLElement | null)?.closest('a')) {
+            event.preventDefault();
+            return true;
+          }
+          return false;
         },
       },
       onUpdate: ({ editor: ed, transaction }) => {

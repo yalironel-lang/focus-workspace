@@ -4,13 +4,23 @@
  */
 
 import type { Editor } from '@tiptap/core';
+import { getMarkRange } from '@tiptap/core';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../notebookInlineMarks';
+import type { TextAlignment } from '../notebookDialect';
+import { sanitizeUrl } from '../urlSanitizer';
 
 /** Student-oriented size presets for the candidate toolbar. */
 export const CANDIDATE_FONT_SIZE_PRESETS = [12, 14, 16, 18, 20, 24, 28, 32] as const;
 
 export type CandidateFontSizePx = (typeof CANDIDATE_FONT_SIZE_PRESETS)[number];
+
+export const SUPPORTED_ALIGN_NODE_NAMES = new Set([
+  'nbParagraph',
+  'nbTitle',
+  'nbSection',
+  'nbQuote',
+]);
 
 export type CandidateFormatCommand =
   | { type: 'toggleBold' }
@@ -22,7 +32,10 @@ export type CandidateFormatCommand =
   | { type: 'setTextColor'; color: string }
   | { type: 'setHighlight'; color: string }
   | { type: 'clearHighlight' }
-  | { type: 'clearFormatting' };
+  | { type: 'clearFormatting' }
+  | { type: 'applyLink'; href: string }
+  | { type: 'removeLink' }
+  | { type: 'setAlignment'; align: TextAlignment | null };
 
 export type CandidateFormatState = {
   bold: boolean;
@@ -30,6 +43,11 @@ export type CandidateFormatState = {
   underline: boolean;
   strike: boolean;
   math: boolean;
+  link: boolean;
+  linkHref: string | null;
+  canLink: boolean;
+  align: TextAlignment | null;
+  alignSupported: boolean;
   /** Unambiguous size in px, or null when default / unset. */
   fontSizePx: number | null;
   fontSizeMixed: boolean;
@@ -116,6 +134,33 @@ export function readCandidateFormatState(editor: Editor): CandidateFormatState {
     highlight = only === '' ? undefined : only;
   }
 
+  const isLinkActive = editor.isActive('link');
+  const linkHref = isLinkActive
+    ? ((editor.getAttributes('link').href as string | null) ?? null)
+    : null;
+  const canLink = (!empty && to > from) || isLinkActive;
+
+  let alignSupported = false;
+  const alignments = new Set<TextAlignment | null>();
+  if (editor.state.selection instanceof NodeSelection) {
+    const node = editor.state.selection.node;
+    if (SUPPORTED_ALIGN_NODE_NAMES.has(node.type.name)) {
+      alignSupported = true;
+      alignments.add((node.attrs.align as TextAlignment | null) ?? null);
+    }
+  } else {
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      if (node.isBlock && SUPPORTED_ALIGN_NODE_NAMES.has(node.type.name)) {
+        alignSupported = true;
+        alignments.add((node.attrs.align as TextAlignment | null) ?? null);
+      }
+    });
+  }
+  let align: TextAlignment | null = null;
+  if (alignSupported && alignments.size === 1) {
+    align = [...alignments][0]!;
+  }
+
   return {
     bold: editor.isActive('bold'),
     italic: editor.isActive('italic'),
@@ -140,6 +185,11 @@ export function readCandidateFormatState(editor: Editor): CandidateFormatState {
       }
       return false;
     })(),
+    link: isLinkActive,
+    linkHref,
+    canLink,
+    align,
+    alignSupported,
     fontSizePx,
     fontSizeMixed,
     color,
@@ -231,8 +281,134 @@ export function toggleCandidateMath(editor: Editor): boolean {
   return false;
 }
 
+export function applyCandidateLink(editor: Editor, rawHref: string): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  const href = sanitizeUrl(rawHref);
+  if (!href) return false;
+
+  const { state, view } = editor;
+  const { from, to, empty } = state.selection;
+  const linkType = state.schema.marks.link;
+  if (!linkType) return false;
+
+  if (empty && editor.isActive('link')) {
+    const range = getMarkRange(state.selection.$from, linkType);
+    if (!range) return false;
+    const tr = state.tr;
+    tr.removeMark(range.from, range.to, linkType);
+    tr.addMark(range.from, range.to, linkType.create({ href }));
+    view.dispatch(tr);
+    return true;
+  }
+
+  if (!empty && to > from) {
+    let effectiveTo = to;
+    while (effectiveTo > from) {
+      const char = state.doc.textBetween(effectiveTo - 1, effectiveTo);
+      if (char === ' ' || char === '\t' || char === '\n') {
+        effectiveTo--;
+      } else {
+        break;
+      }
+    }
+    if (effectiveTo <= from) return false;
+
+    const tr = state.tr;
+    tr.removeMark(from, effectiveTo, linkType);
+
+    let applied = false;
+    state.doc.nodesBetween(from, effectiveTo, (node, pos) => {
+      if (node.isText) {
+        const start = Math.max(from, pos);
+        const end = Math.min(effectiveTo, pos + node.nodeSize);
+        if (end > start) {
+          tr.addMark(start, end, linkType.create({ href }));
+          applied = true;
+        }
+      }
+    });
+
+    if (applied) {
+      view.dispatch(tr);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function removeCandidateLink(editor: Editor): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  const { state, view } = editor;
+  const linkType = state.schema.marks.link;
+  if (!linkType) return false;
+
+  const { from, to, empty } = state.selection;
+
+  if (empty && editor.isActive('link')) {
+    const range = getMarkRange(state.selection.$from, linkType);
+    if (!range) return false;
+    const tr = state.tr.removeMark(range.from, range.to, linkType);
+    view.dispatch(tr);
+    return true;
+  }
+
+  if (!empty && to > from) {
+    const tr = state.tr.removeMark(from, to, linkType);
+    view.dispatch(tr);
+    return true;
+  }
+
+  return false;
+}
+
+export function setCandidateAlignment(
+  editor: Editor,
+  align: TextAlignment | null,
+): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  if (align !== null && align !== 'left' && align !== 'center' && align !== 'right') {
+    return false;
+  }
+
+  const { state, view } = editor;
+  const { from, to } = state.selection;
+
+  const blocksToUpdate: { pos: number; node: any }[] = [];
+
+  if (state.selection instanceof NodeSelection) {
+    const node = state.selection.node;
+    if (SUPPORTED_ALIGN_NODE_NAMES.has(node.type.name)) {
+      blocksToUpdate.push({ pos: from, node });
+    }
+  } else {
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (node.isBlock && SUPPORTED_ALIGN_NODE_NAMES.has(node.type.name)) {
+        blocksToUpdate.push({ pos, node });
+      }
+    });
+  }
+
+  if (blocksToUpdate.length === 0) return false;
+
+  const tr = state.tr;
+  for (const { pos, node } of blocksToUpdate) {
+    tr.setNodeMarkup(pos, undefined, {
+      ...node.attrs,
+      align,
+    });
+  }
+  view.dispatch(tr);
+  return true;
+}
+
 export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCommand): boolean {
-  if (editor.isDestroyed || !editor.isEditable || editor.state.selection.empty) return false;
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  const { empty } = editor.state.selection;
+  const isAllowedEmpty =
+    cmd.type === 'setAlignment' ||
+    ((cmd.type === 'applyLink' || cmd.type === 'removeLink') && editor.isActive('link'));
+  if (empty && !isAllowedEmpty) return false;
 
   switch (cmd.type) {
     case 'toggleBold':
@@ -245,6 +421,12 @@ export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCo
       return editor.chain().focus().toggleStrike().run();
     case 'toggleMath':
       return toggleCandidateMath(editor);
+    case 'applyLink':
+      return applyCandidateLink(editor, cmd.href);
+    case 'removeLink':
+      return removeCandidateLink(editor);
+    case 'setAlignment':
+      return setCandidateAlignment(editor, cmd.align);
     case 'setFontSize':
       return applyCandidateFontSize(editor, cmd.px);
     case 'setTextColor':
@@ -269,7 +451,7 @@ export function runCandidateFormatCommand(editor: Editor, cmd: CandidateFormatCo
           if (!node.isText) return;
           const start = Math.max(from, pos);
           const end = Math.min(to, pos + node.nodeSize);
-          for (const name of ['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight', 'math']) {
+          for (const name of ['bold', 'italic', 'underline', 'strike', 'textStyle', 'highlight', 'math', 'link']) {
             if (state.schema.marks[name]) {
               tr.removeMark(start, end, state.schema.marks[name]);
             }

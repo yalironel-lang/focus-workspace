@@ -12,7 +12,7 @@ import { plainMathToLatex } from '../mathInputAssistant';
 import { textHasMathDelimiters, renderKatexHtml } from '../notebookMath';
 import type { InlineMark } from '../notebookInlineMarks';
 import { tiptapInlineToRichLine } from './inlineBridge';
-import type { CalloutTone } from '../notebookDialect';
+import type { CalloutTone, TextAlignment } from '../notebookDialect';
 import {
   BULLET_GLYPHS,
   NB_FONT_STACK,
@@ -41,7 +41,11 @@ function shouldUseMathRich(plain: string, marks?: InlineMark[]): boolean {
 }
 
 function dirProps(node: NodeViewProps['node']) {
-  return notebookDirWrapperProps(node.attrs.dir as NotebookTextDir, node.textContent ?? '');
+  return notebookDirWrapperProps(
+    node.attrs.dir as NotebookTextDir,
+    node.textContent ?? '',
+    node.attrs.align as TextAlignment | undefined,
+  );
 }
 
 function wrapDir(

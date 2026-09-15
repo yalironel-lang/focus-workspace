@@ -12,6 +12,8 @@ import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens'
 export type NotebookTiptapReadonlyViewerProps = {
   /** Authoritative Notebook documentBody (never written back). */
   documentBody: string;
+  /** Optional codec version for versioned body decoding */
+  codecVersion?: number;
   /** Optional object id for local handwriting cache paint. */
   objectId?: string;
   className?: string;
@@ -21,6 +23,7 @@ export type NotebookTiptapReadonlyViewerProps = {
 
 export function NotebookTiptapReadonlyViewer({
   documentBody,
+  codecVersion,
   objectId,
   className,
   onReady,
@@ -33,7 +36,10 @@ export function NotebookTiptapReadonlyViewer({
     [objectId],
   );
 
-  const initialContent = useMemo(() => bodyToTiptapDoc(documentBody), [documentBody]);
+  const initialContent = useMemo(
+    () => bodyToTiptapDoc(documentBody, codecVersion),
+    [documentBody, codecVersion],
+  );
 
   const editor = useEditor(
     {
@@ -61,12 +67,12 @@ export function NotebookTiptapReadonlyViewer({
   // Sync content when documentBody prop changes without mutating the source string.
   useEffect(() => {
     if (!editor) return;
-    const next = bodyToTiptapDoc(documentBody);
+    const next = bodyToTiptapDoc(documentBody, codecVersion);
     const current = editor.getJSON();
     if (JSON.stringify(current) !== JSON.stringify(next)) {
       editor.commands.setContent(next, { emitUpdate: false });
     }
-  }, [editor, documentBody]);
+  }, [editor, documentBody, codecVersion]);
 
   useEffect(() => {
     if (!editor || !onReady) return;

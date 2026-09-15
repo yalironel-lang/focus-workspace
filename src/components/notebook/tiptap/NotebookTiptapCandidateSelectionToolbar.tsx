@@ -19,7 +19,12 @@ import {
   Baseline,
   Type,
   ChevronDown,
+  Link2,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react';
+import { sanitizeUrl } from '../../../lib/urlSanitizer';
 import {
   DEFAULT_NOTEBOOK_FONT_SIZE,
   HIGHLIGHT_PRESETS,
@@ -55,7 +60,7 @@ function selectionShouldShowToolbar(editor: Editor): boolean {
   if (!editor.isEditable || editor.isDestroyed) return false;
   if (editor.state.selection instanceof NodeSelection) return false;
   const { empty, from, to } = editor.state.selection;
-  return !empty && to > from;
+  return (!empty && to > from) || editor.isActive('link');
 }
 
 function CaptureBtn({
@@ -126,12 +131,32 @@ function useFormatCapture(onAction: () => void) {
   };
 }
 
-function FormatBtn({ title, active, testId, onAction, children, style }: Parameters<typeof CaptureBtn>[0]) {
+function FormatBtn({
+  title,
+  active,
+  testId,
+  onAction,
+  children,
+  style,
+  disabled,
+}: Parameters<typeof CaptureBtn>[0] & { disabled?: boolean }) {
   const capture = useFormatCapture(onAction);
   return (
-    <button type="button" className="nb-toolbar-btn" title={title} aria-label={title}
-      aria-pressed={active} data-active={active ? 'true' : undefined}
-      data-nb-candidate-fmt={testId} style={style} {...capture}>
+    <button
+      type="button"
+      className="nb-toolbar-btn"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      disabled={disabled}
+      data-active={active ? 'true' : undefined}
+      data-nb-candidate-fmt={testId}
+      style={{
+        ...style,
+        ...(disabled ? { opacity: 0.35, pointerEvents: 'none' } : {}),
+      }}
+      {...(disabled ? {} : capture)}
+    >
       {children}
     </button>
   );
@@ -192,6 +217,11 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const [open, setOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [isEditingLink, setIsEditingLink] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
   const [diag, setDiag] = useState({
     empty: true,
     from: 0,
@@ -221,6 +251,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
       setAnchor(null);
       setSizeOpen(false);
       setBlockOpen(false);
+      setLinkOpen(false);
       return;
     }
 
@@ -269,16 +300,26 @@ export function NotebookTiptapCandidateSelectionToolbar({
   }, [editor, syncFromEditor]);
 
   useEffect(() => {
-    if (!sizeOpen && !blockOpen) return;
+    if (!sizeOpen && !blockOpen && !linkOpen) return;
     const onDoc = (e: MouseEvent) => {
       if (!toolbarRef.current?.contains(e.target as Node)) {
         setSizeOpen(false);
         setBlockOpen(false);
+        setLinkOpen(false);
       }
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [sizeOpen, blockOpen]);
+  }, [sizeOpen, blockOpen, linkOpen]);
+
+  useEffect(() => {
+    if (linkOpen) {
+      setTimeout(() => {
+        linkInputRef.current?.focus();
+        linkInputRef.current?.select();
+      }, 50);
+    }
+  }, [linkOpen]);
 
   const releaseBusy = useCallback(() => {
     requestAnimationFrame(() => {
@@ -302,7 +343,10 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const runFmt = useCallback(
     (cmd: CandidateFormatCommand) => {
       const before = ensureSelection();
-      if (before.empty) {
+      const isAllowedEmpty =
+        cmd.type === 'setAlignment' ||
+        ((cmd.type === 'applyLink' || cmd.type === 'removeLink') && editor.isActive('link'));
+      if (before.empty && !isAllowedEmpty) {
         setCmdDiag({
           cmd: cmd.type,
           ok: null,
@@ -333,6 +377,51 @@ export function NotebookTiptapCandidateSelectionToolbar({
     },
     [editor, ensureSelection, releaseBusy, syncFromEditor],
   );
+
+  const toggleLinkPopover = useCallback(() => {
+    if (linkOpen) {
+      setLinkOpen(false);
+      setLinkError(null);
+      return;
+    }
+    setSizeOpen(false);
+    setBlockOpen(false);
+    const editing = fmt.link;
+    setIsEditingLink(editing);
+    setLinkUrl(editing ? (fmt.linkHref ?? '') : '');
+    setLinkError(null);
+    setLinkOpen(true);
+  }, [linkOpen, fmt.link, fmt.linkHref]);
+
+  const handleApplyLink = useCallback(() => {
+    const trimmed = linkUrl.trim();
+    if (!trimmed) {
+      setLinkError('Please enter a URL');
+      return;
+    }
+    const sanitized = sanitizeUrl(trimmed);
+    if (!sanitized) {
+      setLinkError('Invalid URL (must be http:// or https://)');
+      return;
+    }
+    runFmt({ type: 'applyLink', href: sanitized });
+    setLinkOpen(false);
+    setLinkError(null);
+    editor.commands.focus();
+  }, [editor, linkUrl, runFmt]);
+
+  const handleRemoveLink = useCallback(() => {
+    runFmt({ type: 'removeLink' });
+    setLinkOpen(false);
+    setLinkError(null);
+    editor.commands.focus();
+  }, [editor, runFmt]);
+
+  const handleCancelLink = useCallback(() => {
+    setLinkOpen(false);
+    setLinkError(null);
+    editor.commands.focus();
+  }, [editor]);
 
   const runBlock = useCallback(
     (target: CandidateBlockTarget) => {
@@ -394,7 +483,9 @@ export function NotebookTiptapCandidateSelectionToolbar({
               pointerEvents: 'auto',
             }}
             onMouseDown={e => {
-              e.preventDefault();
+              if ((e.target as HTMLElement).tagName !== 'INPUT') {
+                e.preventDefault();
+              }
               candidateSelectionToolbarBusyRef.current = true;
             }}
           >
@@ -418,6 +509,118 @@ export function NotebookTiptapCandidateSelectionToolbar({
             <FormatBtn title="Math" testId="math" active={fmt.math} onAction={() => runFmt({ type: 'toggleMath' })}>
               <Sigma size={14} strokeWidth={2.5} />
             </FormatBtn>
+
+            <div style={{ position: 'relative' }}>
+              <FormatBtn
+                title={fmt.link ? 'Edit link' : 'Insert link'}
+                testId="link"
+                active={fmt.link}
+                disabled={!fmt.canLink}
+                onAction={toggleLinkPopover}
+              >
+                <Link2 size={14} strokeWidth={2.5} />
+              </FormatBtn>
+              {linkOpen ? (
+                <div
+                  data-nb-candidate-link-popover="1"
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: 6,
+                    padding: 8,
+                    borderRadius: 8,
+                    background: 'rgba(10,14,24,0.98)',
+                    border: `1px solid ${borderColor}`,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                    zIndex: 10,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 6,
+                    minWidth: 260,
+                  }}
+                  onMouseDown={e => e.stopPropagation()}
+                >
+                  <input
+                    ref={linkInputRef}
+                    data-nb-candidate-link-input="1"
+                    type="text"
+                    value={linkUrl}
+                    placeholder="https://example.com"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: 4,
+                      color: '#ffffff',
+                      fontSize: 12,
+                      padding: '4px 8px',
+                      outline: 'none',
+                      flex: '1 1 180px',
+                      minWidth: 140,
+                    }}
+                    onChange={e => {
+                      setLinkUrl(e.target.value);
+                      setLinkError(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleApplyLink();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleCancelLink();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    data-nb-candidate-link-apply="1"
+                    className="nb-toolbar-btn"
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '3px 8px',
+                      background: 'rgba(59, 130, 246, 0.25)',
+                      color: '#93c5fd',
+                    }}
+                    onClick={handleApplyLink}
+                  >
+                    {isEditingLink ? 'Save' : 'Apply'}
+                  </button>
+                  {isEditingLink ? (
+                    <button
+                      type="button"
+                      data-nb-candidate-link-remove="1"
+                      className="nb-toolbar-btn"
+                      style={{ fontSize: 11, padding: '3px 8px', color: '#fca5a5' }}
+                      onClick={handleRemoveLink}
+                    >
+                      Remove Link
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    data-nb-candidate-link-cancel="1"
+                    className="nb-toolbar-btn"
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={handleCancelLink}
+                  >
+                    Cancel
+                  </button>
+                  {linkError ? (
+                    <div
+                      data-nb-candidate-link-error="1"
+                      style={{ color: '#f87171', fontSize: 10, marginTop: 4, width: '100%' }}
+                    >
+                      {linkError}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
 
             <div className="nb-toolbar-divider" />
 
@@ -516,6 +719,51 @@ export function NotebookTiptapCandidateSelectionToolbar({
               onClose={() => setBlockOpen(false)}
               onSelect={runBlock}
             />
+
+            <div className="nb-toolbar-divider" />
+
+            <div
+              data-nb-candidate-align-group="1"
+              style={{ display: 'flex', alignItems: 'center', gap: 2 }}
+            >
+              <FormatBtn
+                title="Align: Auto (Default)"
+                testId="align-auto"
+                active={fmt.alignSupported && fmt.align === null}
+                disabled={!fmt.alignSupported}
+                onAction={() => runFmt({ type: 'setAlignment', align: null })}
+                style={{ fontSize: 11, fontWeight: 700, padding: '2px 5px', minWidth: 36 }}
+              >
+                Auto
+              </FormatBtn>
+              <FormatBtn
+                title="Align left"
+                testId="align-left"
+                active={fmt.alignSupported && fmt.align === 'left'}
+                disabled={!fmt.alignSupported}
+                onAction={() => runFmt({ type: 'setAlignment', align: 'left' })}
+              >
+                <AlignLeft size={14} strokeWidth={2.5} />
+              </FormatBtn>
+              <FormatBtn
+                title="Align center"
+                testId="align-center"
+                active={fmt.alignSupported && fmt.align === 'center'}
+                disabled={!fmt.alignSupported}
+                onAction={() => runFmt({ type: 'setAlignment', align: 'center' })}
+              >
+                <AlignCenter size={14} strokeWidth={2.5} />
+              </FormatBtn>
+              <FormatBtn
+                title="Align right"
+                testId="align-right"
+                active={fmt.alignSupported && fmt.align === 'right'}
+                disabled={!fmt.alignSupported}
+                onAction={() => runFmt({ type: 'setAlignment', align: 'right' })}
+              >
+                <AlignRight size={14} strokeWidth={2.5} />
+              </FormatBtn>
+            </div>
 
             <div className="nb-toolbar-divider" />
 

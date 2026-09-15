@@ -14,22 +14,46 @@ import Strike from '@tiptap/extension-strike';
 import Underline from '@tiptap/extension-underline';
 import { TextStyle, Color, FontSize, BackgroundColor } from '@tiptap/extension-text-style';
 import Highlight from '@tiptap/extension-highlight';
-import type { CalloutTone, ParagraphVariant } from '../notebookDialect';
+import type { CalloutTone, ParagraphVariant, TextAlignment } from '../notebookDialect';
 import { CALLOUT_TONES } from '../notebookDialect';
 import { notebookDirAttribute } from './direction';
 import { plainMathToLatex } from '../mathInputAssistant';
 import { renderKatexHtml } from '../notebookMath';
+import { sanitizeUrl } from './urlSanitizer';
 
 const inlineContent = 'inline*';
 
-function textBlock(name: string, attrs?: Record<string, unknown>) {
+export function notebookAlignAttribute() {
+  return {
+    align: {
+      default: null as TextAlignment | null,
+      parseHTML: (el: HTMLElement) =>
+        (el.getAttribute('data-align') as TextAlignment | null) ||
+        (el.style.textAlign as TextAlignment | null) ||
+        null,
+      renderHTML: (attrs: Record<string, unknown>) => {
+        if (!attrs.align) return {};
+        return {
+          'data-align': attrs.align,
+          style: `text-align: ${attrs.align};`,
+        };
+      },
+    },
+  };
+}
+
+function textBlock(name: string, attrs?: Record<string, unknown>, withAlign = false) {
   return Node.create({
     name,
     group: 'block',
     content: inlineContent,
     defining: true,
     addAttributes() {
-      return { ...notebookDirAttribute(), ...(attrs ?? {}) };
+      return {
+        ...notebookDirAttribute(),
+        ...(withAlign ? notebookAlignAttribute() : {}),
+        ...(attrs ?? {}),
+      };
     },
     parseHTML() {
       return [{ tag: `div[data-nb="${name}"]` }];
@@ -48,6 +72,7 @@ export const NbParagraph = Node.create({
   addAttributes() {
     return {
       ...notebookDirAttribute(),
+      ...notebookAlignAttribute(),
       variant: {
         default: null as ParagraphVariant | null,
         parseHTML: el => el.getAttribute('data-variant'),
@@ -63,9 +88,9 @@ export const NbParagraph = Node.create({
   },
 });
 
-export const NbTitle = textBlock('nbTitle');
-export const NbSection = textBlock('nbSection');
-export const NbQuote = textBlock('nbQuote');
+export const NbTitle = textBlock('nbTitle', undefined, true);
+export const NbSection = textBlock('nbSection', undefined, true);
+export const NbQuote = textBlock('nbQuote', undefined, true);
 export const NbStep = textBlock('nbStep');
 /** Block math keeps dir attr for schema uniformity; NodeViews force LTR isolate visually. */
 export const NbMath = textBlock('nbMath');
@@ -234,6 +259,75 @@ export const MathMark = Mark.create({
       }),
       0,
     ];
+  },
+});
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    link: {
+      setLink: (attributes: { href: string; target?: string | null; rel?: string | null; class?: string | null; title?: string | null }) => ReturnType;
+      toggleLink: (attributes?: { href: string; target?: string | null; rel?: string | null; class?: string | null; title?: string | null }) => ReturnType;
+      unsetLink: () => ReturnType;
+    };
+  }
+}
+
+export const LinkMark = Mark.create({
+  name: 'link',
+  priority: 1000,
+  keepOnSplit: false,
+  inclusive: false,
+
+  addAttributes() {
+    return {
+      href: {
+        default: null,
+        parseHTML: element => sanitizeUrl(element.getAttribute('href')),
+        renderHTML: attributes => {
+          const href = sanitizeUrl(attributes.href);
+          if (!href) return {};
+          return { href };
+        },
+      },
+      target: {
+        default: '_blank',
+      },
+      rel: {
+        default: 'noopener noreferrer',
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'a[href]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['a', mergeAttributes(HTMLAttributes, { target: '_blank', rel: 'noopener noreferrer' }), 0];
+  },
+
+  addCommands() {
+    return {
+      setLink:
+        attributes =>
+        ({ chain }) => {
+          const href = sanitizeUrl(attributes.href);
+          if (!href) return false;
+          return chain().setMark(this.name, { ...attributes, href }).run();
+        },
+      toggleLink:
+        attributes =>
+        ({ chain }) => {
+          const href = attributes?.href ? sanitizeUrl(attributes.href) : null;
+          if (!href) return false;
+          return chain().toggleMark(this.name, { ...attributes, href }, { extendEmptyMarkRange: true }).run();
+        },
+      unsetLink:
+        () =>
+        ({ chain }) => {
+          return chain().unsetMark(this.name, { extendEmptyMarkRange: true }).run();
+        },
+    };
   },
 });
 
@@ -477,6 +571,7 @@ export function createNotebookTiptapExtensions() {
     BackgroundColor,
     Highlight.configure({ multicolor: true }),
     MathMark,
+    LinkMark,
   ];
 }
 
@@ -505,4 +600,5 @@ export const ALLOWED_MARK_TYPES = new Set([
   'textStyle',
   'highlight',
   'math',
+  'link',
 ]);

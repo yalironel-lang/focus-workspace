@@ -81,7 +81,7 @@ describe('versioned canonical codec through actual editable schema', () => {
   });
   it('does not infer version from text and rejects unsupported versions', () => {
     const body = serializeNotebookBlocks([paragraph('# literal')], 1);
-    expect(parseNotebookBody(body)[0]).toMatchObject({ kind: 'paragraph', text: body });
+    expect(() => parseNotebookBody(body)).toThrow('Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion');
     expect(() => parseNotebookBody(body, 2)).toThrow('Unsupported');
     expect(() => parseNotebookBody('# legacy', 1)).toThrow();
   });

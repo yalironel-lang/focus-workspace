@@ -3,7 +3,9 @@
  * Marks are stored as character offsets over plain text (no TipTap).
  */
 
-export type InlineMarkType = 'b' | 'i' | 'u' | 's' | 'fs' | 'fg' | 'bg' | 'hl' | 'm';
+import { isCanonicalUrl } from './urlSanitizer';
+
+export type InlineMarkType = 'b' | 'i' | 'u' | 's' | 'fs' | 'fg' | 'bg' | 'hl' | 'm' | 'a';
 
 export interface InlineMark {
   s: number;
@@ -20,7 +22,7 @@ export interface RichTextLine {
 const MARK_PREFIX_OPEN = '\u27e8m\u27e9';
 const MARK_PREFIX_CLOSE = '\u27e8/m\u27e9';
 
-const VALID_TYPES = new Set<InlineMarkType>(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl', 'm']);
+const VALID_TYPES = new Set<InlineMarkType>(['b', 'i', 'u', 's', 'fs', 'fg', 'bg', 'hl', 'm', 'a']);
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
@@ -30,6 +32,7 @@ function normalizeMark(m: InlineMark, len: number): InlineMark | null {
   const s = clamp(Math.floor(m.s), 0, len);
   const e = clamp(Math.floor(m.e), 0, len);
   if (e <= s || !VALID_TYPES.has(m.t)) return null;
+  if (m.t === 'a' && !isCanonicalUrl(m.v)) return null;
   const out: InlineMark = { s, e, t: m.t };
   if (m.v != null && m.v !== '') out.v = String(m.v);
   return out;
@@ -78,6 +81,7 @@ function parseMarksJson(jsonPart: string, baseOffset: number): InlineMark[] {
       const e = typeof rec.e === 'number' ? rec.e : NaN;
       const t = rec.t as InlineMarkType;
       if (!VALID_TYPES.has(t)) continue;
+      if (t === 'a' && (typeof rec.v !== 'string' || !rec.v.trim())) continue;
       marks.push({
         s: s + baseOffset,
         e: e + baseOffset,
@@ -199,13 +203,15 @@ export function marksAtSelection(
   if (end <= start) return {};
   const active: Partial<Record<InlineMarkType, string | true>> = {};
   for (const t of VALID_TYPES) {
-    if (t === 'fs' || t === 'fg' || t === 'bg' || t === 'hl') continue;
+    if (t === 'fs' || t === 'fg' || t === 'bg' || t === 'hl' || t === 'a') continue;
     if (isMarkActiveOnRange(marks, start, end, t)) active[t] = true;
   }
   for (const t of ['fg', 'bg', 'hl'] as const) {
     const covering = marks.filter(m => m.t === t && m.s <= start && m.e >= end);
     if (covering.length === 1 && covering[0]!.v) active[t] = covering[0]!.v;
   }
+  const coveringA = marks.filter(m => m.t === 'a' && m.s <= start && m.e >= end);
+  if (coveringA.length === 1 && coveringA[0]!.v) active.a = coveringA[0]!.v;
   // Only report fs when an explicit mark covers the range (toolbar uses fontSizeAtSelection for default/mixed UI).
   const coveringFs = marks.filter(m => m.t === 'fs' && m.s <= start && m.e >= end);
   if (coveringFs.length === 1 && coveringFs[0]!.v) {
@@ -250,6 +256,7 @@ export function applyMarkRange(
   value?: string,
 ): InlineMark[] {
   if (end <= start) return marks;
+  if (type === 'a' && !isCanonicalUrl(value)) return marks;
   const without = removeMarksInRange(marks, start, end, new Set([type]));
   const next: InlineMark = { s: start, e: end, t: type };
   if (value != null && value !== '') next.v = value;

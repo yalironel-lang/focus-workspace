@@ -13,6 +13,7 @@ import {
 } from '../notebookInlineMarks';
 import { NotebookTiptapConversionError } from './errors';
 import { ALLOWED_MARK_TYPES } from './extensions';
+import { sanitizeUrl } from '../urlSanitizer';
 
 const MARK_TYPE_ORDER: Record<InlineMarkType, number> = {
   b: 0,
@@ -24,6 +25,7 @@ const MARK_TYPE_ORDER: Record<InlineMarkType, number> = {
   bg: 6,
   hl: 7,
   m: 8,
+  a: 9,
 };
 
 /** Merge touching/overlapping ranges of the same type+value (TipTap segments fragment spans). */
@@ -113,6 +115,9 @@ function segmentToTiptapMarks(
   const hl = types.get('hl');
   if (hl) marks.push({ type: 'highlight', attrs: { color: hl } });
 
+  const a = types.get('a');
+  if (a) marks.push({ type: 'link', attrs: { href: a } });
+
   return marks.length ? marks : undefined;
 }
 
@@ -125,6 +130,7 @@ export function richLineToTiptapInline(plain: string, marks: InlineMark[] = []):
     if (seg.types.has('m')) {
       const nonMathTypes = new Map(seg.types);
       nonMathTypes.delete('m');
+      nonMathTypes.delete('a');
       const otherMarks = segmentToTiptapMarks(nonMathTypes);
       return otherMarks
         ? { type: 'nbInlineMath', attrs: { text }, marks: otherMarks }
@@ -203,6 +209,19 @@ function tiptapMarkToInline(
       }
       break;
     }
+    case 'link': {
+      const rawHref = mark.attrs?.href;
+      const sanitized = sanitizeUrl(rawHref);
+      if (!sanitized) {
+        throw new NotebookTiptapConversionError(
+          'unsupported_attr',
+          `Unsafe or invalid link href "${String(rawHref)}" cannot be persisted`,
+          'href',
+        );
+      }
+      out.push({ s: start, e: end, t: 'a', v: sanitized });
+      break;
+    }
     default:
       throw new NotebookTiptapConversionError(
         'unsupported_mark',
@@ -242,7 +261,7 @@ export function tiptapInlineToRichLine(nodes: JSONContent[] | undefined): {
       plain += mathText;
       marks.push({ s: start, e: end, t: 'm' });
       for (const mark of node.marks ?? []) {
-        if (mark.type !== 'math') {
+        if (mark.type !== 'math' && mark.type !== 'link') {
           tiptapMarkToInline(mark, start, end, marks);
         }
       }

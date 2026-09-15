@@ -10,6 +10,8 @@
  * - Must not inject Unicode bidi control characters into content
  */
 
+import type { TextAlignment } from '../notebookDialect';
+
 export type NotebookTextDir = 'auto' | 'ltr' | 'rtl';
 
 export const NOTEBOOK_TEXT_DIRS = ['auto', 'ltr', 'rtl'] as const;
@@ -129,6 +131,7 @@ export function notebookDirAttribute() {
 export function notebookDirWrapperProps(
   dir: NotebookTextDir | null | undefined,
   text: string,
+  align?: TextAlignment | null,
 ): {
   dir: 'auto' | 'ltr' | 'rtl';
   'data-nb-dir': NotebookTextDir;
@@ -138,7 +141,7 @@ export function notebookDirWrapperProps(
   const normalized = normalizeTextDir(dir);
   const effective = resolveEffectiveDir(normalized, text);
   const style: CSSPropertiesLike = {
-    textAlign: 'start',
+    textAlign: align || 'start',
   };
   if (normalized === 'auto') {
     // Let HTML dir=auto drive caret/BiDi; plaintext helps paragraph-level first-strong.
@@ -156,7 +159,7 @@ export function notebookDirWrapperProps(
 }
 
 type CSSPropertiesLike = {
-  textAlign: 'start';
+  textAlign: 'start' | 'left' | 'center' | 'right';
   direction?: 'ltr' | 'rtl';
   unicodeBidi?: 'plaintext' | 'normal';
 };
