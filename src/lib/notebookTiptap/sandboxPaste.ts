@@ -3,6 +3,9 @@
  * Newlines → dialect blocks (via parseNotebookLine), never hardBreak.
  * HTML-only paste is refused.
  *
+ * M6.4B: paste inside a table cell stays in that cell as single-line plain text.
+ * No top-level block creation, no HTML/TSV table import.
+ *
  * Policy: do NOT strip Unicode bidi control characters from user paste.
  * ZIKUK implements RTL via DOM dir/isolation and never injects bidi controls.
  */
@@ -26,8 +29,31 @@ function linesToJsonNodes(text: string): JSONContent[] {
   });
 }
 
+function selectionInsideTableCell(state: {
+  selection: { $from: { depth: number; node: (d: number) => { type: { name: string } } } };
+}): boolean {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const name = $from.node(d).type.name;
+    if (name === 'nbTableCell' || name === 'nbTableHeader') return true;
+    if (name === 'nbTable') return false;
+  }
+  return false;
+}
+
+/** Collapse pasted plain text into one cell-safe string (no new rows/cols/blocks). */
+function normalizeCellPasteText(plain: string): string {
+  return plain
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/\n+/g, ' ');
+}
+
 export const NotebookSandboxPaste = Extension.create({
   name: 'notebookSandboxPaste',
+  // Registered after table extensions; keep priority high within that slot.
+  priority: 1200,
 
   addProseMirrorPlugins() {
     return [
@@ -37,9 +63,21 @@ export const NotebookSandboxPaste = Extension.create({
           handlePaste(view, event) {
             const plain = event.clipboardData?.getData('text/plain') ?? '';
             if (!plain) {
+              // HTML-only (incl. HTML tables) — refuse.
               event.preventDefault();
               return true;
             }
+
+            // M6.4B: keep paste inside the active cell; never create top-level blocks.
+            if (selectionInsideTableCell(view.state)) {
+              event.preventDefault();
+              const text = normalizeCellPasteText(plain);
+              if (!text) return true;
+              const { from, to } = view.state.selection;
+              view.dispatch(view.state.tr.insertText(text, from, to).scrollIntoView());
+              return true;
+            }
+
             event.preventDefault();
             const nodesJson = linesToJsonNodes(plain);
             const schema = view.state.schema;
@@ -53,9 +91,6 @@ export const NotebookSandboxPaste = Extension.create({
             }
             if (!pmNodes.length) return true;
             const fragment = Fragment.fromArray(pmNodes);
-            // Plain paragraph edges should join the surrounding text, just like
-            // native text paste. Keep explicit dialect block edges closed so
-            // pasting a list/callout still inserts that existing block type.
             const first = pmNodes[0];
             const last = pmNodes[pmNodes.length - 1];
             const openStart = first.type.name === 'nbParagraph' && first.attrs.variant == null ? 1 : 0;

@@ -15,6 +15,7 @@ import type { Editor } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { inheritDirForNewBlock } from './direction';
+import { isSelectionInsideTable, isSelectionInsideTableCell } from './tableCommands';
 
 export const PROTECTED_ATOMS = new Set([
   'nbImageRef',
@@ -32,6 +33,11 @@ export function isProtectedBlockAtom(node: ProseMirrorNode | null | undefined): 
 export function isProtectedAtom(node: ProseMirrorNode | null | undefined): boolean {
   if (!node) return false;
   return node.isAtom || PROTECTED_ATOMS.has(node.type.name);
+}
+
+/** Whole-table NodeSelection — nested content, but protected like atoms against replace-by-typing. */
+export function isTableBlock(node: ProseMirrorNode | null | undefined): boolean {
+  return Boolean(node && node.type.name === 'nbTable');
 }
 
 const LISTISH = new Set(['nbBullet', 'nbOrdered', 'nbTask', 'nbStep']);
@@ -77,7 +83,8 @@ export const NotebookSandboxKeymap = Extension.create({
           if (sel.node.isInline) {
             return editor.commands.setTextSelection(sel.to);
           }
-          if (isProtectedBlockAtom(sel.node)) {
+          // Protected atoms + whole-table NodeSelection: insert/focus paragraph after.
+          if (isProtectedBlockAtom(sel.node) || isTableBlock(sel.node)) {
             const { doc } = editor.state;
             const afterPos = sel.to;
             const $after = doc.resolve(afterPos);
@@ -109,6 +116,12 @@ export const NotebookSandboxKeymap = Extension.create({
             })
             .focus()
             .run();
+        }
+
+        // M6.4B: cells hold exactly one nbParagraph — Enter must not split into a second.
+        // Soft hardBreak is unsupported. Enter inside a cell is a structural no-op.
+        if (isSelectionInsideTableCell(editor)) {
+          return true;
         }
 
         const info = parentInfo(editor);
@@ -194,6 +207,11 @@ export const NotebookSandboxKeymap = Extension.create({
         const info = parentInfo(editor);
         if (!info.atStart) return false;
 
+        // M6.4B: never joinBackward out of a table cell.
+        if (isSelectionInsideTableCell(editor)) {
+          return true;
+        }
+
         if (info.type === 'nbBullet' && info.empty) {
           const depth = Number(info.attrs.depth ?? 0);
           if (depth > 0) {
@@ -232,7 +250,7 @@ export const NotebookSandboxKeymap = Extension.create({
         if (editor.state.selection.$from.parent.type.name === 'doc') {
           const { $from } = editor.state.selection;
           const nodeBefore = $from.nodeBefore;
-          if (isProtectedBlockAtom(nodeBefore)) {
+          if (isProtectedBlockAtom(nodeBefore) || isTableBlock(nodeBefore)) {
             const prevBlockPos = $from.pos - (nodeBefore?.nodeSize ?? 0);
             return editor
               .chain()
@@ -250,8 +268,8 @@ export const NotebookSandboxKeymap = Extension.create({
           const blockIndex = $from.index(0);
           if (blockIndex > 0) {
             const prevBlock = editor.state.doc.child(blockIndex - 1);
-            if (isProtectedBlockAtom(prevBlock)) {
-              // Select the adjacent atom instead of silently deleting it.
+            if (isProtectedBlockAtom(prevBlock) || isTableBlock(prevBlock)) {
+              // Select the adjacent atom/table instead of silently deleting it.
               // A second explicit Backspace/Delete on NodeSelection will delete it.
               const currentBlockPos = $from.before(1);
               const prevBlockPos = currentBlockPos - prevBlock.nodeSize;
@@ -298,7 +316,7 @@ export const NotebookSandboxKeymap = Extension.create({
         if (editor.state.selection.$from.parent.type.name === 'doc') {
           const { $from } = editor.state.selection;
           const nodeAfter = $from.nodeAfter;
-          if (isProtectedBlockAtom(nodeAfter)) {
+          if (isProtectedBlockAtom(nodeAfter) || isTableBlock(nodeAfter)) {
             const nextBlockPos = $from.pos;
             return editor
               .chain()
@@ -316,11 +334,15 @@ export const NotebookSandboxKeymap = Extension.create({
         const atEnd = $from.parentOffset === parent.content.size;
 
         if (atEnd) {
+          // M6.4B: never joinForward out of a table cell into top-level content.
+          if (isSelectionInsideTableCell(editor)) {
+            return true;
+          }
           const blockIndex = $from.index(0);
           if (blockIndex < editor.state.doc.childCount - 1) {
             const nextBlock = editor.state.doc.child(blockIndex + 1);
-            if (isProtectedBlockAtom(nextBlock)) {
-              // Select the adjacent atom instead of silently deleting it.
+            if (isProtectedBlockAtom(nextBlock) || isTableBlock(nextBlock)) {
+              // Select the adjacent atom/table instead of silently deleting it.
               const nextBlockPos = $from.after(1);
               return editor
                 .chain()
@@ -338,6 +360,8 @@ export const NotebookSandboxKeymap = Extension.create({
       },
 
       Tab: ({ editor }) => {
+        // Inside tables: defer to NbTable goToNextCell (do not swallow Tab).
+        if (isSelectionInsideTable(editor)) return false;
         const info = parentInfo(editor);
         if (info.type !== 'nbBullet') return true;
         const depth = Number(info.attrs.depth ?? 0);
@@ -346,6 +370,7 @@ export const NotebookSandboxKeymap = Extension.create({
       },
 
       'Shift-Tab': ({ editor }) => {
+        if (isSelectionInsideTable(editor)) return false;
         const info = parentInfo(editor);
         if (info.type !== 'nbBullet') return true;
         const depth = Number(info.attrs.depth ?? 0);
@@ -363,7 +388,7 @@ export const NotebookSandboxKeymap = Extension.create({
   },
 });
 
-/** Guard: reject transactions that introduce hardBreak or depth>2 bullets. */
+/** Guard: reject transactions that introduce hardBreak, depth>2 bullets, or illegal tables. */
 export const NotebookSandboxGuards = Extension.create({
   name: 'notebookSandboxGuards',
 
@@ -374,8 +399,31 @@ export const NotebookSandboxGuards = Extension.create({
           if (!tr.docChanged) return true;
           let ok = true;
           tr.doc.descendants(node => {
+            if (!ok) return false;
             if (node.type.name === 'hardBreak') ok = false;
             if (node.type.name === 'nbBullet' && Number(node.attrs.depth ?? 0) > 2) ok = false;
+            if (node.type.name === 'nbTableHeader') ok = false;
+            if (node.type.name === 'nbTableCell') {
+              const { colspan, rowspan, colwidth, align } = node.attrs as {
+                colspan?: unknown;
+                rowspan?: unknown;
+                colwidth?: unknown;
+                align?: unknown;
+              };
+              if (colspan !== undefined && colspan !== 1) ok = false;
+              if (rowspan !== undefined && rowspan !== 1) ok = false;
+              if (colwidth != null) ok = false;
+              if (align != null) ok = false;
+              if (node.childCount !== 1 || node.firstChild?.type.name !== 'nbParagraph') ok = false;
+            }
+            if (node.type.name === 'nbTable') {
+              if (node.childCount < 1 || node.childCount > 20) ok = false;
+              const cols = node.firstChild?.childCount ?? 0;
+              if (cols < 1 || cols > 20) ok = false;
+              for (let i = 0; i < node.childCount; i++) {
+                if (node.child(i).childCount !== cols) ok = false;
+              }
+            }
             return ok;
           });
           return ok;
@@ -390,7 +438,7 @@ export function getProtectedAtomInSelection(
 ): { node: ProseMirrorNode; pos: number; to: number } | null {
   const { selection } = state;
   if (selection instanceof NodeSelection) {
-    if (isProtectedAtom(selection.node)) {
+    if (isProtectedAtom(selection.node) || isTableBlock(selection.node)) {
       return { node: selection.node, pos: selection.from, to: selection.to };
     }
   }
@@ -399,7 +447,7 @@ export function getProtectedAtomInSelection(
     const node = $from.nodeAfter;
     if (
       node &&
-      isProtectedBlockAtom(node) &&
+      (isProtectedBlockAtom(node) || isTableBlock(node)) &&
       selection.from === $from.pos &&
       selection.to === $from.pos + node.nodeSize
     ) {
@@ -537,7 +585,7 @@ export const NotebookSandboxDocumentFlow = Extension.create({
             const last = doc.lastChild;
             if (!last) return false;
 
-            if (!isProtectedBlockAtom(last)) return false;
+            if (!isProtectedBlockAtom(last) && !isTableBlock(last)) return false;
 
             if (event.target === view.dom || pos >= doc.content.size) {
               const insertPos = doc.content.size;

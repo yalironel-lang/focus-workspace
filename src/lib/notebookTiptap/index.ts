@@ -53,6 +53,23 @@ export {
   type CandidateBlockTarget,
 } from './candidateBlockCommands';
 
+export {
+  DEFAULT_INSERT_TABLE_COLS,
+  DEFAULT_INSERT_TABLE_ROWS,
+  collapseSelectionToEndOfTableCell,
+  createNotebookTableJson,
+  isEditorTableDocSerializable,
+  isSelectionInsideTable,
+  isSelectionInsideTableCell,
+  isValidTableSize,
+  navigateNotebookTableCell,
+  readCandidateTableState,
+  readTableContext,
+  runCandidateTableCommand,
+  type CandidateTableCommand,
+  type CandidateTableState,
+} from './tableCommands';
+
 export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksToTiptapDoc';
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';
 export { richLineToTiptapInline, tiptapInlineToRichLine } from './inlineBridge';

@@ -72,7 +72,6 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     NotebookSandboxKeymap,
     NotebookSandboxGuards,
     NotebookSandboxDocumentFlow,
-    NotebookSandboxPaste,
     ...(options.enableDelimiterMathIsolate ? [NotebookSandboxInlineMathIsolate] : []),
     NbParagraph.extend({
       addNodeView() {
@@ -149,6 +148,8 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
       },
     }),
     ...createNotebookTableExtensions(),
+    // After tables so cell paste wins over prosemirror-tables HTML import.
+    NotebookSandboxPaste,
     NbInlineMath,
     Bold,
     Italic,

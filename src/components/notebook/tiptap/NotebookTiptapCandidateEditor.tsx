@@ -548,6 +548,27 @@ export function NotebookTiptapCandidateEditor({
         .ProseMirror-focused .ProseMirror-gapcursor {
           display: block;
         }
+        /* M6.4B: TipTap tables ship without borders — empty grid must stay visible. */
+        .nb-tiptap-candidate-prosemirror .tableWrapper {
+          margin: 0.5em 0;
+          overflow-x: auto;
+        }
+        .nb-tiptap-candidate-prosemirror table.nb-table,
+        .nb-tiptap-candidate-prosemirror table[data-nb="nbTable"] {
+          border-collapse: collapse;
+          width: 100%;
+          table-layout: fixed;
+        }
+        .nb-tiptap-candidate-prosemirror td.nb-table-cell,
+        .nb-tiptap-candidate-prosemirror th.nb-table-header,
+        .nb-tiptap-candidate-prosemirror td[data-nb="nbTableCell"],
+        .nb-tiptap-candidate-prosemirror th[data-nb="nbTableHeader"] {
+          border: 1px solid rgba(148, 163, 184, 0.9);
+          min-width: 3rem;
+          min-height: 1.75rem;
+          padding: 6px 8px;
+          vertical-align: top;
+        }
       `}</style>
 
       <div
