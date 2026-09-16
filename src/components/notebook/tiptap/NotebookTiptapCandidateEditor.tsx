@@ -49,6 +49,7 @@ import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
+import { resetCandidateEditorHistory } from '../../../lib/notebookTiptap/candidatePageHistory';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
 import {
   type NotebookQaDiagContext,
@@ -215,6 +216,14 @@ export function NotebookTiptapCandidateEditor({
   );
 
   const prevPageKeyRef = useRef(pageKey);
+  /**
+   * Live page identity for onUpdate / emissions.
+   * Synced synchronously when `pageKey` changes (parent flushes the old page
+   * before updating this prop). Never rely on the create-time useEditor closure.
+   */
+  const pageKeyRef = useRef(pageKey);
+  const sourceBodyCodecVersionRef = useRef(sourceBodyCodecVersion);
+  sourceBodyCodecVersionRef.current = sourceBodyCodecVersion;
   type CandidateEmittedItem = {
     pageKey: string;
     body: string;
@@ -225,12 +234,16 @@ export function NotebookTiptapCandidateEditor({
 
   if (prevPageKeyRef.current !== pageKey) {
     prevPageKeyRef.current = pageKey;
+    pageKeyRef.current = pageKey;
     recentEmissionsRef.current = [];
+  } else {
+    pageKeyRef.current = pageKey;
   }
 
   useEffect(() => {
     if (prevPageKeyRef.current !== pageKey) {
       prevPageKeyRef.current = pageKey;
+      pageKeyRef.current = pageKey;
       recentEmissionsRef.current = [];
       userEditedRef.current = false;
       setUserEdited(false);
@@ -331,18 +344,25 @@ export function NotebookTiptapCandidateEditor({
         if (!ed.isEditable) return;
         userEditedRef.current = true;
         setUserEdited(true);
-        const targetCodec = onUserEditRef.current ? 1 : sourceBodyCodecVersion;
+        // Live identity — never the create-time pageKey closed over by useEditor.
+        const emitPageKey = pageKeyRef.current;
+        const targetCodec = onUserEditRef.current ? 1 : sourceBodyCodecVersionRef.current;
         const next = attemptSerialize(ed.getJSON(), true, targetCodec);
         setSnap(next);
         onSnapshot?.(next);
         // M5.2 — guarded real persistence (fail-closed).
         // Only fires when: docChanged + serialization succeeded + prop provided.
-        // Does NOT fire on: mount, setContent, selection, focus, blur.
+        // Does NOT fire on: mount, hydration, programmatic setContent, selection, focus, blur.
         if (next.status === 'SAFE' && next.body !== null) {
           const persistFn = onUserEditRef.current;
           if (persistFn) {
             recentEmissionsRef.current = [
-              { pageKey, body: next.body, codecVersion: 1, emittedAt: Date.now() },
+              {
+                pageKey: emitPageKey,
+                body: next.body,
+                codecVersion: 1,
+                emittedAt: Date.now(),
+              },
               ...recentEmissionsRef.current.slice(0, 9),
             ];
             try {
@@ -397,9 +417,11 @@ export function NotebookTiptapCandidateEditor({
     }
 
     // Genuine external update, page switch, or initial load:
+    // Establish the hydrated doc as a non-undoable baseline (M7.5A page-local history).
     userEditedRef.current = false;
     setUserEdited(false);
     editor.commands.setContent(load.content, { emitUpdate: false });
+    resetCandidateEditorHistory(editor);
     const next = attemptSerialize(editor.getJSON(), false, sourceBodyCodecVersion);
     setSnap(next);
     onSnapshot?.(next);
