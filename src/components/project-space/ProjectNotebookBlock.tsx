@@ -100,9 +100,11 @@ import {
 import { referencedNotebookImageKeys } from '../../lib/notebookImageRefs';
 import {
   insertNbImageRefAtSelection,
+  replaceNbImageRefAtPos,
   resolveNbImageInsertTarget,
   storeNotebookImageFile,
   type NbImageInsertTarget,
+  type NotebookImageReplaceContext,
 } from '../../lib/notebookTiptap/candidateImageInsert';
 import {
   gcOrphanHandwriting,
@@ -2482,6 +2484,48 @@ export function ProjectNotebookBlock({
       void ingestNotebookImageFile(file, undefined, ctx.insertTarget);
     },
     [ingestNotebookImageFile],
+  );
+
+  /**
+   * M7.2B — Replace Image: store a new asset key, keep width/position.
+   * Cancel/fail leaves the existing node untouched. Page switch aborts body mutation.
+   * Old asset is intentionally retained (Undo must keep working).
+   */
+  const handleReplaceImageFile = useCallback(
+    async (file: File, ctx: NotebookImageReplaceContext) => {
+      const pageAtStart = ctx.pageKey;
+      const stored = await storeNotebookImageFile(file);
+      if (!stored.ok) {
+        if (stored.reason === 'storage_failed') {
+          toast.error('Could not save image — storage may be full.');
+        }
+        return;
+      }
+      const pageNow =
+        contentRef.current.activePageId ??
+        navigationActivePageIdRef.current ??
+        'legacy-body';
+      if (String(pageNow) !== String(pageAtStart)) {
+        return;
+      }
+      const ed = candidateEditorRef.current;
+      if (!ed || ed.isDestroyed) return;
+      const ok = replaceNbImageRefAtPos(ed, ctx.pos, {
+        key: stored.key,
+        alt: stored.alt,
+        width: ctx.width,
+      });
+      if (!ok) return;
+      if (handwritingUserId && freeSpaceSectionId && objectId) {
+        onNotebookImageSaved({
+          userId: handwritingUserId,
+          sectionId: freeSpaceSectionId,
+          objectId,
+          imageKey: stored.key,
+        });
+      }
+    },
+    [handwritingUserId, freeSpaceSectionId, objectId],
   );
 
   const handleNotebookPaste = useCallback(
@@ -6614,6 +6658,7 @@ export function ProjectNotebookBlock({
               }}
               onUserEdit={tipTapPersistActive ? handleCandidateUserEdit : undefined}
               onInsertImageFile={handleInsertImageFile}
+              onReplaceImageFile={handleReplaceImageFile}
               qaDiagContext={{
                 objectId: String(objectId),
                 propsContent: content,

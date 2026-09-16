@@ -95,6 +95,19 @@ export type NotebookTiptapCandidateEditorProps = {
     file: File,
     ctx: { insertTarget: NbImageInsertTarget },
   ) => void | Promise<void>;
+  /**
+   * M7.2B — replace the selected nbImageRef asset while keeping position/width.
+   * Cancelled picker must not call this. Parent stores via existing nbImageSet pipeline.
+   */
+  onReplaceImageFile?: (
+    file: File,
+    ctx: {
+      pos: number;
+      pageKey: string;
+      prevKey: string;
+      width: number | null;
+    },
+  ) => void | Promise<void>;
 };
 
 function attemptSerialize(
@@ -166,6 +179,7 @@ export function NotebookTiptapCandidateEditor({
   onUserEdit,
   qaDiagContext,
   onInsertImageFile,
+  onReplaceImageFile,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
@@ -173,6 +187,8 @@ export function NotebookTiptapCandidateEditor({
   const [snap, setSnap] = useState<CandidateSerializeSnapshot | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingImageInsertTargetRef = useRef<NbImageInsertTarget | null>(null);
+  const onReplaceImageFileRef = useRef(onReplaceImageFile);
+  onReplaceImageFileRef.current = onReplaceImageFile;
 
   const pageSource = useMemo(
     () => sourceDocumentBody,
@@ -377,7 +393,15 @@ export function NotebookTiptapCandidateEditor({
     return () => onEditorReady?.(null);
   }, [editor, onEditorReady]);
 
-
+  useEffect(() => {
+    if (!editor) return;
+    const storage = editor.storage.notebookImageProduct;
+    storage.pageKey = pageKey;
+    storage.replaceImageFile = (file, ctx) => onReplaceImageFileRef.current?.(file, ctx);
+    return () => {
+      storage.replaceImageFile = undefined;
+    };
+  }, [editor, pageKey, onReplaceImageFile]);
 
   const markState = useEditorState({
     editor,

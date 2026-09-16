@@ -231,3 +231,84 @@ export function selectTopLevelBlockBoundary(view: EditorView, insertPos: number)
   view.focus();
   return true;
 }
+
+/** M7.2B — replace attrs on an existing nbImageRef at a known doc position. */
+export function replaceNbImageRefAtPos(
+  editor: Editor,
+  pos: number,
+  next: { key: string; alt: string; width: number | null },
+): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  if (!next.key.trim()) return false;
+  const node = editor.state.doc.nodeAt(pos);
+  if (!node || node.type.name !== 'nbImageRef') return false;
+
+  return editor
+    .chain()
+    .focus()
+    .command(({ tr }) => {
+      tr.setNodeMarkup(pos, undefined, {
+        key: next.key,
+        alt: next.alt || '',
+        width: next.width,
+      });
+      try {
+        tr.setSelection(NodeSelection.create(tr.doc, pos));
+      } catch {
+        /* best-effort */
+      }
+      return true;
+    })
+    .run();
+}
+
+/**
+ * M7.2B — remove the currently selected nbImageRef via NodeSelection deletion.
+ * Does not touch the asset store (Undo must remain able to restore the reference).
+ */
+export function removeSelectedNbImageRef(editor: Editor): boolean {
+  if (editor.isDestroyed || !editor.isEditable) return false;
+  const sel = editor.state.selection;
+  if (!(sel instanceof NodeSelection) || sel.node.type.name !== 'nbImageRef') {
+    return false;
+  }
+
+  if (editor.state.doc.childCount <= 1) {
+    return editor
+      .chain()
+      .focus()
+      .command(({ tr, state }) => {
+        const pNode = state.schema.nodes.nbParagraph.create({
+          variant: null,
+          dir: 'auto',
+        });
+        tr.replaceWith(sel.from, sel.to, pNode);
+        tr.setSelection(TextSelection.create(tr.doc, 1));
+        return true;
+      })
+      .run();
+  }
+
+  return editor.chain().focus().deleteSelection().run();
+}
+
+export type NotebookImageReplaceContext = {
+  pos: number;
+  pageKey: string;
+  prevKey: string;
+  width: number | null;
+};
+
+export type NotebookImageProductStorage = {
+  pageKey: string;
+  replaceImageFile?: (
+    file: File,
+    ctx: NotebookImageReplaceContext,
+  ) => void | Promise<void>;
+};
+
+declare module '@tiptap/core' {
+  interface Storage {
+    notebookImageProduct: NotebookImageProductStorage;
+  }
+}

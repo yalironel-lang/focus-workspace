@@ -26,6 +26,10 @@ import {
   notebookDirWrapperProps,
   type NotebookTextDir,
 } from './direction';
+import {
+  NOTEBOOK_IMAGE_FILE_ACCEPT,
+  removeSelectedNbImageRef,
+} from './candidateImageInsert';
 
 const baseText: CSSProperties = {
   fontFamily: NB_FONT_STACK,
@@ -392,6 +396,7 @@ export function SandboxImageRefView({
   const displayWidth = liveWidth ?? persistedWidth;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const isDraggingRef = useRef(false);
 
   const handleSelect = useCallback(
@@ -458,6 +463,23 @@ export function SandboxImageRefView({
     [displayWidth, node.attrs.width, updateAttributes],
   );
 
+  const actionBtnStyle: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '4px 8px',
+    fontSize: 11,
+    fontWeight: 500,
+    lineHeight: '14px',
+    color: '#f8fafc',
+    background: 'rgba(15, 23, 42, 0.88)',
+    border: '1px solid rgba(255, 255, 255, 0.18)',
+    borderRadius: 6,
+    cursor: 'pointer',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+    userSelect: 'none',
+  };
+
   return (
     <NodeViewWrapper
       as="div"
@@ -496,7 +518,6 @@ export function SandboxImageRefView({
 
         {selected && (
           <>
-            {/* Right edge handle */}
             <div
               data-nb-resize-handle="right"
               onPointerDown={startResize('right')}
@@ -515,8 +536,6 @@ export function SandboxImageRefView({
                 boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
               }}
             />
-
-            {/* Left edge handle */}
             <div
               data-nb-resize-handle="left"
               onPointerDown={startResize('left')}
@@ -535,8 +554,6 @@ export function SandboxImageRefView({
                 boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
               }}
             />
-
-            {/* Bottom-right corner handle */}
             <div
               data-nb-resize-handle="se"
               onPointerDown={startResize('se')}
@@ -555,8 +572,6 @@ export function SandboxImageRefView({
                 boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
               }}
             />
-
-            {/* Bottom-left corner handle */}
             <div
               data-nb-resize-handle="sw"
               onPointerDown={startResize('sw')}
@@ -575,46 +590,98 @@ export function SandboxImageRefView({
                 boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
               }}
             />
-
-            {/* Contextual Reset Size button if custom width is set */}
-            {persistedWidth != null && (
-              <button
-                type="button"
-                data-nb-image-reset="true"
-                title="Reset to natural size"
-                onClick={e => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  updateAttributes({ width: null });
-                }}
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  zIndex: 25,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '3px 8px',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  lineHeight: '14px',
-                  color: '#f8fafc',
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  backdropFilter: 'blur(6px)',
-                  border: '1px solid rgba(255, 255, 255, 0.18)',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                  userSelect: 'none',
-                }}
-              >
-                Reset size
-              </button>
-            )}
           </>
         )}
       </div>
+
+      {selected ? (
+        <div
+          data-nb-image-actions="1"
+          contentEditable={false}
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            marginTop: 8,
+            lineHeight: 1.2,
+          }}
+        >
+          <button
+            type="button"
+            data-nb-image-replace="1"
+            title="Replace image"
+            style={actionBtnStyle}
+            onMouseDown={e => e.preventDefault()}
+            onClick={e => {
+              e.stopPropagation();
+              e.preventDefault();
+              selectBlockAtom(editor, getPos, e);
+              replaceInputRef.current?.click();
+            }}
+          >
+            Replace Image
+          </button>
+          {persistedWidth != null ? (
+            <button
+              type="button"
+              data-nb-image-reset="true"
+              title="Reset to natural size"
+              style={actionBtnStyle}
+              onMouseDown={e => e.preventDefault()}
+              onClick={e => {
+                e.stopPropagation();
+                e.preventDefault();
+                updateAttributes({ width: null });
+              }}
+            >
+              Reset Size
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-nb-image-remove="1"
+            title="Remove image"
+            style={actionBtnStyle}
+            onMouseDown={e => e.preventDefault()}
+            onClick={e => {
+              e.stopPropagation();
+              e.preventDefault();
+              if (!editor) return;
+              selectBlockAtom(editor, getPos, e);
+              removeSelectedNbImageRef(editor);
+            }}
+          >
+            Remove Image
+          </button>
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
+            data-nb-image-replace-input="1"
+            aria-hidden="true"
+            tabIndex={-1}
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0] ?? null;
+              e.target.value = '';
+              if (!file || !editor) return;
+              const pos = typeof getPos === 'function' ? getPos() : undefined;
+              if (typeof pos !== 'number') return;
+              const product = editor.storage.notebookImageProduct;
+              const width =
+                typeof node.attrs.width === 'number' && Number.isFinite(node.attrs.width)
+                  ? node.attrs.width
+                  : null;
+              void product?.replaceImageFile?.(file, {
+                pos,
+                pageKey: product.pageKey ?? '',
+                prevKey: String(node.attrs.key ?? ''),
+                width,
+              });
+            }}
+          />
+        </div>
+      ) : null}
     </NodeViewWrapper>
   );
 }
