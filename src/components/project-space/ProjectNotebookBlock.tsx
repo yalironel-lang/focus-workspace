@@ -26,7 +26,6 @@ import {
   addNotebookPage,
   addNotebookSection,
   applyNotebookPersist,
-  collectNotebookPageInkKeys,
   findActivePage,
   getNotebookWorkspaceBreadcrumb,
   inkPageKeyForNotebookPage,
@@ -97,7 +96,10 @@ import {
   gcOrphanNotebookImages,
   hydrateNotebookImagesWithCloud,
 } from '../../lib/notebookImageCloud';
-import { referencedNotebookImageKeys } from '../../lib/notebookImageRefs';
+import {
+  collectNotebookReferencedImageKeys,
+  collectNotebookReferencedHandwritingKeys,
+} from '../../lib/notebookAssetRefs';
 import {
   insertNbImageRefAtSelection,
   replaceNbImageRefAtPos,
@@ -117,7 +119,7 @@ import {
   hydrateHandwritingBlocks,
   hwDelete,
 } from '../../lib/notebookHandwritingStore';
-import { newHandwritingKey, referencedHandwritingKeys, PAGE_INK_BLOCK_KEY, PAGE_INK_INITIAL_HEIGHT } from '../../lib/handwritingTypes';
+import { newHandwritingKey, PAGE_INK_BLOCK_KEY, PAGE_INK_INITIAL_HEIGHT } from '../../lib/handwritingTypes';
 import {
   isPenPointer,
   noteNotebookKeyboardTyping,
@@ -1428,6 +1430,8 @@ export function ProjectNotebookBlock({
   );
   const contentRef = useRef(content);
   contentRef.current = effectiveContent;
+  /** TipTap live body ahead of flushed pages[] — unioned into asset GC roots (M7.5C1). */
+  const candidateLiveRepresentationRef = useRef<NotebookBodyRepresentation | null>(null);
   // Both editors decode and serialize the exact projected page's codec.
   function parseBodyToBlocks(body: string, prev?: Block[], version = contentRef.current.bodyCodecVersion): Block[] {
     return parseBodyToBlocksForCodec(body, prev, version);
@@ -1483,8 +1487,11 @@ export function ProjectNotebookBlock({
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
       .map(b => b.key);
-    const fromBody = referencedNotebookImageKeys(content.body ?? '');
-    const keys = [...new Set([...fromBlocks, ...fromBody])];
+    const keys = collectNotebookReferencedImageKeys({
+      pages: content.pages,
+      liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
+      liveBlockImageKeys: fromBlocks,
+    });
     void hydrateNotebookImages(keys);
     if (handwritingUserId && freeSpaceSectionId && objectId) {
       void hydrateNotebookImagesWithCloud({
@@ -1494,15 +1501,18 @@ export function ProjectNotebookBlock({
         imageKeys: keys,
       });
     }
-  }, [blocks, content.body, handwritingUserId, freeSpaceSectionId, objectId]);
+  }, [blocks, content.body, content.pages, handwritingUserId, freeSpaceSectionId, objectId]);
 
   useEffect(() => {
     if (!objectId || !handwritingUserId || !freeSpaceSectionId) return;
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
       .map(b => b.key);
-    const fromBody = referencedNotebookImageKeys(content.body ?? '');
-    const imageKeys = [...new Set([...fromBlocks, ...fromBody])];
+    const imageKeys = collectNotebookReferencedImageKeys({
+      pages: content.pages,
+      liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
+      liveBlockImageKeys: fromBlocks,
+    });
     const timer = window.setTimeout(() => {
       void gcOrphanNotebookImages({
         userId: handwritingUserId,
@@ -1512,7 +1522,7 @@ export function ProjectNotebookBlock({
       });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [blocks, content.body, objectId, handwritingUserId, freeSpaceSectionId]);
+  }, [blocks, content.body, content.pages, objectId, handwritingUserId, freeSpaceSectionId]);
 
   useEffect(() => {
     if (!objectId) return;
@@ -1527,11 +1537,12 @@ export function ProjectNotebookBlock({
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
-    const fromBody = referencedHandwritingKeys(content.body ?? '');
-    const pageInkKeys = workspaceBinderMode
-      ? collectNotebookPageInkKeys(content.pages)
-      : [PAGE_INK_BLOCK_KEY];
-    const hwKeys = [...new Set([...fromBlocks, ...fromBody, ...pageInkKeys])];
+    const hwKeys = collectNotebookReferencedHandwritingKeys({
+      pages: content.pages,
+      liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
+      liveBlockHandwritingKeys: fromBlocks,
+      includeAllPageInkKeys: workspaceBinderMode,
+    });
     const timer = window.setTimeout(() => {
       void gcOrphanHandwritingKeys(objectId, hwKeys).then(deleted => {
         if (!handwritingUserId || !freeSpaceSectionId || deleted.length === 0) return;
@@ -2070,7 +2081,6 @@ export function ProjectNotebookBlock({
     return () => flushNotebookPersist();
   }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
 
-  const candidateLiveRepresentationRef = useRef<NotebookBodyRepresentation | null>(null);
   const candidateEditorRef = useRef<import('@tiptap/core').Editor | null>(null);
 
   const effectivePageKey = effectiveContent.activePageId ?? 'legacy-body';
