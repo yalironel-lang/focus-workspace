@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_NOTEBOOK_TIPTAP_PERSIST?: string;
   /** When true/1, force legacy contentEditable Notebook body editor (emergency override). */
   readonly VITE_NOTEBOOK_LEGACY_CE?: string;
+  /** Explicit opt-in for Notebook engineering QA/status/selection diagnostics. Default off. */
+  readonly VITE_NOTEBOOK_ENGINEERING_CHROME?: string;
 }
 
 interface ImportMeta {

@@ -90,6 +90,7 @@ describe('M5.2 QA3 Delayed-Reflection Regression', () => {
     });
     mem.set('notebookTiptapCandidate', '1');
     mem.set('notebookTiptapPersist', '1');
+    mem.set('notebookEngineeringChrome', '1');
     vi.stubEnv('VITE_NOTEBOOK_TIPTAP_CANDIDATE', 'true');
     vi.stubEnv('VITE_NOTEBOOK_TIPTAP_PERSIST', 'true');
     vi.stubEnv('VITE_NOTEBOOK_V1_PAGES', 'true');

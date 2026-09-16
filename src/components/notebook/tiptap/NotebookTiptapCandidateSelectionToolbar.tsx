@@ -54,6 +54,7 @@ import {
   type CandidateTableCommand,
 } from '../../../lib/notebookTiptap/tableCommands';
 import type { TableMenuAction } from '../../../lib/notebookTiptap/candidateTableUi';
+import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import '../notebookToolbar.css';
 import { NotebookTiptapCandidateBlockPicker } from './NotebookTiptapCandidateBlockPicker';
 import { NotebookTiptapCandidateTableSizePicker } from './NotebookTiptapCandidateTableSizePicker';
@@ -917,7 +918,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
       : null;
 
   const diagnostics =
-    import.meta.env.DEV && typeof document !== 'undefined'
+    isNotebookEngineeringChromeEnabled() && typeof document !== 'undefined'
       ? createPortal(
           <div
             data-nb-candidate-sel-diag="1"
@@ -930,7 +931,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
             data-nb-candidate-cmd-ok={
               cmdDiag == null ? '' : cmdDiag.skippedEmpty ? 'skipped-empty' : cmdDiag.ok ? '1' : '0'
             }
-            title="DEV-only candidate selection toolbar diagnostics"
+            title="Opt-in Notebook engineering selection diagnostics"
             style={{
               position: 'fixed',
               right: 10,

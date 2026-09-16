@@ -199,12 +199,10 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
     });
     expect(ed.state.selection.empty).toBe(true);
 
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-nb-candidate-sel-diag="1"]')).toBeTruthy();
-      expect(
-        document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]'),
-      ).toBeNull();
-    });
+    // No selection → product formatting toolbar closed (engineering sel-diag is opt-in).
+    expect(
+      document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]'),
+    ).toBeNull();
 
     act(() => {
       selectPlainRange(ed, 0, 6);
@@ -217,7 +215,6 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
       ) as HTMLElement | null;
       expect(el).toBeTruthy();
       expect(el!.style.position).toBe('fixed');
-      expect(document.querySelector('[data-nb-candidate-sel-should-show="1"]')).toBeTruthy();
     });
 
     const boldBtn = document.querySelector(
@@ -326,8 +323,8 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
       }),
     );
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
-    expect(host!.querySelector('[data-nb-candidate-toolbar-temp="1"]')).toBeTruthy();
-    expect(host!.textContent).toMatch(/Temp DEV tools/i);
+    expect(host!.querySelector('[data-nb-product-toolbar="1"]')).toBeTruthy();
+    expect(host!.textContent).not.toMatch(/Temp DEV tools/i);
 
     act(() => {
       root!.render(
@@ -348,7 +345,7 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
     ).toBeNull();
   });
 
-  it('candidate has no persistence props and badge stays Unsaved', async () => {
+  it('candidate has no persistence props and no candidate badge chrome', async () => {
     const onReady = vi.fn();
     mount(
       createElement(NotebookTiptapCandidateEditor, {
@@ -360,7 +357,9 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
     expect(onReady.mock.calls[0][0].persistence).toBe(false);
     expect(host!.querySelector('[data-nb-candidate-persistence="never"]')).toBeTruthy();
-    expect(host!.textContent).toMatch(/TipTap candidate · Unsaved/);
+    expect(host!.querySelector('[data-nb-candidate-badge="1"]')).toBeNull();
+    expect(host!.textContent).not.toMatch(/TipTap candidate/i);
+    expect(host!.querySelector('[data-nb-product-toolbar="1"]')).toBeTruthy();
   });
 });
 

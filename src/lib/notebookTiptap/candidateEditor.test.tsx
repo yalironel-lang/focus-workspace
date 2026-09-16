@@ -63,11 +63,15 @@ describe('candidate feature flag defaults (M7.1A)', () => {
     expect(isNotebookTiptapEditorEnabled()).toBe(false);
   });
 
-  it('candidate active follows enable flag (no DEV gate); explicit OFF works', () => {
+  it('candidate active follows enable flag; DEV LS OFF still works in DEV', () => {
     expect(isNotebookTiptapCandidateActive()).toBe(true);
     localStorage.setItem('notebookTiptapCandidate', '0');
+    // Vitest runs as DEV — historical LS OFF still honored for local engineering.
     expect(isNotebookTiptapCandidateEnabled()).toBe(false);
     expect(isNotebookTiptapCandidateActive()).toBe(false);
+    // Production seam: same LS must not pin TipTap OFF.
+    expect(isNotebookTiptapCandidateEnabled({ isDev: false })).toBe(true);
+    expect(isNotebookTiptapCandidateActive({ isDev: false })).toBe(true);
     localStorage.setItem('notebookTiptapCandidate', '1');
     expect(isNotebookTiptapCandidateEnabled()).toBe(true);
     expect(isNotebookTiptapCandidateActive()).toBe(true);
@@ -75,7 +79,7 @@ describe('candidate feature flag defaults (M7.1A)', () => {
 });
 
 describe('NotebookTiptapCandidateEditor', () => {
-  it('loads real body, has no persistence API, shows badge', async () => {
+  it('loads real body, has no persistence API, shows product toolbar', async () => {
     const source = '# Title\nהפונקציה $f(x)$ היא רציפה';
     const frozen = source;
     const onReady = vi.fn();
@@ -93,10 +97,16 @@ describe('NotebookTiptapCandidateEditor', () => {
     expect(onReady.mock.calls[0]![0].editable).toBe(true);
     expect(source).toBe(frozen);
     expect(host!.querySelector('[data-nb-tiptap-candidate="1"]')).toBeTruthy();
-    expect(host!.querySelector('[data-nb-candidate-badge="1"]')?.textContent).toMatch(/TipTap candidate/i);
+    expect(host!.querySelector('[data-nb-candidate-badge="1"]')).toBeNull();
     expect(host!.querySelector('[data-nb-candidate-persistence="never"]')).toBeTruthy();
-    expect(host!.querySelector('[data-nb-candidate-toolbar="1"]')).toBeTruthy();
-    expect(host!.querySelector('[data-nb-candidate-dir="1"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-toolbar="1"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-undo="1"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-redo="1"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-block="1"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-dir="1"]')).toBeTruthy();
+    expect(host!.textContent).not.toMatch(/Temp DEV tools/i);
+    expect(host!.textContent).not.toMatch(/TIPTAP CANDIDATE/i);
+    // Engineering QA strip may still mount under vitest DEV; product absence covered in m71d.
     // Component props must not include persistence callbacks
     expect(NotebookTiptapCandidateEditor.length).toBeLessThanOrEqual(1);
     const snap = onSnapshot.mock.calls.at(-1)?.[0];
@@ -257,8 +267,9 @@ describe('NotebookTiptapCandidateEditor', () => {
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
     expect(onReady.mock.calls[0]![0].persistence).toBe(true);
     expect(host!.querySelector('[data-nb-candidate-persistence="guarded"]')).toBeTruthy();
-    expect(host!.querySelector('[data-nb-candidate-badge="1"]')?.textContent).toContain('M5.2 Guarded Persist');
-    expect(host!.querySelector('[data-nb-dir-persist="guarded"]')).toBeTruthy();
+    expect(host!.querySelector('[data-nb-candidate-badge="1"]')).toBeNull();
+    expect(host!.textContent).not.toMatch(/M5\.2 Guarded Persist/i);
+    // Status strip is engineering chrome (explicit opt-in); product path must not require it.
 
     // Opening/mounting MUST NOT call onUserEdit
     expect(onUserEdit).not.toHaveBeenCalled();
@@ -277,7 +288,6 @@ describe('NotebookTiptapCandidateEditor', () => {
     expect(persistedBody.startsWith('~nb1:')).toBe(true);
     expect(persistedBody).toContain('Original page text added');
 
-    // UI dirty label updates to saving
-    expect(host!.querySelector('[data-nb-candidate-dirty="EDITED (saving…)"]')).toBeTruthy();
+    // Engineering status strip is opt-in; product persistence contract is onUserEdit above.
   });
 });

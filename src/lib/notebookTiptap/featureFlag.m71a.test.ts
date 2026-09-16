@@ -96,7 +96,7 @@ describe('M7.1A feature flags — production defaults', () => {
     expect(isNotebookTiptapPersistActive()).toBe(false);
   });
 
-  it('8. explicit historical TipTap OFF is deterministic', () => {
+  it('8. explicit TipTap OFF via env is deterministic; DEV LS OFF still works in DEV', () => {
     vi.stubEnv('VITE_NOTEBOOK_TIPTAP_CANDIDATE', 'false');
     expect(isNotebookTiptapCandidateEnabled()).toBe(false);
     expect(isNotebookTiptapCandidateActive()).toBe(false);
@@ -104,8 +104,18 @@ describe('M7.1A feature flags — production defaults', () => {
 
     vi.unstubAllEnvs();
     mem.set('notebookTiptapCandidate', '0');
-    expect(isNotebookTiptapCandidateEnabled()).toBe(false);
-    expect(isNotebookTiptapCandidateActive()).toBe(false);
+    // Vitest/DEV: historical LS OFF honored for local engineering.
+    expect(isNotebookTiptapCandidateEnabled({ isDev: true })).toBe(false);
+    expect(isNotebookTiptapCandidateActive({ isDev: true })).toBe(false);
+  });
+
+  it('8b. M7.1D: production ignores obsolete localStorage notebookTiptapCandidate=0', () => {
+    mem.set('notebookTiptapCandidate', '0');
+    expect(isNotebookTiptapCandidateEnabled({ isDev: false })).toBe(true);
+    expect(isNotebookTiptapCandidateActive({ isDev: false })).toBe(true);
+    // Emergency CE still wins in production
+    mem.set('notebookLegacyCe', '1');
+    expect(isNotebookTiptapCandidateActive({ isDev: false })).toBe(false);
   });
 
   it('9. persistence cannot be active when TipTap body is inactive', () => {

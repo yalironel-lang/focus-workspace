@@ -272,7 +272,10 @@ describe('M5.2 End-to-End Feedback Loop Regression', () => {
       expect(host!.querySelector('[data-nb-candidate-load-error="1"]')).toBeTruthy();
     });
     expect(host!.querySelector('[data-nb-candidate-load-error="1"]')?.textContent).toContain(
-      'Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion',
+      'Unable to open this page safely',
+    );
+    expect(host!.querySelector('[data-nb-candidate-load-error="1"]')?.textContent).toContain(
+      'Your original content has not been changed',
     );
   });
 
@@ -457,7 +460,10 @@ describe('M5.2 End-to-End Feedback Loop Regression', () => {
     const pm = host!.querySelector('.ProseMirror');
     expect(pm).toBeNull(); // EditorContent is hidden when load.error is present
     expect(host!.querySelector('[data-nb-candidate-load-error="1"]')?.textContent).toContain(
-      'Corrupt state: received versioned Notebook text (~nb1:) with undefined codecVersion',
+      'Unable to open this page safely',
+    );
+    expect(host!.querySelector('[data-nb-candidate-load-error="1"]')?.textContent).toContain(
+      'Your original content has not been changed',
     );
   });
 });

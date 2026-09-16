@@ -27,6 +27,7 @@ import {
   type CandidateBlockTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
 
+import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
 import {
   type NotebookQaDiagContext,
@@ -449,7 +450,7 @@ export function NotebookTiptapCandidateEditor({
       // 1. Target check: Do not intercept clicks on controls, toolbars, QA panel, ProseMirror content, or node views
       if (
         target?.closest(
-          '.ProseMirror, button, select, input, [role="toolbar"], [data-nb-candidate-toolbar], [data-nb-candidate-qa-panel], [data-nb-candidate-badge], [data-nb="nbImageRef"], [data-nb="nbHandwriting"], [data-nb="nbDivider"], [data-nb="nbMath"], [data-nb-node-view-wrapper], [data-node-view-wrapper], [data-nb-resize-handle], [data-nb-image-reset], .nb-img-block',
+          '.ProseMirror, button, select, input, [role="toolbar"], [data-nb-product-toolbar], [data-nb-candidate-toolbar], [data-nb-candidate-qa-panel], [data-nb="nbImageRef"], [data-nb="nbHandwriting"], [data-nb="nbDivider"], [data-nb="nbMath"], [data-nb-node-view-wrapper], [data-node-view-wrapper], [data-nb-resize-handle], [data-nb-image-reset], .nb-img-block',
         )
       ) {
         return;
@@ -583,37 +584,6 @@ export function NotebookTiptapCandidateEditor({
         }
       `}</style>
 
-      {/* Hide candidate DEV chrome while fail-closed so users only see product-safe copy. */}
-      {!load.error ? (
-        <>
-          <div
-            data-nb-candidate-badge="1"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              marginBottom: 10,
-              padding: '4px 10px',
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              background: 'rgba(245,158,11,0.18)',
-              border: '1px solid rgba(245,158,11,0.45)',
-              color: '#fbbf24',
-            }}
-          >
-            TipTap candidate · {onUserEdit ? 'M5.2 Guarded Persist' : 'Unsaved'}
-          </div>
-
-          <NotebookCandidateQaPanel
-            getSnapshot={getSnapshot}
-            failClosed={Boolean(load.error)}
-          />
-        </>
-      ) : null}
-
       {load.error ? (
         <div
           data-nb-candidate-load-error="1"
@@ -655,7 +625,7 @@ export function NotebookTiptapCandidateEditor({
           >
             Reload page
           </button>
-          {import.meta.env.DEV ? (
+          {isNotebookEngineeringChromeEnabled() ? (
             <pre
               data-nb-page-load-error-detail="1"
               style={{ whiteSpace: 'pre-wrap', marginTop: 12, fontSize: 11, opacity: 0.7 }}
@@ -666,12 +636,9 @@ export function NotebookTiptapCandidateEditor({
         </div>
       ) : (
         <>
-          {/* Temp DEV-only: undo/dir + caret block morph — NOT final product UI.
-              Selection formatting + Block/Academic menu: floating toolbar (M4.2). */}
+          {/* Product document tools — Undo/Redo, block type, text direction */}
           <div
-            data-nb-candidate-toolbar="1"
-            data-nb-candidate-toolbar-temp="1"
-            title="Temporary DEV tools — not final product UI. Select text for the formatting toolbar."
+            data-nb-product-toolbar="1"
             style={{
               display: 'flex',
               flexWrap: 'wrap',
@@ -680,23 +647,29 @@ export function NotebookTiptapCandidateEditor({
               alignItems: 'center',
             }}
           >
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                opacity: 0.55,
-                marginInlineEnd: 4,
-              }}
+            <button
+              type="button"
+              data-nb-product-undo="1"
+              aria-label="Undo"
+              style={toolBtn}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => run(() => editor!.chain().focus().undo().run())}
             >
-              Temp DEV tools
-            </span>
-            <button type="button" style={toolBtn} onMouseDown={e => e.preventDefault()} onClick={() => run(() => editor!.chain().focus().undo().run())}>Undo</button>
-            <button type="button" style={toolBtn} onMouseDown={e => e.preventDefault()} onClick={() => run(() => editor!.chain().focus().redo().run())}>Redo</button>
+              Undo
+            </button>
+            <button
+              type="button"
+              data-nb-product-redo="1"
+              aria-label="Redo"
+              style={toolBtn}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => run(() => editor!.chain().focus().redo().run())}
+            >
+              Redo
+            </button>
             <select
-              data-nb-candidate-block-dev="1"
-              aria-label="Block type (DEV caret morph)"
+              data-nb-product-block="1"
+              aria-label="Block type"
               defaultValue=""
               style={{ ...toolBtn, fontWeight: 500, minWidth: 120 }}
               onMouseDown={e => e.preventDefault()}
@@ -709,7 +682,9 @@ export function NotebookTiptapCandidateEditor({
                 });
               }}
             >
-              <option value="" disabled>Block / Academic…</option>
+              <option value="" disabled>
+                Block / Academic…
+              </option>
               {CANDIDATE_BLOCK_MENU.map(item => (
                 <option key={item.id} value={item.id}>
                   {item.group === 'academic' ? `◆ ${item.label}` : item.label}
@@ -717,7 +692,7 @@ export function NotebookTiptapCandidateEditor({
               ))}
             </select>
             <select
-              data-nb-candidate-dir="1"
+              data-nb-product-dir="1"
               aria-label="Text direction"
               value={markState?.dir ?? 'auto'}
               style={{ ...toolBtn, fontWeight: 500, minWidth: 72 }}
@@ -744,29 +719,37 @@ export function NotebookTiptapCandidateEditor({
         </>
       )}
 
-      {!load.error ? (
-        <div
-          data-nb-candidate-status="1"
-          style={{
-            marginTop: 12,
-            fontSize: 11,
-            opacity: 0.75,
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 8,
-            alignItems: 'center',
-          }}
-        >
-          <span data-nb-candidate-dirty={dirtyLabel}>{dirtyLabel}</span>
-          {snap ? (
-            <span data-nb-candidate-serialize={snap.status}>
-              serialize={snap.status}
-              {snap.errorCode ? ` (${snap.errorCode})` : ''}
+      {isNotebookEngineeringChromeEnabled() && !load.error ? (
+        <>
+          <NotebookCandidateQaPanel
+            getSnapshot={getSnapshot}
+            failClosed={Boolean(load.error)}
+          />
+          <div
+            data-nb-candidate-status="1"
+            style={{
+              marginTop: 12,
+              fontSize: 11,
+              opacity: 0.75,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 8,
+              alignItems: 'center',
+            }}
+          >
+            <span data-nb-candidate-dirty={dirtyLabel}>{dirtyLabel}</span>
+            {snap ? (
+              <span data-nb-candidate-serialize={snap.status}>
+                serialize={snap.status}
+                {snap.errorCode ? ` (${snap.errorCode})` : ''}
+              </span>
+            ) : null}
+            <span data-nb-dir-persist={persistenceMode}>
+              {onUserEdit ? 'persist: guarded' : 'dir not persisted'}
             </span>
-          ) : null}
-          <span data-nb-dir-persist={persistenceMode}>{onUserEdit ? 'persist: guarded' : 'dir not persisted'}</span>
-          <span>page={pageKey}</span>
-        </div>
+            <span>page={pageKey}</span>
+          </div>
+        </>
       ) : null}
     </div>
   );

@@ -257,7 +257,7 @@ describe('candidatePersistenceReloadBoundary', () => {
     // b. Candidate editor is healthy and in guarded persist mode
     const rootEl = host!.querySelector('[data-nb-tiptap-candidate-root="1"]');
     expect(rootEl).toBeTruthy();
-    const persistBadge = host!.querySelector('[data-nb-dir-persist="guarded"]');
+    const persistBadge = host!.querySelector('[data-nb-candidate-persistence="guarded"]');
     expect(persistBadge).toBeTruthy();
 
     // c. Editor content shows 2 lines (middle line remains deleted)
