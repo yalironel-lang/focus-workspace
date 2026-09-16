@@ -4,9 +4,10 @@
  * Memory-only: never writes documentBody / Free Space / Supabase / sync.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { JSONContent } from '@tiptap/core';
+import { Redo2, Undo2 } from 'lucide-react';
 import { bodyToTiptapDoc } from '../../../lib/notebookTiptap/blocksToTiptapDoc';
 import { tiptapDocToBody } from '../../../lib/notebookTiptap/tiptapDocToBody';
 import {
@@ -20,10 +21,21 @@ import {
   type NotebookTextDir,
 } from '../../../lib/notebookTiptap/direction';
 import { hasVersionedNotebookRecord } from '../../../lib/notebookDialect';
-import { NotebookTiptapCandidateSelectionToolbar } from './NotebookTiptapCandidateSelectionToolbar';
 import {
-  runCandidateBlockCommand,
+  NotebookTiptapCandidateSelectionToolbar,
+  candidateFloatingToolbarEscapeRef,
+} from './NotebookTiptapCandidateSelectionToolbar';
+import {
+  insertCandidateBlockAtTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
+import {
+  NB_PRODUCT_CHROME,
+  nbProductDirSelectStyle,
+  nbProductGroupDividerStyle,
+  nbProductGroupStyle,
+  nbProductIconBtnStyle,
+  nbProductToolbarShellStyle,
+} from './notebookProductToolbarChrome';
 import {
   NOTEBOOK_IMAGE_FILE_ACCEPT,
   resolveNbImageInsertTarget,
@@ -112,7 +124,7 @@ export type NotebookTiptapCandidateEditorProps = {
     },
   ) => void | Promise<void>;
   /**
-   * M7.3A — product handwriting insertion via Block / Academic… → Handwriting.
+   * M7.3A — product handwriting insertion via Add menu → Handwriting.
    * Parent creates a newHandwritingKey and inserts nbHandwriting via existing model.
    */
   onInsertHandwriting?: (ctx: { insertTarget: NbHandwritingInsertTarget }) => void;
@@ -160,19 +172,6 @@ function attemptSerialize(
     };
   }
 }
-
-const toolBtn: CSSProperties = {
-  background: 'rgba(15,23,42,0.55)',
-  color: 'inherit',
-  border: '1px solid rgba(148,163,184,0.35)',
-  borderRadius: 6,
-  padding: '4px 8px',
-  fontSize: 12,
-  fontWeight: 700,
-  cursor: 'pointer',
-  minWidth: 28,
-  opacity: 0.92,
-};
 
 /**
  * TipTap candidate editor for the real Notebook writing column.
@@ -300,6 +299,14 @@ export function NotebookTiptapCandidateEditor({
             'min-height: 240px',
             'caret-color: currentColor',
           ].join(';'),
+        },
+        handleKeyDown: (_view, event) => {
+          // M7.4A: physical Escape while floating toolbar is open must dismiss it
+          // (and Turn into), even when ProseMirror owns the focused contenteditable.
+          if (candidateFloatingToolbarEscapeRef.current?.(event)) {
+            return true;
+          }
+          return false;
         },
         handleDOMEvents: {
           click: (_view, event) => {
@@ -720,68 +727,90 @@ export function NotebookTiptapCandidateEditor({
         </div>
       ) : (
         <>
-          {/* Product document tools — Undo/Redo, block type, text direction */}
+          {/* Product document tools — sticky within Notebook scroll viewport ([data-nb-body-scroll]). */}
           <div
             data-nb-product-toolbar="1"
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 6,
-              marginBottom: 10,
-              alignItems: 'center',
-            }}
+            data-nb-product-toolbar-sticky="1"
+            data-nb-product-toolbar-polish="1"
+            style={nbProductToolbarShellStyle()}
           >
-            <button
-              type="button"
-              data-nb-product-undo="1"
-              aria-label="Undo"
-              style={toolBtn}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => run(() => editor!.chain().focus().undo().run())}
-            >
-              Undo
-            </button>
-            <button
-              type="button"
-              data-nb-product-redo="1"
-              aria-label="Redo"
-              style={toolBtn}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => run(() => editor!.chain().focus().redo().run())}
-            >
-              Redo
-            </button>
-            <NotebookTiptapProductBlockMenu
-              buttonStyle={toolBtn}
-              onBeforeOpen={() => {
-                if (!editor || editor.isDestroyed) return;
-                // Capture caret/boundary before the menu interaction can blur focus.
-                pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
-              }}
-              onAction={action => {
-                if (!editor || editor.isDestroyed) return;
-                if (action.kind === 'image') {
-                  if (!onInsertImageFile) return;
-                  if (!pendingImageInsertTargetRef.current) {
-                    pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+            <div data-nb-product-toolbar-group="history" style={nbProductGroupStyle()}>
+              <button
+                type="button"
+                data-nb-product-undo="1"
+                aria-label="Undo"
+                title="Undo"
+                style={nbProductIconBtnStyle()}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => run(() => editor!.chain().focus().undo().run())}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = NB_PRODUCT_CHROME.hoverFill;
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <Undo2 size={15} strokeWidth={2.1} aria-hidden />
+              </button>
+              <button
+                type="button"
+                data-nb-product-redo="1"
+                aria-label="Redo"
+                title="Redo"
+                style={nbProductIconBtnStyle()}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => run(() => editor!.chain().focus().redo().run())}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = NB_PRODUCT_CHROME.hoverFill;
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <Redo2 size={15} strokeWidth={2.1} aria-hidden />
+              </button>
+            </div>
+
+            <div aria-hidden style={nbProductGroupDividerStyle()} />
+
+            <div data-nb-product-toolbar-group="add" style={nbProductGroupStyle()}>
+              <NotebookTiptapProductBlockMenu
+                onBeforeOpen={() => {
+                  if (!editor || editor.isDestroyed) return;
+                  // Capture caret/boundary before the menu interaction can blur focus.
+                  pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+                }}
+                onAction={action => {
+                  if (!editor || editor.isDestroyed) return;
+                  if (action.kind === 'image') {
+                    if (!onInsertImageFile) return;
+                    if (!pendingImageInsertTargetRef.current) {
+                      pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+                    }
+                    imageFileInputRef.current?.click();
+                    return;
                   }
-                  imageFileInputRef.current?.click();
-                  return;
-                }
-                if (action.kind === 'handwriting') {
-                  if (!onInsertHandwriting) return;
-                  const insertTarget =
-                    pendingImageInsertTargetRef.current ??
-                    resolveNbHandwritingInsertTarget(editor.state);
-                  pendingImageInsertTargetRef.current = null;
-                  onInsertHandwriting({ insertTarget });
-                  return;
-                }
-                run(() => {
-                  runCandidateBlockCommand(editor, action.target);
-                });
-              }}
-            />
+                  if (action.kind === 'handwriting') {
+                    if (!onInsertHandwriting) return;
+                    const insertTarget =
+                      pendingImageInsertTargetRef.current ??
+                      resolveNbHandwritingInsertTarget(editor.state);
+                    pendingImageInsertTargetRef.current = null;
+                    onInsertHandwriting({ insertTarget });
+                    return;
+                  }
+                  run(() => {
+                    const insertTarget =
+                      pendingImageInsertTargetRef.current ??
+                      resolveNbImageInsertTarget(editor.state);
+                    pendingImageInsertTargetRef.current = null;
+                    // + Add = CREATE at captured target (never convert non-empty content).
+                    insertCandidateBlockAtTarget(editor, action.target, insertTarget);
+                  });
+                }}
+              />
+            </div>
+
             <input
               ref={imageFileInputRef}
               type="file"
@@ -808,26 +837,40 @@ export function NotebookTiptapCandidateEditor({
                 void onInsertImageFile(file, { insertTarget });
               }}
             />
-            <select
-              data-nb-product-dir="1"
-              aria-label="Text direction"
-              value={markState?.dir ?? 'auto'}
-              style={{ ...toolBtn, fontWeight: 500, minWidth: 72 }}
-              onChange={e => {
-                const dir = normalizeTextDir(e.target.value);
-                run(() => {
-                  editor!
-                    .chain()
-                    .focus()
-                    .updateAttributes(editor!.state.selection.$from.parent.type.name, { dir })
-                    .run();
-                });
-              }}
-            >
-              <option value="auto">Auto</option>
-              <option value="ltr">LTR</option>
-              <option value="rtl">RTL</option>
-            </select>
+
+            <div aria-hidden style={nbProductGroupDividerStyle()} />
+
+            <div data-nb-product-toolbar-group="direction" style={nbProductGroupStyle()}>
+              <select
+                data-nb-product-dir="1"
+                aria-label="Text direction"
+                title="Text direction"
+                value={markState?.dir ?? 'auto'}
+                style={nbProductDirSelectStyle()}
+                onChange={e => {
+                  const dir = normalizeTextDir(e.target.value);
+                  run(() => {
+                    editor!
+                      .chain()
+                      .focus()
+                      .updateAttributes(editor!.state.selection.$from.parent.type.name, { dir })
+                      .run();
+                  });
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.background = NB_PRODUCT_CHROME.hoverFill;
+                  e.currentTarget.style.boxShadow = `inset 0 0 0 1px ${NB_PRODUCT_CHROME.focusRing}`;
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <option value="auto">Auto</option>
+                <option value="ltr">LTR</option>
+                <option value="rtl">RTL</option>
+              </select>
+            </div>
           </div>
 
           <EditorContent editor={editor} />

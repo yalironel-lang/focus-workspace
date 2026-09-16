@@ -67,7 +67,7 @@ describe('candidate block picker UX', () => {
       expect(section.querySelectorAll('button')).toHaveLength(expected.length);
       for (const item of expected) expect(section.textContent).toContain(item.label);
     }
-    expect(Array.from(menu.querySelectorAll('[aria-label="Academic blocks"] button')).map(button => button.textContent)).toEqual(['Definition', 'Key Concept', 'Theorem', 'Example', 'Mistake', 'Summary', 'Review']);
+    expect(Array.from(menu.querySelectorAll('[aria-label="Academic blocks"] button')).map(button => button.textContent)).toEqual(['Definition', 'Key Concept', 'Theorem', 'Example', 'Common Mistake', 'Summary', 'Review']);
     expect(menu.querySelector('[data-nb-candidate-block="paragraph"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(menu.querySelector('[data-nb-candidate-block="callout:definition"]')?.getAttribute('aria-pressed')).toBe('false');
   });
@@ -97,9 +97,31 @@ describe('candidate block picker UX', () => {
     act(() => { trigger.focus(); trigger.click(); });
     const menu = document.querySelector('[data-nb-candidate-block-menu]')!;
     expect(menu.contains(document.activeElement)).toBe(true);
-    act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    // Escape while Turn into is focused: product dismisses picker + floating toolbar
+    // (window capture), not only the menu with focus returning to the trigger.
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
     expect(document.querySelector('[data-nb-candidate-block-menu]')).toBeNull();
-    expect(document.activeElement).toBe(trigger);
+    expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeNull();
+    expect(ed.state.selection.from).toBe(1);
+    expect(ed.state.selection.to).toBe(5);
+
+    // Deliberate editor gesture re-enables the toolbar, then outside pointer closes the menu.
+    act(() => {
+      ed.view.dom.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }),
+      );
+      ed.chain().focus().setTextSelection({ from: 1, to: 5 }).run();
+      window.dispatchEvent(
+        new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0 }),
+      );
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeTruthy(),
+    );
     openMenu();
     act(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
     expect(document.querySelector('[data-nb-candidate-block-menu]')).toBeNull();

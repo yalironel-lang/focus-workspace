@@ -158,6 +158,42 @@ export function notebookDirWrapperProps(
   };
 }
 
+/**
+ * Direction props for wrappers that render non-content chrome before body text
+ * (e.g. Academic Block labels like "Definition").
+ *
+ * Plain `dir="auto"` first-strongs on that Latin chrome and keeps logical CSS (including
+ * `border-inline-start`) stuck in LTR even when the block body is Hebrew.
+ *
+ * Contract:
+ * - `data-nb-dir` stays the persisted Auto/LTR/RTL attribute (no fake align write).
+ * - Display `dir` + CSS `direction` use content-resolved effective direction.
+ * - Explicit LTR/RTL still win via resolveEffectiveDir.
+ */
+export function notebookChromeAwareDirWrapperProps(
+  dir: NotebookTextDir | null | undefined,
+  text: string,
+  align?: TextAlignment | null,
+): {
+  dir: 'ltr' | 'rtl';
+  'data-nb-dir': NotebookTextDir;
+  'data-nb-effective-dir': 'ltr' | 'rtl';
+  style: CSSPropertiesLike;
+} {
+  const base = notebookDirWrapperProps(dir, text, align);
+  const visual = base['data-nb-effective-dir'];
+  return {
+    dir: visual,
+    'data-nb-dir': base['data-nb-dir'],
+    'data-nb-effective-dir': visual,
+    style: {
+      ...base.style,
+      direction: visual,
+      unicodeBidi: base['data-nb-dir'] === 'auto' ? 'plaintext' : 'normal',
+    },
+  };
+}
+
 type CSSPropertiesLike = {
   textAlign: 'start' | 'left' | 'center' | 'right';
   direction?: 'ltr' | 'rtl';

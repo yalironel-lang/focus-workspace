@@ -6,6 +6,7 @@
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import { isNotebookTiptapEditorEnabled } from '../../../lib/notebookTiptap/featureFlag';
+import { ACADEMIC_PRODUCT_QA_BODY } from '../../../lib/notebookTiptap/academicProductQaFixture';
 import {
   PARITY_FIXTURE_BODY,
   RTL_OBSERVATION_LINES,
@@ -105,6 +106,17 @@ export default function NotebookTiptapParityPage() {
             style={btnStyle}
           >
             Load Inline Math fixture
+          </button>
+          <button
+            type="button"
+            data-nb-load-academic-qa-fixture="1"
+            onClick={() => {
+              setBody(ACADEMIC_PRODUCT_QA_BODY);
+              setResetToken(t => t + 1);
+            }}
+            style={btnStyle}
+          >
+            Load Academic QA fixture
           </button>
           <span style={{ color: '#64748b', fontSize: 12, alignSelf: 'center' }}>
             RTL Phase A — Auto/LTR/RTL in sandbox toolbar · {RTL_OBSERVATION_LINES.length} mixed samples

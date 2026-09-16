@@ -62,12 +62,24 @@ import { NotebookTiptapCandidateTableMenu } from './NotebookTiptapCandidateTable
 
 export const candidateSelectionToolbarBusyRef = { current: false };
 
+/**
+ * Product Escape path while the floating toolbar is open.
+ * CandidateEditor wires this into ProseMirror `handleKeyDown` so Escape still
+ * dismisses when focus is inside the editor (window capture alone is not enough
+ * if a lower-level handler swallows the DOM event after capture).
+ * Returns true when Escape was handled (toolbar dismissed).
+ */
+export const candidateFloatingToolbarEscapeRef: {
+  current: ((event: KeyboardEvent) => boolean) | null;
+} = { current: null };
+
 function preventToolbarEvent(e: React.PointerEvent | React.MouseEvent): void {
   e.preventDefault();
   e.stopPropagation();
 }
 
-/** Show for text ranges, active links, in-table caret, or whole-table NodeSelection. */
+/** Selection toolbar: non-empty text range, whole-table NodeSelection, or in-table context.
+ * Collapsed typing carets in normal prose/callouts do NOT summon the toolbar (M7.4A contract). */
 export function selectionShouldShowToolbar(editor: Editor): boolean {
   if (!editor.isEditable || editor.isDestroyed) return false;
   const { selection } = editor.state;
@@ -75,9 +87,31 @@ export function selectionShouldShowToolbar(editor: Editor): boolean {
     return selection.node.type.name === 'nbTable';
   }
   const { empty, from, to } = selection;
-  if ((!empty && to > from) || editor.isActive('link')) return true;
-  // Contextual Table ▾ while editing inside a cell (collapsed caret).
-  return isSelectionInsideTable(editor);
+  // Real non-empty text selection (mouse drag or Shift+Arrow).
+  if (!empty && to > from) return true;
+  // Table ▾ context while the caret is inside a cell (pre-existing table UX).
+  if (isSelectionInsideTable(editor)) return true;
+  return false;
+}
+
+const CONVERTIBLE_TEXTBLOCK_TYPES = new Set([
+  'nbParagraph',
+  'nbTitle',
+  'nbSection',
+  'nbBullet',
+  'nbOrdered',
+  'nbTask',
+  'nbQuote',
+  'nbStep',
+  'nbMath',
+  'nbCallout',
+]);
+
+/** Parent textblock can be morph'd by Turn into (CONVERT). Not a visibility rule. */
+export function isConvertibleTextblockSelection(editor: Editor): boolean {
+  if (editor.isDestroyed) return false;
+  const parent = editor.state.selection.$from.parent;
+  return parent.isTextblock && CONVERTIBLE_TEXTBLOCK_TYPES.has(parent.type.name);
 }
 
 function CaptureBtn({
@@ -230,6 +264,19 @@ export function NotebookTiptapCandidateSelectionToolbar({
 }: Props) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const storedSelRef = useRef<{ from: number; to: number } | null>(null);
+  /**
+   * After Turn into / Escape / outside dismiss, block syncFromEditor from reopening
+   * for the *same* range (M7.4A). Cleared on editor pointerdown or when the
+   * selection actually changes from the dismissed snapshot.
+   */
+  const suppressAutoOpenRef = useRef(false);
+  const dismissedSelRef = useRef<{ from: number; to: number } | null>(null);
+  /**
+   * While the primary pointer is down in the editor (selection drag), defer
+   * opening/repositioning so the toolbar does not jump during the drag.
+   * Keyboard selections are unaffected (pointerSelecting stays false).
+   */
+  const pointerSelectingRef = useRef(false);
   const [anchor, setAnchor] = useState<ToolbarAnchor | null>(null);
   const [open, setOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
@@ -261,6 +308,30 @@ export function NotebookTiptapCandidateSelectionToolbar({
     }),
   });
 
+  const closeMenus = useCallback(() => {
+    setSizeOpen(false);
+    setBlockOpen(false);
+    setLinkOpen(false);
+    setTablePickerOpen(false);
+    setTableMenuOpen(false);
+  }, []);
+
+  const dismissToolbar = useCallback(
+    (opts?: { suppressReopen?: boolean }) => {
+      if (opts?.suppressReopen) {
+        suppressAutoOpenRef.current = true;
+        if (!editor.isDestroyed) {
+          const { from, to } = editor.state.selection;
+          dismissedSelRef.current = { from, to };
+        }
+      }
+      setOpen(false);
+      setAnchor(null);
+      closeMenus();
+    },
+    [closeMenus, editor],
+  );
+
   const syncFromEditor = useCallback(() => {
     if (editor.isDestroyed) return;
     const { from, to, empty } = editor.state.selection;
@@ -271,15 +342,37 @@ export function NotebookTiptapCandidateSelectionToolbar({
     if (!shouldShow) {
       setOpen(false);
       setAnchor(null);
-      setSizeOpen(false);
-      setBlockOpen(false);
-      setLinkOpen(false);
-      setTablePickerOpen(false);
-      setTableMenuOpen(false);
+      closeMenus();
       return;
     }
 
-    storedSelRef.current = { from, to };
+    // Mouse selection still in progress — wait for pointerup before showing/moving.
+    if (pointerSelectingRef.current) {
+      setOpen(false);
+      setAnchor(null);
+      closeMenus();
+      return;
+    }
+
+    if (!empty) {
+      storedSelRef.current = { from, to };
+    }
+
+    if (suppressAutoOpenRef.current) {
+      const snap = dismissedSelRef.current;
+      const selectionChanged = !snap || snap.from !== from || snap.to !== to;
+      if (!selectionChanged) {
+        // Same range as when dismissed (Escape / convert) — stay closed.
+        setOpen(false);
+        setAnchor(null);
+        closeMenus();
+        return;
+      }
+      // User made a genuinely new selection after dismiss — allow toolbar again.
+      suppressAutoOpenRef.current = false;
+      dismissedSelRef.current = null;
+    }
+
     try {
       const rect = posToDOMRect(editor.view, from, to);
       let place = rect;
@@ -293,7 +386,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
       setOpen(false);
       setAnchor(null);
     }
-  }, [editor]);
+  }, [editor, closeMenus]);
 
   useEffect(() => {
     syncFromEditor();
@@ -304,13 +397,33 @@ export function NotebookTiptapCandidateSelectionToolbar({
       if (related && toolbarRef.current?.contains(related)) return;
       requestAnimationFrame(() => {
         if (candidateSelectionToolbarBusyRef.current) return;
-        if (!selectionShouldShowToolbar(editor)) setOpen(false);
+        if (!selectionShouldShowToolbar(editor)) dismissToolbar();
       });
     };
+    // After dismiss/convert, a later click in the editor allows the toolbar again
+    // once a (possibly new) selection qualifies.
+    const onEditorPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      pointerSelectingRef.current = true;
+      if (suppressAutoOpenRef.current) {
+        suppressAutoOpenRef.current = false;
+        dismissedSelRef.current = null;
+      }
+    };
+    const endPointerSelecting = () => {
+      if (!pointerSelectingRef.current) return;
+      pointerSelectingRef.current = false;
+      syncFromEditor();
+    };
+    const editorDom = editor.isDestroyed ? null : editor.view?.dom ?? null;
     editor.on('selectionUpdate', onSel);
     editor.on('transaction', onSel);
     editor.on('focus', onSel);
     editor.on('blur', onBlur);
+    editorDom?.addEventListener('pointerdown', onEditorPointerDown);
+    // pointerup may land outside the editor after a drag.
+    window.addEventListener('pointerup', endPointerSelecting, true);
+    window.addEventListener('pointercancel', endPointerSelecting, true);
     window.addEventListener('resize', onSel);
     window.addEventListener('scroll', onSel, true);
     return () => {
@@ -318,25 +431,83 @@ export function NotebookTiptapCandidateSelectionToolbar({
       editor.off('transaction', onSel);
       editor.off('focus', onSel);
       editor.off('blur', onBlur);
+      editorDom?.removeEventListener('pointerdown', onEditorPointerDown);
+      window.removeEventListener('pointerup', endPointerSelecting, true);
+      window.removeEventListener('pointercancel', endPointerSelecting, true);
       window.removeEventListener('resize', onSel);
       window.removeEventListener('scroll', onSel, true);
     };
-  }, [editor, syncFromEditor]);
+  }, [editor, syncFromEditor, dismissToolbar]);
+
+  // Escape + outside click dismiss the whole floating toolbar (not only nested menus).
+  // Dual path: (1) window capture for focus in portaled Turn into / menus / chrome;
+  // (2) ProseMirror handleKeyDown via candidateFloatingToolbarEscapeRef when caret is in the editor.
+  useEffect(() => {
+    if (!open) {
+      candidateFloatingToolbarEscapeRef.current = null;
+      return;
+    }
+    const handleEscape = (e: KeyboardEvent): boolean => {
+      if (e.key !== 'Escape' && e.code !== 'Escape') return false;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissToolbar({ suppressReopen: true });
+      // Do not re-focus — same selection must stay suppressed until a deliberate edit gesture.
+      return true;
+    };
+    candidateFloatingToolbarEscapeRef.current = handleEscape;
+
+    const isToolbarChrome = (t: EventTarget | null) => {
+      if (!(t instanceof Node)) return false;
+      if (toolbarRef.current?.contains(t)) return true;
+      if (
+        t instanceof Element &&
+        (t.closest('[data-nb-candidate-block-menu]') ||
+          t.closest('[data-nb-candidate-table-size-picker]') ||
+          t.closest('[data-nb-candidate-table-menu]'))
+      ) {
+        return true;
+      }
+      return false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      handleEscape(e);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (isToolbarChrome(e.target)) return;
+      // Click elsewhere in the Notebook / UI → dismiss; don't reopen on same selection.
+      dismissToolbar({ suppressReopen: true });
+    };
+    window.addEventListener('keydown', onKey, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      if (candidateFloatingToolbarEscapeRef.current === handleEscape) {
+        candidateFloatingToolbarEscapeRef.current = null;
+      }
+      window.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [open, dismissToolbar]);
 
   useEffect(() => {
     if (!sizeOpen && !blockOpen && !linkOpen && !tablePickerOpen && !tableMenuOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (!toolbarRef.current?.contains(e.target as Node)) {
-        setSizeOpen(false);
-        setBlockOpen(false);
-        setLinkOpen(false);
-        setTablePickerOpen(false);
-        setTableMenuOpen(false);
+      const t = e.target as Node | null;
+      if (toolbarRef.current?.contains(t)) return;
+      // Portaled Turn into / table menus live on document.body.
+      if (
+        t instanceof Element &&
+        (t.closest('[data-nb-candidate-block-menu]') ||
+          t.closest('[data-nb-candidate-table-size-picker]') ||
+          t.closest('[data-nb-candidate-table-menu]'))
+      ) {
+        return;
       }
+      closeMenus();
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [sizeOpen, blockOpen, linkOpen, tablePickerOpen, tableMenuOpen]);
+  }, [sizeOpen, blockOpen, linkOpen, tablePickerOpen, tableMenuOpen, closeMenus]);
 
   useEffect(() => {
     if (linkOpen) {
@@ -453,11 +624,23 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
   const runBlock = useCallback(
     (target: CandidateBlockTarget) => {
-      const before = ensureSelection();
-      if (before.empty) {
+      candidateSelectionToolbarBusyRef.current = true;
+      // CONVERT the live caret/range parent — do NOT restore a prior text range
+      // (that would morph the wrong block) and never call insertCandidateBlockAtTarget.
+      if (!isConvertibleTextblockSelection(editor)) {
+        setCmdDiag({
+          cmd: `block:${target}`,
+          ok: false,
+          skippedEmpty: true,
+          beforeFrom: editor.state.selection.from,
+          beforeTo: editor.state.selection.to,
+          afterFrom: editor.state.selection.from,
+          afterTo: editor.state.selection.to,
+        });
         releaseBusy();
         return;
       }
+      const before = editor.state.selection;
       const ok = runCandidateBlockCommand(editor, target);
       setCmdDiag({
         cmd: `block:${target}`,
@@ -468,11 +651,17 @@ export function NotebookTiptapCandidateSelectionToolbar({
         afterFrom: editor.state.selection.from,
         afterTo: editor.state.selection.to,
       });
-      setBlockOpen(false);
+      // One-shot: close Turn into + dismiss floating toolbar; suppress same-range reopen.
+      dismissToolbar({ suppressReopen: true });
+      try {
+        editor.commands.focus();
+      } catch {
+        /* best-effort */
+      }
       releaseBusy();
       syncFromEditor();
     },
-    [editor, ensureSelection, releaseBusy, syncFromEditor],
+    [editor, dismissToolbar, releaseBusy, syncFromEditor],
   );
 
   const restoreTableTargetSelection = useCallback(() => {
@@ -503,11 +692,11 @@ export function NotebookTiptapCandidateSelectionToolbar({
         afterFrom: editor.state.selection.from,
         afterTo: editor.state.selection.to,
       });
-      setTablePickerOpen(false);
+      dismissToolbar({ suppressReopen: true });
       releaseBusy();
       syncFromEditor();
     },
-    [editor, ensureSelection, releaseBusy, syncFromEditor],
+    [editor, dismissToolbar, ensureSelection, releaseBusy, syncFromEditor],
   );
 
   const runTableAction = useCallback(

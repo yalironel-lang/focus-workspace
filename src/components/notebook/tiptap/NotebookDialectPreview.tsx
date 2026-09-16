@@ -24,6 +24,10 @@ import {
   calloutToneTokens,
 } from '../../../lib/notebookTiptap/visualTokens';
 import {
+  notebookChromeAwareDirWrapperProps,
+  type NotebookTextDir,
+} from '../../../lib/notebookTiptap/direction';
+import {
   NotebookHandwritingReadonlyView,
   NotebookImageReadonlyView,
 } from '../../../lib/notebookTiptap/readonlyMedia';
@@ -155,28 +159,41 @@ function renderBlock(block: NotebookDialectBlock, objectId?: string) {
     case 'callout': {
       const tone = block.tone as CalloutTone;
       const ct = calloutToneTokens(tone);
+      const d = notebookChromeAwareDirWrapperProps(
+        (block as { dir?: NotebookTextDir }).dir,
+        block.text,
+      );
       return (
         <div
+          data-nb-academic-type={tone}
+          dir={d.dir}
+          data-nb-dir={d['data-nb-dir']}
+          data-nb-effective-dir={d['data-nb-effective-dir']}
           style={{
-            borderLeft: `3px solid ${ct.bar}`,
+            ...d.style,
+            /* Logical-start accent (mirrors TipTap product academic family). */
+            borderInlineStart: `2px solid ${ct.bar}`,
             backgroundColor: ct.bg,
-            borderRadius: '0 12px 12px 0',
-            padding: '10px 14px',
-            margin: '8px 0',
+            borderRadius: 6,
+            paddingBlock: 7,
+            paddingInline: 12,
+            marginBlock: 7,
             fontFamily: NB_FONT_STACK,
           }}
         >
           <div
+            data-nb-academic-chrome="1"
+            dir="ltr"
             style={{
-              fontSize: NB_TYPE_SCALE.l5,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
               color: ct.label,
-              marginBottom: 6,
+              marginBottom: 3,
+              lineHeight: 1.25,
+              userSelect: 'none',
             }}
           >
-            <span style={{ marginRight: 6 }}>{ct.glyph}</span>
             {calloutLabel(tone)}
           </div>
           <LineBody text={block.text} marks={block.marks} />

@@ -23,9 +23,10 @@ import {
 const { NotebookTiptapCandidateEditor } = await import(
   '../../components/notebook/tiptap/NotebookTiptapCandidateEditor'
 );
-const { NotebookTiptapCandidateSelectionToolbar } = await import(
-  '../../components/notebook/tiptap/NotebookTiptapCandidateSelectionToolbar'
-);
+const {
+  NotebookTiptapCandidateSelectionToolbar,
+  selectionShouldShowToolbar,
+} = await import('../../components/notebook/tiptap/NotebookTiptapCandidateSelectionToolbar');
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -186,7 +187,7 @@ describe('candidateFormatCommands adapter', () => {
 });
 
 describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
-  it('toolbar hidden with collapsed selection; visible with non-empty selection', async () => {
+  it('toolbar absent for collapsed caret; appears for non-empty selection; dismisses on collapse', async () => {
     const ed = makeEditor('Select me please');
     const mountPoint = document.createElement('div');
     document.body.appendChild(mountPoint);
@@ -198,11 +199,8 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
       ed.commands.focus('end');
     });
     expect(ed.state.selection.empty).toBe(true);
-
-    // No selection → product formatting toolbar closed (engineering sel-diag is opt-in).
-    expect(
-      document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]'),
-    ).toBeNull();
+    expect(selectionShouldShowToolbar(ed)).toBe(false);
+    expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeNull();
 
     act(() => {
       selectPlainRange(ed, 0, 6);
@@ -215,6 +213,10 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
       ) as HTMLElement | null;
       expect(el).toBeTruthy();
       expect(el!.style.position).toBe('fixed');
+      expect(document.querySelector('[data-nb-candidate-block-convert="1"]')).toBeTruthy();
+      expect(
+        document.querySelector('[data-nb-candidate-block-convert-label="1"]')?.textContent,
+      ).toBe('Turn into');
     });
 
     const boldBtn = document.querySelector(
@@ -236,11 +238,9 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
     act(() => {
       ed.commands.setTextSelection(ed.state.selection.to);
     });
-    await vi.waitFor(() => {
-      expect(
-        document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]'),
-      ).toBeNull();
-    });
+    // Collapsed caret dismisses the selection toolbar.
+    expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeNull();
+    expect(document.querySelector('[data-nb-candidate-block-convert="1"]')).toBeNull();
 
     ed.destroy();
     mountPoint.remove();
@@ -340,9 +340,8 @@ describe('NotebookTiptapCandidateSelectionToolbar visibility', () => {
         host!.querySelector('[data-nb-candidate-page]')?.getAttribute('data-nb-candidate-page'),
       ).toBe('page-b');
     });
-    expect(
-      document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]'),
-    ).toBeNull();
+    expect(host!.textContent).toContain('Other page body');
+    expect(host!.textContent).not.toContain('Hello candidate');
   });
 
   it('candidate has no persistence props and no candidate badge chrome', async () => {
@@ -459,7 +458,9 @@ describe('M4.1 real editor gestures and isolation', () => {
       onEditorReady: next => { ed = next; },
     })));
     expect(ed!.state.doc.textContent).toBe('Other page');
-    expect(document.querySelector('[data-nb-candidate-selection-toolbar]')).toBeNull();
+    // New page starts with caret only — floating selection toolbar must stay closed.
+    expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeNull();
+    expect(ed!.state.doc.textContent).not.toContain('prefix');
   });
 
   it('restores saved selection when it collapses during toolbar interaction', () => {

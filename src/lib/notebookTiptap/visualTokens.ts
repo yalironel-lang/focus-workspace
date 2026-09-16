@@ -29,23 +29,25 @@ export function calloutToneTokens(tone: CalloutTone): {
   bar: string;
   bg: string;
   label: string;
+  /** Optional typographic marker for legacy/CE chrome; TipTap product view omits it. */
   glyph: string;
 } {
+  // One visual family: quiet tint + accent at logical inline-start (RTL-aware).
   switch (tone) {
-    case 'concept':
-      return { bar: '#f59e0b', bg: 'rgba(245,158,11,0.07)', label: '#f59e0b', glyph: '◆' };
     case 'definition':
-      return { bar: '#a78bfa', bg: 'rgba(167,139,250,0.07)', label: '#a78bfa', glyph: ':=' };
+      return { bar: 'rgba(167,139,250,0.85)', bg: 'rgba(167,139,250,0.05)', label: 'rgba(196,181,253,0.92)', glyph: '' };
+    case 'concept':
+      return { bar: 'rgba(245,158,11,0.85)', bg: 'rgba(245,158,11,0.05)', label: 'rgba(251,191,36,0.92)', glyph: '' };
     case 'theorem':
-      return { bar: '#818cf8', bg: 'rgba(129,140,248,0.07)', label: '#818cf8', glyph: '∴' };
+      return { bar: 'rgba(129,140,248,0.85)', bg: 'rgba(129,140,248,0.05)', label: 'rgba(165,180,252,0.92)', glyph: '' };
     case 'example':
-      return { bar: '#34d399', bg: 'rgba(52,211,153,0.06)', label: '#34d399', glyph: '→' };
+      return { bar: 'rgba(52,211,153,0.8)', bg: 'rgba(52,211,153,0.045)', label: 'rgba(110,231,183,0.92)', glyph: '' };
     case 'mistake':
-      return { bar: '#f87171', bg: 'rgba(248,113,113,0.07)', label: '#f87171', glyph: '✕' };
+      return { bar: 'rgba(248,113,113,0.85)', bg: 'rgba(248,113,113,0.05)', label: 'rgba(252,165,165,0.92)', glyph: '' };
     case 'summary':
-      return { bar: '#60a5fa', bg: 'rgba(96,165,250,0.07)', label: '#60a5fa', glyph: '≡' };
+      return { bar: 'rgba(96,165,250,0.85)', bg: 'rgba(96,165,250,0.05)', label: 'rgba(147,197,253,0.92)', glyph: '' };
     case 'review':
-      return { bar: '#fb923c', bg: 'rgba(251,146,60,0.07)', label: '#fb923c', glyph: '↩' };
+      return { bar: 'rgba(251,146,60,0.85)', bg: 'rgba(251,146,60,0.05)', label: 'rgba(253,186,116,0.92)', glyph: '' };
   }
 }
 
@@ -64,7 +66,8 @@ export function calloutLabel(tone: CalloutTone): string {
     case 'example':
       return 'Example';
     case 'mistake':
-      return 'Mistake';
+      // Product-facing clarity; canonical ID remains `mistake`.
+      return 'Common Mistake';
   }
 }
 

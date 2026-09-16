@@ -239,7 +239,7 @@ describe('M7.3A insert / selection / delete / undo', () => {
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
 
     const trigger = host!.querySelector('[data-nb-product-block="1"]') as HTMLButtonElement;
-    expect(trigger.textContent).toMatch(/Block \/ Academic/);
+    expect(trigger.querySelector('[data-nb-product-add-label="1"]')?.textContent).toBe('Add');
     expect(host!.querySelector('[data-nb-product-block-menu="1"]')).toBeNull();
 
     act(() => {
@@ -249,7 +249,7 @@ describe('M7.3A insert / selection / delete / undo', () => {
     const menu = document.querySelector('[data-nb-product-block-menu="1"]');
     expect(menu).toBeTruthy();
 
-    const labels = Array.from(menu!.querySelectorAll('[role="menuitem"]')).map(
+    const labels = Array.from(menu!.querySelectorAll('[data-nb-product-menu-item-label="1"]')).map(
       el => (el.textContent ?? '').trim(),
     );
     expect(labels.indexOf('Handwriting')).toBe(labels.indexOf('Step') + 2);

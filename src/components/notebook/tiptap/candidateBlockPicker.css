@@ -1,4 +1,12 @@
 .nb-candidate-block-trigger { min-width: 72px; gap: 5px; font-size: 11px; }
+.nb-candidate-block-current {
+  max-width: 7.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.72;
+  font-weight: 500;
+}
 .nb-candidate-block-picker {
   box-sizing: border-box;
   display: grid;

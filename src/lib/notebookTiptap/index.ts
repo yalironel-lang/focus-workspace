@@ -33,6 +33,7 @@ export {
   hasBidiControlChars,
   normalizeTextDir,
   inheritDirForNewBlock,
+  notebookChromeAwareDirWrapperProps,
   type NotebookTextDir,
 } from './direction';
 
@@ -45,10 +46,13 @@ export {
   type CandidateFormatState,
 } from './candidateFormatCommands';
 
+export { ACADEMIC_PRODUCT_QA_BODY } from './academicProductQaFixture';
 export {
   runCandidateBlockCommand,
+  insertCandidateBlockAtTarget,
   readCandidateBlockKind,
   CANDIDATE_BLOCK_MENU,
+  PRODUCT_ACADEMIC_TONES,
   textLooksLikeAcademicTypedLabel,
   type CandidateBlockTarget,
 } from './candidateBlockCommands';

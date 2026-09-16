@@ -86,7 +86,8 @@ describe('M7.3A product Block / Academic menu — Image + Handwriting visible', 
     });
 
     const trigger = host!.querySelector('[data-nb-product-block="1"]') as HTMLButtonElement;
-    expect(trigger.textContent).toBe('Block / Academic…');
+    expect(trigger.querySelector('[data-nb-product-add-label="1"]')?.textContent).toBe('Add');
+    expect(trigger.getAttribute('aria-label')).toMatch(/Add or change block/i);
     expect(document.querySelector('[data-nb-product-block-menu="1"]')).toBeNull();
 
     const menu = openProductBlockMenu();
@@ -94,7 +95,7 @@ describe('M7.3A product Block / Academic menu — Image + Handwriting visible', 
     // Portaled to document.body — not trapped in notebook overflow.
     expect(menu.parentElement).toBe(document.body);
 
-    const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(
+    const labels = Array.from(menu.querySelectorAll('[data-nb-product-menu-item-label="1"]')).map(
       el => (el.textContent ?? '').trim(),
     );
     // Expected product order: … Step, Image, Handwriting, …
@@ -113,8 +114,12 @@ describe('M7.3A product Block / Academic menu — Image + Handwriting visible', 
     ) as HTMLButtonElement;
     expect(imageBtn).toBeTruthy();
     expect(hwBtn).toBeTruthy();
-    expect(imageBtn.textContent).toBe('Image');
-    expect(hwBtn.textContent).toBe('Handwriting');
+    expect(imageBtn.querySelector('[data-nb-product-menu-item-label="1"]')?.textContent).toBe(
+      'Image',
+    );
+    expect(hwBtn.querySelector('[data-nb-product-menu-item-label="1"]')?.textContent).toBe(
+      'Handwriting',
+    );
 
     // Preserve prior basic options.
     expect(labels).toEqual(

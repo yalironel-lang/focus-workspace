@@ -19,8 +19,15 @@ function holdSelection(event: React.MouseEvent | React.PointerEvent) {
 }
 
 /** UI only. Conversion and selection restoration stay in the existing toolbar. */
-export function NotebookTiptapCandidateBlockPicker({ open, label, onToggle, onClose, onSelect }: {
+export function NotebookTiptapCandidateBlockPicker({
+  open,
+  label,
+  onToggle,
+  onClose,
+  onSelect,
+}: {
   open: boolean;
+  /** Current block product label (for checkmarks / context). */
   label: string;
   onToggle: () => void;
   onClose: () => void;
@@ -73,18 +80,25 @@ export function NotebookTiptapCandidateBlockPicker({ open, label, onToggle, onCl
 
   return <>
     <button ref={trigger} type="button" className="nb-toolbar-btn nb-candidate-block-trigger"
-      title="Change block type" aria-label={`Block type: ${label}`} aria-expanded={open}
-      aria-haspopup="dialog" aria-controls={open ? id : undefined} data-nb-candidate-fmt="blockMenu"
+      title={`Turn this block into… (currently ${label})`}
+      aria-label={`Turn into — currently ${label}`}
+      aria-expanded={open}
+      aria-haspopup="dialog" aria-controls={open ? id : undefined}
+      data-nb-candidate-fmt="blockMenu"
+      data-nb-candidate-block-convert="1"
       onPointerDownCapture={holdSelection} onMouseDownCapture={holdSelection}
       onClick={event => { event.stopPropagation(); keyboardOpen.current = event.detail === 0; onToggle(); }}
       onKeyDown={event => {
         if (event.key === 'ArrowDown') { event.preventDefault(); keyboardOpen.current = true; if (!open) onToggle(); else menu.current?.querySelector<HTMLButtonElement>('[data-nb-candidate-block]')?.focus(); }
         if (event.key === 'Escape') { event.preventDefault(); onClose(); }
       }}>
-      {label}<ChevronDown size={12} aria-hidden />
+      <span data-nb-candidate-block-convert-label="1">Turn into</span>
+      <span data-nb-candidate-block-current="1" className="nb-candidate-block-current">{label}</span>
+      <ChevronDown size={12} aria-hidden />
     </button>
     {open && position ? createPortal(
-      <div ref={menu} id={id} role="dialog" aria-label="Choose block type" dir="ltr"
+      <div ref={menu} id={id} role="dialog" aria-label="Turn this block into"
+        dir="ltr"
         data-nb-candidate-block-menu="1" data-placement={position.side}
         className="nb-candidate-block-picker"
         style={{ position: 'fixed', left: position.left, top: position.top, width: position.width,

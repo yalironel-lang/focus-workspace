@@ -24,6 +24,7 @@ import {
 import { NotebookHandwritingReadonlyView, NotebookImageReadonlyView } from './readonlyMedia';
 import {
   mathLtrIsolateProps,
+  notebookChromeAwareDirWrapperProps,
   notebookDirWrapperProps,
   type NotebookTextDir,
 } from './direction';
@@ -304,39 +305,45 @@ export function NbCalloutView({ node }: NodeViewProps) {
   const tone = (node.attrs.tone ?? 'concept') as CalloutTone;
   const ct = calloutToneTokens(tone);
   const { plain, marks } = richFromNode(node);
-  const d = dirProps(node);
+  const d = notebookChromeAwareDirWrapperProps(
+    node.attrs.dir as NotebookTextDir,
+    node.textContent ?? '',
+    node.attrs.align as TextAlignment | undefined,
+  );
   return (
     <NodeViewWrapper
       as="div"
       data-nb="nbCallout"
+      data-nb-academic-type={tone}
+      data-nb-academic-label={calloutLabel(tone)}
       dir={d.dir}
       data-nb-dir={d['data-nb-dir']}
       data-nb-effective-dir={d['data-nb-effective-dir']}
       style={{
         ...d.style,
-        borderInlineStart: `3px solid ${ct.bar}`,
+        /* Match product SandboxCalloutView: quiet family + logical-start accent. */
+        borderInlineStart: `2px solid ${ct.bar}`,
         backgroundColor: ct.bg,
-        borderStartStartRadius: 0,
-        borderEndStartRadius: 0,
-        borderStartEndRadius: 12,
-        borderEndEndRadius: 12,
-        paddingBlock: 10,
-        paddingInline: 14,
-        margin: '8px 0',
+        borderRadius: 6,
+        paddingBlock: 7,
+        paddingInline: 12,
+        marginBlock: 7,
         fontFamily: NB_FONT_STACK,
       }}
     >
       <div
+        data-nb-academic-chrome="1"
+        dir="ltr"
         style={{
-          fontSize: NB_TYPE_SCALE.l5,
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: '0.02em',
           color: ct.label,
-          marginBottom: 6,
+          marginBottom: 3,
+          lineHeight: 1.25,
+          userSelect: 'none',
         }}
       >
-        <span style={{ marginInlineEnd: 6 }}>{ct.glyph}</span>
         {calloutLabel(tone)}
       </div>
       <div style={{ ...baseText, color: NB_INK.primary }}>
