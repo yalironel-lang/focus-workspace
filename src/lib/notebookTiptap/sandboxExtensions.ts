@@ -57,6 +57,7 @@ import {
 import { NotebookSandboxPaste } from './sandboxPaste';
 import { NotebookSandboxInlineMathIsolate } from './sandboxInlineMathIsolate';
 import { NotebookImageProduct } from './notebookImageProduct';
+import { NotebookHandwritingProduct } from './notebookHandwritingProduct';
 
 export type NotebookTiptapSandboxOptions = {
   objectId?: string;
@@ -71,6 +72,7 @@ export function createNotebookTiptapSandboxExtensions(options: NotebookTiptapSan
     Gapcursor,
     UndoRedo,
     NotebookImageProduct,
+    NotebookHandwritingProduct,
     NotebookSandboxKeymap,
     NotebookSandboxGuards,
     NotebookSandboxDocumentFlow,

@@ -107,6 +107,11 @@ import {
   type NotebookImageReplaceContext,
 } from '../../lib/notebookTiptap/candidateImageInsert';
 import {
+  insertNbHandwritingAtSelection,
+  resolveNbHandwritingInsertTarget,
+  type NbHandwritingInsertTarget,
+} from '../../lib/notebookTiptap/candidateHandwritingInsert';
+import {
   gcOrphanHandwriting,
   gcOrphanHandwritingKeys,
   hydrateHandwritingBlocks,
@@ -2484,6 +2489,54 @@ export function ProjectNotebookBlock({
       void ingestNotebookImageFile(file, undefined, ctx.insertTarget);
     },
     [ingestNotebookImageFile],
+  );
+
+  /**
+   * M7.3A — product Block → Handwriting.
+   * Creates a new key via existing newHandwritingKey(); inserts nbHandwriting only.
+   * Does not write an empty asset (strokes persist on first draw via HandwritingBlock).
+   * Page-switch guard: abort body mutation if active page changed mid-flight.
+   */
+  const handleInsertHandwriting = useCallback(
+    (ctx: { insertTarget: NbHandwritingInsertTarget }) => {
+      const pageAtStart =
+        contentRef.current.activePageId ??
+        navigationActivePageIdRef.current ??
+        'legacy-body';
+      const tipTapTarget =
+        ctx.insertTarget ??
+        (tipTapCandidateActive &&
+        candidateEditorRef.current &&
+        !candidateEditorRef.current.isDestroyed
+          ? resolveNbHandwritingInsertTarget(candidateEditorRef.current.state)
+          : undefined);
+      const hwKey = newHandwritingKey();
+      const pageNow =
+        contentRef.current.activePageId ??
+        navigationActivePageIdRef.current ??
+        'legacy-body';
+      if (pageNow !== pageAtStart) return;
+
+      if (tipTapCandidateActive && candidateEditorRef.current && !candidateEditorRef.current.isDestroyed) {
+        insertNbHandwritingAtSelection(candidateEditorRef.current, hwKey, tipTapTarget);
+        if (objectId) void hydrateHandwritingBlocks(objectId, [hwKey]);
+        return;
+      }
+
+      // Legacy CE fallback: insert after focused block (same as slash/gutter).
+      const focusedId =
+        surfaceFocusBlockId ??
+        (blocksRef.current.length > 0 ? blocksRef.current[blocksRef.current.length - 1]!.id : null);
+      const newBlock: Block = { id: newBlockId(), kind: 'handwriting', key: hwKey };
+      const prev = blocksRef.current;
+      const idx = focusedId ? prev.findIndex(b => b.id === focusedId) : prev.length - 1;
+      const insertIdx = idx < 0 ? prev.length : idx + 1;
+      const next = [...prev];
+      next.splice(insertIdx, 0, newBlock);
+      commitBlocks(next);
+      if (objectId) void hydrateHandwritingBlocks(objectId, [hwKey]);
+    },
+    [tipTapCandidateActive, objectId, surfaceFocusBlockId, commitBlocks],
   );
 
   /**
@@ -6659,6 +6712,11 @@ export function ProjectNotebookBlock({
               onUserEdit={tipTapPersistActive ? handleCandidateUserEdit : undefined}
               onInsertImageFile={handleInsertImageFile}
               onReplaceImageFile={handleReplaceImageFile}
+              onInsertHandwriting={handleInsertHandwriting}
+              handwritingTokens={tokens}
+              handwritingUserId={handwritingUserId}
+              handwritingSectionId={freeSpaceSectionId}
+              onDismissTextEditing={dismissNotebookTextEditing}
               qaDiagContext={{
                 objectId: String(objectId),
                 propsContent: content,

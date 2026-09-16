@@ -5,7 +5,7 @@
  * Block math / media / divider are atomic (non-editable content).
  */
 
-import { useCallback, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { NodeViewProps } from '@tiptap/react';
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react';
@@ -20,6 +20,8 @@ import {
   calloutLabel,
   calloutToneTokens,
 } from './visualTokens';
+import { HandwritingBlock } from '../../components/notebook/HandwritingBlock';
+import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { NotebookHandwritingReadonlyView, NotebookImageReadonlyView } from './readonlyMedia';
 import {
   mathLtrIsolateProps,
@@ -30,7 +32,40 @@ import {
   NOTEBOOK_IMAGE_FILE_ACCEPT,
   removeSelectedNbImageRef,
 } from './candidateImageInsert';
+import { removeSelectedNbHandwriting } from './candidateHandwritingInsert';
 
+/** Minimal tokens when TipTap storage has not been wired yet (tests / unbound). */
+const HW_FALLBACK_TOKENS: AtmosphereTokens = {
+  id: 'nb-hw-fallback',
+  name: 'Notebook',
+  emoji: '',
+  description: '',
+  pageBg: '#0f172a',
+  navBg: '#0f172a',
+  cardBg: '#1e293b',
+  cardBorder: 'rgba(148,163,184,0.28)',
+  cardBorderHover: 'rgba(148,163,184,0.4)',
+  wellBg: '#0f172a',
+  textPrimary: '#f8fafc',
+  textSecondary: '#e2e8f0',
+  textMuted: '#94a3b8',
+  textGhost: '#64748b',
+  accent: '#38bdf8',
+  accentHover: '#7dd3fc',
+  accentSubtle: '#0ea5e9',
+  accentGlow: 'rgba(56,189,248,0.35)',
+  divider: 'rgba(148,163,184,0.28)',
+  focusBorder: '#38bdf8',
+  ambientGlow1: 'transparent',
+  ambientGlow2: 'transparent',
+  shadowSm: 'none',
+  shadowMd: 'none',
+  shadowLg: 'none',
+  blur: 0,
+  glowIntensity: 0,
+  radius: 10,
+  density: 'comfortable',
+};
 const baseText: CSSProperties = {
   fontFamily: NB_FONT_STACK,
   color: NB_INK.primary,
@@ -688,12 +723,41 @@ export function SandboxImageRefView({
 
 export function createSandboxHandwritingView(objectId?: string) {
   return function SandboxHandwritingView({ node, selected, editor, getPos }: NodeViewProps) {
+    const [editing, setEditing] = useState(false);
+    const key = String(node.attrs.key ?? '');
+    const product = editor?.storage?.notebookHandwritingProduct;
+    const resolvedObjectId = (product?.objectId || objectId || '').trim();
+    const tokens = product?.tokens ?? HW_FALLBACK_TOKENS;
+
     const handleSelect = useCallback(
       (e: React.MouseEvent) => {
+        if (editing) return;
         selectBlockAtom(editor, getPos, e);
       },
-      [editor, getPos],
+      [editor, getPos, editing],
     );
+
+    const actionBtnStyle: CSSProperties = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: '4px 8px',
+      fontSize: 11,
+      fontWeight: 500,
+      lineHeight: '14px',
+      color: '#f8fafc',
+      background: 'rgba(15, 23, 42, 0.88)',
+      border: '1px solid rgba(255, 255, 255, 0.18)',
+      borderRadius: 6,
+      cursor: 'pointer',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+      userSelect: 'none',
+    };
+
+    // Leave edit mode when the atom is deselected (e.g. click elsewhere).
+    useEffect(() => {
+      if (!selected && editing) setEditing(false);
+    }, [selected, editing]);
 
     return (
       <NodeViewWrapper
@@ -701,19 +765,120 @@ export function createSandboxHandwritingView(objectId?: string) {
         data-nb="nbHandwriting"
         data-nb-sandbox-atom="handwriting"
         data-nb-selected={selected ? 'true' : undefined}
-        onMouseDown={handleSelect}
-        onClick={handleSelect}
+        data-nb-hw-editing={editing ? 'true' : undefined}
         contentEditable={false}
         style={{
           margin: '10px 0',
-          outline: selected ? '2px solid #38bdf8' : 'none',
+          outline: selected || editing ? '2px solid #38bdf8' : 'none',
           outlineOffset: '2px',
           borderRadius: 10,
-          cursor: 'default',
+          cursor: editing ? 'default' : 'default',
           userSelect: 'none',
         }}
       >
-        <NotebookHandwritingReadonlyView objectId={objectId} blockKey={String(node.attrs.key ?? '')} />
+        {editing && resolvedObjectId ? (
+          <div
+            data-nb-hw-editor="1"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+            onPointerDown={e => e.stopPropagation()}
+          >
+            <HandwritingBlock
+              blockId={`tiptap-hw-${key}`}
+              objectId={resolvedObjectId}
+              blockKey={key}
+              userId={product?.userId}
+              sectionId={product?.sectionId}
+              tokens={tokens}
+              readOnly={false}
+              onDismissTextEditing={product?.onDismissTextEditing}
+              onFocus={() => {
+                selectBlockAtom(editor, getPos, {
+                  preventDefault() {},
+                } as React.MouseEvent);
+              }}
+            />
+            <div
+              data-nb-hw-actions="1"
+              contentEditable={false}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 6,
+                marginTop: 8,
+                lineHeight: 1.2,
+              }}
+            >
+              <button
+                type="button"
+                data-nb-hw-done="1"
+                title="Done drawing"
+                style={actionBtnStyle}
+                onMouseDown={e => e.preventDefault()}
+                onClick={e => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setEditing(false);
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div onMouseDown={handleSelect} onClick={handleSelect}>
+              <NotebookHandwritingReadonlyView objectId={resolvedObjectId || undefined} blockKey={key} />
+            </div>
+            {selected ? (
+              <div
+                data-nb-hw-actions="1"
+                contentEditable={false}
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                  marginTop: 8,
+                  lineHeight: 1.2,
+                }}
+              >
+                <button
+                  type="button"
+                  data-nb-hw-edit="1"
+                  title="Edit / Draw"
+                  style={actionBtnStyle}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={e => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    selectBlockAtom(editor, getPos, e);
+                    if (!resolvedObjectId) return;
+                    product?.onDismissTextEditing?.();
+                    setEditing(true);
+                  }}
+                >
+                  Edit / Draw
+                </button>
+                <button
+                  type="button"
+                  data-nb-hw-remove="1"
+                  title="Remove handwriting"
+                  style={actionBtnStyle}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={e => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (!editor) return;
+                    selectBlockAtom(editor, getPos, e);
+                    removeSelectedNbHandwriting(editor);
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
       </NodeViewWrapper>
     );
   };

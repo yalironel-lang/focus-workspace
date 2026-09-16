@@ -81,6 +81,24 @@ export { bodyToTiptapDoc, blocksToTiptapDoc, blockToTiptapNode } from './blocksT
 export { tiptapDocToBody, tiptapDocToBlocks } from './tiptapDocToBody';
 export { richLineToTiptapInline, tiptapInlineToRichLine } from './inlineBridge';
 
+export {
+  CANDIDATE_INSERT_IMAGE_MENU_VALUE,
+  NOTEBOOK_IMAGE_FILE_ACCEPT,
+  insertNbImageRefAtSelection,
+  resolveNbImageInsertTarget,
+  removeSelectedNbImageRef,
+  type NbImageInsertTarget,
+} from './candidateImageInsert';
+
+export {
+  CANDIDATE_INSERT_HANDWRITING_MENU_VALUE,
+  insertNbHandwritingAtSelection,
+  resolveNbHandwritingInsertTarget,
+  removeSelectedNbHandwriting,
+  newHandwritingKey,
+  type NbHandwritingInsertTarget,
+} from './candidateHandwritingInsert';
+
 import { bodyToTiptapDoc } from './blocksToTiptapDoc';
 import { tiptapDocToBody } from './tiptapDocToBody';
 import type { JSONContent } from '@tiptap/core';

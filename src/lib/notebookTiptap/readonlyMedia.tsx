@@ -120,7 +120,11 @@ export function NotebookHandwritingReadonlyView({
   const empty = !cached || cached.strokes.length === 0;
 
   return (
-    <div data-nb-parity="handwriting" style={{ position: 'relative' }}>
+    <div
+      data-nb-parity={cached ? 'handwriting' : 'handwriting-missing'}
+      data-nb-hw-key={blockKey}
+      style={{ position: 'relative' }}
+    >
       <canvas
         ref={canvasRef}
         style={{
@@ -143,9 +147,13 @@ export function NotebookHandwritingReadonlyView({
             color: 'rgba(148,163,184,0.75)',
             fontSize: 12,
             pointerEvents: 'none',
+            textAlign: 'center',
+            padding: 12,
           }}
         >
-          Handwriting key {blockKey} (local cache empty)
+          {cached
+            ? `Handwriting key ${blockKey} (local cache empty)`
+            : `Handwriting unavailable — key ${blockKey} (reference kept)`}
         </div>
       ) : null}
     </div>

@@ -22,16 +22,19 @@ import {
 import { hasVersionedNotebookRecord } from '../../../lib/notebookDialect';
 import { NotebookTiptapCandidateSelectionToolbar } from './NotebookTiptapCandidateSelectionToolbar';
 import {
-  CANDIDATE_BLOCK_MENU,
   runCandidateBlockCommand,
-  type CandidateBlockTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
 import {
-  CANDIDATE_INSERT_IMAGE_MENU_VALUE,
   NOTEBOOK_IMAGE_FILE_ACCEPT,
   resolveNbImageInsertTarget,
   type NbImageInsertTarget,
 } from '../../../lib/notebookTiptap/candidateImageInsert';
+import {
+  resolveNbHandwritingInsertTarget,
+  type NbHandwritingInsertTarget,
+} from '../../../lib/notebookTiptap/candidateHandwritingInsert';
+import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
+import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
@@ -108,6 +111,16 @@ export type NotebookTiptapCandidateEditorProps = {
       width: number | null;
     },
   ) => void | Promise<void>;
+  /**
+   * M7.3A — product handwriting insertion via Block / Academic… → Handwriting.
+   * Parent creates a newHandwritingKey and inserts nbHandwriting via existing model.
+   */
+  onInsertHandwriting?: (ctx: { insertTarget: NbHandwritingInsertTarget }) => void;
+  /** Atmosphere tokens for HandwritingBlock Edit/Draw surface. */
+  handwritingTokens?: AtmosphereTokens | null;
+  handwritingUserId?: string;
+  handwritingSectionId?: string;
+  onDismissTextEditing?: () => void;
 };
 
 function attemptSerialize(
@@ -180,6 +193,11 @@ export function NotebookTiptapCandidateEditor({
   qaDiagContext,
   onInsertImageFile,
   onReplaceImageFile,
+  onInsertHandwriting,
+  handwritingTokens,
+  handwritingUserId,
+  handwritingSectionId,
+  onDismissTextEditing,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
@@ -189,6 +207,8 @@ export function NotebookTiptapCandidateEditor({
   const pendingImageInsertTargetRef = useRef<NbImageInsertTarget | null>(null);
   const onReplaceImageFileRef = useRef(onReplaceImageFile);
   onReplaceImageFileRef.current = onReplaceImageFile;
+  const onDismissTextEditingRef = useRef(onDismissTextEditing);
+  onDismissTextEditingRef.current = onDismissTextEditing;
 
   const pageSource = useMemo(
     () => sourceDocumentBody,
@@ -402,6 +422,27 @@ export function NotebookTiptapCandidateEditor({
       storage.replaceImageFile = undefined;
     };
   }, [editor, pageKey, onReplaceImageFile]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const storage = editor.storage.notebookHandwritingProduct;
+    storage.pageKey = pageKey;
+    storage.objectId = objectId ?? '';
+    storage.userId = handwritingUserId;
+    storage.sectionId = handwritingSectionId;
+    storage.tokens = handwritingTokens ?? null;
+    storage.onDismissTextEditing = () => onDismissTextEditingRef.current?.();
+    return () => {
+      storage.onDismissTextEditing = undefined;
+    };
+  }, [
+    editor,
+    pageKey,
+    objectId,
+    handwritingUserId,
+    handwritingSectionId,
+    handwritingTokens,
+  ]);
 
   const markState = useEditorState({
     editor,
@@ -710,72 +751,68 @@ export function NotebookTiptapCandidateEditor({
             >
               Redo
             </button>
-            <select
-              data-nb-product-block="1"
-              aria-label="Block type"
-              defaultValue=""
-              style={{ ...toolBtn, fontWeight: 500, minWidth: 120 }}
-              onMouseDown={e => e.preventDefault()}
-              onChange={e => {
-                const v = e.target.value;
-                e.target.value = '';
-                if (!v) return;
-                if (v === CANDIDATE_INSERT_IMAGE_MENU_VALUE) {
-                  if (!onInsertImageFile || !editor) return;
-                  // Capture boundary/caret target BEFORE the native picker steals focus.
-                  pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+            <NotebookTiptapProductBlockMenu
+              buttonStyle={toolBtn}
+              onBeforeOpen={() => {
+                if (!editor || editor.isDestroyed) return;
+                // Capture caret/boundary before the menu interaction can blur focus.
+                pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+              }}
+              onAction={action => {
+                if (!editor || editor.isDestroyed) return;
+                if (action.kind === 'image') {
+                  if (!onInsertImageFile) return;
+                  if (!pendingImageInsertTargetRef.current) {
+                    pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+                  }
                   imageFileInputRef.current?.click();
                   return;
                 }
-                run(() => {
-                  runCandidateBlockCommand(editor!, v as CandidateBlockTarget);
-                });
-              }}
-            >
-              <option value="" disabled>
-                Block / Academic…
-              </option>
-              {CANDIDATE_BLOCK_MENU.map(item => (
-                <option key={item.id} value={item.id}>
-                  {item.group === 'academic' ? `◆ ${item.label}` : item.label}
-                </option>
-              ))}
-              {onInsertImageFile ? (
-                <option value={CANDIDATE_INSERT_IMAGE_MENU_VALUE} data-nb-product-image-option="1">
-                  Image
-                </option>
-              ) : null}
-            </select>
-            {onInsertImageFile ? (
-              <input
-                ref={imageFileInputRef}
-                type="file"
-                accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
-                data-nb-product-image-input="1"
-                aria-hidden="true"
-                tabIndex={-1}
-                style={{ display: 'none' }}
-                onChange={e => {
-                  const file = e.target.files?.[0] ?? null;
-                  e.target.value = '';
-                  if (!file) {
-                    pendingImageInsertTargetRef.current = null;
-                    return;
-                  }
+                if (action.kind === 'handwriting') {
+                  if (!onInsertHandwriting) return;
                   const insertTarget =
                     pendingImageInsertTargetRef.current ??
-                    (editor ? resolveNbImageInsertTarget(editor.state) : { kind: 'split' as const });
+                    resolveNbHandwritingInsertTarget(editor.state);
                   pendingImageInsertTargetRef.current = null;
-                  void onInsertImageFile(file, { insertTarget });
-                }}
-              />
-            ) : null}
+                  onInsertHandwriting({ insertTarget });
+                  return;
+                }
+                run(() => {
+                  runCandidateBlockCommand(editor, action.target);
+                });
+              }}
+            />
+            <input
+              ref={imageFileInputRef}
+              type="file"
+              accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
+              data-nb-product-image-input="1"
+              aria-hidden="true"
+              tabIndex={-1}
+              style={{ display: 'none' }}
+              onChange={e => {
+                const file = e.target.files?.[0] ?? null;
+                e.target.value = '';
+                if (!file) {
+                  pendingImageInsertTargetRef.current = null;
+                  return;
+                }
+                if (!onInsertImageFile) {
+                  pendingImageInsertTargetRef.current = null;
+                  return;
+                }
+                const insertTarget =
+                  pendingImageInsertTargetRef.current ??
+                  (editor ? resolveNbImageInsertTarget(editor.state) : { kind: 'split' as const });
+                pendingImageInsertTargetRef.current = null;
+                void onInsertImageFile(file, { insertTarget });
+              }}
+            />
             <select
               data-nb-product-dir="1"
               aria-label="Text direction"
               value={markState?.dir ?? 'auto'}
               style={{ ...toolBtn, fontWeight: 500, minWidth: 72 }}
-              onMouseDown={e => e.preventDefault()}
               onChange={e => {
                 const dir = normalizeTextDir(e.target.value);
                 run(() => {

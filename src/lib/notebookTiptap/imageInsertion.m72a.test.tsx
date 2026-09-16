@@ -12,7 +12,6 @@ import { createNotebookTiptapSandboxExtensions } from './sandboxExtensions';
 import { bodyToTiptapDoc } from './blocksToTiptapDoc';
 import { tiptapDocToBody } from './tiptapDocToBody';
 import {
-  CANDIDATE_INSERT_IMAGE_MENU_VALUE,
   NOTEBOOK_IMAGE_FILE_ACCEPT,
   altFromImageFileName,
   insertNbImageRefAtSelection,
@@ -164,10 +163,26 @@ describe('M7.2A product UI entry', () => {
     );
     await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
 
-    const option = host!.querySelector('[data-nb-product-image-option="1"]') as HTMLOptionElement;
+    const trigger = host!.querySelector('[data-nb-product-block="1"]') as HTMLButtonElement;
+    expect(trigger).toBeTruthy();
+    expect(host!.querySelector('[data-nb-product-block-menu="1"]')).toBeNull();
+
+    act(() => {
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      trigger.click();
+    });
+    const menu = document.querySelector('[data-nb-product-block-menu="1"]');
+    expect(menu).toBeTruthy();
+
+    const option = host!.querySelector('[data-nb-product-image-option="1"]') as HTMLButtonElement
+      ?? document.querySelector('[data-nb-product-image-option="1"]') as HTMLButtonElement;
     expect(option).toBeTruthy();
     expect(option.textContent).toMatch(/^Image$/);
-    expect(option.value).toBe(CANDIDATE_INSERT_IMAGE_MENU_VALUE);
+    // Immediately after Step in product order
+    const labels = Array.from(menu!.querySelectorAll('[role="menuitem"]')).map(
+      el => (el.textContent ?? '').trim(),
+    );
+    expect(labels.indexOf('Image')).toBe(labels.indexOf('Step') + 1);
 
     const input = host!.querySelector(
       '[data-nb-product-image-input="1"]',
@@ -176,13 +191,12 @@ describe('M7.2A product UI entry', () => {
     expect(input.accept).toBe(NOTEBOOK_IMAGE_FILE_ACCEPT);
 
     const clickSpy = vi.spyOn(input, 'click').mockImplementation(() => undefined);
-    const select = host!.querySelector('[data-nb-product-block="1"]') as HTMLSelectElement;
     act(() => {
-      select.value = CANDIDATE_INSERT_IMAGE_MENU_VALUE;
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+      option.click();
     });
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(onInsertImageFile).not.toHaveBeenCalled(); // picker cancel / no file yet
+    expect(document.querySelector('[data-nb-product-block-menu="1"]')).toBeNull();
   });
 
   it('3. cancel / empty file input = zero mutation callback', async () => {
