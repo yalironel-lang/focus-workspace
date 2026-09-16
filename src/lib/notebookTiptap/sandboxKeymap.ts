@@ -16,6 +16,10 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 import { inheritDirForNewBlock } from './direction';
 import { isSelectionInsideTable, isSelectionInsideTableCell } from './tableCommands';
+import {
+  findTopLevelBlockBoundaryInsertPos,
+  selectTopLevelBlockBoundary,
+} from './candidateImageInsert';
 
 export const PROTECTED_ATOMS = new Set([
   'nbImageRef',
@@ -581,6 +585,20 @@ export const NotebookSandboxDocumentFlow = Extension.create({
           },
 
           handleClick(view, pos, event) {
+            // M7.2A: click the visual seam between top-level blocks → boundary selection
+            // (GapCursor when valid; otherwise end-of-previous / start-of-next text caret).
+            if (event instanceof MouseEvent) {
+              const boundaryPos = findTopLevelBlockBoundaryInsertPos(
+                view,
+                event.clientX,
+                event.clientY,
+              );
+              if (boundaryPos != null) {
+                selectTopLevelBlockBoundary(view, boundaryPos);
+                return true;
+              }
+            }
+
             const { doc } = view.state;
             const last = doc.lastChild;
             if (!last) return false;

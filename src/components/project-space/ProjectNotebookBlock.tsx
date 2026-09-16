@@ -89,7 +89,6 @@ import { parseRichLine } from '../../lib/notebookInlineMarks';
 import {
   hydrateNotebookImages,
   nbImageGet,
-  nbImageSet,
   subscribeNotebookImages,
 } from '../../lib/notebookImageStore';
 import {
@@ -99,6 +98,12 @@ import {
   hydrateNotebookImagesWithCloud,
 } from '../../lib/notebookImageCloud';
 import { referencedNotebookImageKeys } from '../../lib/notebookImageRefs';
+import {
+  insertNbImageRefAtSelection,
+  resolveNbImageInsertTarget,
+  storeNotebookImageFile,
+  type NbImageInsertTarget,
+} from '../../lib/notebookTiptap/candidateImageInsert';
 import {
   gcOrphanHandwriting,
   gcOrphanHandwritingKeys,
@@ -2405,16 +2410,9 @@ export function ProjectNotebookBlock({
     });
   }, [pushContent]);
 
-  const insertImageBlock = useCallback((key: string, alt: string) => {
+  const insertImageBlock = useCallback((key: string, alt: string, insertTarget?: NbImageInsertTarget) => {
     if (tipTapCandidateActive && candidateEditorRef.current && !candidateEditorRef.current.isDestroyed) {
-      const ed = candidateEditorRef.current;
-      ed.chain()
-        .focus()
-        .insertContent({
-          type: 'nbImageRef',
-          attrs: { key, alt: alt || '', width: null },
-        })
-        .run();
+      insertNbImageRefAtSelection(candidateEditorRef.current, key, alt, insertTarget);
       return;
     }
     const focusedId = surfaceFocusBlockId ?? (blocksRef.current.length > 0 ? blocksRef.current[blocksRef.current.length - 1]!.id : null);
@@ -2427,66 +2425,89 @@ export function ProjectNotebookBlock({
     commitBlocks(next);
   }, [tipTapCandidateActive, surfaceFocusBlockId, commitBlocks]);
 
-  const handleNotebookPaste = useCallback((e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData.items ?? []);
-    const imageItem = items.find(i => i.type.startsWith('image/'));
-    if (!imageItem) return;
-    e.preventDefault();
-    const file = imageItem.getAsFile();
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      void (async () => {
-        const dataUrl = reader.result as string;
-        const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const saved = await nbImageSet(key, dataUrl);
-        if (!saved) {
+  /**
+   * Shared image ingest: store asset first, then insert canonical nbImageRef.
+   * Captures active page at start — if the user switches pages before insert completes,
+   * skip body mutation (may leave a rare orphan asset; see M7.2A report).
+   */
+  const ingestNotebookImageFile = useCallback(
+    async (file: File, altOverride?: string, insertTarget?: NbImageInsertTarget) => {
+      const pageAtStart =
+        contentRef.current.activePageId ??
+        navigationActivePageIdRef.current ??
+        'legacy-body';
+      // Capture TipTap insert target before await (picker/async must not lose boundary).
+      const tipTapTarget =
+        insertTarget ??
+        (tipTapCandidateActive &&
+        candidateEditorRef.current &&
+        !candidateEditorRef.current.isDestroyed
+          ? resolveNbImageInsertTarget(candidateEditorRef.current.state)
+          : undefined);
+      const stored = await storeNotebookImageFile(file);
+      if (!stored.ok) {
+        if (stored.reason === 'storage_failed') {
           toast.error('Could not save image — storage may be full.');
-          return;
         }
-        if (handwritingUserId && freeSpaceSectionId && objectId) {
-          onNotebookImageSaved({
-            userId: handwritingUserId,
-            sectionId: freeSpaceSectionId,
-            objectId,
-            imageKey: key,
-          });
-        }
-        insertImageBlock(key, '');
-      })();
-    };
-    reader.readAsDataURL(file);
-  }, [insertImageBlock, handwritingUserId, freeSpaceSectionId, objectId]);
+        return;
+      }
+      const pageNow =
+        contentRef.current.activePageId ??
+        navigationActivePageIdRef.current ??
+        'legacy-body';
+      if (pageNow !== pageAtStart) {
+        // Avoid stale-writing the image into the wrong page.
+        return;
+      }
+      if (handwritingUserId && freeSpaceSectionId && objectId) {
+        onNotebookImageSaved({
+          userId: handwritingUserId,
+          sectionId: freeSpaceSectionId,
+          objectId,
+          imageKey: stored.key,
+        });
+      }
+      insertImageBlock(
+        stored.key,
+        altOverride !== undefined ? altOverride : stored.alt,
+        tipTapTarget,
+      );
+    },
+    [insertImageBlock, handwritingUserId, freeSpaceSectionId, objectId, tipTapCandidateActive],
+  );
 
-  const handleWritingAreaDrop = useCallback((e: React.DragEvent) => {
-    const file = e.dataTransfer.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const reader = new FileReader();
-    reader.onload = () => {
-      void (async () => {
-        const dataUrl = reader.result as string;
-        const key = `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const saved = await nbImageSet(key, dataUrl);
-        if (!saved) {
-          toast.error('Could not save image — storage may be full.');
-          return;
-        }
-        if (handwritingUserId && freeSpaceSectionId && objectId) {
-          onNotebookImageSaved({
-            userId: handwritingUserId,
-            sectionId: freeSpaceSectionId,
-            objectId,
-            imageKey: key,
-          });
-        }
-        const cleanName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
-        insertImageBlock(key, cleanName);
-      })();
-    };
-    reader.readAsDataURL(file);
-  }, [insertImageBlock, handwritingUserId, freeSpaceSectionId, objectId]);
+  /** M7.2A — product Block → Image file picker path (insertTarget captured in editor). */
+  const handleInsertImageFile = useCallback(
+    (file: File, ctx: { insertTarget: NbImageInsertTarget }) => {
+      void ingestNotebookImageFile(file, undefined, ctx.insertTarget);
+    },
+    [ingestNotebookImageFile],
+  );
+
+  const handleNotebookPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = Array.from(e.clipboardData.items ?? []);
+      const imageItem = items.find(i => i.type.startsWith('image/'));
+      if (!imageItem) return;
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      // Paste historically used empty alt; preserve that product behavior.
+      void ingestNotebookImageFile(file, '');
+    },
+    [ingestNotebookImageFile],
+  );
+
+  const handleWritingAreaDrop = useCallback(
+    (e: React.DragEvent) => {
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !file.type.startsWith('image/')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void ingestNotebookImageFile(file);
+    },
+    [ingestNotebookImageFile],
+  );
 
   const persist = useCallback(
     (next: Block[]) => {
@@ -6592,6 +6613,7 @@ export function ProjectNotebookBlock({
                 candidateEditorRef.current = ed;
               }}
               onUserEdit={tipTapPersistActive ? handleCandidateUserEdit : undefined}
+              onInsertImageFile={handleInsertImageFile}
               qaDiagContext={{
                 objectId: String(objectId),
                 propsContent: content,

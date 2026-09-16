@@ -26,6 +26,12 @@ import {
   runCandidateBlockCommand,
   type CandidateBlockTarget,
 } from '../../../lib/notebookTiptap/candidateBlockCommands';
+import {
+  CANDIDATE_INSERT_IMAGE_MENU_VALUE,
+  NOTEBOOK_IMAGE_FILE_ACCEPT,
+  resolveNbImageInsertTarget,
+  type NbImageInsertTarget,
+} from '../../../lib/notebookTiptap/candidateImageInsert';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
@@ -79,6 +85,16 @@ export type NotebookTiptapCandidateEditorProps = {
   onUserEdit?: (body: string, codecVersion: number) => void;
   /** DEV-only diagnostics context for copying in-memory snapshot and transition trace */
   qaDiagContext?: NotebookQaDiagContext;
+  /**
+   * M7.2A — product image insertion.
+   * Called with a user-selected image File after the native picker.
+   * Parent stores via existing nbImageSet pipeline and inserts nbImageRef.
+   * Cancelled picker must not call this.
+   */
+  onInsertImageFile?: (
+    file: File,
+    ctx: { insertTarget: NbImageInsertTarget },
+  ) => void | Promise<void>;
 };
 
 function attemptSerialize(
@@ -149,11 +165,14 @@ export function NotebookTiptapCandidateEditor({
   onSnapshot,
   onUserEdit,
   qaDiagContext,
+  onInsertImageFile,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
   const [userEdited, setUserEdited] = useState(false);
   const [snap, setSnap] = useState<CandidateSerializeSnapshot | null>(null);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingImageInsertTargetRef = useRef<NbImageInsertTarget | null>(null);
 
   const pageSource = useMemo(
     () => sourceDocumentBody,
@@ -674,11 +693,18 @@ export function NotebookTiptapCandidateEditor({
               style={{ ...toolBtn, fontWeight: 500, minWidth: 120 }}
               onMouseDown={e => e.preventDefault()}
               onChange={e => {
-                const v = e.target.value as CandidateBlockTarget | '';
+                const v = e.target.value;
                 e.target.value = '';
                 if (!v) return;
+                if (v === CANDIDATE_INSERT_IMAGE_MENU_VALUE) {
+                  if (!onInsertImageFile || !editor) return;
+                  // Capture boundary/caret target BEFORE the native picker steals focus.
+                  pendingImageInsertTargetRef.current = resolveNbImageInsertTarget(editor.state);
+                  imageFileInputRef.current?.click();
+                  return;
+                }
                 run(() => {
-                  runCandidateBlockCommand(editor!, v);
+                  runCandidateBlockCommand(editor!, v as CandidateBlockTarget);
                 });
               }}
             >
@@ -690,7 +716,36 @@ export function NotebookTiptapCandidateEditor({
                   {item.group === 'academic' ? `◆ ${item.label}` : item.label}
                 </option>
               ))}
+              {onInsertImageFile ? (
+                <option value={CANDIDATE_INSERT_IMAGE_MENU_VALUE} data-nb-product-image-option="1">
+                  Image
+                </option>
+              ) : null}
             </select>
+            {onInsertImageFile ? (
+              <input
+                ref={imageFileInputRef}
+                type="file"
+                accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
+                data-nb-product-image-input="1"
+                aria-hidden="true"
+                tabIndex={-1}
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0] ?? null;
+                  e.target.value = '';
+                  if (!file) {
+                    pendingImageInsertTargetRef.current = null;
+                    return;
+                  }
+                  const insertTarget =
+                    pendingImageInsertTargetRef.current ??
+                    (editor ? resolveNbImageInsertTarget(editor.state) : { kind: 'split' as const });
+                  pendingImageInsertTargetRef.current = null;
+                  void onInsertImageFile(file, { insertTarget });
+                }}
+              />
+            ) : null}
             <select
               data-nb-product-dir="1"
               aria-label="Text direction"
