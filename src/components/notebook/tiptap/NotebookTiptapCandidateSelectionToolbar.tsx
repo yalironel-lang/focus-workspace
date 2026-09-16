@@ -24,8 +24,10 @@ import {
   AlignCenter,
   AlignRight,
   Plus,
+  ExternalLink,
 } from 'lucide-react';
 import { sanitizeUrl } from '../../../lib/urlSanitizer';
+import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
 import {
   DEFAULT_NOTEBOOK_FONT_SIZE,
   HIGHLIGHT_PRESETS,
@@ -265,6 +267,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const storedSelRef = useRef<{ from: number; to: number } | null>(null);
   /**
+   * Range captured when the Link popover opens. Survives input-focus / outside
+   * blur collapsing the live ProseMirror selection so Apply/Save still targets
+   * the text the student originally selected (M7.5B product contract).
+   */
+  const linkRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const linkOpenRef = useRef(false);
+  /**
    * After Turn into / Escape / outside dismiss, block syncFromEditor from reopening
    * for the *same* range (M7.4A). Cleared on editor pointerdown or when the
    * selection actually changes from the dismissed snapshot.
@@ -312,6 +321,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
     setSizeOpen(false);
     setBlockOpen(false);
     setLinkOpen(false);
+    linkOpenRef.current = false;
     setTablePickerOpen(false);
     setTableMenuOpen(false);
   }, []);
@@ -339,7 +349,21 @@ export function NotebookTiptapCandidateSelectionToolbar({
     const shouldShow = selectionShouldShowToolbar(editor);
     setDiag({ empty, from, to, focused, shouldShow });
 
+    if (!empty) {
+      storedSelRef.current = { from, to };
+      if (linkOpenRef.current) {
+        linkRangeRef.current = { from, to };
+      }
+    }
+
     if (!shouldShow) {
+      // M7.5B: while the Link popover is open, keep the floating toolbar mounted
+      // even if focusing the URL input collapsed the live selection. Apply/Save
+      // restores linkRangeRef / storedSelRef. Do not summon the toolbar for a
+      // caret alone when the popover is closed (M7.4A unchanged).
+      if (linkOpenRef.current) {
+        return;
+      }
       setOpen(false);
       setAnchor(null);
       closeMenus();
@@ -352,10 +376,6 @@ export function NotebookTiptapCandidateSelectionToolbar({
       setAnchor(null);
       closeMenus();
       return;
-    }
-
-    if (!empty) {
-      storedSelRef.current = { from, to };
     }
 
     if (suppressAutoOpenRef.current) {
@@ -393,10 +413,12 @@ export function NotebookTiptapCandidateSelectionToolbar({
     const onSel = () => syncFromEditor();
     const onBlur = ({ event }: { event: FocusEvent }) => {
       if (candidateSelectionToolbarBusyRef.current) return;
+      if (linkOpenRef.current) return;
       const related = event.relatedTarget as Node | null;
       if (related && toolbarRef.current?.contains(related)) return;
       requestAnimationFrame(() => {
         if (candidateSelectionToolbarBusyRef.current) return;
+        if (linkOpenRef.current) return;
         if (!selectionShouldShowToolbar(editor)) dismissToolbar();
       });
     };
@@ -511,12 +533,18 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
   useEffect(() => {
     if (linkOpen) {
+      // Snapshot again right before focus — autofocus must not lose the target range.
+      const { from, to, empty } = editor.state.selection;
+      if (!empty && to > from) {
+        linkRangeRef.current = { from, to };
+        storedSelRef.current = { from, to };
+      }
       setTimeout(() => {
         linkInputRef.current?.focus();
         linkInputRef.current?.select();
       }, 50);
     }
-  }, [linkOpen]);
+  }, [linkOpen, editor]);
 
   const releaseBusy = useCallback(() => {
     requestAnimationFrame(() => {
@@ -529,12 +557,22 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const ensureSelection = useCallback(() => {
     candidateSelectionToolbarBusyRef.current = true;
     let before = editor.state.selection;
-    if (before.empty && storedSelRef.current) {
-      const { from, to } = storedSelRef.current;
-      editor.chain().setTextSelection({ from, to }).run();
+    const preferred =
+      (linkOpenRef.current && linkRangeRef.current) || storedSelRef.current;
+    if (before.empty && preferred && preferred.to > preferred.from) {
+      editor.chain().focus().setTextSelection({ from: preferred.from, to: preferred.to }).run();
       before = editor.state.selection;
     }
     return before;
+  }, [editor]);
+
+  const restoreLinkTargetSelection = useCallback(() => {
+    candidateSelectionToolbarBusyRef.current = true;
+    const preferred = linkRangeRef.current ?? storedSelRef.current;
+    if (preferred && preferred.to > preferred.from) {
+      editor.chain().focus().setTextSelection({ from: preferred.from, to: preferred.to }).run();
+    }
+    return editor.state.selection;
   }, [editor]);
 
   const runFmt = useCallback(
@@ -554,7 +592,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
           afterTo: before.to,
         });
         releaseBusy();
-        return;
+        return false;
       }
       storedSelRef.current = { from: before.from, to: before.to };
       const ok = runCandidateFormatCommand(editor, cmd);
@@ -571,12 +609,14 @@ export function NotebookTiptapCandidateSelectionToolbar({
       });
       releaseBusy();
       syncFromEditor();
+      return ok;
     },
     [editor, ensureSelection, releaseBusy, syncFromEditor],
   );
 
   const toggleLinkPopover = useCallback(() => {
     if (linkOpen) {
+      linkOpenRef.current = false;
       setLinkOpen(false);
       setLinkError(null);
       return;
@@ -585,12 +625,22 @@ export function NotebookTiptapCandidateSelectionToolbar({
     setBlockOpen(false);
     setTablePickerOpen(false);
     setTableMenuOpen(false);
+    const { from, to, empty } = editor.state.selection;
+    if (!empty && to > from) {
+      storedSelRef.current = { from, to };
+      linkRangeRef.current = { from, to };
+    } else if (storedSelRef.current) {
+      linkRangeRef.current = { ...storedSelRef.current };
+    } else {
+      linkRangeRef.current = null;
+    }
     const editing = fmt.link;
     setIsEditingLink(editing);
     setLinkUrl(editing ? (fmt.linkHref ?? '') : '');
     setLinkError(null);
+    linkOpenRef.current = true;
     setLinkOpen(true);
-  }, [linkOpen, fmt.link, fmt.linkHref]);
+  }, [linkOpen, fmt.link, fmt.linkHref, editor]);
 
   const handleApplyLink = useCallback(() => {
     const trimmed = linkUrl.trim();
@@ -600,27 +650,76 @@ export function NotebookTiptapCandidateSelectionToolbar({
     }
     const sanitized = sanitizeUrl(trimmed);
     if (!sanitized) {
-      setLinkError('Invalid URL (must be http:// or https://)');
+      setLinkError('Invalid URL (http(s), mailto:, tel:, /path, or #anchor)');
       return;
     }
-    runFmt({ type: 'applyLink', href: sanitized });
+    const before = restoreLinkTargetSelection();
+    if (before.empty && !editor.isActive('link')) {
+      setLinkError('Select text to link, then Apply');
+      releaseBusy();
+      return;
+    }
+    const ok = runCandidateFormatCommand(editor, { type: 'applyLink', href: sanitized });
+    setCmdDiag({
+      cmd: 'applyLink',
+      ok,
+      skippedEmpty: false,
+      beforeFrom: before.from,
+      beforeTo: before.to,
+      afterFrom: editor.state.selection.from,
+      afterTo: editor.state.selection.to,
+    });
+    if (!ok) {
+      setLinkError('Could not apply link — reselect the text and try again');
+      releaseBusy();
+      return;
+    }
+    linkOpenRef.current = false;
     setLinkOpen(false);
     setLinkError(null);
-    editor.commands.focus();
-  }, [editor, linkUrl, runFmt]);
+    releaseBusy();
+    // Keep the linked range selected so the mark + chrome are immediately visible.
+    const applied = linkRangeRef.current ?? storedSelRef.current;
+    if (applied && applied.to > applied.from) {
+      editor.chain().focus().setTextSelection(applied).run();
+      storedSelRef.current = applied;
+    } else {
+      editor.commands.focus();
+    }
+    syncFromEditor();
+  }, [editor, linkUrl, restoreLinkTargetSelection, releaseBusy, syncFromEditor]);
+
+  const handleOpenLink = useCallback(() => {
+    const raw = linkUrl.trim() || fmt.linkHref || '';
+    const ok = openNotebookLink(raw);
+    if (!ok) {
+      setLinkError('Invalid or unsafe URL — cannot open');
+    }
+  }, [linkUrl, fmt.linkHref]);
 
   const handleRemoveLink = useCallback(() => {
-    runFmt({ type: 'removeLink' });
+    restoreLinkTargetSelection();
+    const ok = runCandidateFormatCommand(editor, { type: 'removeLink' });
+    if (!ok) {
+      setLinkError('Could not remove link — reselect the linked text');
+      releaseBusy();
+      return;
+    }
+    linkOpenRef.current = false;
     setLinkOpen(false);
     setLinkError(null);
+    releaseBusy();
     editor.commands.focus();
-  }, [editor, runFmt]);
+    syncFromEditor();
+  }, [editor, restoreLinkTargetSelection, releaseBusy, syncFromEditor]);
 
   const handleCancelLink = useCallback(() => {
+    linkOpenRef.current = false;
     setLinkOpen(false);
     setLinkError(null);
     editor.commands.focus();
-  }, [editor]);
+    syncFromEditor();
+  }, [editor, syncFromEditor]);
 
   const runBlock = useCallback(
     (target: CandidateBlockTarget) => {
@@ -814,12 +913,28 @@ export function NotebookTiptapCandidateSelectionToolbar({
                     gap: 6,
                     minWidth: 260,
                   }}
-                  onMouseDown={e => e.stopPropagation()}
+                  onMouseDown={e => {
+                    // Keep the original text selection intact for Apply/Save/Remove.
+                    // Allow the URL <input> to take focus (do not preventDefault on it).
+                    e.stopPropagation();
+                    const tag = (e.target as HTMLElement | null)?.tagName;
+                    if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+                      e.preventDefault();
+                    } else if (!editor.isDestroyed) {
+                      const { from, to, empty } = editor.state.selection;
+                      if (!empty && to > from) {
+                        linkRangeRef.current = { from, to };
+                        storedSelRef.current = { from, to };
+                      }
+                    }
+                    candidateSelectionToolbarBusyRef.current = true;
+                  }}
                 >
                   <input
                     ref={linkInputRef}
                     data-nb-candidate-link-input="1"
                     type="text"
+                    dir="ltr"
                     value={linkUrl}
                     placeholder="https://example.com"
                     style={{
@@ -832,6 +947,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
                       outline: 'none',
                       flex: '1 1 180px',
                       minWidth: 140,
+                      direction: 'ltr',
+                      unicodeBidi: 'isolate',
                     }}
                     onChange={e => {
                       setLinkUrl(e.target.value);
@@ -864,6 +981,27 @@ export function NotebookTiptapCandidateSelectionToolbar({
                   >
                     {isEditingLink ? 'Save' : 'Apply'}
                   </button>
+                  {isEditingLink ? (
+                    <button
+                      type="button"
+                      data-nb-candidate-link-open="1"
+                      className="nb-toolbar-btn"
+                      title="Open link"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: '3px 8px',
+                        color: '#7dd3fc',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      onClick={handleOpenLink}
+                    >
+                      <ExternalLink size={12} strokeWidth={2.5} />
+                      Open Link
+                    </button>
+                  ) : null}
                   {isEditingLink ? (
                     <button
                       type="button"

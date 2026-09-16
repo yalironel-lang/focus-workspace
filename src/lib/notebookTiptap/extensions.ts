@@ -21,6 +21,7 @@ import { notebookDirAttribute } from './direction';
 import { plainMathToLatex } from '../mathInputAssistant';
 import { renderKatexHtml } from '../notebookMath';
 import { sanitizeUrl } from './urlSanitizer';
+import { NB_TIPTAP_LINK_CLASS } from './openNotebookLink';
 import { createNotebookTableExtensions } from './tableExtensions';
 
 const inlineContent = 'inline*';
@@ -297,6 +298,9 @@ export const LinkMark = Mark.create({
       rel: {
         default: 'noopener noreferrer',
       },
+      class: {
+        default: NB_TIPTAP_LINK_CLASS,
+      },
     };
   },
 
@@ -305,7 +309,15 @@ export const LinkMark = Mark.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['a', mergeAttributes(HTMLAttributes, { target: '_blank', rel: 'noopener noreferrer' }), 0];
+    return [
+      'a',
+      mergeAttributes(HTMLAttributes, {
+        class: NB_TIPTAP_LINK_CLASS,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }),
+      0,
+    ];
   },
 
   addCommands() {

@@ -17,6 +17,8 @@ import {
 } from './notebookInlineMarks';
 import { KatexPreview } from '../components/notebook/KatexPreview';
 import { plainMathToLatex } from './mathInputAssistant';
+import { sanitizeUrl } from './urlSanitizer';
+import { NB_TIPTAP_LINK_CLASS } from './notebookTiptap/openNotebookLink';
 
 export { TEXT_COLOR_PRESETS, HIGHLIGHT_PRESETS };
 
@@ -227,7 +229,7 @@ function wrapSegmentReact(
   key: string,
 ): ReactNode {
   let node: ReactNode = text;
-  const order: InlineMarkType[] = ['fs', 'fg', 'hl', 'b', 'i', 'u', 's', 'm'];
+  const order: InlineMarkType[] = ['fs', 'fg', 'hl', 'b', 'i', 'u', 's', 'm', 'a'];
   for (const t of order) {
     if (!types.has(t)) continue;
     const v = types.get(t);
@@ -277,6 +279,27 @@ function wrapSegmentReact(
           </span>
         );
         break;
+      case 'a': {
+        const href = sanitizeUrl(v);
+        if (!href) break;
+        node = (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={NB_TIPTAP_LINK_CLASS}
+            style={{
+              color: '#7dd3fc',
+              textDecoration: 'underline',
+              textDecorationThickness: 1,
+              textUnderlineOffset: 2,
+            }}
+          >
+            {node}
+          </a>
+        );
+        break;
+      }
       default:
         break;
     }

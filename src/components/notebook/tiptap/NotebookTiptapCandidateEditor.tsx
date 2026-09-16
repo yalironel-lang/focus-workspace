@@ -45,6 +45,7 @@ import {
   resolveNbHandwritingInsertTarget,
   type NbHandwritingInsertTarget,
 } from '../../../lib/notebookTiptap/candidateHandwritingInsert';
+import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
 
@@ -322,12 +323,16 @@ export function NotebookTiptapCandidateEditor({
           return false;
         },
         handleDOMEvents: {
+          // M7.5B: ordinary click on linked text stays editor interaction (no navigate).
+          // Cmd/Ctrl+Click intentionally opens via sanitizeUrl + safe opener.
           click: (_view, event) => {
-            if ((event.target as HTMLElement | null)?.closest('a')) {
-              event.preventDefault();
-              return true;
+            const anchor = (event.target as HTMLElement | null)?.closest('a[href]');
+            if (!anchor) return false;
+            event.preventDefault();
+            if (event.metaKey || event.ctrlKey) {
+              openNotebookLink(anchor.getAttribute('href'));
             }
-            return false;
+            return true;
           },
         },
         handleClick: (_view, _pos, event) => {
@@ -694,6 +699,29 @@ export function NotebookTiptapCandidateEditor({
         .nb-tiptap-candidate-prosemirror td.nb-table-cell:focus-within,
         .nb-tiptap-candidate-prosemirror th.nb-table-header:focus-within {
           background: rgba(56, 189, 248, 0.06);
+        }
+        /* M7.5B: restrained document-editor link treatment (dark Notebook UI).
+         * !important beats Tailwind preflight anchor inherit rules inside the product shell. */
+        .nb-tiptap-candidate-prosemirror a.nb-tiptap-link,
+        .nb-tiptap-candidate-prosemirror a[href] {
+          color: #7dd3fc !important;
+          text-decoration: underline !important;
+          text-decoration-thickness: 1px;
+          text-underline-offset: 2px;
+          text-decoration-skip-ink: auto;
+          cursor: text;
+        }
+        .nb-tiptap-candidate-prosemirror a.nb-tiptap-link:hover,
+        .nb-tiptap-candidate-prosemirror a[href]:hover {
+          color: #bae6fd !important;
+          text-decoration-thickness: 1.5px;
+        }
+        .nb-tiptap-candidate-prosemirror a.nb-tiptap-link:focus-visible,
+        .nb-tiptap-candidate-prosemirror a[href]:focus-visible {
+          color: #e0f2fe !important;
+          outline: 1px solid rgba(125, 211, 252, 0.55);
+          outline-offset: 1px;
+          border-radius: 2px;
         }
       `}</style>
 
