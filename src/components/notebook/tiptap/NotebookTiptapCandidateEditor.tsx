@@ -264,6 +264,8 @@ export function NotebookTiptapCandidateEditor({
       },
       onUpdate: ({ editor: ed, transaction }) => {
         if (!transaction.docChanged) return;
+        // Fail-closed / non-editable: never bridge to persistence (protects empty hydrate fallback).
+        if (!ed.isEditable) return;
         userEditedRef.current = true;
         setUserEdited(true);
         const targetCodec = onUserEditRef.current ? 1 : sourceBodyCodecVersion;
@@ -581,45 +583,86 @@ export function NotebookTiptapCandidateEditor({
         }
       `}</style>
 
-      <div
-        data-nb-candidate-badge="1"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 10,
-          padding: '4px 10px',
-          borderRadius: 999,
-          fontSize: 11,
-          fontWeight: 800,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          background: 'rgba(245,158,11,0.18)',
-          border: '1px solid rgba(245,158,11,0.45)',
-          color: '#fbbf24',
-        }}
-      >
-        TipTap candidate · {onUserEdit ? 'M5.2 Guarded Persist' : 'Unsaved'}
-      </div>
+      {/* Hide candidate DEV chrome while fail-closed so users only see product-safe copy. */}
+      {!load.error ? (
+        <>
+          <div
+            data-nb-candidate-badge="1"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 10,
+              padding: '4px 10px',
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              background: 'rgba(245,158,11,0.18)',
+              border: '1px solid rgba(245,158,11,0.45)',
+              color: '#fbbf24',
+            }}
+          >
+            TipTap candidate · {onUserEdit ? 'M5.2 Guarded Persist' : 'Unsaved'}
+          </div>
 
-      <NotebookCandidateQaPanel
-        getSnapshot={getSnapshot}
-        failClosed={Boolean(load.error)}
-      />
+          <NotebookCandidateQaPanel
+            getSnapshot={getSnapshot}
+            failClosed={Boolean(load.error)}
+          />
+        </>
+      ) : null}
 
       {load.error ? (
         <div
           data-nb-candidate-load-error="1"
+          data-nb-page-load-safe-error="1"
+          role="alert"
           style={{
-            padding: 12,
-            borderRadius: 8,
+            padding: 16,
+            borderRadius: 10,
             background: 'rgba(248,113,113,0.12)',
-            color: '#fca5a5',
-            fontSize: 13,
+            color: '#fecaca',
+            fontSize: 14,
+            lineHeight: 1.45,
+            maxWidth: 520,
           }}
         >
-          Fail-closed: cannot load this page body into TipTap. CE remains available when candidate is off.
-          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{load.error}</pre>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Unable to open this page safely</div>
+          <div style={{ opacity: 0.95 }}>
+            Your original content has not been changed.
+          </div>
+          <div style={{ marginTop: 8, opacity: 0.85, fontSize: 13 }}>
+            Try reloading the page. If the problem continues, use recovery options or contact support.
+          </div>
+          <button
+            type="button"
+            data-nb-page-load-reload="1"
+            onClick={() => {
+              if (typeof window !== 'undefined') window.location.reload();
+            }}
+            style={{
+              marginTop: 14,
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(252,165,165,0.45)',
+              background: 'rgba(15,23,42,0.35)',
+              color: '#fecaca',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Reload page
+          </button>
+          {import.meta.env.DEV ? (
+            <pre
+              data-nb-page-load-error-detail="1"
+              style={{ whiteSpace: 'pre-wrap', marginTop: 12, fontSize: 11, opacity: 0.7 }}
+            >
+              {load.error}
+            </pre>
+          ) : null}
         </div>
       ) : (
         <>
@@ -701,28 +744,30 @@ export function NotebookTiptapCandidateEditor({
         </>
       )}
 
-      <div
-        data-nb-candidate-status="1"
-        style={{
-          marginTop: 12,
-          fontSize: 11,
-          opacity: 0.75,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 8,
-          alignItems: 'center',
-        }}
-      >
-        <span data-nb-candidate-dirty={dirtyLabel}>{dirtyLabel}</span>
-        {snap ? (
-          <span data-nb-candidate-serialize={snap.status}>
-            serialize={snap.status}
-            {snap.errorCode ? ` (${snap.errorCode})` : ''}
-          </span>
-        ) : null}
-        <span data-nb-dir-persist={persistenceMode}>{onUserEdit ? 'persist: guarded' : 'dir not persisted'}</span>
-        <span>page={pageKey}</span>
-      </div>
+      {!load.error ? (
+        <div
+          data-nb-candidate-status="1"
+          style={{
+            marginTop: 12,
+            fontSize: 11,
+            opacity: 0.75,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            alignItems: 'center',
+          }}
+        >
+          <span data-nb-candidate-dirty={dirtyLabel}>{dirtyLabel}</span>
+          {snap ? (
+            <span data-nb-candidate-serialize={snap.status}>
+              serialize={snap.status}
+              {snap.errorCode ? ` (${snap.errorCode})` : ''}
+            </span>
+          ) : null}
+          <span data-nb-dir-persist={persistenceMode}>{onUserEdit ? 'persist: guarded' : 'dir not persisted'}</span>
+          <span>page={pageKey}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
