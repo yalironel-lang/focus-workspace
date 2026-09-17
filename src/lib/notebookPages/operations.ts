@@ -244,6 +244,8 @@ export function renameNotebookPage<T extends NotebookContentWithPages>(
 function resolveActiveAfterDelete(
   content: NotebookContentWithPages,
   deletedPageId: string,
+  /** Next-or-previous sibling id computed BEFORE removing the page from pageIds. */
+  preferredFallbackId?: string | null,
 ): Pick<NotebookContentWithPages, 'activeSectionId' | 'activePageId' | 'body' | 'bodyCodecVersion'> {
   const sections = content.sections ?? [];
   const pages = content.pages ?? [];
@@ -253,27 +255,25 @@ function resolveActiveAfterDelete(
       activeSectionId: content.activeSectionId,
       activePageId: content.activePageId,
       ...(active ? notebookPageBodyProjection(active, content) : { body: content.body }),
-      bodyCodecVersion: active ? notebookPageBodyProjection(active, content).bodyCodecVersion : content.bodyCodecVersion,
+      bodyCodecVersion: active
+        ? notebookPageBodyProjection(active, content).bodyCodecVersion
+        : content.bodyCodecVersion,
     };
   }
-  const section = sections.find(s => s.pageIds.includes(deletedPageId));
-  if (!section) {
-    const firstSection = sections[0];
-    const firstPageId = firstSection?.pageIds[0];
-    const firstPage = firstPageId ? pages.find(p => p.id === firstPageId) : null;
-    return {
-      activeSectionId: firstSection?.id,
-      activePageId: firstPageId,
-      ...(firstPage ? notebookPageBodyProjection(firstPage) : { body: '' }),
-      bodyCodecVersion: firstPage?.documentBodyCodecVersion,
-    };
-  }
-  const idx = section.pageIds.indexOf(deletedPageId);
-  const fallbackId = section.pageIds[idx + 1] ?? section.pageIds[idx - 1] ?? sections[0]?.pageIds[0];
+
+  const preferred =
+    preferredFallbackId && pages.some(p => p.id === preferredFallbackId)
+      ? preferredFallbackId
+      : null;
+  const section =
+    (preferred ? sections.find(s => s.pageIds.includes(preferred)) : null) ??
+    sections.find(s => s.pageIds.length > 0) ??
+    sections[0];
+  const fallbackId = preferred ?? section?.pageIds[0] ?? sections[0]?.pageIds[0];
   const fallbackPage = fallbackId ? pages.find(p => p.id === fallbackId) : null;
   const fallbackSection = fallbackPage
     ? sections.find(s => s.id === fallbackPage.sectionId)
-    : sections[0];
+    : section;
   return {
     activeSectionId: fallbackSection?.id,
     activePageId: fallbackPage?.id,
@@ -296,6 +296,14 @@ export function deleteNotebookPage<T extends NotebookContentWithPages>(
   const deletedInkKeys =
     page.kind === 'write' ? [page.inkPageKey ?? page.id] : [];
 
+  // Capture next/previous sibling while pageIds still contain the deleted page.
+  const sectionBefore = (saved.sections ?? []).find(s => s.pageIds.includes(pageId));
+  const idxBefore = sectionBefore ? sectionBefore.pageIds.indexOf(pageId) : -1;
+  const preferredFallbackId =
+    idxBefore >= 0 && sectionBefore
+      ? sectionBefore.pageIds[idxBefore + 1] ?? sectionBefore.pageIds[idxBefore - 1]
+      : undefined;
+
   const pages = (saved.pages ?? []).filter(p => p.id !== pageId);
   const sections = (saved.sections ?? []).map(s => ({
     ...s,
@@ -308,7 +316,7 @@ export function deleteNotebookPage<T extends NotebookContentWithPages>(
     sections,
     schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
   } as T;
-  const nextActive = resolveActiveAfterDelete(withoutPage, pageId);
+  const nextActive = resolveActiveAfterDelete(withoutPage, pageId, preferredFallbackId);
   return {
     content: { ...withoutPage, ...nextActive } as T,
     deletedInkKeys,

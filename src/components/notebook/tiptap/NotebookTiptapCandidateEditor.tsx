@@ -90,16 +90,17 @@ export type NotebookTiptapCandidateEditorProps = {
   onEditorReady?: (editor: import('@tiptap/core').Editor | null) => void;
   onSnapshot?: (snap: CandidateSerializeSnapshot) => void;
   /**
-   * M5.2 — guarded real persistence callback.
+   * M5.2 / M7.5C2 — guarded real persistence callback.
    * Called ONLY when:
    *   1. A genuine user content mutation occurs (transaction.docChanged)
    *   2. Serialization to canonical body succeeds (fail-closed)
    *   3. This prop is provided (persistence flag ON at mount site)
    *
-   * The body is always codec V1. Caller routes through existing pushContent pipeline.
+   * Payload always includes the pageKey that produced the body (never infer from
+   * mutable parent activePageId). Body is always codec V1 when persist is on.
    * NOT called on: mount, hydration, programmatic setContent, selection, focus, blur.
    */
-  onUserEdit?: (body: string, codecVersion: number) => void;
+  onUserEdit?: (payload: { body: string; codecVersion: number; pageKey: string }) => void;
   /** DEV-only diagnostics context for copying in-memory snapshot and transition trace */
   qaDiagContext?: NotebookQaDiagContext;
   /**
@@ -371,7 +372,7 @@ export function NotebookTiptapCandidateEditor({
               ...recentEmissionsRef.current.slice(0, 9),
             ];
             try {
-              persistFn(next.body, 1);
+              persistFn({ body: next.body, codecVersion: 1, pageKey: emitPageKey });
             } catch (err) {
               // eslint-disable-next-line no-console
               console.error('[TipTap M5.2] onUserEdit threw — persistence skipped', err);

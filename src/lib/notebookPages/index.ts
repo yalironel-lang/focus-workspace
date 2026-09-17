@@ -57,6 +57,15 @@ export {
   prepareNotebookForCloudPersist,
 } from './persist';
 export {
+  applyPageKeyedUserEdit,
+  applyActivePageTargetedUserEdit,
+  resolveSwitchFlushRepresentation,
+  switchNotebookPageWithSafeFlush,
+  type PageKeyedBodyEmission,
+  type NotebookLiveRepresentation,
+  type SwitchFlushResult,
+} from './pageKeyedPersist';
+export {
   saveNotebookActivePage,
   loadNotebookActivePage,
   clearNotebookActivePage,

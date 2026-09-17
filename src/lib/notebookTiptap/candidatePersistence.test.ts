@@ -151,9 +151,12 @@ describe('T2: Candidate ON + Persistence ON — genuine edit calls persistence',
       if (!tipTapPersistActive) return;
       pushContent({ body, bodyCodecVersion: codecVersion });
     };
-    const onUserEdit = tipTapPersistActive ? handleCandidateUserEdit : undefined;
+    const onUserEdit = tipTapPersistActive
+      ? (payload: { body: string; codecVersion: number; pageKey: string }) =>
+          handleCandidateUserEdit(payload.body, payload.codecVersion)
+      : undefined;
     expect(onUserEdit).toBeDefined();
-    onUserEdit!('some body content', 1);
+    onUserEdit!({ body: 'some body content', codecVersion: 1, pageKey: 'page-1' });
     expect(pushContent).toHaveBeenCalledOnce();
     expect(pushContent).toHaveBeenCalledWith({ body: 'some body content', bodyCodecVersion: 1 });
   });
@@ -164,9 +167,11 @@ describe('T2: Candidate ON + Persistence ON — genuine edit calls persistence',
     try {
       const body = tiptapDocToBody(ed.getJSON(), 1);
       expect(body.length).toBeGreaterThan(0);
-      onUserEdit(body, 1);
+      onUserEdit({ body, codecVersion: 1, pageKey: 'page-1' });
       expect(onUserEdit).toHaveBeenCalledOnce();
-      expect(onUserEdit).toHaveBeenCalledWith(expect.any(String), 1);
+      expect(onUserEdit).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.any(String), codecVersion: 1, pageKey: 'page-1' }),
+      );
     } finally {
       ed.destroy();
     }

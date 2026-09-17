@@ -7,11 +7,14 @@ import type {
   FreeSpaceObjectTombstone,
   KnowledgeTombstone,
   NotebookBlockTombstone,
+  NotebookPageTombstone,
   NotebookSnapshot,
 } from './knowledgeTypes';
 import { resolvePageForBodyProjection } from '../notebookPages/hydrate';
 import { replaceNotebookPageBody } from '../notebookPages/bodyCodec';
-import type { NotebookPage } from '../notebookPages/types';
+import type { NotebookContentWithPages, NotebookPage } from '../notebookPages/types';
+import { NOTEBOOK_SCHEMA_VERSION_V1 } from '../notebookPages/types';
+import { isEquivalentNotebookPage } from './notebookPageRecovery';
 import { cancelPendingFreeSpaceObjectDeletes } from '../focusCache/freeSpaceObjectDeleteEnqueue';
 import { enqueueFreeSpaceObjectCreate } from '../focusCache/freeSpaceObjectCreateEnqueue';
 
@@ -139,6 +142,9 @@ export async function restoreFromTombstone(
   if (tombstone.kind === 'free_space_object') {
     return restoreFreeSpaceObject(tombstone, options);
   }
+  if (tombstone.kind === 'notebook_page') {
+    return restoreNotebookPage(tombstone);
+  }
   return restoreNotebookBlock(tombstone);
 }
 
@@ -249,6 +255,122 @@ async function restoreNotebookBlock(tombstone: NotebookBlockTombstone): Promise<
     return { ok: false, reason: 'Restore could not be verified. Try again.' };
   }
   if (!(verified.content.body ?? '').includes(line)) {
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+
+  await deleteTombstone(tombstone.id);
+  return { ok: true };
+}
+
+function insertPageIntoNotebookContent(
+  content: NotebookContentWithPages,
+  page: NotebookPage,
+  preferredSectionId: string,
+  indexInSection: number,
+): NotebookContentWithPages {
+  const sections = [...(content.sections ?? [])];
+  const pages = [...(content.pages ?? [])];
+  let targetSectionIdx = sections.findIndex(s => s.id === preferredSectionId);
+  if (targetSectionIdx < 0) {
+    // Original section missing — first surviving section (deterministic).
+    if (sections.length === 0) {
+      sections.push({
+        id: preferredSectionId,
+        title: 'Notes',
+        pageIds: [],
+      });
+      targetSectionIdx = 0;
+    } else {
+      targetSectionIdx = 0;
+    }
+  }
+  const targetSection = sections[targetSectionIdx]!;
+  const insertAt = Math.max(0, Math.min(indexInSection, targetSection.pageIds.length));
+  const restoredPage: NotebookPage = {
+    ...page,
+    sectionId: targetSection.id,
+  };
+  const nextPageIds = [...targetSection.pageIds];
+  nextPageIds.splice(insertAt, 0, restoredPage.id);
+  sections[targetSectionIdx] = { ...targetSection, pageIds: nextPageIds };
+  pages.push(restoredPage);
+  return {
+    ...content,
+    schemaVersion: NOTEBOOK_SCHEMA_VERSION_V1,
+    sections,
+    pages,
+  };
+}
+
+async function restoreNotebookPage(tombstone: NotebookPageTombstone): Promise<RestoreResult> {
+  const { sectionId, boardId, objectId, page, indexInSection, sectionIdOfPage } = tombstone;
+  if (!page || typeof page !== 'object' || typeof page.id !== 'string' || !page.id) {
+    return { ok: false, reason: 'This recovery record is incomplete and cannot be restored safely.' };
+  }
+
+  const objects = loadObjectsSync(sectionId, boardId);
+  const notebook = objects.find(o => o.id === objectId && o.content.type === 'notebook');
+  if (!notebook || notebook.content.type !== 'notebook') {
+    return {
+      ok: false,
+      reason: 'The parent notebook no longer exists. Restore the notebook first.',
+    };
+  }
+
+  const notebookContent = notebook.content as NotebookContentWithPages;
+  const existing = (notebookContent.pages ?? []).find(p => p.id === page.id);
+  if (existing) {
+    if (!isEquivalentNotebookPage(existing, page)) {
+      return {
+        ok: false,
+        reason:
+          'A page with this id already exists in the notebook and does not match the recovery copy.',
+      };
+    }
+    await deleteTombstone(tombstone.id);
+    return { ok: true };
+  }
+
+  const nextContent = insertPageIntoNotebookContent(
+    notebookContent,
+    page,
+    sectionIdOfPage || page.sectionId,
+    indexInSection,
+  );
+
+  const nextObjects = objects.map(o => {
+    if (o.id !== objectId) return o;
+    // Preserve full Free Space notebook content (paperStyle, etc.); only merge page fields.
+    return {
+      ...o,
+      content: {
+        ...notebook.content,
+        schemaVersion: nextContent.schemaVersion,
+        sections: nextContent.sections,
+        pages: nextContent.pages,
+      },
+      updatedAt: Date.now(),
+    };
+  });
+
+  const saved = trySaveObjectsForRestore(sectionId, boardId, nextObjects, objectId);
+  if (!saved.ok) {
+    return saved;
+  }
+
+  const verified = loadObjectsSync(sectionId, boardId).find(
+    o => o.id === objectId && o.content.type === 'notebook',
+  );
+  if (!verified || verified.content.type !== 'notebook') {
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+  const verifiedPages = (verified.content as NotebookContentWithPages).pages ?? [];
+  const restored = verifiedPages.find(p => p.id === page.id);
+  if (!restored) {
+    return { ok: false, reason: 'Restore could not be verified. Try again.' };
+  }
+  // sectionId may be remapped when the original section no longer exists.
+  if (!isEquivalentNotebookPage(restored, { ...page, sectionId: restored.sectionId })) {
     return { ok: false, reason: 'Restore could not be verified. Try again.' };
   }
 

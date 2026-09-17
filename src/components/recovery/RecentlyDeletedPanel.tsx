@@ -28,6 +28,7 @@ function formatDeletedAt(ts: number): string {
 
 function tombstoneKindLabel(t: KnowledgeTombstone): string {
   if (t.kind === 'notebook_block') return 'Notebook block';
+  if (t.kind === 'notebook_page') return 'Notebook page';
   return t.objectType || 'Object';
 }
 

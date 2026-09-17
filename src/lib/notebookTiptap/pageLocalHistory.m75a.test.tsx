@@ -67,8 +67,8 @@ async function mountEditable(opts: {
       onEditorReady: ed => {
         editor = ed;
       },
-      onUserEdit: (b, c) => {
-        emissions.push({ body: b, codecVersion: c, pageKeyAtEmit: pageKeyHolder.current });
+      onUserEdit: (payload) => {
+        emissions.push({ body: payload.body, codecVersion: payload.codecVersion, pageKeyAtEmit: pageKeyHolder.current });
       },
     });
 

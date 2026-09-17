@@ -378,11 +378,15 @@ describe('M5.2 End-to-End Feedback Loop Regression', () => {
     });
 
     await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
-    const [emittedBody, emittedCodec] = onUserEdit.mock.calls[onUserEdit.mock.calls.length - 1]!;
+    const emitted = onUserEdit.mock.calls[onUserEdit.mock.calls.length - 1]![0] as {
+      body: string;
+      codecVersion: number;
+      pageKey: string;
+    };
 
     // Simulate the parent reflecting the emitted body back down as props
     act(() => {
-      setBodyFn(emittedBody, emittedCodec);
+      setBodyFn(emitted.body, emitted.codecVersion);
     });
 
     // The editor must NOT have reset or cleared content, and must NOT show ~nb1:
@@ -426,7 +430,8 @@ describe('M5.2 End-to-End Feedback Loop Regression', () => {
     });
 
     await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
-    const [emittedBody] = onUserEdit.mock.calls[onUserEdit.mock.calls.length - 1]!;
+    const emittedBody = (onUserEdit.mock.calls[onUserEdit.mock.calls.length - 1]![0] as { body: string })
+      .body;
     expect(emittedBody).toContain('~nb1:');
 
     // 2. Parent reflects back emitted body but with transient undefined codecVersion (e.g. from navigationOverlay bug)
@@ -526,8 +531,12 @@ describe('M5.2 End-to-End Feedback Loop Regression', () => {
       });
     };
 
-    const handleCandidateUserEdit = (body: string, codecVersion: number) => {
-      pushContent({ ...notebook, body, bodyCodecVersion: codecVersion });
+    const handleCandidateUserEdit = (payload: {
+      body: string;
+      codecVersion: number;
+      pageKey: string;
+    }) => {
+      pushContent({ ...notebook, body: payload.body, bodyCodecVersion: payload.codecVersion });
     };
 
     function ComponentHarness() {

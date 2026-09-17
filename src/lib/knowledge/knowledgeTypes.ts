@@ -1,10 +1,11 @@
 import type { BlockPos } from '../../hooks/useBlockPositions';
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
+import type { NotebookPage } from '../notebookPages/types';
 
 /** Serializable notebook block snapshot (mirrors ProjectNotebookBlock block shapes). */
 export type NotebookBlockSnapshot = Record<string, unknown> & { id: string; kind: string };
 
-export type TombstoneKind = 'free_space_object' | 'notebook_block';
+export type TombstoneKind = 'free_space_object' | 'notebook_block' | 'notebook_page';
 
 export interface TombstoneBase {
   id: string;
@@ -33,7 +34,26 @@ export interface NotebookBlockTombstone extends TombstoneBase {
   block: NotebookBlockSnapshot;
 }
 
-export type KnowledgeTombstone = FreeSpaceObjectTombstone | NotebookBlockTombstone;
+/**
+ * M7.5C2 — Soft-deleted Notebook page (local knowledge journal).
+ * Payload is a lossless NotebookPage snapshot; no documentBody re-encode.
+ */
+export interface NotebookPageTombstone extends TombstoneBase {
+  kind: 'notebook_page';
+  objectId: string;
+  objectTitle: string;
+  /** Exact page record at soft-delete time. */
+  page: NotebookPage;
+  /** section.pageIds index before removal. */
+  indexInSection: number;
+  /** page.sectionId at delete time (may differ from Free Space workspace sectionId). */
+  sectionIdOfPage: string;
+}
+
+export type KnowledgeTombstone =
+  | FreeSpaceObjectTombstone
+  | NotebookBlockTombstone
+  | NotebookPageTombstone;
 
 export interface NotebookSnapshot {
   id: string;

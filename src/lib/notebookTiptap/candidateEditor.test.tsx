@@ -282,8 +282,12 @@ describe('NotebookTiptapCandidateEditor', () => {
     });
 
     await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
-    expect(onUserEdit).toHaveBeenCalledWith(expect.any(String), 1);
-    const [persistedBody, codecVersion] = onUserEdit.mock.calls[0]!;
+    expect(onUserEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.any(String), codecVersion: 1, pageKey: expect.any(String) }),
+    );
+    const persisted = onUserEdit.mock.calls[0]![0] as { body: string; codecVersion: number; pageKey: string };
+    const persistedBody = persisted.body;
+    const codecVersion = persisted.codecVersion;
     expect(codecVersion).toBe(1);
     expect(persistedBody.startsWith('~nb1:')).toBe(true);
     expect(persistedBody).toContain('Original page text added');

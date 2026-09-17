@@ -407,7 +407,7 @@ describe('M7.4A product menu click path', () => {
     expect(editor!.state.selection.$from.parent.textContent).toBe('');
 
     await vi.waitFor(() => expect(onUserEditMock).toHaveBeenCalled());
-    const lastBody = onUserEditMock.mock.calls.at(-1)![0] as string;
+    const lastBody = (onUserEditMock.mock.calls.at(-1)![0] as { body: string }).body;
     expect(lastBody).toContain('definition');
     expect(lastBody).toContain('Keep my text');
     expect(lastBody).not.toMatch(/"type"\s*:\s*"doc"/);

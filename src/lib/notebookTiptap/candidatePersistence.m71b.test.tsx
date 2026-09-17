@@ -257,14 +257,19 @@ describe('M7.1B real user edit → canonical persistence boundary', () => {
       editor!.commands.insertContent(' typed');
     });
     await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
-    const [body, codec] = onUserEdit.mock.calls.at(-1)!;
-    expect(codec).toBe(1);
-    expect(typeof body).toBe('string');
-    expect(body).toContain('Start text typed');
-    expect(body.startsWith('~nb1:') || body.includes('Start text typed')).toBe(true);
+    const payload = onUserEdit.mock.calls.at(-1)![0] as {
+      body: string;
+      codecVersion: number;
+      pageKey: string;
+    };
+    expect(payload.codecVersion).toBe(1);
+    expect(typeof payload.body).toBe('string');
+    expect(payload.body).toContain('Start text typed');
+    expect(payload.body.startsWith('~nb1:') || payload.body.includes('Start text typed')).toBe(true);
     // Not TipTap JSON document
-    expect(body).not.toMatch(/^\s*\{[\s\S]*"type"\s*:\s*"doc"/);
-    expect(body).not.toContain('"type":"doc"');
+    expect(payload.body).not.toMatch(/^\s*\{[\s\S]*"type"\s*:\s*"doc"/);
+    expect(payload.body).not.toContain('"type":"doc"');
+    expect(payload.pageKey).toEqual(expect.any(String));
   });
 });
 
@@ -291,7 +296,7 @@ describe('M7.1B refresh / reopen', () => {
       editor!.commands.insertContent(' → B');
     });
     await vi.waitFor(() => expect(onUserEdit).toHaveBeenCalled());
-    const [persistedB] = onUserEdit.mock.calls.at(-1)! as [string, number];
+    const persistedB = (onUserEdit.mock.calls.at(-1)![0] as { body: string }).body;
     expect(persistedB).toContain('B');
 
     unmount();

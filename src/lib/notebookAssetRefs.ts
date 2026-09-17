@@ -5,7 +5,7 @@
  * Active content.body alone is never sufficient.
  *
  * Optional `extra*` slots are reserved for M7.5C2 recoverable page tombstones —
- * callers may union those later without rewriting this collector.
+ * pass keys from collectAssetKeysFromNotebookPageTombstones without rewriting this collector.
  */
 
 import type { NotebookPage } from './notebookPages/types';

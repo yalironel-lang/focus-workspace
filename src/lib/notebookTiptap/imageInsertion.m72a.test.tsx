@@ -238,8 +238,8 @@ describe('M7.2A product UI entry', () => {
         onEditorReady: ed => {
           editor = ed;
         },
-        onUserEdit: body => {
-          bodies.push(body);
+        onUserEdit: payload => {
+          bodies.push(payload.body);
         },
         onInsertImageFile: async (file, ctx) => {
           const stored = await storeNotebookImageFile(file, { key: 'img-ui-1' });

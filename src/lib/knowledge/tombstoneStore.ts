@@ -14,7 +14,9 @@ import {
   type KnowledgeTombstone,
   type NotebookBlockSnapshot,
   type NotebookBlockTombstone,
+  type NotebookPageTombstone,
 } from './knowledgeTypes';
+import type { NotebookPage } from '../notebookPages/types';
 
 function newId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -124,6 +126,54 @@ export async function writeNotebookBlockTombstone(input: {
   }
 }
 
+/**
+ * M7.5C2 — Persist a recoverable notebook_page tombstone and verify durability.
+ * Fail-closed: callers must not mutate the Notebook if this returns ok:false.
+ */
+export async function writeNotebookPageTombstone(input: {
+  sectionId: string;
+  boardId: string;
+  objectId: string;
+  objectTitle: string;
+  page: NotebookPage;
+  indexInSection: number;
+  sectionIdOfPage: string;
+}): Promise<{ ok: true; tombstone: NotebookPageTombstone } | { ok: false; reason: string }> {
+  const { sectionId, boardId, objectId, objectTitle, page, indexInSection, sectionIdOfPage } =
+    input;
+  if (!sectionId || !objectId || !page?.id || !sectionIdOfPage) {
+    return { ok: false, reason: 'Incomplete page recovery payload.' };
+  }
+  const now = Date.now();
+  const pageTitle = page.title?.trim() || 'Page';
+  const tombstone: NotebookPageTombstone = {
+    id: newId('ts'),
+    kind: 'notebook_page',
+    sectionId,
+    boardId: boardId || 'main',
+    deletedAt: now,
+    expiresAt: now + TOMBSTONE_RETENTION_MS,
+    label: `${objectTitle || 'Notebook'} · ${pageTitle}`,
+    objectId,
+    objectTitle: objectTitle || 'Notebook',
+    page,
+    indexInSection: Math.max(0, indexInSection),
+    sectionIdOfPage,
+  };
+  try {
+    await idbPut(TOMBSTONES_STORE, tombstone);
+  } catch (e) {
+    fwPersistWarn(`Could not write notebook page tombstone for "${page.id}": ${String(e)}`);
+    return { ok: false, reason: 'Could not save the page for recovery. The page was not deleted.' };
+  }
+  const listed = await listTombstones(sectionId);
+  const verified = listed.find(t => t.id === tombstone.id && t.kind === 'notebook_page');
+  if (!verified) {
+    return { ok: false, reason: 'Could not verify page recovery record. The page was not deleted.' };
+  }
+  return { ok: true, tombstone };
+}
+
 export async function listTombstones(sectionId?: string): Promise<KnowledgeTombstone[]> {
   try {
     const rows = sectionId
@@ -201,5 +251,8 @@ export async function deleteTombstonePermanently(
       }
     }
   }
+  // M7.5C2 notebook_page: drop recovery only. NEVER cascadeDeleteNotebookAssets —
+  // sibling pages may still own assets. Page-exclusive keys become GC-eligible
+  // via normal live orphan GC once tombstone extras no longer retain them.
   await deleteTombstone(tombstone.id);
 }

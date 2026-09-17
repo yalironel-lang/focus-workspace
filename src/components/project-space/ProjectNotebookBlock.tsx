@@ -26,7 +26,6 @@ import {
   addNotebookPage,
   addNotebookSection,
   applyNotebookPersist,
-  findActivePage,
   getNotebookWorkspaceBreadcrumb,
   inkPageKeyForNotebookPage,
   isNotebookV1PagesEnabled,
@@ -39,7 +38,6 @@ import {
   renameNotebookPage,
   renameNotebookSection,
   resolveDefaultNavigation,
-  resolvePageForBodyProjection,
   saveNotebookActivePage,
   saveNotebookPageBody,
   setActiveNotebookSection,
@@ -49,6 +47,11 @@ import {
   type NotebookContentWithPages,
   type NotebookPageKind,
 } from '../../lib/notebookPages';
+import {
+  applyPageKeyedUserEdit,
+  resolveSwitchFlushRepresentation,
+  type NotebookLiveRepresentation,
+} from '../../lib/notebookPages/pageKeyedPersist';
 import {
   createInitialWorkspaceChromeState,
   enterWorkspaceFocus,
@@ -100,6 +103,8 @@ import {
   collectNotebookReferencedImageKeys,
   collectNotebookReferencedHandwritingKeys,
 } from '../../lib/notebookAssetRefs';
+import { collectAssetKeysFromNotebookPageTombstones } from '../../lib/knowledge/notebookPageRecovery';
+import { listTombstones } from '../../lib/knowledge/tombstoneStore';
 import {
   insertNbImageRefAtSelection,
   replaceNbImageRefAtPos,
@@ -1430,8 +1435,8 @@ export function ProjectNotebookBlock({
   );
   const contentRef = useRef(content);
   contentRef.current = effectiveContent;
-  /** TipTap live body ahead of flushed pages[] — unioned into asset GC roots (M7.5C1). */
-  const candidateLiveRepresentationRef = useRef<NotebookBodyRepresentation | null>(null);
+  /** TipTap live body ahead of flushed pages[] — unioned into asset GC roots (M7.5C1). Page-keyed (M7.5C2). */
+  const candidateLiveRepresentationRef = useRef<NotebookLiveRepresentation | null>(null);
   // Both editors decode and serialize the exact projected page's codec.
   function parseBodyToBlocks(body: string, prev?: Block[], version = contentRef.current.bodyCodecVersion): Block[] {
     return parseBodyToBlocksForCodec(body, prev, version);
@@ -1483,6 +1488,26 @@ export function ProjectNotebookBlock({
 
   useEffect(() => subscribeNotebookImages(() => bumpNotebookImageCache(n => n + 1)), []);
 
+  const [pageTombstoneAssetExtras, setPageTombstoneAssetExtras] = useState<{
+    imageKeys: string[];
+    handwritingKeys: string[];
+  }>({ imageKeys: [], handwritingKeys: [] });
+
+  useEffect(() => {
+    if (!freeSpaceSectionId || !objectId) {
+      setPageTombstoneAssetExtras({ imageKeys: [], handwritingKeys: [] });
+      return;
+    }
+    let cancelled = false;
+    void listTombstones(freeSpaceSectionId).then(rows => {
+      if (cancelled) return;
+      setPageTombstoneAssetExtras(collectAssetKeysFromNotebookPageTombstones(rows, objectId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [freeSpaceSectionId, objectId, content.pages]);
+
   useEffect(() => {
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
@@ -1491,6 +1516,7 @@ export function ProjectNotebookBlock({
       pages: content.pages,
       liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
       liveBlockImageKeys: fromBlocks,
+      extraImageKeys: pageTombstoneAssetExtras.imageKeys,
     });
     void hydrateNotebookImages(keys);
     if (handwritingUserId && freeSpaceSectionId && objectId) {
@@ -1501,7 +1527,15 @@ export function ProjectNotebookBlock({
         imageKeys: keys,
       });
     }
-  }, [blocks, content.body, content.pages, handwritingUserId, freeSpaceSectionId, objectId]);
+  }, [
+    blocks,
+    content.body,
+    content.pages,
+    handwritingUserId,
+    freeSpaceSectionId,
+    objectId,
+    pageTombstoneAssetExtras.imageKeys,
+  ]);
 
   useEffect(() => {
     if (!objectId || !handwritingUserId || !freeSpaceSectionId) return;
@@ -1512,6 +1546,7 @@ export function ProjectNotebookBlock({
       pages: content.pages,
       liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
       liveBlockImageKeys: fromBlocks,
+      extraImageKeys: pageTombstoneAssetExtras.imageKeys,
     });
     const timer = window.setTimeout(() => {
       void gcOrphanNotebookImages({
@@ -1522,7 +1557,15 @@ export function ProjectNotebookBlock({
       });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [blocks, content.body, content.pages, objectId, handwritingUserId, freeSpaceSectionId]);
+  }, [
+    blocks,
+    content.body,
+    content.pages,
+    objectId,
+    handwritingUserId,
+    freeSpaceSectionId,
+    pageTombstoneAssetExtras.imageKeys,
+  ]);
 
   useEffect(() => {
     if (!objectId) return;
@@ -1542,6 +1585,7 @@ export function ProjectNotebookBlock({
       liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
       liveBlockHandwritingKeys: fromBlocks,
       includeAllPageInkKeys: workspaceBinderMode,
+      extraHandwritingKeys: pageTombstoneAssetExtras.handwritingKeys,
     });
     const timer = window.setTimeout(() => {
       void gcOrphanHandwritingKeys(objectId, hwKeys).then(deleted => {
@@ -1565,6 +1609,7 @@ export function ProjectNotebookBlock({
     workspaceBinderMode,
     handwritingUserId,
     freeSpaceSectionId,
+    pageTombstoneAssetExtras.handwritingKeys,
   ]);
 
   useEffect(() => {
@@ -2090,85 +2135,50 @@ export function ProjectNotebookBlock({
     candidateLiveRepresentationRef.current = null;
   }
 
-  const getCurrentNotebookEditorRepresentation = useCallback(
-    (base?: NotebookContentWithPages): NotebookBodyRepresentation => {
-      if (tipTapCandidateActive && tipTapPersistActive) {
-        if (candidateLiveRepresentationRef.current) {
-          return candidateLiveRepresentationRef.current;
-        }
-        const source = base ?? migrateLegacyNotebook(contentRef.current);
-        const activeDocPage =
-          (source.pages ?? []).find(p => p.id === (source.activePageId ?? navigationActivePageIdRef.current)) ??
-          findActivePage(source) ??
-          resolvePageForBodyProjection(source);
-        if (activeDocPage?.kind === 'document') {
-          return {
-            body: activeDocPage.documentBody ?? '',
-            ...(activeDocPage.documentBodyCodecVersion !== undefined
-              ? { codecVersion: activeDocPage.documentBodyCodecVersion }
-              : {}),
-          };
-        }
-        return {
-          body: effectiveContent.body ?? '',
-          ...(effectiveContent.bodyCodecVersion !== undefined
-            ? { codecVersion: effectiveContent.bodyCodecVersion }
-            : {}),
-        };
-      }
-
-      return {
-        body: serializeBlocks(blocksRef.current),
-        ...(contentRef.current.bodyCodecVersion !== undefined
-          ? { codecVersion: contentRef.current.bodyCodecVersion }
-          : {}),
-      };
-    },
-    [tipTapCandidateActive, tipTapPersistActive, effectiveContent.body, effectiveContent.bodyCodecVersion],
-  );
-
   /**
-   * M5.2 — TipTap candidate → existing persistence pipeline.
+   * M5.2 / M7.5C2 — TipTap candidate → existing persistence pipeline.
    *
    * Called from NotebookTiptapCandidateEditor.onUserEdit ONLY when:
    *   - transaction.docChanged (genuine user mutation, not mount/hydration/selection)
    *   - tiptapDocToBody succeeded (fail-closed: unserializable content is never passed here)
    *   - The persist flag is ON at the mount site
    *
-   * Routes through pushContent — the SAME path used by the CE block editor.
-   * Reuses: 420ms debounce, flush-on-unmount, flush-on-page-switch,
-   *         applyNotebookPersist dual-write, prepareNotebookForCloudPersist,
-   *         emitContentChange → existing local/offline/cloud storage.
-   *
+   * Writes ONLY into payload.pageKey (never mutable activePageId).
    * bodyCodecVersion is always 1 (V1 codec required for lossless TipTap serialization).
-   * On first TipTap edit of a legacy page, applyNotebookPersist will write
+   * On first TipTap edit of a legacy page, applyPageKeyedUserEdit writes
    * documentBodyCodecVersion: 1 onto that page only. Other pages are untouched.
    */
   const handleCandidateUserEdit = useCallback(
-    (body: string, codecVersion: number) => {
-      // Extra safety guard — must never be called when persist is off.
+    (payload: { body: string; codecVersion: number; pageKey: string }) => {
       if (!tipTapPersistActive) return;
-      candidateLiveRepresentationRef.current = { body, codecVersion };
-      const currentActivePageId =
-        effectiveContent.activePageId ??
-        navigationOverlayRef.current?.activePageId ??
-        contentRef.current.activePageId;
-      const currentActiveSectionId =
-        effectiveContent.activeSectionId ??
-        navigationOverlayRef.current?.activeSectionId ??
-        contentRef.current.activeSectionId;
-      const baseContent: NotebookContent = {
+      const { body, codecVersion, pageKey } = payload;
+      if (!pageKey) return;
+
+      candidateLiveRepresentationRef.current = { body, codecVersion, pageKey };
+
+      const currentWithOverlay: NotebookContent = {
         ...contentRef.current,
         ...(navigationOverlayRef.current?.pages ? { pages: navigationOverlayRef.current.pages } : {}),
-        ...(navigationOverlayRef.current?.sections ? { sections: navigationOverlayRef.current.sections } : {}),
-        ...(currentActivePageId ? { activePageId: currentActivePageId } : {}),
-        ...(currentActiveSectionId ? { activeSectionId: currentActiveSectionId } : {}),
-        body,
-        bodyCodecVersion: codecVersion,
+        ...(navigationOverlayRef.current?.sections
+          ? { sections: navigationOverlayRef.current.sections }
+          : {}),
+        ...(navigationOverlayRef.current?.activeSectionId
+          ? { activeSectionId: navigationOverlayRef.current.activeSectionId }
+          : {}),
+        ...(navigationOverlayRef.current?.activePageId
+          ? { activePageId: navigationOverlayRef.current.activePageId }
+          : {}),
       };
-      pushContent(baseContent);
+
+      // Page-keyed write: body goes into pageKey even if activePageId temporarily differs.
+      const next = applyPageKeyedUserEdit(migrateLegacyNotebook(currentWithOverlay), {
+        pageKey,
+        body,
+        codecVersion,
+      });
+      pushContent(next);
     },
-    [tipTapPersistActive, pushContent, effectiveContent.activePageId, effectiveContent.activeSectionId],
+    [tipTapPersistActive, pushContent],
   );
 
   const applyShellMutation = useCallback(
@@ -2188,9 +2198,12 @@ export function ProjectNotebookBlock({
           ...(navigationOverlayRef.current?.activePageId ? { activePageId: navigationOverlayRef.current.activePageId } : {}),
         };
         const baseContent = migrateLegacyNotebook(currentWithOverlay);
-        const editorRep = getCurrentNotebookEditorRepresentation(baseContent);
-        const body = editorRep.body;
-        const codecVersion = editorRep.codecVersion;
+        const pageBeingFlushed = baseContent.activePageId ?? '';
+        const live = candidateLiveRepresentationRef.current;
+        // M7.5C2: never flush a live TipTap body into a different pageKey.
+        const flush = resolveSwitchFlushRepresentation(baseContent, pageBeingFlushed, live);
+        const body = flush.body;
+        const codecVersion = flush.codecVersion;
         const mutated = mutate(baseContent, body, codecVersion);
         candidateLiveRepresentationRef.current = null;
         const activeRep: NotebookBodyRepresentation = {
