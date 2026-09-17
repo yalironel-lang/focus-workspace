@@ -48,6 +48,7 @@ import {
 import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
+import { NotebookTiptapProductMoreMenu } from './NotebookTiptapProductMoreMenu';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import { resetCandidateEditorHistory } from '../../../lib/notebookTiptap/candidatePageHistory';
@@ -136,6 +137,11 @@ export type NotebookTiptapCandidateEditorProps = {
   handwritingUserId?: string;
   handwritingSectionId?: string;
   onDismissTextEditing?: () => void;
+  /**
+   * M7.6 — Export entire Notebook as PDF (canonical pages[]).
+   * Parent owns the read-only exportNotebookPdf pipeline.
+   */
+  onExportPdf?: () => void;
 };
 
 function attemptSerialize(
@@ -200,6 +206,7 @@ export function NotebookTiptapCandidateEditor({
   handwritingUserId,
   handwritingSectionId,
   onDismissTextEditing,
+  onExportPdf,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
@@ -922,6 +929,15 @@ export function NotebookTiptapCandidateEditor({
                 <option value="rtl">RTL</option>
               </select>
             </div>
+
+            {onExportPdf ? (
+              <>
+                <div aria-hidden style={nbProductGroupDividerStyle()} />
+                <div data-nb-product-toolbar-group="more" style={nbProductGroupStyle()}>
+                  <NotebookTiptapProductMoreMenu onExportPdf={onExportPdf} />
+                </div>
+              </>
+            ) : null}
           </div>
 
           <EditorContent editor={editor} />

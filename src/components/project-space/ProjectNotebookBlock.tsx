@@ -173,6 +173,7 @@ import {
   type MathSlashId,
 } from '../../lib/mathStemShortcuts';
 import { notebookBodyToMarkdown, notebookBodyToPlainText } from '../../lib/notebookExport';
+import { exportNotebookPdf } from '../../lib/notebookPdfExport';
 import { loadNotebookPose, saveNotebookPose } from '../../lib/notebookPose';
 import toast from 'react-hot-toast';
 import type { InlineMark } from '../../lib/notebookInlineMarks';
@@ -4974,6 +4975,36 @@ export function ProjectNotebookBlock({
     [],
   );
 
+  const exportNotebookAsPdf = useCallback(async () => {
+    // Snapshot content for a read-only export — never mutate active page / bodies.
+    const snapshot = structuredClone(contentRef.current) as NotebookContentWithPages;
+    const toastId = toast.loading('Preparing PDF…');
+    try {
+      const result = await exportNotebookPdf({
+        content: snapshot,
+        notebookTitle: objectTitle ?? 'Notebook',
+        objectId,
+        openPrintDialog: true,
+      });
+      if (!result.ok) {
+        toast.error(result.error, { id: toastId, duration: 6000 });
+        return;
+      }
+      toast.success(
+        `PDF ready — choose “Save as PDF” (${result.filename}). For a clean PDF, turn off Headers and footers in the print dialog.`,
+        {
+          id: toastId,
+          duration: 7000,
+        },
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not export PDF',
+        { id: toastId, duration: 5000 },
+      );
+    }
+  }, [objectId, objectTitle]);
+
   const handleEditorKeyCapture = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (effectiveEditorMode !== 'edit' || contentRef.current.bodyCodecVersion !== undefined) return;
@@ -6179,6 +6210,16 @@ export function ProjectNotebookBlock({
               fontSize: 10, fontWeight: 500, letterSpacing: '0.04em', transition: 'color 0.15s',
             }}
           >Plain</button>
+          <button
+            type="button"
+            onClick={() => void exportNotebookAsPdf()}
+            title="Export notebook as PDF"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 8px',
+              borderRadius: 4, color: 'rgba(255,248,235,0.42)',
+              fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', transition: 'color 0.15s',
+            }}
+          >PDF</button>
           {effectiveEditorMode === 'edit' && !isFocusModeOpen ? (
             <NotebookWritingModeToggle
               mode={writingMode}
@@ -6831,6 +6872,7 @@ export function ProjectNotebookBlock({
               handwritingUserId={handwritingUserId}
               handwritingSectionId={freeSpaceSectionId}
               onDismissTextEditing={dismissNotebookTextEditing}
+              onExportPdf={() => void exportNotebookAsPdf()}
               qaDiagContext={{
                 objectId: String(objectId),
                 propsContent: content,
@@ -8484,6 +8526,17 @@ export function ProjectNotebookBlock({
                   color: isPaperSurface ? ink.secondary : 'rgba(255,248,235,0.65)', fontSize: 11, fontWeight: 500,
                 }}
               >Copy Plain</button>
+              <button
+                type="button"
+                onClick={() => void exportNotebookAsPdf()}
+                title="Export notebook as PDF"
+                style={{
+                  background: isPaperSurface ? 'rgba(28,25,23,0.04)' : 'rgba(255,255,255,0.04)',
+                  border: isPaperSurface ? '1px solid rgba(28,25,23,0.08)' : '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: 6, cursor: 'pointer', padding: '5px 10px',
+                  color: isPaperSurface ? ink.primary : 'rgba(255,248,235,0.78)', fontSize: 11, fontWeight: 600,
+                }}
+              >Export PDF</button>
               {/* Paper/Spatial toggle — hidden for math-workspace (derivation zone is always spatial) */}
               {notebookMode !== 'math-workspace' && (
                 <button
