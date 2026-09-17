@@ -12,6 +12,19 @@ function spatialImageKey(sectionId: string, objectId: string): string {
   return `${sectionId}::${objectId}`;
 }
 
+vi.mock('./supabase', () => ({
+  isSupabaseConfigured: true,
+  supabase: {
+    storage: {
+      from: () => ({
+        upload: vi.fn(),
+        download: vi.fn(),
+        remove: vi.fn(),
+      }),
+    },
+  },
+}));
+
 vi.mock('./freeSpaceImageIdb', async importOriginal => {
   const mod = await importOriginal<typeof import('./freeSpaceImageIdb')>();
   return {

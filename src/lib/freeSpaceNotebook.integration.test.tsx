@@ -1,5 +1,5 @@
 /**
- * Free Space inline notebook — embedded presentation integration.
+ * Free Space inline notebook — embedded TipTap presentation integration.
  *
  * @vitest-environment happy-dom
  */
@@ -95,6 +95,12 @@ function mountNotebookPresentation(presentation: 'notebook' | 'embedded') {
   });
 }
 
+async function flushFrame() {
+  await act(async () => {
+    await new Promise<void>(r => requestAnimationFrame(() => r()));
+  });
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
@@ -103,21 +109,29 @@ afterEach(() => {
 });
 
 describe('FreeSpaceNotebookSurface integration', () => {
-  it('A: add/render notebook mounts live editor (not card preview)', () => {
+  it('A: add/render notebook mounts live TipTap editor (not card preview)', async () => {
     mountSurface();
     expect(document.querySelector('[data-fs-notebook-surface="1"]')).toBeTruthy();
     expect(document.querySelector('[data-nb-editor-root="1"]')).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-tiptap-candidate="1"]')).toBeTruthy();
+      expect(document.querySelector('.ProseMirror')).toBeTruthy();
+    });
     expect(document.querySelector('[data-nb-card-preview]')).toBeNull();
+    expect(document.querySelector('[data-rich-editable="1"]')).toBeNull();
   });
 
-  it('B: click editor reports editing focus signal true', async () => {
+  it('B: TipTap focus reports editing focus signal true', async () => {
     const onEditing = vi.fn<(id: string, editing: boolean) => void>();
     mountSurface({ onNotebookEditingChange: onEditing });
-    const editable = document.querySelector('[contenteditable="true"]');
+    await vi.waitFor(() => expect(document.querySelector('.ProseMirror')).toBeTruthy());
+    const editable = document.querySelector('.ProseMirror') as HTMLElement;
     expect(editable).toBeTruthy();
     await act(async () => {
-      (editable as HTMLElement).focus();
+      editable.focus();
+      editable.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     });
+    await flushFrame();
     expect(onEditing).toHaveBeenCalledWith('fs-nb-1', true);
   });
 
@@ -139,9 +153,12 @@ describe('FreeSpaceNotebookSurface integration', () => {
     expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
-  it('I: main notebook presentation keeps full card chrome', () => {
+  it('I: main notebook presentation keeps full card chrome with TipTap', async () => {
     mountNotebookPresentation('notebook');
     expect(document.querySelector('[data-fs-notebook-embedded-bar="1"]')).toBeNull();
     expect(document.querySelector('[data-nb-editor-root="1"]')).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-tiptap-candidate="1"]')).toBeTruthy();
+    });
   });
 });

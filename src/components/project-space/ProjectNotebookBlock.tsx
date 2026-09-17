@@ -1225,6 +1225,42 @@ interface Props {
   }) => void;
 }
 
+/**
+ * TipTap Free Space host-editing chrome (incl. portaled menus on document.body).
+ * Used so editor → toolbar / link / table focus does not end the Free Space editing session.
+ */
+function isTipTapEditingChrome(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return !!(
+    target.closest('.nb-selection-toolbar') ||
+    target.closest('[data-nb-candidate-selection-toolbar]') ||
+    target.closest('[data-nb-tiptap-selection-toolbar]') ||
+    target.closest('[data-nb-candidate-link-popover]') ||
+    target.closest('[data-nb-candidate-table-menu]') ||
+    target.closest('[data-nb-candidate-table-size-picker]') ||
+    target.closest('[data-nb-candidate-block-menu]') ||
+    target.closest('[data-nb-candidate-fontsize-menu]') ||
+    target.closest('[data-nb-product-toolbar]') ||
+    target.closest('[data-nb-product-block-menu]') ||
+    target.closest('[data-nb-product-more-menu]')
+  );
+}
+
+/** Open TipTap editing UI that may hold session even if focus briefly left ProseMirror. */
+function isTipTapEditingChromeOpen(): boolean {
+  if (typeof document === 'undefined') return false;
+  return !!(
+    document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]') ||
+    document.querySelector('[data-nb-candidate-link-popover="1"]') ||
+    document.querySelector('[data-nb-candidate-table-menu="1"]') ||
+    document.querySelector('[data-nb-candidate-table-size-picker]') ||
+    document.querySelector('[data-nb-candidate-block-menu="1"]') ||
+    document.querySelector('[data-nb-candidate-fontsize-menu="1"]') ||
+    document.querySelector('[data-nb-product-block-menu="1"]') ||
+    document.querySelector('[data-nb-product-more-menu="1"]')
+  );
+}
+
 function blocksToExamRefs(blocks: Block[]): ExamQuestionBlockRef[] {
   return blocks.map(b => ({
     id: b.id,
@@ -2764,6 +2800,7 @@ export function ProjectNotebookBlock({
     const active = document.activeElement;
     if (!active) return false;
     if (active.closest('.nb-selection-toolbar')) return true;
+    if (isTipTapEditingChrome(active)) return true;
     return !!(
       editorRootRef.current?.contains(active) ||
       focusEditorRootRef.current?.contains(active)
@@ -2773,11 +2810,16 @@ export function ProjectNotebookBlock({
   const syncHostEditingActivity = useCallback(() => {
     if (context !== 'free-space' || !onEditingChangeRef.current) return;
     const toolbarOpen = selectionToolbarRef.current != null;
+    const tipTapChromeOpen = tipTapCandidateActive && isTipTapEditingChromeOpen();
     const editorFocused = isNotebookEditorFocused();
     const active =
-      editorFocused || toolbarOpen || toolbarInteractingRef.current || isDomTextCommitLocked();
+      editorFocused ||
+      toolbarOpen ||
+      tipTapChromeOpen ||
+      toolbarInteractingRef.current ||
+      isDomTextCommitLocked();
     onEditingChangeRef.current(active);
-  }, [context, isNotebookEditorFocused, isDomTextCommitLocked]);
+  }, [context, tipTapCandidateActive, isNotebookEditorFocused, isDomTextCommitLocked]);
 
   const captureCaretForBlock = useCallback(
     (blockId: string): number | null => {
@@ -5642,6 +5684,31 @@ export function ProjectNotebookBlock({
   useEffect(() => {
     syncHostEditingActivity();
   }, [context, selectionToolbar, syncHostEditingActivity]);
+
+  /**
+   * TipTap Free Space host-editing bridge.
+   * Legacy CE used surface onFocusCapture/onBlur; TipTap disables those to avoid
+   * CE block-focus bookkeeping. Re-evaluate host editing via document focus
+   * events so ProseMirror + portaled TipTap chrome keep spaceEditingId correct.
+   */
+  useEffect(() => {
+    if (context !== 'free-space' || !tipTapCandidateActive) return;
+    let raf = 0;
+    const scheduleSync = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        syncHostEditingActivity();
+      });
+    };
+    document.addEventListener('focusin', scheduleSync);
+    document.addEventListener('focusout', scheduleSync);
+    return () => {
+      document.removeEventListener('focusin', scheduleSync);
+      document.removeEventListener('focusout', scheduleSync);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [context, tipTapCandidateActive, syncHostEditingActivity]);
 
   useEffect(() => {
     return () => {

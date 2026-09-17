@@ -13,6 +13,19 @@ function spatialPdfKey(sectionId: string, objectId: string): string {
   return `${sectionId}::${objectId}`;
 }
 
+vi.mock('./supabase', () => ({
+  isSupabaseConfigured: true,
+  supabase: {
+    storage: {
+      from: () => ({
+        upload: vi.fn(),
+        download: vi.fn(),
+        remove: vi.fn(),
+      }),
+    },
+  },
+}));
+
 vi.mock('./freeSpacePdfIdb', async importOriginal => {
   const mod = await importOriginal<typeof import('./freeSpacePdfIdb')>();
   return {

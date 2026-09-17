@@ -1,5 +1,5 @@
 /**
- * Free Space toolbar selection-session stability.
+ * Free Space TipTap toolbar selection-session stability.
  *
  * @vitest-environment happy-dom
  */
@@ -7,8 +7,8 @@ import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Editor } from '@tiptap/core';
 import type { AtmosphereTokens } from '../hooks/useAtmosphere';
-import type { ProjectObjectContent, ProjectSpaceObject } from '../hooks/useSectionFreeSpaceObjects';
 import {
   DEFAULT_NOTEBOOK_FONT_SIZE,
   FONT_SIZE_OPTIONS,
@@ -16,7 +16,11 @@ import {
   applyMarkToggle,
   isMarkActiveOnRange,
 } from './notebookInlineMarks';
-import { getSelectionOffsetsIn, setSelectionOffsetsIn } from './notebookCaret';
+import { tiptapDocToBody } from './notebookTiptap/tiptapDocToBody';
+import {
+  CANDIDATE_FONT_SIZE_PRESETS,
+  runCandidateFormatCommand,
+} from './notebookTiptap/candidateFormatCommands';
 
 vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'test-user' } }),
@@ -27,6 +31,9 @@ vi.mock('./notebookHandwritingCloud', () => ({
   reconcileHandwritingWithCloud: vi.fn().mockResolvedValue(undefined),
 }));
 
+const { NotebookTiptapCandidateEditor } = await import(
+  '../components/notebook/tiptap/NotebookTiptapCandidateEditor'
+);
 const { FreeSpaceNotebookSurface } = await import('../components/notebook/FreeSpaceNotebookSurface');
 
 const tokens = {
@@ -45,59 +52,47 @@ const SAMPLE = 'This is some example text for toolbar testing';
 const SEL_START = SAMPLE.indexOf('example text');
 const SEL_END = SEL_START + 'example text'.length;
 
-const notebookContent: Extract<ProjectObjectContent, { type: 'notebook' }> = {
-  type: 'notebook',
-  body: SAMPLE,
-  notebookMode: 'normal',
-};
-
-const object: ProjectSpaceObject = {
-  id: 'fs-tb-1',
-  type: 'notebook',
-  title: 'Toolbar QA',
-  content: notebookContent,
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-};
-
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
+let editor: Editor | null = null;
 
-function mountSurface() {
+function mountEditor() {
   host = document.createElement('div');
   host.style.width = '620px';
   host.style.height = '520px';
   document.body.appendChild(host);
   root = createRoot(host);
+  editor = null;
   act(() => {
     root!.render(
-      createElement(FreeSpaceNotebookSurface, {
-        content: notebookContent,
-        tokens,
-        object,
-        onChange: vi.fn(),
+      createElement(NotebookTiptapCandidateEditor, {
+        sourceDocumentBody: SAMPLE,
+        pageKey: 'fs-tb-page',
+        onEditorReady: ed => {
+          editor = ed;
+        },
       }),
     );
   });
 }
 
-function editable(): HTMLElement {
-  const el = document.querySelector('[data-rich-editable="1"]');
-  if (!(el instanceof HTMLElement)) throw new Error('rich editable missing');
-  return el;
+async function waitEditor(): Promise<Editor> {
+  await vi.waitFor(() => expect(editor).toBeTruthy());
+  return editor!;
 }
 
-function selectRange(start: number, end: number) {
-  const el = editable();
+/** Select plain-text offsets within the first paragraph (TipTap positions). */
+function selectPlainRange(ed: Editor, start: number, end: number) {
   act(() => {
-    el.focus();
-    setSelectionOffsetsIn(el, start, end);
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    ed.chain()
+      .focus()
+      .setTextSelection({ from: 1 + start, to: 1 + end })
+      .run();
   });
 }
 
-function fireToolbar(testId: string) {
-  const btn = document.querySelector(`[data-nb-toolbar-btn="${testId}"]`);
+function fireFmt(testId: string) {
+  const btn = document.querySelector(`[data-nb-candidate-fmt="${testId}"]`);
   if (!(btn instanceof HTMLElement)) throw new Error(`toolbar control missing: ${testId}`);
   act(() => {
     btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
@@ -107,9 +102,14 @@ function fireToolbar(testId: string) {
 afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
-  document.querySelectorAll('[data-nb-format-toolbar="1"], [data-nb-toolbar-backdrop="1"]').forEach(el => el.remove());
+  document
+    .querySelectorAll(
+      '[data-nb-candidate-selection-toolbar], [data-nb-format-toolbar="1"], [data-nb-toolbar-backdrop="1"]',
+    )
+    .forEach(el => el.remove());
   root = null;
   host = null;
+  editor = null;
 });
 
 describe('font-size canonical mapping', () => {
@@ -134,64 +134,123 @@ describe('font-size canonical mapping', () => {
     ];
     expect(fontSizeAtSelection(mixed, 0, 6).mixed).toBe(true);
   });
+
+  it('TipTap candidate font-size presets remain product-supported', () => {
+    expect(CANDIDATE_FONT_SIZE_PRESETS).toContain(20);
+    expect(CANDIDATE_FONT_SIZE_PRESETS).toContain(DEFAULT_NOTEBOOK_FONT_SIZE);
+  });
 });
 
-describe('Free Space embedded toolbar selection session', () => {
-  it('A/B: select phrase → toolbar opens → live editor present', () => {
-    mountSurface();
-    selectRange(SEL_START, SEL_END);
-    expect(document.querySelector('[data-nb-format-toolbar="1"]')).toBeTruthy();
-    const offsets = getSelectionOffsetsIn(editable());
-    expect(offsets?.start).toBe(SEL_START);
-    expect(offsets?.end).toBe(SEL_END);
-  });
-
-  it('Bold then Italic keep exact logical selection range', () => {
-    mountSurface();
-    selectRange(SEL_START, SEL_END);
-    fireToolbar('bold');
-    let offsets = getSelectionOffsetsIn(editable());
-    expect(offsets?.start).toBe(SEL_START);
-    expect(offsets?.end).toBe(SEL_END);
-    expect(editable().textContent?.slice(SEL_START, SEL_END)).toBe('example text');
-
-    fireToolbar('italic');
-    offsets = getSelectionOffsetsIn(editable());
-    expect(offsets?.start).toBe(SEL_START);
-    expect(offsets?.end).toBe(SEL_END);
-    expect(offsets!.end - offsets!.start).toBe('example text'.length);
-  });
-
-  it('font size change keeps exact range and stores px', () => {
-    mountSurface();
-    selectRange(SEL_START, SEL_END);
-    const select = document.querySelector('[data-nb-toolbar-btn="font-size"]');
-    expect(select).toBeTruthy();
-    act(() => {
-      (select as HTMLSelectElement).value = '20';
-      select!.dispatchEvent(new Event('change', { bubbles: true }));
+describe('Free Space TipTap toolbar selection session', () => {
+  it('A/B: select phrase → TipTap toolbar opens → live editor present', async () => {
+    mountEditor();
+    const ed = await waitEditor();
+    selectPlainRange(ed, SEL_START, SEL_END);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeTruthy();
     });
-    const offsets = getSelectionOffsetsIn(editable());
-    expect(offsets?.start).toBe(SEL_START);
-    expect(offsets?.end).toBe(SEL_END);
-    const fsSpan = editable().querySelector('[data-fs="20"]');
-    expect(fsSpan).toBeTruthy();
-    expect((fsSpan as HTMLElement).style.fontSize).toBe('20px');
+    expect(ed.state.selection.from).toBe(1 + SEL_START);
+    expect(ed.state.selection.to).toBe(1 + SEL_END);
+    expect(document.querySelector('[data-nb-tiptap-candidate="1"]')).toBeTruthy();
   });
 
-  it('H: callout control is wired (not a dead Comment button)', () => {
-    mountSurface();
-    selectRange(SEL_START, SEL_END);
-    expect(document.querySelector('[data-nb-toolbar-btn="callout"]')).toBeTruthy();
-    expect(document.querySelector('[title="Callout"]')).toBeTruthy();
+  it('Bold then Italic keep exact logical selection range', async () => {
+    mountEditor();
+    const ed = await waitEditor();
+    selectPlainRange(ed, SEL_START, SEL_END);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-candidate-fmt="bold"]')).toBeTruthy();
+    });
+    const from = ed.state.selection.from;
+    const to = ed.state.selection.to;
+    fireFmt('bold');
+    expect(ed.state.selection.from).toBe(from);
+    expect(ed.state.selection.to).toBe(to);
+    expect(ed.isActive('bold')).toBe(true);
+    expect(ed.state.doc.textBetween(from, to)).toBe('example text');
+
+    fireFmt('italic');
+    expect(ed.state.selection.from).toBe(from);
+    expect(ed.state.selection.to).toBe(to);
+    expect(ed.isActive('italic')).toBe(true);
+    expect(to - from).toBe('example text'.length);
+    const body = tiptapDocToBody(ed.getJSON(), 1);
+    expect(body).toContain('example text');
+    expect(body).toContain('"t":"b"');
+    expect(body).toContain('"t":"i"');
   });
 
-  it('text color and highlight controls are distinct', () => {
-    mountSurface();
-    selectRange(SEL_START, SEL_END);
-    expect(document.querySelector('[data-nb-toolbar-btn="text-color"]')).toBeTruthy();
-    expect(document.querySelector('[data-nb-toolbar-btn="highlight"]')).toBeTruthy();
-    expect(document.querySelector('[title="Text color"]')).toBeTruthy();
-    expect(document.querySelector('[title="Highlight"]')).toBeTruthy();
+  it('font size change keeps exact range and stores px in canonical body', async () => {
+    mountEditor();
+    const ed = await waitEditor();
+    selectPlainRange(ed, SEL_START, SEL_END);
+    const from = ed.state.selection.from;
+    const to = ed.state.selection.to;
+    expect(runCandidateFormatCommand(ed, { type: 'setFontSize', px: 20 })).toBe(true);
+    expect(ed.state.selection.from).toBe(from);
+    expect(ed.state.selection.to).toBe(to);
+    const body = tiptapDocToBody(ed.getJSON(), 1);
+    expect(body).toMatch(/"t":"fs"/);
+    expect(body).toMatch(/"v":"20"/);
+  });
+
+  it('H: callout / block convert control is wired on selection toolbar', async () => {
+    mountEditor();
+    const ed = await waitEditor();
+    selectPlainRange(ed, SEL_START, SEL_END);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeTruthy();
+    });
+    // TipTap product: Turn into / block convert replaces legacy CE "callout" morph button.
+    expect(document.querySelector('[data-nb-candidate-block-convert="1"]')).toBeTruthy();
+  });
+
+  it('text color and highlight controls are distinct', async () => {
+    mountEditor();
+    const ed = await waitEditor();
+    selectPlainRange(ed, SEL_START, SEL_END);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]')).toBeTruthy();
+    });
+    expect(document.querySelector('[data-nb-candidate-fmt="color"]')).toBeTruthy();
+    expect(document.querySelector('[data-nb-candidate-fmt="highlight"]')).toBeTruthy();
+    expect(document.querySelector('[title^="Text color"]')).toBeTruthy();
+    expect(document.querySelector('[title^="Highlight"]')).toBeTruthy();
+  });
+});
+
+describe('Free Space embedded surface uses TipTap toolbar contract', () => {
+  it('surface mounts TipTap candidate (not legacy CE toolbar DOM)', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const content = {
+      type: 'notebook' as const,
+      body: SAMPLE,
+      notebookMode: 'normal' as const,
+    };
+    const object: ProjectSpaceObject = {
+      id: 'fs-tb-1',
+      type: 'notebook',
+      title: 'Toolbar QA',
+      content,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    act(() => {
+      root!.render(
+        createElement(FreeSpaceNotebookSurface, {
+          content,
+          tokens,
+          object,
+          onChange: vi.fn(),
+        }),
+      );
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-nb-tiptap-candidate="1"]')).toBeTruthy();
+    });
+    expect(document.querySelector('[data-rich-editable="1"]')).toBeNull();
+    expect(document.querySelector('[data-nb-format-toolbar="1"]')).toBeNull();
   });
 });

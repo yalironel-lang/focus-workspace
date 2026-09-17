@@ -73,6 +73,7 @@ export default defineConfig({
       'src/lib/missionControl/**/*.test.tsx',
       'src/components/mission-control/**/*.test.tsx',
       'src/lib/freeSpaceNotebook.integration.test.tsx',
+      'src/lib/freeSpaceNotebook.hostEditing.test.tsx',
       'src/lib/freeSpaceNotebookToolbar.session.test.tsx',
       'src/lib/notebookMultiClickSelection.test.ts',
       'src/lib/notebookToolbarAnchor.test.ts',
