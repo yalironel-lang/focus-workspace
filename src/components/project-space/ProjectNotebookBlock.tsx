@@ -103,7 +103,7 @@ import {
   collectNotebookReferencedImageKeys,
   collectNotebookReferencedHandwritingKeys,
 } from '../../lib/notebookAssetRefs';
-import { collectAssetKeysFromNotebookPageTombstones } from '../../lib/knowledge/notebookPageRecovery';
+import { collectAssetKeysFromNotebookPageTombstones, softDeleteNotebookPage } from '../../lib/knowledge/notebookPageRecovery';
 import { listTombstones } from '../../lib/knowledge/tombstoneStore';
 import {
   insertNbImageRefAtSelection,
@@ -2315,6 +2315,96 @@ export function ProjectNotebookBlock({
       );
     },
     [applyShellMutation],
+  );
+
+  /**
+   * M7.5C3 — Product Delete Page.
+   * ALWAYS softDeleteNotebookPage (tombstone-first). Never low-level deleteNotebookPage.
+   */
+  const handleShellDeletePage = useCallback(
+    (pageId: string) => {
+      void (async () => {
+        if (!freeSpaceSectionId || !objectId) {
+          toast.error('Could not delete this page.');
+          return;
+        }
+        await flushHandwritingBeforeTransition();
+        flushNotebookPersist();
+
+        const currentWithOverlay: NotebookContent = {
+          ...contentRef.current,
+          ...(navigationOverlayRef.current?.pages ? { pages: navigationOverlayRef.current.pages } : {}),
+          ...(navigationOverlayRef.current?.sections
+            ? { sections: navigationOverlayRef.current.sections }
+            : {}),
+          ...(navigationOverlayRef.current?.activeSectionId
+            ? { activeSectionId: navigationOverlayRef.current.activeSectionId }
+            : {}),
+          ...(navigationOverlayRef.current?.activePageId
+            ? { activePageId: navigationOverlayRef.current.activePageId }
+            : {}),
+        };
+        const baseContent = migrateLegacyNotebook(currentWithOverlay);
+        const activeId = baseContent.activePageId ?? '';
+        const flush = resolveSwitchFlushRepresentation(
+          baseContent,
+          activeId,
+          candidateLiveRepresentationRef.current,
+        );
+
+        const result = await softDeleteNotebookPage({
+          content: baseContent,
+          pageId,
+          currentBody: flush.body,
+          currentCodecVersion: flush.codecVersion,
+          sectionId: freeSpaceSectionId,
+          boardId: freeSpaceBoardId || 'main',
+          objectId,
+          objectTitle: objectTitle ?? 'Notebook',
+        });
+
+        if (!result.ok) {
+          toast.error(result.reason || 'Could not delete this page.', { duration: 4500 });
+          return;
+        }
+
+        candidateLiveRepresentationRef.current = null;
+        const activeRep: NotebookBodyRepresentation = {
+          body: result.content.body ?? '',
+          ...(result.content.bodyCodecVersion !== undefined
+            ? { codecVersion: result.content.bodyCodecVersion }
+            : {}),
+        };
+        const next = applyNotebookPersist(
+          { ...baseContent, ...result.content } as NotebookContent,
+          activeRep,
+        );
+        if (next.activePageId && next.activeSectionId) {
+          saveNotebookActivePage(
+            freeSpaceSectionId,
+            freeSpaceBoardId ?? '',
+            objectId,
+            next.activeSectionId,
+            next.activePageId,
+          );
+          navigationActivePageIdRef.current = next.activePageId;
+        }
+        persistNotebookContent(next, next.activePageId ?? null);
+        navigationOverlayRef.current = null;
+        setNavigationOverlay(null);
+        setBlocks(parseBodyToBlocksForCodec(next.body ?? '', undefined, next.bodyCodecVersion));
+        toast.success('Page moved to Recently Deleted');
+      })();
+    },
+    [
+      freeSpaceSectionId,
+      freeSpaceBoardId,
+      objectId,
+      objectTitle,
+      flushHandwritingBeforeTransition,
+      flushNotebookPersist,
+      persistNotebookContent,
+    ],
   );
 
   const contextData = useMemo(
@@ -6283,6 +6373,7 @@ export function ProjectNotebookBlock({
               onAddPage={handleShellAddPage}
               onRenameSection={handleShellRenameSection}
               onRenamePage={handleShellRenamePage}
+              onDeletePage={handleShellDeletePage}
             />
           ) : null
         }
