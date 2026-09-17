@@ -101,9 +101,13 @@ import {
 } from '../../lib/notebookImageCloud';
 import {
   collectNotebookReferencedImageKeys,
-  collectNotebookReferencedHandwritingKeys,
 } from '../../lib/notebookAssetRefs';
-import { collectAssetKeysFromNotebookPageTombstones, softDeleteNotebookPage } from '../../lib/knowledge/notebookPageRecovery';
+import { resolveNotebookGcReferencedKeys } from '../../lib/notebookAssetGcResolve';
+import {
+  collectAssetKeysFromNotebookPageSnapshot,
+  collectAssetKeysFromNotebookPageTombstones,
+  softDeleteNotebookPage,
+} from '../../lib/knowledge/notebookPageRecovery';
 import { listTombstones } from '../../lib/knowledge/tombstoneStore';
 import {
   insertNbImageRefAtSelection,
@@ -1540,24 +1544,34 @@ export function ProjectNotebookBlock({
 
   useEffect(() => {
     if (!objectId || !handwritingUserId || !freeSpaceSectionId) return;
+    let cancelled = false;
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'image-ref' }> => b.kind === 'image-ref')
       .map(b => b.key);
-    const imageKeys = collectNotebookReferencedImageKeys({
-      pages: content.pages,
-      liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
-      liveBlockImageKeys: fromBlocks,
-      extraImageKeys: pageTombstoneAssetExtras.imageKeys,
-    });
     const timer = window.setTimeout(() => {
-      void gcOrphanNotebookImages({
-        userId: handwritingUserId,
-        sectionId: freeSpaceSectionId,
-        objectId,
-        referencedKeys: imageKeys,
-      });
+      void (async () => {
+        // M7.7: await authoritative live ∪ recoverable tombstone refs before GC.
+        // If recoverability is unresolved, refuse collection (keep assets).
+        const resolved = await resolveNotebookGcReferencedKeys({
+          sectionId: freeSpaceSectionId,
+          objectId,
+          pages: content.pages,
+          liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
+          liveBlockImageKeys: fromBlocks,
+        });
+        if (cancelled || !resolved.ok) return;
+        await gcOrphanNotebookImages({
+          userId: handwritingUserId,
+          sectionId: freeSpaceSectionId,
+          objectId,
+          referencedKeys: resolved.imageKeys,
+        });
+      })();
     }, 400);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [
     blocks,
     content.body,
@@ -1565,7 +1579,6 @@ export function ProjectNotebookBlock({
     objectId,
     handwritingUserId,
     freeSpaceSectionId,
-    pageTombstoneAssetExtras.imageKeys,
   ]);
 
   useEffect(() => {
@@ -1577,20 +1590,25 @@ export function ProjectNotebookBlock({
   }, [blocks, objectId]);
 
   useEffect(() => {
-    if (!objectId) return;
+    if (!objectId || !freeSpaceSectionId) return;
+    let cancelled = false;
     const fromBlocks = blocks
       .filter((b): b is Extract<Block, { kind: 'handwriting' }> => b.kind === 'handwriting')
       .map(b => b.key);
-    const hwKeys = collectNotebookReferencedHandwritingKeys({
-      pages: content.pages,
-      liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
-      liveBlockHandwritingKeys: fromBlocks,
-      includeAllPageInkKeys: workspaceBinderMode,
-      extraHandwritingKeys: pageTombstoneAssetExtras.handwritingKeys,
-    });
     const timer = window.setTimeout(() => {
-      void gcOrphanHandwritingKeys(objectId, hwKeys).then(deleted => {
-        if (!handwritingUserId || !freeSpaceSectionId || deleted.length === 0) return;
+      void (async () => {
+        // M7.7: same structural gate as image GC — await tombstone extras first.
+        const resolved = await resolveNotebookGcReferencedKeys({
+          sectionId: freeSpaceSectionId,
+          objectId,
+          pages: content.pages,
+          liveBody: candidateLiveRepresentationRef.current?.body ?? content.body ?? '',
+          liveBlockHandwritingKeys: fromBlocks,
+          includeAllPageInkKeys: workspaceBinderMode,
+        });
+        if (cancelled || !resolved.ok) return;
+        const deleted = await gcOrphanHandwritingKeys(objectId, resolved.handwritingKeys);
+        if (!handwritingUserId || deleted.length === 0) return;
         for (const blockKey of deleted) {
           void enqueueHandwritingCloudDelete({
             userId: handwritingUserId,
@@ -1599,9 +1617,12 @@ export function ProjectNotebookBlock({
             blockKey,
           });
         }
-      });
+      })();
     }, 600);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [
     objectId,
     blocks,
@@ -1610,7 +1631,6 @@ export function ProjectNotebookBlock({
     workspaceBinderMode,
     handwritingUserId,
     freeSpaceSectionId,
-    pageTombstoneAssetExtras.handwritingKeys,
   ]);
 
   useEffect(() => {
@@ -2368,6 +2388,13 @@ export function ProjectNotebookBlock({
           toast.error(result.reason || 'Could not delete this page.', { duration: 4500 });
           return;
         }
+
+        // Optimistic recoverable refs — do not wait for async listTombstones refresh.
+        const deletedKeys = collectAssetKeysFromNotebookPageSnapshot(result.tombstone.page);
+        setPageTombstoneAssetExtras(prev => ({
+          imageKeys: [...new Set([...prev.imageKeys, ...deletedKeys.imageKeys])],
+          handwritingKeys: [...new Set([...prev.handwritingKeys, ...deletedKeys.handwritingKeys])],
+        }));
 
         candidateLiveRepresentationRef.current = null;
         const activeRep: NotebookBodyRepresentation = {

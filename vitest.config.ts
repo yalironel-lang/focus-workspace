@@ -49,6 +49,7 @@ export default defineConfig({
       'src/lib/spatialAssetCloud.crossDevice.pdfDelete.integration.test.ts',
       'src/lib/notebookDeleteCascade.test.ts',
       'src/lib/notebookAssetRefs.m75c1.test.ts',
+      'src/lib/notebookAssetGcSafety.m77.test.ts',
       'src/lib/notebookPdfExport/**/*.test.ts',
       'src/lib/notebookPdfExport/**/*.test.tsx',
       'src/lib/notebookPages/pageKeyedPersist.m75c2.test.ts',

@@ -1,9 +1,13 @@
 /**
- * Temporary structured diagnostics for notebook multi-page cloud sync (P0).
+ * Temporary structured diagnostics for notebook multi-page cloud sync.
  * Prefix: [NB-SYNC-DIAG]
+ *
+ * M7.7: DEFAULT OFF. Gated behind Notebook engineering chrome opt-in so
+ * normal product usage never dumps documentBody or installs window hooks.
  */
 
 import type { NotebookContentWithPages, NotebookPage, NotebookSection } from './types';
+import { isNotebookEngineeringChromeEnabled } from '../notebookTiptap/featureFlag';
 
 export type NbSyncDiagBoundary =
   | 'A_before_updateObjectContent'
@@ -37,9 +41,14 @@ function pageSummary(p: NotebookPage): Record<string, unknown> {
   };
 }
 
+export function isNbSyncDiagEnabled(): boolean {
+  return isNotebookEngineeringChromeEnabled();
+}
+
 export function nbSyncDiagSummarizeContent(
   content: NotebookContentWithPages | null | undefined,
 ): Record<string, unknown> | null {
+  if (!isNbSyncDiagEnabled()) return null;
   if (!content) return null;
   return {
     schemaVersion: content.schemaVersion ?? null,
@@ -60,6 +69,7 @@ export function nbSyncDiagLog(
   ctx: NbSyncDiagContext,
   extra?: Record<string, unknown>,
 ): void {
+  if (!isNbSyncDiagEnabled()) return;
   if (typeof console === 'undefined') return;
   const payload = {
     boundary,
@@ -77,6 +87,7 @@ export async function nbSyncDiagFetchCloudObject(input: {
   objectId: string;
   sectionId?: string;
 }): Promise<{ ok: true; row: unknown } | { ok: false; reason: string }> {
+  if (!isNbSyncDiagEnabled()) return { ok: false, reason: 'diag_disabled' };
   try {
     const { supabase, isSupabaseConfigured } = await import('../supabase');
     if (!isSupabaseConfigured) return { ok: false, reason: 'supabase_not_configured' };
@@ -103,7 +114,23 @@ declare global {
   }
 }
 
-if (typeof window !== 'undefined') {
+/**
+ * Install or remove the window helper according to the current engineering flag.
+ * Safe to call repeatedly (e.g. after toggling localStorage).
+ */
+export function syncNbSyncDiagWindowHook(): void {
+  if (typeof window === 'undefined') return;
+  if (!isNbSyncDiagEnabled()) {
+    try {
+      delete window.__fwNbSyncDiagFetchObject;
+    } catch {
+      window.__fwNbSyncDiagFetchObject = undefined;
+    }
+    return;
+  }
   window.__fwNbSyncDiagFetchObject = (objectId, sectionId) =>
     nbSyncDiagFetchCloudObject({ objectId, sectionId });
 }
+
+// Default product path: ensure hook is NOT installed.
+syncNbSyncDiagWindowHook();

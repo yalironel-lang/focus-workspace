@@ -46,12 +46,13 @@ import {
   type NbHandwritingInsertTarget,
 } from '../../../lib/notebookTiptap/candidateHandwritingInsert';
 import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
+import { canEmitUserEditForHydratedPage } from '../../../lib/notebookTiptap/candidateEmitPageIdentity';
+import { resetCandidateEditorHistory } from '../../../lib/notebookTiptap/candidatePageHistory';
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
 import { NotebookTiptapProductMoreMenu } from './NotebookTiptapProductMoreMenu';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
-import { resetCandidateEditorHistory } from '../../../lib/notebookTiptap/candidatePageHistory';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
 import {
   type NotebookQaDiagContext,
@@ -231,6 +232,8 @@ export function NotebookTiptapCandidateEditor({
    * before updating this prop). Never rely on the create-time useEditor closure.
    */
   const pageKeyRef = useRef(pageKey);
+  /** Page identity of the document currently hydrated into the editor (not merely the newest prop). */
+  const hydratedPageKeyRef = useRef(pageKey);
   const sourceBodyCodecVersionRef = useRef(sourceBodyCodecVersion);
   sourceBodyCodecVersionRef.current = sourceBodyCodecVersion;
   type CandidateEmittedItem = {
@@ -241,6 +244,7 @@ export function NotebookTiptapCandidateEditor({
   };
   const recentEmissionsRef = useRef<CandidateEmittedItem[]>([]);
 
+  // Track newest prop pageKey for transition detection — do NOT advance hydrated identity here.
   if (prevPageKeyRef.current !== pageKey) {
     prevPageKeyRef.current = pageKey;
     pageKeyRef.current = pageKey;
@@ -355,10 +359,17 @@ export function NotebookTiptapCandidateEditor({
         if (!transaction.docChanged) return;
         // Fail-closed / non-editable: never bridge to persistence (protects empty hydrate fallback).
         if (!ed.isEditable) return;
+        // M7.7: refuse emit while prop pageKey has advanced but hydrate has not caught up.
+        // Prevents OLD_BODY + NEW_PAGE_KEY during the transition window.
+        const propPageKey = pageKeyRef.current;
+        const hydratedPageKey = hydratedPageKeyRef.current;
+        if (!canEmitUserEditForHydratedPage({ propPageKey, hydratedPageKey })) {
+          return;
+        }
         userEditedRef.current = true;
         setUserEdited(true);
-        // Live identity — never the create-time pageKey closed over by useEditor.
-        const emitPageKey = pageKeyRef.current;
+        // Emit identity = hydrated generation (same as prop when guard passes).
+        const emitPageKey = hydratedPageKey;
         const targetCodec = onUserEditRef.current ? 1 : sourceBodyCodecVersionRef.current;
         const next = attemptSerialize(ed.getJSON(), true, targetCodec);
         setSnap(next);
@@ -434,6 +445,8 @@ export function NotebookTiptapCandidateEditor({
     userEditedRef.current = false;
     setUserEdited(false);
     editor.commands.setContent(load.content, { emitUpdate: false });
+    // Bind emit identity to this hydrated generation — only AFTER setContent succeeds.
+    hydratedPageKeyRef.current = pageKey;
     resetCandidateEditorHistory(editor);
     const next = attemptSerialize(editor.getJSON(), false, sourceBodyCodecVersion);
     setSnap(next);

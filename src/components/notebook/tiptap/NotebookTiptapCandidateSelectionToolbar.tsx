@@ -37,6 +37,7 @@ import {
   computeToolbarAnchor,
   type ToolbarAnchor,
 } from '../../../lib/notebookSelectionToolbar';
+import { computeViewportAnchoredMenuPosition } from '../../../lib/notebookTiptap/viewportAnchoredMenu';
 import { NB_FORMAT_TOOLBAR_Z } from '../../../lib/notebookToolbarLayers';
 import {
   CANDIDATE_FONT_SIZE_PRESETS,
@@ -297,6 +298,9 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const [linkError, setLinkError] = useState<string | null>(null);
   const [isEditingLink, setIsEditingLink] = useState(false);
   const linkInputRef = useRef<HTMLInputElement>(null);
+  const linkTriggerRef = useRef<HTMLDivElement | null>(null);
+  const tableInsertTriggerRef = useRef<HTMLDivElement | null>(null);
+  const [linkPos, setLinkPos] = useState<{ top: number; left: number; width: number } | null>(null);
   /** Preserve caret/selection inside the intended table while the Table menu is open. */
   const tableTargetPosRef = useRef<number | null>(null);
   const [diag, setDiag] = useState({
@@ -322,9 +326,42 @@ export function NotebookTiptapCandidateSelectionToolbar({
     setBlockOpen(false);
     setLinkOpen(false);
     linkOpenRef.current = false;
+    setLinkPos(null);
     setTablePickerOpen(false);
     setTableMenuOpen(false);
   }, []);
+
+  const repositionLinkPopover = useCallback(() => {
+    const el = linkTriggerRef.current;
+    if (!el) return;
+    const width = 280;
+    const next = computeViewportAnchoredMenuPosition({
+      anchor: el.getBoundingClientRect(),
+      menuWidth: width,
+      menuHeight: 96,
+      minHeight: 72,
+    });
+    setLinkPos({ top: next.top, left: next.left, width });
+  }, []);
+
+  useEffect(() => {
+    if (!linkOpen) {
+      setLinkPos(null);
+      return;
+    }
+    repositionLinkPopover();
+    const onReposition = () => repositionLinkPopover();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    window.visualViewport?.addEventListener('resize', onReposition);
+    window.visualViewport?.addEventListener('scroll', onReposition);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+      window.visualViewport?.removeEventListener('resize', onReposition);
+      window.visualViewport?.removeEventListener('scroll', onReposition);
+    };
+  }, [linkOpen, repositionLinkPopover]);
 
   const dismissToolbar = useCallback(
     (opts?: { suppressReopen?: boolean }) => {
@@ -486,7 +523,10 @@ export function NotebookTiptapCandidateSelectionToolbar({
         t instanceof Element &&
         (t.closest('[data-nb-candidate-block-menu]') ||
           t.closest('[data-nb-candidate-table-size-picker]') ||
-          t.closest('[data-nb-candidate-table-menu]'))
+          t.closest('[data-nb-candidate-table-menu]') ||
+          // M7.7: link popover is portaled to document.body (viewport clamp).
+          // Must be treated as chrome or pointerdown dismisses before Apply/Open click.
+          t.closest('[data-nb-candidate-link-popover]'))
       ) {
         return true;
       }
@@ -516,12 +556,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node | null;
       if (toolbarRef.current?.contains(t)) return;
-      // Portaled Turn into / table menus live on document.body.
+      // Portaled Turn into / table / link menus live on document.body.
       if (
         t instanceof Element &&
         (t.closest('[data-nb-candidate-block-menu]') ||
           t.closest('[data-nb-candidate-table-size-picker]') ||
-          t.closest('[data-nb-candidate-table-menu]'))
+          t.closest('[data-nb-candidate-table-menu]') ||
+          t.closest('[data-nb-candidate-link-popover]'))
       ) {
         return;
       }
@@ -691,7 +732,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
   const handleOpenLink = useCallback(() => {
     const raw = linkUrl.trim() || fmt.linkHref || '';
-    const ok = openNotebookLink(raw);
+    // Sanitize first so Open Link never forwards an unsafe raw string.
+    const sanitized = sanitizeUrl(raw);
+    if (!sanitized) {
+      setLinkError('Invalid or unsafe URL — cannot open');
+      return;
+    }
+    const ok = openNotebookLink(sanitized);
     if (!ok) {
       setLinkError('Invalid or unsafe URL — cannot open');
     }
@@ -720,6 +767,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
     editor.commands.focus();
     syncFromEditor();
   }, [editor, syncFromEditor]);
+
+  /** Fire link actions on pointerdown (like FormatBtn) so they match Enter and
+   * survive before click — still requires portaled popover to be chrome. */
+  const linkApplyCapture = useFormatCapture(handleApplyLink);
+  const linkOpenCapture = useFormatCapture(handleOpenLink);
+  const linkRemoveCapture = useFormatCapture(handleRemoveLink);
+  const linkCancelCapture = useFormatCapture(handleCancelLink);
 
   const runBlock = useCallback(
     (target: CandidateBlockTarget) => {
@@ -883,7 +937,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
               <Sigma size={14} strokeWidth={2.5} />
             </FormatBtn>
 
-            <div style={{ position: 'relative' }}>
+            <div ref={linkTriggerRef} style={{ position: 'relative' }}>
               <FormatBtn
                 title={fmt.link ? 'Edit link' : 'Insert link'}
                 testId="link"
@@ -893,145 +947,151 @@ export function NotebookTiptapCandidateSelectionToolbar({
               >
                 <Link2 size={14} strokeWidth={2.5} />
               </FormatBtn>
-              {linkOpen ? (
-                <div
-                  data-nb-candidate-link-popover="1"
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: 6,
-                    padding: 8,
-                    borderRadius: 8,
-                    background: 'rgba(10,14,24,0.98)',
-                    border: `1px solid ${borderColor}`,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                    zIndex: 10,
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                    gap: 6,
-                    minWidth: 260,
-                  }}
-                  onMouseDown={e => {
-                    // Keep the original text selection intact for Apply/Save/Remove.
-                    // Allow the URL <input> to take focus (do not preventDefault on it).
-                    e.stopPropagation();
-                    const tag = (e.target as HTMLElement | null)?.tagName;
-                    if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-                      e.preventDefault();
-                    } else if (!editor.isDestroyed) {
-                      const { from, to, empty } = editor.state.selection;
-                      if (!empty && to > from) {
-                        linkRangeRef.current = { from, to };
-                        storedSelRef.current = { from, to };
-                      }
-                    }
-                    candidateSelectionToolbarBusyRef.current = true;
-                  }}
-                >
-                  <input
-                    ref={linkInputRef}
-                    data-nb-candidate-link-input="1"
-                    type="text"
-                    dir="ltr"
-                    value={linkUrl}
-                    placeholder="https://example.com"
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: 4,
-                      color: '#ffffff',
-                      fontSize: 12,
-                      padding: '4px 8px',
-                      outline: 'none',
-                      flex: '1 1 180px',
-                      minWidth: 140,
-                      direction: 'ltr',
-                      unicodeBidi: 'isolate',
-                    }}
-                    onChange={e => {
-                      setLinkUrl(e.target.value);
-                      setLinkError(null);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleApplyLink();
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleCancelLink();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    data-nb-candidate-link-apply="1"
-                    className="nb-toolbar-btn"
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: '3px 8px',
-                      background: 'rgba(59, 130, 246, 0.25)',
-                      color: '#93c5fd',
-                    }}
-                    onClick={handleApplyLink}
-                  >
-                    {isEditingLink ? 'Save' : 'Apply'}
-                  </button>
-                  {isEditingLink ? (
-                    <button
-                      type="button"
-                      data-nb-candidate-link-open="1"
-                      className="nb-toolbar-btn"
-                      title="Open link"
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        padding: '3px 8px',
-                        color: '#7dd3fc',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                      onClick={handleOpenLink}
-                    >
-                      <ExternalLink size={12} strokeWidth={2.5} />
-                      Open Link
-                    </button>
-                  ) : null}
-                  {isEditingLink ? (
-                    <button
-                      type="button"
-                      data-nb-candidate-link-remove="1"
-                      className="nb-toolbar-btn"
-                      style={{ fontSize: 11, padding: '3px 8px', color: '#fca5a5' }}
-                      onClick={handleRemoveLink}
-                    >
-                      Remove Link
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    data-nb-candidate-link-cancel="1"
-                    className="nb-toolbar-btn"
-                    style={{ fontSize: 11, padding: '3px 8px' }}
-                    onClick={handleCancelLink}
-                  >
-                    Cancel
-                  </button>
-                  {linkError ? (
+              {linkOpen && linkPos && typeof document !== 'undefined'
+                ? createPortal(
                     <div
-                      data-nb-candidate-link-error="1"
-                      style={{ color: '#f87171', fontSize: 10, marginTop: 4, width: '100%' }}
+                      data-nb-candidate-link-popover="1"
+                      style={{
+                        position: 'fixed',
+                        top: linkPos.top,
+                        left: linkPos.left,
+                        width: linkPos.width,
+                        marginTop: 0,
+                        padding: 8,
+                        borderRadius: 8,
+                        background: 'rgba(10,14,24,0.98)',
+                        border: `1px solid ${borderColor}`,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                        zIndex: NB_FORMAT_TOOLBAR_Z.toolbar + 20,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        gap: 6,
+                        minWidth: 260,
+                        boxSizing: 'border-box',
+                      }}
+                      onMouseDown={e => {
+                        // Keep the original text selection intact for Apply/Save/Remove.
+                        // Allow the URL <input> to take focus (do not preventDefault on it).
+                        e.stopPropagation();
+                        const tag = (e.target as HTMLElement | null)?.tagName;
+                        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+                          e.preventDefault();
+                        } else if (!editor.isDestroyed) {
+                          const { from, to, empty } = editor.state.selection;
+                          if (!empty && to > from) {
+                            linkRangeRef.current = { from, to };
+                            storedSelRef.current = { from, to };
+                          }
+                        }
+                        candidateSelectionToolbarBusyRef.current = true;
+                      }}
+                      onPointerDown={e => e.stopPropagation()}
                     >
-                      {linkError}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                      <input
+                        ref={linkInputRef}
+                        data-nb-candidate-link-input="1"
+                        type="text"
+                        dir="ltr"
+                        value={linkUrl}
+                        placeholder="https://example.com"
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          borderRadius: 4,
+                          color: '#ffffff',
+                          fontSize: 16,
+                          padding: '6px 8px',
+                          outline: 'none',
+                          flex: '1 1 180px',
+                          minWidth: 140,
+                          direction: 'ltr',
+                          unicodeBidi: 'isolate',
+                        }}
+                        onChange={e => {
+                          setLinkUrl(e.target.value);
+                          setLinkError(null);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleApplyLink();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleCancelLink();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        data-nb-candidate-link-apply="1"
+                        className="nb-toolbar-btn"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          background: 'rgba(59, 130, 246, 0.25)',
+                          color: '#93c5fd',
+                        }}
+                        {...linkApplyCapture}
+                      >
+                        {isEditingLink ? 'Save' : 'Apply'}
+                      </button>
+                      {isEditingLink ? (
+                        <button
+                          type="button"
+                          data-nb-candidate-link-open="1"
+                          className="nb-toolbar-btn"
+                          title="Open link"
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            color: '#7dd3fc',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                          }}
+                          {...linkOpenCapture}
+                        >
+                          <ExternalLink size={12} strokeWidth={2.5} />
+                          Open Link
+                        </button>
+                      ) : null}
+                      {isEditingLink ? (
+                        <button
+                          type="button"
+                          data-nb-candidate-link-remove="1"
+                          className="nb-toolbar-btn"
+                          style={{ fontSize: 11, padding: '3px 8px', color: '#fca5a5' }}
+                          {...linkRemoveCapture}
+                        >
+                          Remove Link
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        data-nb-candidate-link-cancel="1"
+                        className="nb-toolbar-btn"
+                        style={{ fontSize: 11, padding: '3px 8px' }}
+                        {...linkCancelCapture}
+                      >
+                        Cancel
+                      </button>
+                      {linkError ? (
+                        <div
+                          data-nb-candidate-link-error="1"
+                          style={{ color: '#f87171', fontSize: 10, marginTop: 4, width: '100%' }}
+                        >
+                          {linkError}
+                        </div>
+                      ) : null}
+                    </div>,
+                    document.body,
+                  )
+                : null}
             </div>
 
             <div className="nb-toolbar-divider" />
@@ -1143,7 +1203,11 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
             <div className="nb-toolbar-divider" />
 
-            <div style={{ position: 'relative' }} data-nb-candidate-table-insert="1">
+            <div
+              ref={tableInsertTriggerRef}
+              style={{ position: 'relative' }}
+              data-nb-candidate-table-insert="1"
+            >
               <FormatBtn
                 title="Insert table"
                 testId="tableInsert"
@@ -1163,6 +1227,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
               <NotebookTiptapCandidateTableSizePicker
                 open={tablePickerOpen}
                 borderColor={borderColor}
+                anchorRef={tableInsertTriggerRef}
                 onClose={() => setTablePickerOpen(false)}
                 onPick={runTableInsert}
               />
