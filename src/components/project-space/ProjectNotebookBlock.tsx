@@ -204,6 +204,23 @@ import {
 import { isNotebookTiptapEditorEnabled, isNotebookTiptapCandidateActive, isNotebookTiptapPersistActive } from '../../lib/notebookTiptap/featureFlag';
 import { NotebookTiptapRealShadowPanel } from '../notebook/tiptap/NotebookTiptapRealShadowPanel';
 import { NotebookTiptapCandidateEditor } from '../notebook/tiptap/NotebookTiptapCandidateEditor';
+import { NotebookDesignerHost } from '../notebook/designer/NotebookDesignerHost';
+import { useNotebookDesignerAppearanceSession } from '../../hooks/useNotebookDesignerAppearanceSession';
+import type { NotebookAppearanceV1 } from '../../lib/notebookAppearance';
+import {
+  notebookAppearanceChromeStyle,
+  notebookAppearanceFrameStyle,
+  notebookAppearanceIdentityRailStyle,
+  notebookAppearanceStudyPageStyle,
+  notebookAppearanceTitleStyle,
+  notebookAppearanceVisualTokensToCssVars,
+  resolveNotebookAppearanceVisualTokens,
+  resolveNotebookDesignerPresetSelection,
+} from '../../lib/notebookAppearanceVisualTokens';
+import {
+  NOTEBOOK_DESIGNER_PANEL_WIDTH_PX,
+  resolveNotebookDesignerContainerMode,
+} from '../../lib/notebookDesignerLayout';
 import {
   anchorFromSelection,
   computeToolbarAnchor,
@@ -1476,6 +1493,35 @@ export function ProjectNotebookBlock({
   );
   const contentRef = useRef(content);
   contentRef.current = effectiveContent;
+
+  const persistAppearanceOnly = useCallback(
+    (appearance: NotebookAppearanceV1) => {
+      const base = contentRef.current;
+      persistNotebookContent(
+        { ...base, appearance },
+        navigationActivePageIdRef.current ?? navigationOverlayRef.current?.activePageId ?? null,
+      );
+    },
+    [persistNotebookContent],
+  );
+
+  /** Paper style is independent of appearance — never couple the two writes. */
+  const persistPaperStyleOnly = useCallback(
+    (nextPaperStyle: 'blank' | 'ruled' | 'grid') => {
+      const base = contentRef.current;
+      persistNotebookContent(
+        { ...base, paperStyle: nextPaperStyle },
+        navigationActivePageIdRef.current ?? navigationOverlayRef.current?.activePageId ?? null,
+      );
+    },
+    [persistNotebookContent],
+  );
+
+  const designerSession = useNotebookDesignerAppearanceSession({
+    persistedAppearance: (effectiveContent as { appearance?: NotebookAppearanceV1 }).appearance,
+    persistAppearance: persistAppearanceOnly,
+  });
+
   /** TipTap live body ahead of flushed pages[] — unioned into asset GC roots (M7.5C1). Page-keyed (M7.5C2). */
   const candidateLiveRepresentationRef = useRef<NotebookLiveRepresentation | null>(null);
   /**
@@ -1720,6 +1766,16 @@ export function ProjectNotebookBlock({
   }, [onActiveQuestionNumber, blocks, surfaceFocusBlockId]);
   const [morphPulseId, setMorphPulseId] = useState<string | null>(null);
   const [surfaceWidth, setSurfaceWidth] = useState(0);
+  const designerVisualTokens = resolveNotebookAppearanceVisualTokens(designerSession.liveAppearance);
+  const designerCssVars = notebookAppearanceVisualTokensToCssVars(designerVisualTokens);
+  const designerPresetSelection = resolveNotebookDesignerPresetSelection(
+    designerSession.liveAppearance,
+  );
+  const designerContainerMode = resolveNotebookDesignerContainerMode(surfaceWidth);
+  const showDesignerPanel =
+    designerSession.open && designerContainerMode === 'panel' && !isDeskPresentation;
+  const showDesignerSheet =
+    designerSession.open && designerContainerMode === 'sheet' && !isDeskPresentation;
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [workspaceChrome, setWorkspaceChrome] = useState(createInitialWorkspaceChromeState);
   const workspaceFocusSnapshotRef = useRef<FocusRestoreSnapshot>({
@@ -2518,8 +2574,13 @@ export function ProjectNotebookBlock({
   const contextPanelVisible = isWorkspacePresentation
     ? workspaceChrome.contextOpen
     : contextPanelOpen;
+  // Designer panel temporarily occupies the right rail; do not mutate persisted Context chrome.
   const showWorkspaceContextDock =
-    isWorkspacePresentation && hasNotebookContext && canDockContext && !workspaceFocusActive;
+    isWorkspacePresentation &&
+    hasNotebookContext &&
+    canDockContext &&
+    !workspaceFocusActive &&
+    !showDesignerPanel;
   const showNotebookContext =
     !isDeskPresentation &&
     !isEmbeddedPresentation &&
@@ -2527,7 +2588,8 @@ export function ProjectNotebookBlock({
     hasNotebookContext &&
     contextPanelVisible &&
     !workspaceFocusActive &&
-    (!isWorkspacePresentation || !canDockContext);
+    (!isWorkspacePresentation || !canDockContext) &&
+    !showDesignerPanel;
 
   const setTopicsOpen = useCallback((open: boolean) => {
     setWorkspaceChrome(s => ({ ...s, topicsOpen: open }));
@@ -3025,10 +3087,16 @@ export function ProjectNotebookBlock({
 
   const paperSize = paperStyle === 'grid' ? '36px 36px' : '100% 38px';
 
-  /** Line texture — spatial (dark glass) vs document page (warm paper). */
+  /**
+   * Study-page line texture from paperStyle only.
+   * Contrast follows design recipe pageInk (not Notebook Design motif / frame).
+   */
+  const studyPageIsLight = !isDeskPresentation
+    ? designerVisualTokens.pageInk === 'dark'
+    : isPaperSurface;
   const writingSurfaceBackground = useMemo(() => {
-    if (isPaperSurface) {
-      const edge = `radial-gradient(ellipse 120% 90% at 50% 0%, rgba(255,255,255,0.65) 0%, transparent 62%)`;
+    if (studyPageIsLight) {
+      const edge = `radial-gradient(ellipse 120% 90% at 50% 0%, rgba(255,255,255,0.45) 0%, transparent 62%)`;
       if (paperStyle === 'blank') {
         return { image: edge, size: '100% 100%' };
       }
@@ -3069,8 +3137,8 @@ export function ProjectNotebookBlock({
     if (paperStyle === 'grid') {
       return {
         image: `
-          linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px),
+          linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px),
           ${edge}
         `,
         size: '36px 36px, 36px 36px, 100% 100%',
@@ -3082,16 +3150,16 @@ export function ProjectNotebookBlock({
           180deg,
           transparent,
           transparent 37px,
-          rgba(255,255,255,0.022) 37px,
-          rgba(255,255,255,0.022) 38px
+          rgba(255,255,255,0.05) 37px,
+          rgba(255,255,255,0.05) 38px
         ),
         ${edge}
       `,
       size: `${paperSize}, 100% 100%`,
     };
-  }, [paperStyle, paperSize, isPaperSurface]);
+  }, [paperStyle, paperSize, studyPageIsLight]);
 
-  /** Editorial ink — spatial (light on dark) vs document (dark on paper). */
+  /** Editorial ink — follow study-page readability (design recipe pageInk). */
   const notebookInk = useMemo(
     () => {
       if (isDeskPresentation) {
@@ -3104,7 +3172,8 @@ export function ProjectNotebookBlock({
           ghost: '#a8a29e',
         };
       }
-      return isPaperSurface
+      const lightPage = designerVisualTokens.pageInk === 'dark';
+      return lightPage
         ? {
             headline: '#1c1917',
             primary: '#292524',
@@ -3122,7 +3191,14 @@ export function ProjectNotebookBlock({
             ghost: `color-mix(in srgb, ${tokens.textGhost} 82%, #e2e8f0 18%)`,
           };
     },
-    [isDeskPresentation, isPaperSurface, tokens.textPrimary, tokens.textSecondary, tokens.textMuted, tokens.textGhost],
+    [
+      isDeskPresentation,
+      designerVisualTokens.pageInk,
+      tokens.textPrimary,
+      tokens.textSecondary,
+      tokens.textMuted,
+      tokens.textGhost,
+    ],
   );
 
   const ink = notebookInk;
@@ -6028,6 +6104,16 @@ export function ProjectNotebookBlock({
       <style dangerouslySetInnerHTML={{ __html: nbMotionCss }} />
       <div
         ref={shellRef}
+        data-nb-designer-root="1"
+        data-nb-identity-frame="1"
+        data-nb-treatment={designerVisualTokens.treatment}
+        data-nb-material={designerVisualTokens.material}
+        data-nb-frame={designerVisualTokens.frame}
+        data-nb-motif={designerVisualTokens.motif}
+        data-nb-page-ink={designerVisualTokens.pageInk}
+        data-nb-frame-pad={String(designerVisualTokens.framePaddingPx)}
+        data-nb-rail={String(designerVisualTokens.identityRailWidthPx)}
+        data-nb-page-surface={designerVisualTokens.pageSurface}
         onPaste={handleNotebookPaste}
         style={{
           padding: isDeskPresentation || isWorkspacePresentation
@@ -6049,28 +6135,26 @@ export function ProjectNotebookBlock({
                 ...((isDeskPresentation || isWorkspacePresentation) ? { flex: 1 } : {}),
               }
             : { minHeight: '420px' }),
-          borderRadius: context === 'free-space' ? 0 : '22px',
           position: 'relative',
-          ...(context === 'free-space'
+          ...designerCssVars,
+          // Notebook identity/frame — surrounds chrome + study page (not TipTap remount).
+          ...(!isDeskPresentation ? notebookAppearanceFrameStyle(designerVisualTokens) : {}),
+          ...(isDeskPresentation
             ? {
+                borderRadius: context === 'free-space' ? 0 : '22px',
                 backgroundColor: 'transparent',
-                backgroundImage: 'none',
-                boxShadow: 'none',
               }
-            : {
-                backgroundColor: `${tokens.cardBg}ff`,
-                backgroundImage: `
-            radial-gradient(circle at 50% 0%, rgba(255,255,255,0.04), transparent 36%),
-            linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 34%)
-          `,
-                boxShadow: `
-            0 22px 60px rgba(0,0,0,0.28),
-            0 0 0 1px rgba(255,255,255,0.09),
-            inset 0 1px 0 rgba(255,255,255,0.08)
-          `,
-              }),
+            : {}),
         }}
       >
+      {!isDeskPresentation
+        ? (() => {
+            const rail = notebookAppearanceIdentityRailStyle(designerVisualTokens);
+            return rail ? (
+              <div data-nb-identity-rail="1" aria-hidden style={rail} />
+            ) : null;
+          })()
+        : null}
       {showCardChrome ? (
       <div
         onMouseEnter={() => setHeaderHovered(true)}
@@ -6081,21 +6165,11 @@ export function ProjectNotebookBlock({
           justifyContent: 'space-between',
           gap: '18px',
           flexWrap: 'wrap',
-          padding: '4px 6px 14px',
-          marginBottom: '8px',
-          borderBottom: `1px solid ${
-            notebookMode === 'math-workspace'
-              ? 'rgba(129,140,248,0.03)'   // near-invisible — no hard chrome/content boundary
-              : isMathNotebook
-                ? isPaperSurface
-                  ? 'rgba(120,113,108,0.28)'
-                  : 'rgba(129,140,248,0.18)'
-                : isPaperSurface
-                  ? 'rgba(28,25,23,0.08)'
-                  : 'rgba(255,255,255,0.055)'
-          }`,
+          padding: '10px 10px 14px',
+          marginBottom: 0,
+          borderRadius: Math.max(0, designerVisualTokens.frameRadiusPx - 4),
+          ...notebookAppearanceChromeStyle(designerVisualTokens),
           ...(context === 'free-space' ? { flexShrink: 0 } : {}),
-          // Scratch mode: header recedes to margin-paper weight at rest, surfaces on hover
           ...(notebookMode === 'scratch' ? {
             opacity: headerHovered ? 0.85 : 0.28,
             transition: 'opacity 0.3s ease',
@@ -6106,10 +6180,9 @@ export function ProjectNotebookBlock({
           <div
             style={{
               fontSize: '13px',
-              color: ink.secondary,
-              letterSpacing: '0.01em',
               lineHeight: 1.55,
               maxWidth: '420px',
+              ...notebookAppearanceTitleStyle(designerVisualTokens),
             }}
           >
             {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}{hasNotebookContext
@@ -6851,17 +6924,22 @@ export function ProjectNotebookBlock({
         style={{
           position: 'relative',
           display:
-            (showNotebookContext && canDockContext) || showWorkspaceContextDock
+            (showNotebookContext && canDockContext) || showWorkspaceContextDock || showDesignerPanel
               ? 'grid'
               : 'flex',
           flexDirection: 'column',
           flex: isDeskPresentation && context === 'free-space' ? 1 : undefined,
           minHeight: context === 'free-space' ? '100%' : undefined,
           gridTemplateColumns:
-            (showNotebookContext && canDockContext) || showWorkspaceContextDock
-              ? `minmax(0, 1fr) ${workspaceChrome.contextOpen || !showWorkspaceContextDock ? '232px' : `${NOTEBOOK_PANEL_RAIL_WIDTH_PX}px`}`
+            showDesignerPanel
+              ? `minmax(0, 1fr) ${NOTEBOOK_DESIGNER_PANEL_WIDTH_PX}px`
+              : (showNotebookContext && canDockContext) || showWorkspaceContextDock
+                ? `minmax(0, 1fr) ${workspaceChrome.contextOpen || !showWorkspaceContextDock ? '232px' : `${NOTEBOOK_PANEL_RAIL_WIDTH_PX}px`}`
+                : undefined,
+          gap:
+            (showNotebookContext && canDockContext) || showWorkspaceContextDock || showDesignerPanel
+              ? '16px'
               : undefined,
-          gap: (showNotebookContext && canDockContext) || showWorkspaceContextDock ? '16px' : undefined,
           alignItems: undefined,
         }}
       >
@@ -6882,11 +6960,29 @@ export function ProjectNotebookBlock({
           onPointerUpCapture={tipTapCandidateActive ? undefined : handleNotebookTextPenUp}
           className="nb-document-surface"
           data-nb-surface={notebookSurface}
+          data-nb-study-page="1"
           data-nb-block-pen-text={!showInkMode ? '1' : undefined}
           data-nb-v1-document={workspaceBinderMode && activePageKind === 'document' ? '1' : undefined}
           data-desk-surface={isDeskPresentation ? '1' : undefined}
           style={{
             ...editorSurfaceStyle,
+            // Study page layer — calm writing surface; paperStyle lines come from editorSurfaceStyle.
+            ...(!isDeskPresentation
+              ? {
+                  ...notebookAppearanceStudyPageStyle(designerVisualTokens),
+                  // Paper lines on study page; overflow visible so sticky toolbar
+                  // sticks to [data-nb-body-scroll] (not clipped by nested overflow).
+                  backgroundImage: editorSurfaceStyle.backgroundImage,
+                  backgroundSize: editorSurfaceStyle.backgroundSize,
+                  backgroundRepeat: 'repeat',
+                  backgroundAttachment: 'local',
+                  backgroundColor: designerVisualTokens.pageSurface,
+                  color:
+                    designerVisualTokens.pageInk === 'dark'
+                      ? '#1c1917'
+                      : editorSurfaceStyle.color,
+                }
+              : {}),
             ...(showWorkspaceContextDock && !workspaceChrome.contextOpen
               ? { flex: 1, minWidth: 0 }
               : {}),
@@ -6930,6 +7026,7 @@ export function ProjectNotebookBlock({
                   sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   pageLayout
+                  pageInk={designerVisualTokens.pageInk}
                   surfaceChrome={{
                     margin: 0,
                     width: '100%',
@@ -6949,6 +7046,7 @@ export function ProjectNotebookBlock({
                   sectionId={freeSpaceSectionId}
                   tokens={tokens}
                   pageLayout
+                  pageInk={designerVisualTokens.pageInk}
                   surfaceChrome={{
                     margin: 0,
                     width: '100%',
@@ -6998,10 +7096,12 @@ export function ProjectNotebookBlock({
               onReplaceImageFile={handleReplaceImageFile}
               onInsertHandwriting={handleInsertHandwriting}
               handwritingTokens={tokens}
+              handwritingPageInk={designerVisualTokens.pageInk}
               handwritingUserId={handwritingUserId}
               handwritingSectionId={freeSpaceSectionId}
               onDismissTextEditing={dismissNotebookTextEditing}
               onExportPdf={() => void exportNotebookAsPdf()}
+              onCustomizeNotebook={designerSession.openDesigner}
               qaDiagContext={{
                 objectId: String(objectId),
                 propsContent: content,
@@ -8530,6 +8630,30 @@ export function ProjectNotebookBlock({
             />
           </div>
         )
+      ) : null}
+      {showDesignerPanel ? (
+        <NotebookDesignerHost
+          open
+          mode="panel"
+          selection={designerPresetSelection}
+          onSelectPreset={designerSession.selectPreset}
+          paperStyle={paperStyle}
+          onSelectPaperStyle={persistPaperStyleOnly}
+          onClose={designerSession.closeDesigner}
+          shellRect={null}
+        />
+      ) : null}
+      {showDesignerSheet ? (
+        <NotebookDesignerHost
+          open
+          mode="sheet"
+          selection={designerPresetSelection}
+          onSelectPreset={designerSession.selectPreset}
+          paperStyle={paperStyle}
+          onSelectPaperStyle={persistPaperStyleOnly}
+          onClose={designerSession.closeDesigner}
+          shellRect={shellRef.current?.getBoundingClientRect() ?? null}
+        />
       ) : null}
       </div>
       </NotebookBodyScroll>

@@ -85,7 +85,7 @@ describe('M7.6 product Export PDF wiring (TipTap surface)', () => {
     expect(onExportPdf).toHaveBeenCalledTimes(1);
   });
 
-  it('hides More menu when onExportPdf is absent (no orphan chrome)', () => {
+  it('hides More menu when onExportPdf and onCustomizeNotebook are absent (no orphan chrome)', () => {
     const body = encodeNotebookTextV1([{ kind: 'paragraph', text: 'Hello' }]);
     ({ host, root } = mount(
       createElement(NotebookTiptapCandidateEditor, {

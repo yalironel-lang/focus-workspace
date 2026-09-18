@@ -55,7 +55,10 @@ import {
 import { getFwInkDraftMode } from '../../lib/handwritingInkDraftMode';
 import { hwPaintProfileRecord } from '../../lib/handwritingPaintProfile';
 import {
-  STUDY_INK_COLOR,
+  defaultHandwritingInkColor,
+  readNotebookPageInkFromElement,
+  strokesForDisplay,
+  strokeForDisplay,
   STUDY_PEN_WIDTH,
   type InkPresetId,
 } from '../../lib/handwritingInk';
@@ -135,6 +138,11 @@ type Props = {
   onDelete?: () => void;
   /** Notebook page ink — full-width surface, no delete block. */
   pageLayout?: boolean;
+  /**
+   * Study-page ink recipe (`pageInk` from NotebookAppearance).
+   * When omitted, reads `[data-nb-page-ink]` from an ancestor at paint time.
+   */
+  pageInk?: 'dark' | 'light';
 };
 
 declare global {
@@ -227,10 +235,13 @@ export function HandwritingBlock({
   onDismissTextEditing,
   onDelete,
   pageLayout = false,
+  pageInk: pageInkProp,
 }: Props) {
   const isPageInkBlock = isNotebookPageInkKey(blockKey);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pageInkRef = useRef<'dark' | 'light'>(pageInkProp ?? 'dark');
+  const [pageInk, setPageInk] = useState<'dark' | 'light'>(pageInkProp ?? 'dark');
   const menuRef = useRef<HTMLDivElement>(null);
   const dataRef = useRef<HandwritingBlockData | null>(null);
   const draftRef = useRef<HandwritingStroke | null>(null);
@@ -277,6 +288,12 @@ export function HandwritingBlock({
     commitCacheValidRef.current = false;
     commitCacheStrokeCountRef.current = -1;
   }, []);
+
+  useEffect(() => {
+    pageInkRef.current = pageInk;
+    invalidateCommitCache();
+    schedulePaintRef.current?.();
+  }, [pageInk, invalidateCommitCache]);
 
   const formatCanvasSize = (canvas: HTMLCanvasElement | null): string => {
     if (!canvas) return 'no-canvas';
@@ -357,10 +374,36 @@ export function HandwritingBlock({
   );
   toolRef.current = tool;
 
+  useLayoutEffect(() => {
+    if (pageInkProp) {
+      pageInkRef.current = pageInkProp;
+      setPageInk(prev => (prev === pageInkProp ? prev : pageInkProp));
+      return;
+    }
+    const el = wrapRef.current ?? canvasRef.current;
+    const host = el?.closest?.('[data-nb-page-ink]') ?? null;
+    const sync = () => {
+      const next = readNotebookPageInkFromElement(wrapRef.current ?? canvasRef.current);
+      pageInkRef.current = next;
+      setPageInk(prev => (prev === next ? prev : next));
+    };
+    sync();
+    if (!host || typeof MutationObserver === 'undefined') return;
+    const obs = new MutationObserver(sync);
+    obs.observe(host, { attributes: true, attributeFilter: ['data-nb-page-ink'] });
+    return () => obs.disconnect();
+  }, [pageInkProp]);
+
   const inkPreset: InkPresetId = pageLayout ? 'study' : 'math';
-  const inkColor = pageLayout ? STUDY_INK_COLOR : (tokens.textPrimary ?? '#1c1917');
+  const inkColor = defaultHandwritingInkColor(pageInk);
   const penInkWidth = pageLayout ? STUDY_PEN_WIDTH : PEN_WIDTH;
   const atMaxHeight = displayHeight >= CANVAS_HEIGHT_MAX;
+  const studyPageIsLight = pageInk === 'dark';
+
+  const displayStrokes = useCallback(
+    (strokes: HandwritingStroke[]) => strokesForDisplay(strokes, pageInkRef.current),
+    [],
+  );
 
   const paintIdle = useCallback(() => {
     const canvas = canvasRef.current;
@@ -392,7 +435,7 @@ export function HandwritingBlock({
     const refW = data.canvas.width;
 
     if (import.meta.env.DEV && getHwRenderMode() === 'polyline') {
-      drawStrokes(visibleCtx, data.strokes, w, h, refW);
+      drawStrokes(visibleCtx, displayStrokes(data.strokes), w, h, refW);
       if (isPageInkBlock) {
         recordPageInkRenderState({
           lastPaintStatus: `dev-polyline ${data.strokes.length} strokes`,
@@ -416,7 +459,7 @@ export function HandwritingBlock({
       !commitCacheValidRef.current ||
       commitCacheStrokeCountRef.current !== data.strokes.length;
     if (needsRebuild) {
-      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW, inkPreset);
+      rebuildCommitLayer(commitCtx, displayStrokes(data.strokes), w, h, refW, inkPreset);
       commitCacheValidRef.current = true;
       commitCacheStrokeCountRef.current = data.strokes.length;
     }
@@ -430,7 +473,7 @@ export function HandwritingBlock({
         canvasSizeAtRedraw: formatCanvasSize(canvas),
       });
     }
-  }, [ensureCommitCanvas, isPageInkBlock, inkPreset]);
+  }, [ensureCommitCanvas, isPageInkBlock, inkPreset, displayStrokes, pageInk]);
 
   const paintDraft = useCallback(() => {
     const canvas = canvasRef.current;
@@ -459,15 +502,16 @@ export function HandwritingBlock({
       !commitCacheValidRef.current ||
       commitCacheStrokeCountRef.current !== data.strokes.length;
     if (needsRebuild) {
-      rebuildCommitLayer(commitCtx, data.strokes, w, h, refW, inkPreset);
+      rebuildCommitLayer(commitCtx, displayStrokes(data.strokes), w, h, refW, inkPreset);
       commitCacheValidRef.current = true;
       commitCacheStrokeCountRef.current = data.strokes.length;
     }
 
-    const inkDraftFull = draft.tool === 'pen' && usesInkDraftPenRenderer();
+    const displayDraft = strokeForDisplay(draft, pageInkRef.current);
+    const inkDraftFull = displayDraft.tool === 'pen' && usesInkDraftPenRenderer();
     if (inkDraftFull) {
-      paintDraftPenInkLayer(visibleCtx, commitCanvas, draft, w, h, refW, inkPreset);
-      draftPaintedCountRef.current = draft.points.length;
+      paintDraftPenInkLayer(visibleCtx, commitCanvas, displayDraft, w, h, refW, inkPreset);
+      draftPaintedCountRef.current = displayDraft.points.length;
     } else {
       if (draftReplayRef.current) {
         draftReplayRef.current = false;
@@ -479,7 +523,7 @@ export function HandwritingBlock({
 
       draftPaintedCountRef.current = appendDraftStrokeSegment(
         visibleCtx,
-        draft,
+        displayDraft,
         draftPaintedCountRef.current,
         w,
         h,
@@ -507,7 +551,7 @@ export function HandwritingBlock({
         });
       }
     }
-  }, [ensureCommitCanvas, isPageInkBlock, inkPreset]);
+  }, [ensureCommitCanvas, isPageInkBlock, inkPreset, displayStrokes]);
 
   const paint = useCallback(() => {
     if (drawingRef.current && draftRef.current) {
@@ -1059,14 +1103,35 @@ export function HandwritingBlock({
               !commitCacheValidRef.current ||
               commitCacheStrokeCountRef.current !== base.strokes.length
             ) {
-              rebuildCommitLayer(commitCtx, base.strokes, w, h, refW, inkPreset);
+              rebuildCommitLayer(
+                commitCtx,
+                displayStrokes(base.strokes),
+                w,
+                h,
+                refW,
+                inkPreset,
+              );
             }
-            appendCommittedStroke(commitCtx, draft, w, h, refW, inkPreset);
+            appendCommittedStroke(
+              commitCtx,
+              strokeForDisplay(draft, pageInkRef.current),
+              w,
+              h,
+              refW,
+              inkPreset,
+            );
             commitCacheValidRef.current = true;
             commitCacheStrokeCountRef.current = strokes.length;
             blitCommitLayer(visibleCtx, commitCanvas, w, h);
           } else if (draft.tool === 'eraser') {
-            rebuildCommitLayer(commitCtx, strokes, w, h, refW, inkPreset);
+            rebuildCommitLayer(
+              commitCtx,
+              displayStrokes(strokes),
+              w,
+              h,
+              refW,
+              inkPreset,
+            );
             commitCacheValidRef.current = true;
             commitCacheStrokeCountRef.current = strokes.length;
             blitCommitLayer(visibleCtx, commitCanvas, w, h);
@@ -1593,11 +1658,23 @@ export function HandwritingBlock({
           ...(pageLayout ? pageInkCanvasWrapStyle(displayHeight) : { height: displayHeight }),
           borderRadius: pageLayout ? 2 : 8,
           border: pageLayout
-            ? '1px solid rgba(28,25,23,0.1)'
-            : '1px solid rgba(255,255,255,0.1)',
-          background: pageLayout ? 'rgba(255,251,245,0.98)' : 'rgba(0,0,0,0.18)',
+            ? studyPageIsLight
+              ? '1px solid rgba(28,25,23,0.1)'
+              : '1px solid rgba(255,255,255,0.12)'
+            : studyPageIsLight
+              ? '1px solid rgba(28,25,23,0.12)'
+              : '1px solid rgba(255,255,255,0.1)',
+          background: studyPageIsLight
+            ? pageLayout
+              ? 'rgba(255,251,245,0.98)'
+              : 'var(--nb-page-surface, rgba(255,251,245,0.96))'
+            : pageLayout
+              ? 'rgba(15,23,42,0.55)'
+              : 'rgba(0,0,0,0.18)',
           boxShadow: pageLayout
-            ? '0 1px 3px rgba(28,25,23,0.06), inset 0 0 0 1px rgba(255,255,255,0.65)'
+            ? studyPageIsLight
+              ? '0 1px 3px rgba(28,25,23,0.06), inset 0 0 0 1px rgba(255,255,255,0.65)'
+              : 'inset 0 1px 0 rgba(255,255,255,0.06)'
             : 'inset 0 1px 0 rgba(255,255,255,0.04)',
           overflow: 'hidden',
           touchAction: HW_INK_CANVAS_TOUCH_ACTION,

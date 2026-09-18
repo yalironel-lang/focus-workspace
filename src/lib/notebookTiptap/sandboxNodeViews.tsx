@@ -800,6 +800,7 @@ export function createSandboxHandwritingView(objectId?: string) {
               userId={product?.userId}
               sectionId={product?.sectionId}
               tokens={tokens}
+              pageInk={product?.pageInk ?? 'dark'}
               readOnly={false}
               onDismissTextEditing={product?.onDismissTextEditing}
               onFocus={() => {

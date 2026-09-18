@@ -13,7 +13,7 @@ import {
   type NotebookTiptapErrorCode,
 } from '../../../lib/notebookTiptap/errors';
 import { createNotebookTiptapSandboxExtensions } from '../../../lib/notebookTiptap/sandboxExtensions';
-import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens';
+import { NB_FONT_STACK, NB_INK, NB_PROSE_CSS_VARS_ON_DARK } from '../../../lib/notebookTiptap/visualTokens';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../../../lib/notebookInlineMarks';
 import {
   hasBidiControlChars,
@@ -192,7 +192,7 @@ export function NotebookTiptapSandboxEditor({
     <div
       className={className}
       data-nb-tiptap-sandbox-root="1"
-      style={{ fontFamily: NB_FONT_STACK, color: NB_INK.primary }}
+      style={{ fontFamily: NB_FONT_STACK, color: NB_INK.primary, ...NB_PROSE_CSS_VARS_ON_DARK }}
     >
       <style>{`
         .nb-tiptap-math-src-isolate {

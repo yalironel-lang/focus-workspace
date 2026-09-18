@@ -9,6 +9,10 @@ import { useEffect, useRef, useState } from 'react';
 import { nbImageGet, hydrateNotebookImages, subscribeNotebookImages } from '../notebookImageStore';
 import { hwGetCached, hydrateHandwritingBlocks } from '../notebookHandwritingStore';
 import { drawStrokes } from '../handwritingGeometry';
+import {
+  readNotebookPageInkFromElement,
+  strokesForDisplay,
+} from '../handwritingInk';
 import { emptyHandwritingData } from '../handwritingTypes';
 
 export function NotebookImageReadonlyView({
@@ -93,10 +97,14 @@ export function NotebookHandwritingReadonlyView({
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const pageInk = readNotebookPageInkFromElement(canvas);
+    const lightPage = pageInk === 'dark';
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(15,23,42,0.35)';
+    ctx.fillStyle = lightPage ? 'rgba(255,251,245,0.96)' : 'rgba(15,23,42,0.35)';
     ctx.fillRect(0, 0, w, h);
-    if (data.strokes.length) drawStrokes(ctx, data.strokes, w, h, Math.min(w, h));
+    if (data.strokes.length) {
+      drawStrokes(ctx, strokesForDisplay(data.strokes, pageInk), w, h, Math.min(w, h));
+    }
   }, [objectId, blockKey, ready]);
 
   if (!objectId) {

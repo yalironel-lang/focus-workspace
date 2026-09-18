@@ -24,6 +24,11 @@ export const NB_PRODUCT_CHROME = {
   controlHeight: 30,
 } as const;
 
+/** Prefer design CSS vars from notebook identity frame when present. */
+function toolbarVar(name: string, fallback: string): string {
+  return `var(${name}, ${fallback})`;
+}
+
 export function nbProductIconBtnStyle(): CSSProperties {
   return {
     display: 'inline-flex',
@@ -35,7 +40,7 @@ export function nbProductIconBtnStyle(): CSSProperties {
     border: 'none',
     borderRadius: 8,
     background: 'transparent',
-    color: NB_PRODUCT_CHROME.ink,
+    color: toolbarVar('--nb-toolbar-ink', NB_PRODUCT_CHROME.ink),
     cursor: 'pointer',
     opacity: 0.9,
     flexShrink: 0,
@@ -52,7 +57,7 @@ export function nbProductTriggerStyle(open: boolean): CSSProperties {
     border: 'none',
     borderRadius: 8,
     background: open ? NB_PRODUCT_CHROME.activeFill : 'transparent',
-    color: NB_PRODUCT_CHROME.ink,
+    color: toolbarVar('--nb-toolbar-ink', NB_PRODUCT_CHROME.ink),
     fontSize: 12.5,
     fontWeight: 600,
     letterSpacing: '0.01em',
@@ -69,7 +74,7 @@ export function nbProductDirSelectStyle(): CSSProperties {
     border: 'none',
     borderRadius: 8,
     background: 'transparent',
-    color: NB_PRODUCT_CHROME.mutedInk,
+    color: toolbarVar('--nb-toolbar-muted', NB_PRODUCT_CHROME.mutedInk),
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -89,13 +94,21 @@ export function nbProductToolbarShellStyle(): CSSProperties {
     alignItems: 'center',
     position: 'sticky',
     top: 0,
-    zIndex: 30,
-    marginBottom: 8,
-    paddingTop: 4,
+    zIndex: 40,
+    marginTop: 0,
+    marginBottom: 10,
+    marginLeft: -2,
+    marginRight: -2,
+    paddingTop: 6,
     paddingBottom: 10,
-    background: NB_PRODUCT_CHROME.toolbarFade,
+    paddingLeft: 4,
+    paddingRight: 4,
+    borderRadius: '0 0 8px 8px',
+    background: toolbarVar('--nb-toolbar-fade', NB_PRODUCT_CHROME.toolbarFade),
     backdropFilter: 'blur(10px)',
     WebkitBackdropFilter: 'blur(10px)',
+    borderBottom: `1px solid ${toolbarVar('--nb-toolbar-hairline', 'transparent')}`,
+    boxShadow: `0 1px 0 ${toolbarVar('--nb-toolbar-hairline', 'transparent')}`,
   };
 }
 
@@ -113,7 +126,7 @@ export function nbProductGroupDividerStyle(): CSSProperties {
     width: 1,
     height: 16,
     margin: '0 6px',
-    background: NB_PRODUCT_CHROME.hairline,
+    background: toolbarVar('--nb-toolbar-hairline', NB_PRODUCT_CHROME.hairline),
     flexShrink: 0,
   };
 }

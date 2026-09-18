@@ -13,7 +13,7 @@ import {
   tryCanonicalBody,
   type ShadowSerializeSnapshot,
 } from '../../../lib/notebookTiptap/shadowDiff';
-import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens';
+import { NB_FONT_STACK, NB_INK, NB_PROSE_CSS_VARS_ON_DARK } from '../../../lib/notebookTiptap/visualTokens';
 import { DEFAULT_NOTEBOOK_FONT_SIZE } from '../../../lib/notebookInlineMarks';
 import {
   hasBidiControlChars,
@@ -218,6 +218,7 @@ export function NotebookTiptapRealShadowPanel({
         color: '#e2e8f0',
         fontFamily: 'ui-sans-serif, system-ui',
         padding: 12,
+        ...NB_PROSE_CSS_VARS_ON_DARK,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

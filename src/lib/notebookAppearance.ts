@@ -115,6 +115,31 @@ export const NOTEBOOK_DESIGN_PRESET_IDS: readonly NotebookDesignPresetId[] = [
   'ink',
 ] as const;
 
+/**
+ * Product-facing Designer picker (Phase 1 final).
+ * Historical IDs remain in NOTEBOOK_DESIGN_PRESET_IDS for sanitize/hydrate compatibility.
+ */
+export const NOTEBOOK_PRODUCT_DESIGN_PRESET_IDS = [
+  'classic',
+  'minimal',
+  'academic',
+  'midnight',
+  'blueprint',
+  'aurora',
+] as const satisfies readonly NotebookDesignPresetId[];
+
+export type NotebookProductDesignPresetId =
+  (typeof NOTEBOOK_PRODUCT_DESIGN_PRESET_IDS)[number];
+
+export function isNotebookProductDesignPresetId(
+  v: unknown,
+): v is NotebookProductDesignPresetId {
+  return (
+    typeof v === 'string' &&
+    (NOTEBOOK_PRODUCT_DESIGN_PRESET_IDS as readonly string[]).includes(v)
+  );
+}
+
 export const NOTEBOOK_IDENTITY_COLORS: readonly NotebookIdentityColor[] = [
   'neutral',
   'blue',

@@ -8,7 +8,7 @@ import type { JSONContent } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { bodyToTiptapDoc } from '../../../lib/notebookTiptap/blocksToTiptapDoc';
 import { createNotebookTiptapViewerExtensions } from '../../../lib/notebookTiptap/viewerExtensions';
-import { NB_FONT_STACK, NB_INK } from '../../../lib/notebookTiptap/visualTokens';
+import { NB_FONT_STACK, NB_INK, NB_PROSE_CSS_VARS_ON_DARK } from '../../../lib/notebookTiptap/visualTokens';
 
 export type NotebookTiptapReadonlyViewerProps = {
   /** Authoritative Notebook documentBody (never written back). */
@@ -113,6 +113,7 @@ export function NotebookTiptapReadonlyViewer({
         fontFamily: NB_FONT_STACK,
         color: NB_INK.primary,
         padding: '8px 4px',
+        ...NB_PROSE_CSS_VARS_ON_DARK,
       }}
     >
       {loaded.error ? (

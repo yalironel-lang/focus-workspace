@@ -11,6 +11,8 @@ export type NotebookHandwritingProductStorage = {
   userId?: string;
   sectionId?: string;
   tokens: AtmosphereTokens | null;
+  /** Study-page ink recipe for presentation-aware handwriting. */
+  pageInk?: 'dark' | 'light';
   onDismissTextEditing?: () => void;
 };
 
@@ -24,6 +26,7 @@ export const NotebookHandwritingProduct = Extension.create({
       userId: undefined,
       sectionId: undefined,
       tokens: null,
+      pageInk: 'dark',
       onDismissTextEditing: undefined,
     } satisfies NotebookHandwritingProductStorage;
   },

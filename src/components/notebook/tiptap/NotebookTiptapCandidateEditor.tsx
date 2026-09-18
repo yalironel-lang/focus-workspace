@@ -135,6 +135,8 @@ export type NotebookTiptapCandidateEditorProps = {
   onInsertHandwriting?: (ctx: { insertTarget: NbHandwritingInsertTarget }) => void;
   /** Atmosphere tokens for HandwritingBlock Edit/Draw surface. */
   handwritingTokens?: AtmosphereTokens | null;
+  /** Study-page ink recipe — presentation-aware handwriting (no stroke rewrite). */
+  handwritingPageInk?: 'dark' | 'light';
   handwritingUserId?: string;
   handwritingSectionId?: string;
   onDismissTextEditing?: () => void;
@@ -143,6 +145,8 @@ export type NotebookTiptapCandidateEditorProps = {
    * Parent owns the read-only exportNotebookPdf pipeline.
    */
   onExportPdf?: () => void;
+  /** Open Notebook Designer (Customize Notebook). */
+  onCustomizeNotebook?: () => void;
 };
 
 function attemptSerialize(
@@ -204,10 +208,12 @@ export function NotebookTiptapCandidateEditor({
   onReplaceImageFile,
   onInsertHandwriting,
   handwritingTokens,
+  handwritingPageInk = 'dark',
   handwritingUserId,
   handwritingSectionId,
   onDismissTextEditing,
   onExportPdf,
+  onCustomizeNotebook,
 }: NotebookTiptapCandidateEditorProps) {
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
@@ -486,6 +492,7 @@ export function NotebookTiptapCandidateEditor({
     storage.userId = handwritingUserId;
     storage.sectionId = handwritingSectionId;
     storage.tokens = handwritingTokens ?? null;
+    storage.pageInk = handwritingPageInk;
     storage.onDismissTextEditing = () => onDismissTextEditingRef.current?.();
     return () => {
       storage.onDismissTextEditing = undefined;
@@ -497,6 +504,7 @@ export function NotebookTiptapCandidateEditor({
     handwritingUserId,
     handwritingSectionId,
     handwritingTokens,
+    handwritingPageInk,
   ]);
 
   const markState = useEditorState({
@@ -721,11 +729,10 @@ export function NotebookTiptapCandidateEditor({
         .nb-tiptap-candidate-prosemirror th.nb-table-header:focus-within {
           background: rgba(56, 189, 248, 0.06);
         }
-        /* M7.5B: restrained document-editor link treatment (dark Notebook UI).
-         * !important beats Tailwind preflight anchor inherit rules inside the product shell. */
+        /* M7.5B: link treatment — presentation-aware via study-page CSS vars. */
         .nb-tiptap-candidate-prosemirror a.nb-tiptap-link,
         .nb-tiptap-candidate-prosemirror a[href] {
-          color: #7dd3fc !important;
+          color: var(--nb-prose-link, #0369a1) !important;
           text-decoration: underline !important;
           text-decoration-thickness: 1px;
           text-underline-offset: 2px;
@@ -734,13 +741,13 @@ export function NotebookTiptapCandidateEditor({
         }
         .nb-tiptap-candidate-prosemirror a.nb-tiptap-link:hover,
         .nb-tiptap-candidate-prosemirror a[href]:hover {
-          color: #bae6fd !important;
+          color: var(--nb-prose-link-hover, #0c4a6e) !important;
           text-decoration-thickness: 1.5px;
         }
         .nb-tiptap-candidate-prosemirror a.nb-tiptap-link:focus-visible,
         .nb-tiptap-candidate-prosemirror a[href]:focus-visible {
-          color: #e0f2fe !important;
-          outline: 1px solid rgba(125, 211, 252, 0.55);
+          color: var(--nb-prose-link-hover, #0c4a6e) !important;
+          outline: 1px solid color-mix(in srgb, var(--nb-prose-link, #0369a1) 55%, transparent);
           outline-offset: 1px;
           border-radius: 2px;
         }
@@ -943,11 +950,14 @@ export function NotebookTiptapCandidateEditor({
               </select>
             </div>
 
-            {onExportPdf ? (
+            {onExportPdf || onCustomizeNotebook ? (
               <>
                 <div aria-hidden style={nbProductGroupDividerStyle()} />
                 <div data-nb-product-toolbar-group="more" style={nbProductGroupStyle()}>
-                  <NotebookTiptapProductMoreMenu onExportPdf={onExportPdf} />
+                  <NotebookTiptapProductMoreMenu
+                    onCustomizeNotebook={onCustomizeNotebook}
+                    onExportPdf={onExportPdf}
+                  />
                 </div>
               </>
             ) : null}
