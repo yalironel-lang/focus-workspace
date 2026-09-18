@@ -1,7 +1,7 @@
 /**
- * Temporary P0 Page-Unresponsive forensic counters.
- * Enabled only when `globalThis.__NB_P0_FORENSICS__ === true` (tests / DEV soak).
- * Never writes Notebook persistence data.
+ * P0 Page-Unresponsive forensic counters (test-only).
+ * Enabled only when `globalThis.__NB_P0_FORENSICS__ === true`.
+ * Never writes Notebook persistence data; zero-cost when disabled.
  */
 
 export type NotebookP0ForensicsSnapshot = {
@@ -21,6 +21,9 @@ export type NotebookP0ForensicsSnapshot = {
   handwritingRedraws: number;
   handwritingResizeObserverCallbacks: number;
   bodyScrollHandlerCalls: number;
+  moreMenuRepositions: number;
+  moreMenuPosStateUpdates: number;
+  moreMenuScrollRepositions: number;
 };
 
 const EMPTY: NotebookP0ForensicsSnapshot = {
@@ -40,6 +43,9 @@ const EMPTY: NotebookP0ForensicsSnapshot = {
   handwritingRedraws: 0,
   handwritingResizeObserverCallbacks: 0,
   bodyScrollHandlerCalls: 0,
+  moreMenuRepositions: 0,
+  moreMenuPosStateUpdates: 0,
+  moreMenuScrollRepositions: 0,
 };
 
 let counts: NotebookP0ForensicsSnapshot = { ...EMPTY };

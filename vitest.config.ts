@@ -61,6 +61,7 @@ export default defineConfig({
       'src/lib/notebookDesigner.releaseBlockers.test.tsx',
       'src/lib/notebookDesigner.p0Unresponsive.test.ts',
       'src/lib/notebookDesigner.p0Forensic.scrollStorm.test.tsx',
+      'src/lib/notebookDesigner.p0MoreMenuScrollStorm.test.tsx',
       'src/lib/notebookPages.persistence.test.ts',
       'src/lib/notebookPages.crossDevice.integration.test.ts',
       'src/lib/notebookPages.live.test.ts',

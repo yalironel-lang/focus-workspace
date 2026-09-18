@@ -12,6 +12,7 @@ import {
   NB_PRODUCT_CHROME,
   nbProductIconBtnStyle,
 } from './notebookProductToolbarChrome';
+import { nbP0Bump } from '../../../lib/notebookP0Forensics';
 
 type Props = {
   /** Open Notebook Designer (Customize Notebook). */
@@ -66,7 +67,20 @@ export function NotebookTiptapProductMoreMenu({ onCustomizeNotebook, onExportPdf
   const reposition = () => {
     const el = triggerRef.current;
     if (!el) return;
-    setPos(computeMenuPosition(el));
+    nbP0Bump('moreMenuRepositions');
+    const next = computeMenuPosition(el);
+    setPos(prev => {
+      if (
+        prev &&
+        prev.top === next.top &&
+        prev.left === next.left &&
+        prev.width === next.width
+      ) {
+        return prev;
+      }
+      nbP0Bump('moreMenuPosStateUpdates');
+      return next;
+    });
   };
 
   useLayoutEffect(() => {
@@ -90,21 +104,29 @@ export function NotebookTiptapProductMoreMenu({ onCustomizeNotebook, onExportPdf
       if (menuRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const onReposition = () => reposition();
+    // P0: do NOT reposition on every scroll tick while sticky toolbar moves —
+    // that was a setPos storm on heavy pages (same class as selection-toolbar scroll storm).
+    // Close on scroll instead; resize still repositions when menu stays open.
+    const onScrollClose = () => {
+      nbP0Bump('moreMenuScrollRepositions');
+      setOpen(false);
+    };
+    const onResizeReposition = () => reposition();
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPointer, true);
-    window.addEventListener('resize', onReposition);
-    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onResizeReposition);
+    window.addEventListener('scroll', onScrollClose, true);
     const vv = window.visualViewport;
-    vv?.addEventListener('resize', onReposition);
-    vv?.addEventListener('scroll', onReposition);
+    vv?.addEventListener('resize', onResizeReposition);
+    // visualViewport scroll often tracks keyboard/pinch — treat like window scroll for P0.
+    vv?.addEventListener('scroll', onScrollClose);
     return () => {
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onPointer, true);
-      window.removeEventListener('resize', onReposition);
-      window.removeEventListener('scroll', onReposition, true);
-      vv?.removeEventListener('resize', onReposition);
-      vv?.removeEventListener('scroll', onReposition);
+      window.removeEventListener('resize', onResizeReposition);
+      window.removeEventListener('scroll', onScrollClose, true);
+      vv?.removeEventListener('resize', onResizeReposition);
+      vv?.removeEventListener('scroll', onScrollClose);
     };
   }, [open]);
 
