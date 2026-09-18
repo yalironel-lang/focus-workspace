@@ -15,3 +15,14 @@ export function resolveNotebookDesignerContainerMode(
   if (!Number.isFinite(surfaceWidthPx) || surfaceWidthPx <= 0) return 'sheet';
   return surfaceWidthPx >= NOTEBOOK_DESIGNER_PANEL_MIN_WIDTH_PX ? 'panel' : 'sheet';
 }
+
+/**
+ * Stabilize shell width for ResizeObserver → React state.
+ * Rounds fractional CSS pixels and returns `prev` when unchanged so setState
+ * is a no-op (prevents scrollbar/sticky oscillation loops).
+ */
+export function nextNotebookSurfaceWidthPx(prev: number, measured: number): number {
+  if (!Number.isFinite(measured)) return prev;
+  const w = Math.round(measured);
+  return prev === w ? prev : w;
+}

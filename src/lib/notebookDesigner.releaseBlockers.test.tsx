@@ -279,6 +279,16 @@ describe('Bug 3 — sticky product toolbar in Notebook scroll viewport', () => {
     expect(style.top).toBe(0);
     expect(style.position).not.toBe('fixed');
     expect(Number(style.zIndex)).toBeGreaterThanOrEqual(30);
+    // P0: sticky product toolbar must not use backdrop-filter (Chrome main-thread lock).
+    expect(style.backdropFilter).toBeUndefined();
+    expect((style as { WebkitBackdropFilter?: string }).WebkitBackdropFilter).toBeUndefined();
+  });
+
+  it('P0: sticky shell style never enables backdrop blur', () => {
+    const style = nbProductToolbarShellStyle();
+    const serialized = JSON.stringify(style).toLowerCase();
+    expect(serialized).not.toContain('backdrop');
+    expect(serialized).not.toContain('blur(');
   });
 
   it('12+13+14+15. sticky toolbar stays in same editor; no writes; Designer/floating intact', async () => {

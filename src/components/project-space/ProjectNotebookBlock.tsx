@@ -219,6 +219,7 @@ import {
 } from '../../lib/notebookAppearanceVisualTokens';
 import {
   NOTEBOOK_DESIGNER_PANEL_WIDTH_PX,
+  nextNotebookSurfaceWidthPx,
   resolveNotebookDesignerContainerMode,
 } from '../../lib/notebookDesignerLayout';
 import {
@@ -2637,7 +2638,10 @@ export function ProjectNotebookBlock({
   useLayoutEffect(() => {
     const el = shellRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const update = () => setSurfaceWidth(el.getBoundingClientRect().width);
+    const update = () => {
+      const measured = el.getBoundingClientRect().width;
+      setSurfaceWidth(prev => nextNotebookSurfaceWidthPx(prev, measured));
+    };
     update();
     const ro = new ResizeObserver(() => update());
     ro.observe(el);

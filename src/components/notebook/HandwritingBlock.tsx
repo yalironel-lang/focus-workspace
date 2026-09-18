@@ -241,6 +241,8 @@ export function HandwritingBlock({
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageInkRef = useRef<'dark' | 'light'>(pageInkProp ?? 'dark');
+  /** Last ink mode that triggered a commit-layer rebuild (skip redundant paints). */
+  const pageInkPaintModeRef = useRef<'dark' | 'light' | null>(null);
   const [pageInk, setPageInk] = useState<'dark' | 'light'>(pageInkProp ?? 'dark');
   const menuRef = useRef<HTMLDivElement>(null);
   const dataRef = useRef<HandwritingBlockData | null>(null);
@@ -291,6 +293,9 @@ export function HandwritingBlock({
 
   useEffect(() => {
     pageInkRef.current = pageInk;
+    // Only rebuild when ink mode actually changes — mount paint is owned by hydrate.
+    if (pageInkPaintModeRef.current === pageInk) return;
+    pageInkPaintModeRef.current = pageInk;
     invalidateCommitCache();
     schedulePaintRef.current?.();
   }, [pageInk, invalidateCommitCache]);

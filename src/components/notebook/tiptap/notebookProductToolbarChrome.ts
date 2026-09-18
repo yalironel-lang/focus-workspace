@@ -104,9 +104,10 @@ export function nbProductToolbarShellStyle(): CSSProperties {
     paddingLeft: 4,
     paddingRight: 4,
     borderRadius: '0 0 8px 8px',
+    // Opaque recipe fade only — never backdrop-filter on sticky.
+    // Sticky + blur over TipTap/HW content caused Chrome "Page Unresponsive"
+    // once study-page overflow became visible (sticky actually sticks).
     background: toolbarVar('--nb-toolbar-fade', NB_PRODUCT_CHROME.toolbarFade),
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
     borderBottom: `1px solid ${toolbarVar('--nb-toolbar-hairline', 'transparent')}`,
     boxShadow: `0 1px 0 ${toolbarVar('--nb-toolbar-hairline', 'transparent')}`,
   };
