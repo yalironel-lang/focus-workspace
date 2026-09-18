@@ -84,6 +84,19 @@ import {
   type NotebookPagesFields,
 } from '../lib/notebookPages';
 import { nbSyncDiagLog, nbSyncDiagSummarizeContent } from '../lib/notebookPages/nbSyncDiag';
+import {
+  sanitizeNotebookAppearance,
+  type NotebookAppearanceV1,
+} from '../lib/notebookAppearance';
+
+export type {
+  NotebookAppearanceV1,
+  NotebookDesignPresetId,
+  NotebookIdentityColor,
+  NotebookIdentityTreatment,
+  NotebookWritingWidth,
+  NotebookWritingDensity,
+} from '../lib/notebookAppearance';
 
 export type { DeskFormulaItem, DeskLayoutState, DeskComputeHistoryEntry, DeskZoneId } from '../lib/mathDesk/types';
 
@@ -128,6 +141,11 @@ export type ProjectObjectContent =
       icon?: string;
       accentColor?: string;
       subtitle?: string;
+      /**
+       * Notebook-level visual identity + writing width (Appearance V1).
+       * Absent = product defaults. Never part of body/codec/page documentBody.
+       */
+      appearance?: NotebookAppearanceV1;
       /** Math desk — user formula memory cards */
       deskFormulas?: DeskFormulaItem[];
       deskScratch?: string;
@@ -434,6 +452,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
       const icon = typeof r.icon === 'string' && r.icon ? r.icon : undefined;
       const accentColor = typeof r.accentColor === 'string' && r.accentColor ? r.accentColor : undefined;
       const subtitle = typeof r.subtitle === 'string' && r.subtitle ? r.subtitle : undefined;
+      const appearance = sanitizeNotebookAppearance(r.appearance);
       const deskFormulas = sanitizeDeskFormulas(r.deskFormulas);
       const deskScratch = sanitizeDeskScratch(r.deskScratch);
       const deskLayout = sanitizeDeskLayout(r.deskLayout);
@@ -453,6 +472,7 @@ export function ensureProjectObjectContent(type: ProjectObjectType, raw: unknown
         ...(icon !== undefined ? { icon } : {}),
         ...(accentColor !== undefined ? { accentColor } : {}),
         ...(subtitle !== undefined ? { subtitle } : {}),
+        ...(appearance !== undefined ? { appearance } : {}),
         ...(deskFormulas !== undefined ? { deskFormulas } : {}),
         ...(deskScratch !== undefined ? { deskScratch } : {}),
         ...(deskLayout !== undefined ? { deskLayout } : {}),
