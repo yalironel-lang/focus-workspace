@@ -1478,7 +1478,12 @@ export function ProjectNotebookBlock({
   contentRef.current = effectiveContent;
   /** TipTap live body ahead of flushed pages[] — unioned into asset GC roots (M7.5C1). Page-keyed (M7.5C2). */
   const candidateLiveRepresentationRef = useRef<NotebookLiveRepresentation | null>(null);
-  // Both editors decode and serialize the exact projected page's codec.
+  /**
+   * Parse/serialize helpers for the *current* projected page only (body already matches contentRef).
+   * Callers that own a body from another snapshot (effect closure, history entry, prop) MUST use
+   * parseBodyToBlocksForCodec / serializeNotebookBlocks with that snapshot's codec explicitly —
+   * never pair a foreign body with contentRef's mutable codec.
+   */
   function parseBodyToBlocks(body: string, prev?: Block[], version = contentRef.current.bodyCodecVersion): Block[] {
     return parseBodyToBlocksForCodec(body, prev, version);
   }
@@ -1511,7 +1516,13 @@ export function ProjectNotebookBlock({
   const isVersionedPage = effectiveContent.bodyCodecVersion !== undefined;
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const effectiveEditorMode = isVersionedPage && !tipTapCandidateActive ? 'preview' : editorMode;
-  const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
+  const [blocks, setBlocks] = useState<Block[]>(() =>
+    parseBodyToBlocksForCodec(
+      effectiveContent.body ?? '',
+      undefined,
+      effectiveContent.bodyCodecVersion,
+    ),
+  );
   const [, bumpNotebookImageCache] = useState(0);
   const [slashMenu, setSlashMenu] = useState<{
     blockId: string;
@@ -2876,17 +2887,36 @@ export function ProjectNotebookBlock({
   );
 
   useEffect(() => {
-    const body = effectiveContent.body ?? '';
+    // Snapshot BODY + CODEC + PAGE from the same effectiveContent render.
+    // Never re-read contentRef inside the updater — it can already reflect a newer page
+    // (e.g. device-local Page 3 restore after first-page hydrate) while this closure
+    // still owns the prior page's body (mixed-codec iPad reload P0).
+    const representation = {
+      pageKey: effectiveContent.activePageId ?? null,
+      body: effectiveContent.body ?? '',
+      codecVersion: effectiveContent.bodyCodecVersion,
+    };
     setBlocks((prev) => {
-      if (serializeBlocks(prev) === body) return prev;
+      if (
+        serializeNotebookBlocks(prev as NotebookDialectBlock[], representation.codecVersion) ===
+        representation.body
+      ) {
+        return prev;
+      }
       if (isNotebookEditorFocused()) return prev;
       if (isDomTextCommitLocked()) return prev;
       // Free Space toolbar session: never reparse from host while a format session is open.
       if (selectionToolbarRef.current != null) return prev;
       if (toolbarActiveBlockIdRef.current != null) return prev;
-      return parseBodyToBlocks(body, prev);
+      return parseBodyToBlocksForCodec(representation.body, prev, representation.codecVersion);
     });
-  }, [effectiveContent.body, effectiveContent.bodyCodecVersion, isNotebookEditorFocused, isDomTextCommitLocked]);
+  }, [
+    effectiveContent.body,
+    effectiveContent.bodyCodecVersion,
+    effectiveContent.activePageId,
+    isNotebookEditorFocused,
+    isDomTextCommitLocked,
+  ]);
 
   useEffect(() => {
     if (!morphPulseId) return;
@@ -3935,7 +3965,12 @@ export function ProjectNotebookBlock({
       isApplyingFormatHistoryRef.current = true;
       try {
         const prevBlocks = blocksRef.current;
-        const nextBlocks = parseBodyToBlocks(entry.body, prevBlocks);
+        // History entry owns its own body+codec pair — do not take codec from contentRef.
+        const nextBlocks = parseBodyToBlocksForCodec(
+          entry.body,
+          prevBlocks,
+          entry.bodyCodecVersion,
+        );
         flushSync(() => {
           setBlocks(nextBlocks);
         });
