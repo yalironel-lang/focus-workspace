@@ -21,6 +21,7 @@ import {
   type NotebookPagesFields,
   type NotebookSection,
 } from './types';
+import { sanitizeNotebookPagePresentation } from './pagePresentation';
 
 export type { NotebookContentWithPages, NotebookPage, NotebookSection, NotebookPagesFields };
 
@@ -52,6 +53,7 @@ export function sanitizeNotebookPage(raw: unknown): NotebookPage | null {
   const inkPageKey = typeof r.inkPageKey === 'string' && r.inkPageKey ? r.inkPageKey : undefined;
   const linkedPdfObjectId =
     typeof r.linkedPdfObjectId === 'string' && r.linkedPdfObjectId ? r.linkedPdfObjectId : undefined;
+  const presentation = sanitizeNotebookPagePresentation(r.presentation);
   return {
     id: r.id,
     sectionId: r.sectionId,
@@ -61,6 +63,7 @@ export function sanitizeNotebookPage(raw: unknown): NotebookPage | null {
     ...(typeof r.documentBodyCodecVersion === 'number' ? { documentBodyCodecVersion: r.documentBodyCodecVersion } : {}),
     ...(inkPageKey !== undefined ? { inkPageKey } : {}),
     ...(linkedPdfObjectId !== undefined ? { linkedPdfObjectId } : {}),
+    ...(presentation !== undefined ? { presentation } : {}),
   };
 }
 

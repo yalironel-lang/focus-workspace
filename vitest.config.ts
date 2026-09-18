@@ -56,6 +56,7 @@ export default defineConfig({
       'src/lib/notebookPages/notebookPageDeleteProduct.m75c3.test.tsx',
       'src/lib/knowledge/**/*.test.ts',
       'src/lib/notebookAppearance.foundation.test.ts',
+      'src/lib/notebookPages.pagePresentation.foundation.test.ts',
       'src/lib/notebookPages.persistence.test.ts',
       'src/lib/notebookPages.crossDevice.integration.test.ts',
       'src/lib/notebookPages.live.test.ts',

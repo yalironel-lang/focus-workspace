@@ -6,6 +6,7 @@ import type { NotebookContentWithPages, NotebookPage } from '../notebookPages/ty
 import { migrateLegacyNotebook } from '../notebookPages/hydrate';
 import { deleteNotebookPage, saveNotebookPageBody } from '../notebookPages/operations';
 import { inkPageKeyForNotebookPage } from '../notebookPages/inkPageKey';
+import { notebookPagePresentationsEqual } from '../notebookPages/pagePresentation';
 import { referencedNotebookImageKeys } from '../notebookImageRefs';
 import { referencedHandwritingKeys } from '../handwritingTypes';
 import {
@@ -37,7 +38,8 @@ export type SoftDeleteNotebookPageResult =
 /**
  * Equivalence for idempotent page restore.
  * Compares persisted NotebookPage semantics: id, sectionId, kind, title,
- * documentBody + codec (document), inkPageKey + linkedPdfObjectId (write).
+ * documentBody + codec (document), inkPageKey + linkedPdfObjectId (write),
+ * and presentation (paper/layout overrides).
  * Does not invent timestamps — NotebookPage has none.
  */
 export function isEquivalentNotebookPage(a: NotebookPage, b: NotebookPage): boolean {
@@ -45,6 +47,7 @@ export function isEquivalentNotebookPage(a: NotebookPage, b: NotebookPage): bool
   const titleA = (a.title ?? '').trim();
   const titleB = (b.title ?? '').trim();
   if (titleA !== titleB) return false;
+  if (!notebookPagePresentationsEqual(a.presentation, b.presentation)) return false;
   if (a.kind === 'document' && b.kind === 'document') {
     if ((a.documentBody ?? '') !== (b.documentBody ?? '')) return false;
     if (a.documentBodyCodecVersion !== b.documentBodyCodecVersion) return false;

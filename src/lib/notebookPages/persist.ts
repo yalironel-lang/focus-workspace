@@ -1,5 +1,6 @@
 import { notebookPageBodyProjection, replaceNotebookBodyProjection } from './bodyCodec';
 import { resolvePageForBodyProjection } from './hydrate';
+import { sanitizeNotebookPagePresentation } from './pagePresentation';
 import type { NotebookContentWithPages, NotebookPage, NotebookSection } from './types';
 
 /** Stable fingerprint of persisted notebook manifest (excludes navigation + derived body). */
@@ -29,7 +30,9 @@ function pageFingerprint(p: NotebookPage): {
   documentBodyCodecVersion?: number;
   inkPageKey: string | null;
   linkedPdfObjectId: string | null;
+  presentation: ReturnType<typeof sanitizeNotebookPagePresentation> | null;
 } {
+  const presentation = sanitizeNotebookPagePresentation(p.presentation) ?? null;
   return {
     id: p.id,
     sectionId: p.sectionId,
@@ -39,6 +42,7 @@ function pageFingerprint(p: NotebookPage): {
     ...(p.documentBodyCodecVersion !== undefined ? { documentBodyCodecVersion: p.documentBodyCodecVersion } : {}),
     inkPageKey: p.inkPageKey ?? null,
     linkedPdfObjectId: p.linkedPdfObjectId ?? null,
+    presentation,
   };
 }
 

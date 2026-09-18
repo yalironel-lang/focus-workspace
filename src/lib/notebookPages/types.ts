@@ -1,3 +1,5 @@
+import type { NotebookPagePresentation } from './pagePresentation';
+
 export const NOTEBOOK_SCHEMA_VERSION_V1 = 1;
 
 export const LEGACY_DEFAULT_SECTION_ID = 'sec-notes';
@@ -6,6 +8,12 @@ export const LEGACY_DEFAULT_SECTION_TITLE = 'Notes';
 export const LEGACY_DEFAULT_PAGE_TITLE = 'Page 1';
 
 export type NotebookPageKind = 'document' | 'write';
+
+export type {
+  NotebookPagePresentation,
+  NotebookPagePaperStyle,
+  NotebookLayoutTemplateId,
+} from './pagePresentation';
 
 export interface NotebookSection {
   id: string;
@@ -28,6 +36,12 @@ export interface NotebookPage {
   inkPageKey?: string;
   /** Optional PDF on canvas for past-exam practice (write pages only). */
   linkedPdfObjectId?: string;
+  /**
+   * Optional visual/layout presentation for this page only.
+   * Absent = inherit notebook paperStyle + layout 'free' at read time (never write on hydrate).
+   * Never part of documentBody / codec / TipTap JSON.
+   */
+  presentation?: NotebookPagePresentation;
 }
 
 export interface NotebookPagesFields {

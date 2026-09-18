@@ -9,7 +9,22 @@ export {
   type NotebookPage,
   type NotebookPagesFields,
   type NotebookContentWithPages,
+  type NotebookPagePresentation,
+  type NotebookPagePaperStyle,
+  type NotebookLayoutTemplateId,
 } from './types';
+export {
+  sanitizeNotebookPagePresentation,
+  resolveNotebookPagePaperStyle,
+  resolveNotebookPageLayoutTemplate,
+  notebookPagePresentationsEqual,
+  isNotebookPagePaperStyle,
+  isNotebookLayoutTemplateId,
+  NOTEBOOK_PAGE_PAPER_STYLES,
+  NOTEBOOK_LAYOUT_TEMPLATE_IDS,
+  DEFAULT_NOTEBOOK_PAGE_PAPER_STYLE,
+  DEFAULT_NOTEBOOK_LAYOUT_TEMPLATE,
+} from './pagePresentation';
 export { isNotebookV1PagesEnabled } from './featureFlag';
 export {
   sanitizeNotebookSection,
