@@ -36,6 +36,7 @@ import {
   nbProductIconBtnStyle,
   nbProductToolbarShellStyle,
 } from './notebookProductToolbarChrome';
+import { nbP0Bump } from '../../../lib/notebookP0Forensics';
 import {
   NOTEBOOK_IMAGE_FILE_ACCEPT,
   resolveNbImageInsertTarget,
@@ -215,6 +216,7 @@ export function NotebookTiptapCandidateEditor({
   onExportPdf,
   onCustomizeNotebook,
 }: NotebookTiptapCandidateEditorProps) {
+  nbP0Bump('tipTapCandidateRenders');
   const sourceRef = useRef(sourceDocumentBody);
   const userEditedRef = useRef(false);
   const [userEdited, setUserEdited] = useState(false);
@@ -362,6 +364,9 @@ export function NotebookTiptapCandidateEditor({
         },
       },
       onUpdate: ({ editor: ed, transaction }) => {
+        nbP0Bump('tipTapOnUpdate');
+        nbP0Bump('tipTapTransactions');
+        if (transaction.docChanged) nbP0Bump('tipTapDocChangedTransactions');
         if (!transaction.docChanged) return;
         // Fail-closed / non-editable: never bridge to persistence (protects empty hydrate fallback).
         if (!ed.isEditable) return;
@@ -396,6 +401,7 @@ export function NotebookTiptapCandidateEditor({
               ...recentEmissionsRef.current.slice(0, 9),
             ];
             try {
+              nbP0Bump('tipTapOnUserEdit');
               persistFn({ body: next.body, codecVersion: 1, pageKey: emitPageKey });
             } catch (err) {
               // eslint-disable-next-line no-console
@@ -451,6 +457,7 @@ export function NotebookTiptapCandidateEditor({
     userEditedRef.current = false;
     setUserEdited(false);
     editor.commands.setContent(load.content, { emitUpdate: false });
+    nbP0Bump('tipTapExternalSetContent');
     // Bind emit identity to this hydrated generation — only AFTER setContent succeeds.
     hydratedPageKeyRef.current = pageKey;
     resetCandidateEditorHistory(editor);

@@ -206,6 +206,7 @@ import { NotebookTiptapRealShadowPanel } from '../notebook/tiptap/NotebookTiptap
 import { NotebookTiptapCandidateEditor } from '../notebook/tiptap/NotebookTiptapCandidateEditor';
 import { NotebookDesignerHost } from '../notebook/designer/NotebookDesignerHost';
 import { useNotebookDesignerAppearanceSession } from '../../hooks/useNotebookDesignerAppearanceSession';
+import { nbP0Bump } from '../../lib/notebookP0Forensics';
 import type { NotebookAppearanceV1 } from '../../lib/notebookAppearance';
 import {
   notebookAppearanceChromeStyle,
@@ -1321,6 +1322,7 @@ export function ProjectNotebookBlock({
   compositionChromeSuppressed = false,
   onOpenBinderStudy,
 }: Props) {
+  nbP0Bump('projectNotebookBlockRenders');
   const { user } = useAuth();
   const handwritingUserId = user?.id;
   const v1PagesShell = isNotebookV1PagesEnabled();
@@ -1488,6 +1490,7 @@ export function ProjectNotebookBlock({
         stage: 'persistNotebookContent',
         forCloud: nbSyncDiagSummarizeContent(forCloud as NotebookContentWithPages),
       });
+      nbP0Bump('notebookPersistCommits');
       emitContentChange(forCloud as NotebookContent);
     },
     [emitContentChange, v1PagesShell, freeSpaceSectionId, freeSpaceBoardId, objectId],
@@ -1497,6 +1500,7 @@ export function ProjectNotebookBlock({
 
   const persistAppearanceOnly = useCallback(
     (appearance: NotebookAppearanceV1) => {
+      nbP0Bump('appearancePersists');
       const base = contentRef.current;
       persistNotebookContent(
         { ...base, appearance },
@@ -1970,6 +1974,7 @@ export function ProjectNotebookBlock({
     const sc = notebookBodyScrollRef.current;
     if (!sc) return;
     const onScroll = () => {
+      nbP0Bump('bodyScrollHandlerCalls');
       if (!isProgrammaticScrollRef.current) {
         userControlledScrollRef.current = true;
       }
@@ -2639,8 +2644,13 @@ export function ProjectNotebookBlock({
     const el = shellRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const update = () => {
+      nbP0Bump('shellResizeObserverCallbacks');
       const measured = el.getBoundingClientRect().width;
-      setSurfaceWidth(prev => nextNotebookSurfaceWidthPx(prev, measured));
+      setSurfaceWidth(prev => {
+        const next = nextNotebookSurfaceWidthPx(prev, measured);
+        if (next !== prev) nbP0Bump('shellSurfaceWidthStateChanges');
+        return next;
+      });
     };
     update();
     const ro = new ResizeObserver(() => update());

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { sanitizeUrl } from '../../../lib/urlSanitizer';
 import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
+import { nbP0Bump } from '../../../lib/notebookP0Forensics';
 import {
   DEFAULT_NOTEBOOK_FONT_SIZE,
   HIGHLIGHT_PRESETS,
@@ -296,6 +297,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
+  /** Mirror open chrome for scroll/resize handlers without setState on every wheel tick. */
+  const floatingChromeOpenRef = useRef(false);
   const [isEditingLink, setIsEditingLink] = useState(false);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const linkTriggerRef = useRef<HTMLDivElement | null>(null);
@@ -311,6 +314,10 @@ export function NotebookTiptapCandidateSelectionToolbar({
     shouldShow: false,
   });
   const [cmdDiag, setCmdDiag] = useState<CmdDiag | null>(null);
+
+  // Keep scroll/resize handlers O(1) when floating chrome is closed (Designer-closed scroll path).
+  floatingChromeOpenRef.current =
+    open || linkOpen || sizeOpen || blockOpen || tablePickerOpen || tableMenuOpen;
 
   const fmt = useEditorState({
     editor,
@@ -379,12 +386,31 @@ export function NotebookTiptapCandidateSelectionToolbar({
     [closeMenus, editor],
   );
 
-  const syncFromEditor = useCallback(() => {
+  const syncFromEditor = useCallback((source: 'editor' | 'scroll' | 'resize' = 'editor') => {
     if (editor.isDestroyed) return;
+    // Scroll/resize only need to reposition visible floating chrome.
+    // Idle closed path must not setState on every wheel tick — with sticky product
+    // toolbar + study-page overflow:visible this was a main-thread lock (Page Unresponsive).
+    if (
+      (source === 'scroll' || source === 'resize') &&
+      !floatingChromeOpenRef.current
+    ) {
+      return;
+    }
+    nbP0Bump('selectionToolbarSyncs');
+    if (source === 'scroll') nbP0Bump('selectionToolbarScrollSyncs');
     const { from, to, empty } = editor.state.selection;
     const focused = editor.view.hasFocus();
     const shouldShow = selectionShouldShowToolbar(editor);
-    setDiag({ empty, from, to, focused, shouldShow });
+    setDiag(prev =>
+      prev.empty === empty &&
+      prev.from === from &&
+      prev.to === to &&
+      prev.focused === focused &&
+      prev.shouldShow === shouldShow
+        ? prev
+        : { empty, from, to, focused, shouldShow },
+    );
 
     if (!empty) {
       storedSelRef.current = { from, to };
@@ -447,7 +473,9 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
   useEffect(() => {
     syncFromEditor();
-    const onSel = () => syncFromEditor();
+    const onSel = () => syncFromEditor('editor');
+    const onScrollSel = () => syncFromEditor('scroll');
+    const onResizeSel = () => syncFromEditor('resize');
     const onBlur = ({ event }: { event: FocusEvent }) => {
       if (candidateSelectionToolbarBusyRef.current) return;
       if (linkOpenRef.current) return;
@@ -483,8 +511,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
     // pointerup may land outside the editor after a drag.
     window.addEventListener('pointerup', endPointerSelecting, true);
     window.addEventListener('pointercancel', endPointerSelecting, true);
-    window.addEventListener('resize', onSel);
-    window.addEventListener('scroll', onSel, true);
+    window.addEventListener('resize', onResizeSel);
+    window.addEventListener('scroll', onScrollSel, true);
     return () => {
       editor.off('selectionUpdate', onSel);
       editor.off('transaction', onSel);
@@ -493,8 +521,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
       editorDom?.removeEventListener('pointerdown', onEditorPointerDown);
       window.removeEventListener('pointerup', endPointerSelecting, true);
       window.removeEventListener('pointercancel', endPointerSelecting, true);
-      window.removeEventListener('resize', onSel);
-      window.removeEventListener('scroll', onSel, true);
+      window.removeEventListener('resize', onResizeSel);
+      window.removeEventListener('scroll', onScrollSel, true);
     };
   }, [editor, syncFromEditor, dismissToolbar]);
 

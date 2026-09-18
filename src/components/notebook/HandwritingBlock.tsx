@@ -82,6 +82,7 @@ import {
   recordHandwritingStrokeRawSample,
 } from '../../lib/handwritingStrokeDiag';
 import { registerHandwritingFlush } from '../../lib/handwritingFlushRegistry';
+import { nbP0Bump } from '../../lib/notebookP0Forensics';
 import {
   recordPageInkFlush,
   recordPageInkHydrate,
@@ -310,6 +311,7 @@ export function HandwritingBlock({
 
   const redrawAfterHydrate = useCallback(
     (reason: 'mount' | 'layout', attempt = 0): void => {
+      nbP0Bump('handwritingRedraws');
       const canvas = canvasRef.current;
       const data = dataRef.current;
       if (!canvas || !data) {
@@ -974,6 +976,7 @@ export function HandwritingBlock({
     if (!wrap || typeof ResizeObserver === 'undefined') return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
+      nbP0Bump('handwritingResizeObserverCallbacks');
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
