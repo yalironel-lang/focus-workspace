@@ -1,4 +1,7 @@
-# Minimal Supabase config for ZIKUK AI Gateway (M0.2)
+# Minimal Supabase config for ZIKUK AI Edge Functions
 
 [functions.ai-gateway]
+verify_jwt = true
+
+[functions.ai-knowledge-ingest]
 verify_jwt = true
