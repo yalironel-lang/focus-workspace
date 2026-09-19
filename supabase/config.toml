@@ -1,0 +1,4 @@
+# Minimal Supabase config for ZIKUK AI Gateway (M0.2)
+
+[functions.ai-gateway]
+verify_jwt = true

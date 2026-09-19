@@ -1,0 +1,180 @@
+/**
+ * ZIKUK AI Gateway — Supabase Edge Function (M0.2).
+ *
+ * Auth: JWT via Authorization header → auth.getUser()
+ * Secrets: AI_PROVIDER_API_KEY, AI_PROVIDER_BASE_URL, AI_MODEL (server-only)
+ * Never mutates Notebook / Free Space / product tables.
+ */
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.0';
+import { MAX_REQUEST_BODY_BYTES } from '../_shared/ai/bounds.ts';
+import { createOpenAICompatibleProvider } from '../_shared/ai/providerOpenAICompatible.ts';
+import {
+  formatUsageLogLine,
+  runGatewayPipeline,
+} from '../_shared/ai/runGatewayPipeline.ts';
+import type { ZikukAiResponse } from '../_shared/ai/requestTypes.ts';
+
+const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function jsonResponse(body: ZikukAiResponse, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+function httpStatusFor(code: string): number {
+  switch (code) {
+    case 'unauthenticated':
+      return 401;
+    case 'auth_mismatch':
+      return 403;
+    case 'invalid_request':
+    case 'unsupported_capability':
+    case 'unsupported_content':
+      return 400;
+    case 'rate_limited':
+      return 429;
+    case 'provider_timeout':
+      return 504;
+    case 'provider_unavailable':
+    case 'quota_exceeded':
+      return 502;
+    default:
+      return 500;
+  }
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return jsonResponse(
+      {
+        version: 1,
+        ok: false,
+        error: { code: 'invalid_request', message: 'POST required.' },
+      },
+      405,
+    );
+  }
+
+  try {
+    const contentLength = Number(req.headers.get('content-length') ?? '0');
+    if (contentLength > MAX_REQUEST_BODY_BYTES) {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: { code: 'invalid_request', message: 'Request body too large.' },
+        },
+        413,
+      );
+    }
+
+    const rawText = await req.text();
+    if (rawText.length > MAX_REQUEST_BODY_BYTES) {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: { code: 'invalid_request', message: 'Request body too large.' },
+        },
+        413,
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawText || 'null');
+    } catch {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: { code: 'invalid_request', message: 'Invalid JSON body.' },
+        },
+        400,
+      );
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseAnon = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const authHeader = req.headers.get('Authorization') ?? '';
+
+    let authUserId: string | null = null;
+    if (supabaseUrl && supabaseAnon && authHeader) {
+      const supabase = createClient(supabaseUrl, supabaseAnon, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data, error } = await supabase.auth.getUser();
+      if (!error && data.user?.id) {
+        authUserId = data.user.id;
+      }
+    }
+
+    const apiKey = Deno.env.get('AI_PROVIDER_API_KEY') ?? '';
+    const baseUrl = Deno.env.get('AI_PROVIDER_BASE_URL') ?? 'https://api.openai.com/v1';
+    const model = Deno.env.get('AI_MODEL') ?? '';
+
+    if (!apiKey || !model) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: 'internal_error',
+          reason: 'missing_server_ai_config',
+        }),
+      );
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: 'AI Gateway is not configured.',
+          },
+        },
+        500,
+      );
+    }
+
+    const provider = createOpenAICompatibleProvider({ apiKey, baseUrl });
+    const { response, usageLog } = await runGatewayPipeline({
+      body,
+      authUserId,
+      provider,
+      routerConfig: { model },
+    });
+
+    if (usageLog) {
+      console.log(formatUsageLogLine(usageLog));
+    }
+
+    const status = response.ok ? 200 : httpStatusFor(response.error.code);
+    return jsonResponse(response, status);
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        event: 'zikuk_ai_gateway',
+        ok: false,
+        errorCode: 'internal_error',
+        reason: e instanceof Error ? e.name : 'unknown',
+      }),
+    );
+    return jsonResponse(
+      {
+        version: 1,
+        ok: false,
+        error: { code: 'internal_error', message: 'Something went wrong.' },
+      },
+      500,
+    );
+  }
+});
