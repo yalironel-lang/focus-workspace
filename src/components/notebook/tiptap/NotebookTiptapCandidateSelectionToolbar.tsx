@@ -25,9 +25,16 @@ import {
   AlignRight,
   Plus,
   ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { sanitizeUrl } from '../../../lib/urlSanitizer';
 import { openNotebookLink } from '../../../lib/notebookTiptap/openNotebookLink';
+import {
+  shouldShowExplainAction,
+  useExplainSelectionController,
+  type ExplainHost,
+} from '../../../lib/ai/explainSelection';
+import { NotebookExplainSelectionPanel } from './NotebookExplainSelectionPanel';
 import { nbP0Bump } from '../../../lib/notebookP0Forensics';
 import {
   DEFAULT_NOTEBOOK_FONT_SIZE,
@@ -249,6 +256,10 @@ function ColorSwatch({
 
 interface Props {
   editor: Editor;
+  /** Active page identity — invalidates Explain when the page changes. */
+  pageKey?: string;
+  /** Host identity for M0.1 capture; null → Explain cannot call the gateway. */
+  aiHost?: ExplainHost | null;
   borderColor?: string;
 }
 
@@ -264,6 +275,8 @@ type CmdDiag = {
 
 export function NotebookTiptapCandidateSelectionToolbar({
   editor,
+  pageKey = 'legacy-body',
+  aiHost = null,
   borderColor = 'rgba(255,255,255,0.12)',
 }: Props) {
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -314,6 +327,20 @@ export function NotebookTiptapCandidateSelectionToolbar({
     shouldShow: false,
   });
   const [cmdDiag, setCmdDiag] = useState<CmdDiag | null>(null);
+
+  const {
+    state: explainState,
+    activateExplain,
+    retry: retryExplain,
+    close: closeExplain,
+    isOpen: explainOpen,
+  } = useExplainSelectionController({
+    editor,
+    host: aiHost ?? null,
+    pageKey,
+  });
+  const explainOpenRef = useRef(false);
+  explainOpenRef.current = explainOpen;
 
   // Keep scroll/resize handlers O(1) when floating chrome is closed (Designer-closed scroll path).
   floatingChromeOpenRef.current =
@@ -372,6 +399,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
 
   const dismissToolbar = useCallback(
     (opts?: { suppressReopen?: boolean }) => {
+      closeExplain();
       if (opts?.suppressReopen) {
         suppressAutoOpenRef.current = true;
         if (!editor.isDestroyed) {
@@ -383,7 +411,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
       setAnchor(null);
       closeMenus();
     },
-    [closeMenus, editor],
+    [closeMenus, closeExplain, editor],
   );
 
   const syncFromEditor = useCallback((source: 'editor' | 'scroll' | 'resize' = 'editor') => {
@@ -479,12 +507,18 @@ export function NotebookTiptapCandidateSelectionToolbar({
     const onBlur = ({ event }: { event: FocusEvent }) => {
       if (candidateSelectionToolbarBusyRef.current) return;
       if (linkOpenRef.current) return;
+      if (explainOpenRef.current) return;
       const related = event.relatedTarget as Node | null;
       if (related && toolbarRef.current?.contains(related)) return;
       requestAnimationFrame(() => {
         if (candidateSelectionToolbarBusyRef.current) return;
         if (linkOpenRef.current) return;
-        if (!selectionShouldShowToolbar(editor)) dismissToolbar();
+        if (explainOpenRef.current) return;
+        if (!selectionShouldShowToolbar(editor)) {
+          setOpen(false);
+          setAnchor(null);
+          closeMenus();
+        }
       });
     };
     // After dismiss/convert, a later click in the editor allows the toolbar again
@@ -524,13 +558,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
       window.removeEventListener('resize', onResizeSel);
       window.removeEventListener('scroll', onScrollSel, true);
     };
-  }, [editor, syncFromEditor, dismissToolbar]);
+  }, [editor, syncFromEditor, closeMenus]);
 
   // Escape + outside click dismiss the whole floating toolbar (not only nested menus).
   // Dual path: (1) window capture for focus in portaled Turn into / menus / chrome;
   // (2) ProseMirror handleKeyDown via candidateFloatingToolbarEscapeRef when caret is in the editor.
   useEffect(() => {
-    if (!open) {
+    if (!open && !explainOpen) {
       candidateFloatingToolbarEscapeRef.current = null;
       return;
     }
@@ -538,6 +572,10 @@ export function NotebookTiptapCandidateSelectionToolbar({
       if (e.key !== 'Escape' && e.code !== 'Escape') return false;
       e.preventDefault();
       e.stopPropagation();
+      if (explainOpenRef.current) {
+        closeExplain();
+        return true;
+      }
       dismissToolbar({ suppressReopen: true });
       // Do not re-focus — same selection must stay suppressed until a deliberate edit gesture.
       return true;
@@ -554,7 +592,8 @@ export function NotebookTiptapCandidateSelectionToolbar({
           t.closest('[data-nb-candidate-table-menu]') ||
           // M7.7: link popover is portaled to document.body (viewport clamp).
           // Must be treated as chrome or pointerdown dismisses before Apply/Open click.
-          t.closest('[data-nb-candidate-link-popover]'))
+          t.closest('[data-nb-candidate-link-popover]') ||
+          t.closest('[data-nb-candidate-explain-panel]'))
       ) {
         return true;
       }
@@ -577,7 +616,7 @@ export function NotebookTiptapCandidateSelectionToolbar({
       window.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
     };
-  }, [open, dismissToolbar]);
+  }, [open, explainOpen, dismissToolbar, closeExplain]);
 
   useEffect(() => {
     if (!sizeOpen && !blockOpen && !linkOpen && !tablePickerOpen && !tableMenuOpen) return;
@@ -902,7 +941,15 @@ export function NotebookTiptapCandidateSelectionToolbar({
     [editor, releaseBusy, restoreTableTargetSelection, syncFromEditor],
   );
 
+  const handleExplain = useCallback(() => {
+    candidateSelectionToolbarBusyRef.current = true;
+    ensureSelection();
+    activateExplain();
+    releaseBusy();
+  }, [activateExplain, ensureSelection, releaseBusy]);
+
   const showToolbar = open && anchor != null;
+  const showExplain = showToolbar && shouldShowExplainAction(editor);
   const sizeLabel = fmt.fontSizeMixed
     ? 'Mixed'
     : String(fmt.fontSizePx ?? DEFAULT_NOTEBOOK_FONT_SIZE);
@@ -964,6 +1011,11 @@ export function NotebookTiptapCandidateSelectionToolbar({
             <FormatBtn title="Math" testId="math" active={fmt.math} onAction={() => runFmt({ type: 'toggleMath' })}>
               <Sigma size={14} strokeWidth={2.5} />
             </FormatBtn>
+            {showExplain ? (
+              <FormatBtn title="Explain" testId="explain" active={explainOpen} onAction={handleExplain}>
+                <Sparkles size={14} strokeWidth={2.5} />
+              </FormatBtn>
+            ) : null}
 
             <div ref={linkTriggerRef} style={{ position: 'relative' }}>
               <FormatBtn
@@ -1387,6 +1439,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
   return (
     <>
       {toolbar}
+      <NotebookExplainSelectionPanel
+        state={explainState}
+        anchor={anchor}
+        borderColor={borderColor}
+        onClose={closeExplain}
+        onRetry={retryExplain}
+      />
       {diagnostics}
     </>
   );

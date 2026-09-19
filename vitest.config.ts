@@ -7,6 +7,8 @@ export default defineConfig({
     include: [
       'src/lib/ai/context/**/*.test.ts',
       'src/lib/ai/gatewayClient/**/*.test.ts',
+      'src/lib/ai/explainSelection/**/*.test.ts',
+      'src/lib/ai/explainSelection/**/*.test.tsx',
       'supabase/functions/_shared/ai/**/*.test.ts',
       'src/lib/katexVisualExtract/**/*.test.ts',
       'src/lib/persistenceQa.test.ts',

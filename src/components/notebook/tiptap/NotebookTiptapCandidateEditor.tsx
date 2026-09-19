@@ -148,6 +148,17 @@ export type NotebookTiptapCandidateEditorProps = {
   onExportPdf?: () => void;
   /** Open Notebook Designer (Customize Notebook). */
   onCustomizeNotebook?: () => void;
+  /**
+   * M0.3 — host identity for Select → Explain (bounded context capture).
+   * Omit/incomplete → Explain does not call the gateway.
+   */
+  aiHost?: {
+    userId: string;
+    sectionId: string;
+    notebookObjectId: string;
+    pageId: string;
+    pageKey: string;
+  } | null;
 };
 
 function attemptSerialize(
@@ -215,6 +226,7 @@ export function NotebookTiptapCandidateEditor({
   onDismissTextEditing,
   onExportPdf,
   onCustomizeNotebook,
+  aiHost = null,
 }: NotebookTiptapCandidateEditorProps) {
   nbP0Bump('tipTapCandidateRenders');
   const sourceRef = useRef(sourceDocumentBody);
@@ -971,7 +983,13 @@ export function NotebookTiptapCandidateEditor({
           </div>
 
           <EditorContent editor={editor} />
-          {editor ? <NotebookTiptapCandidateSelectionToolbar editor={editor} /> : null}
+          {editor ? (
+            <NotebookTiptapCandidateSelectionToolbar
+              editor={editor}
+              pageKey={pageKey}
+              aiHost={aiHost ?? null}
+            />
+          ) : null}
         </>
       )}
 

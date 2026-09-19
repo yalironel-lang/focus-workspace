@@ -1255,6 +1255,7 @@ function isTipTapEditingChrome(target: EventTarget | null): boolean {
     target.closest('[data-nb-candidate-selection-toolbar]') ||
     target.closest('[data-nb-tiptap-selection-toolbar]') ||
     target.closest('[data-nb-candidate-link-popover]') ||
+    target.closest('[data-nb-candidate-explain-panel]') ||
     target.closest('[data-nb-candidate-table-menu]') ||
     target.closest('[data-nb-candidate-table-size-picker]') ||
     target.closest('[data-nb-candidate-block-menu]') ||
@@ -1271,6 +1272,7 @@ function isTipTapEditingChromeOpen(): boolean {
   return !!(
     document.querySelector('[data-nb-candidate-selection-toolbar-open="1"]') ||
     document.querySelector('[data-nb-candidate-link-popover="1"]') ||
+    document.querySelector('[data-nb-candidate-explain-panel="1"]') ||
     document.querySelector('[data-nb-candidate-table-menu="1"]') ||
     document.querySelector('[data-nb-candidate-table-size-picker]') ||
     document.querySelector('[data-nb-candidate-block-menu="1"]') ||
@@ -7102,6 +7104,29 @@ export function ProjectNotebookBlock({
                   'legacy-body',
               )}
               objectId={objectId}
+              aiHost={
+                handwritingUserId &&
+                freeSpaceSectionId &&
+                objectId
+                  ? {
+                      userId: handwritingUserId,
+                      sectionId: freeSpaceSectionId,
+                      notebookObjectId: objectId,
+                      pageId: String(
+                        effectiveContent.activePageId ??
+                          resolveDefaultNavigation(effectiveContent)?.activePageId ??
+                          resolveDefaultNavigation(migrateLegacyNotebook(effectiveContent))?.activePageId ??
+                          'legacy-body',
+                      ),
+                      pageKey: String(
+                        effectiveContent.activePageId ??
+                          resolveDefaultNavigation(effectiveContent)?.activePageId ??
+                          resolveDefaultNavigation(migrateLegacyNotebook(effectiveContent))?.activePageId ??
+                          'legacy-body',
+                      ),
+                    }
+                  : null
+              }
               onEditorReady={ed => {
                 candidateEditorRef.current = ed;
               }}
