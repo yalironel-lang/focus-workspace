@@ -344,7 +344,7 @@ describe('useExplainSelectionController', () => {
     ed.destroy();
   });
 
-  it('second Explain invalidates the first response', async () => {
+  it('duplicate Explain while loading does not start a second request', async () => {
     const ed = makeEditor('First then second');
     selectAllText(ed);
     let api!: ReturnType<typeof useExplainSelectionController>;
@@ -368,29 +368,21 @@ describe('useExplainSelectionController', () => {
     act(() => {
       api.activateExplain();
     });
+    expect(api.state.phase).toBe('loading');
     act(() => {
       api.activateExplain();
     });
-    expect(zikukAiRequest).toHaveBeenCalledTimes(2);
+    expect(zikukAiRequest).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       resolvers[0]?.({
         version: 1,
         ok: true,
-        result: { type: 'text', text: 'first-stale' },
-      });
-    });
-    expect(api.state.resultText).not.toBe('first-stale');
-
-    await act(async () => {
-      resolvers[1]?.({
-        version: 1,
-        ok: true,
-        result: { type: 'text', text: 'second-wins' },
+        result: { type: 'text', text: 'only-one' },
       });
     });
     expect(api.state.phase).toBe('success');
-    expect(api.state.resultText).toBe('second-wins');
+    expect(api.state.resultText).toBe('only-one');
     ed.destroy();
   });
 

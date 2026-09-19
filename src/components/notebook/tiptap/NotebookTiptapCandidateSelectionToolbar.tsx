@@ -942,11 +942,12 @@ export function NotebookTiptapCandidateSelectionToolbar({
   );
 
   const handleExplain = useCallback(() => {
+    if (explainState.phase === 'loading') return;
     candidateSelectionToolbarBusyRef.current = true;
     ensureSelection();
     activateExplain();
     releaseBusy();
-  }, [activateExplain, ensureSelection, releaseBusy]);
+  }, [activateExplain, ensureSelection, explainState.phase, releaseBusy]);
 
   const showToolbar = open && anchor != null;
   const showExplain = showToolbar && shouldShowExplainAction(editor);
@@ -1012,7 +1013,13 @@ export function NotebookTiptapCandidateSelectionToolbar({
               <Sigma size={14} strokeWidth={2.5} />
             </FormatBtn>
             {showExplain ? (
-              <FormatBtn title="Explain" testId="explain" active={explainOpen} onAction={handleExplain}>
+              <FormatBtn
+                title="Explain · Beta"
+                testId="explain"
+                active={explainOpen}
+                disabled={explainState.phase === 'loading'}
+                onAction={handleExplain}
+              >
                 <Sparkles size={14} strokeWidth={2.5} />
               </FormatBtn>
             ) : null}

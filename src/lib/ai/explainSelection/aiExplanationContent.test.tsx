@@ -122,6 +122,7 @@ describe('Explain panel success rendering', () => {
       resultText: null,
       errorMessage: null,
       errorCode: null,
+      localUnavailable: null,
     };
     mount(
       createElement(NotebookExplainSelectionPanel, {
@@ -140,7 +141,8 @@ describe('Explain panel success rendering', () => {
       frozenContext: null,
       resultText: null,
       errorMessage: 'Safe error',
-      errorCode: 'provider_error',
+      errorCode: 'provider_unavailable',
+      localUnavailable: null,
     };
     mount(
       createElement(NotebookExplainSelectionPanel, {
@@ -151,7 +153,7 @@ describe('Explain panel success rendering', () => {
       }),
     );
     expect(document.querySelector('[data-nb-candidate-explain-error]')?.textContent).toContain(
-      'Safe error',
+      'The AI service is temporarily unavailable. Try again shortly.',
     );
 
     cleanup();
@@ -162,6 +164,7 @@ describe('Explain panel success rendering', () => {
       resultText: 'Power rule: \\(nx^{n-1}\\)',
       errorMessage: null,
       errorCode: null,
+      localUnavailable: null,
     };
     mount(
       createElement(NotebookExplainSelectionPanel, {

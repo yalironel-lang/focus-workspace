@@ -47,6 +47,8 @@ export function useExplainSelectionController(input: {
   const genRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const frozenRef = useRef<ZikukAiContext | null>(null);
+  const phaseRef = useRef<ExplainPhase>(IDLE.phase);
+  phaseRef.current = state.phase;
   const pageKeyRef = useRef(pageKey);
   pageKeyRef.current = pageKey;
 
@@ -149,8 +151,11 @@ export function useExplainSelectionController(input: {
   /**
    * Call ONLY after toolbar ensureSelection / busy is set.
    * Synchronously captures context from the current editor selection.
+   * While loading, ignore repeat activation (preserve in-flight request / quota).
    */
   const activateExplain = useCallback(() => {
+    if (phaseRef.current === 'loading') return;
+
     if (!host) {
       setState({
         ...IDLE,

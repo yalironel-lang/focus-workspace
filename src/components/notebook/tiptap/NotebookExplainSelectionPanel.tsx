@@ -6,6 +6,11 @@
 import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import type { ExplainSelectionState } from '../../../lib/ai/explainSelection';
+import {
+  computeExplainPanelTop,
+  isExplainRetryAllowed,
+  userFacingExplainErrorMessage,
+} from '../../../lib/ai/explainSelection';
 import { AiExplanationContent } from './AiExplanationContent';
 
 type Props = {
@@ -25,14 +30,22 @@ export function NotebookExplainSelectionPanel({
 }: Props) {
   if (state.phase === 'idle' || typeof document === 'undefined') return null;
 
-  const top = anchor ? anchor.top + 44 : 72;
+  const top = computeExplainPanelTop({ anchorTop: anchor?.top ?? null });
   const left = anchor ? anchor.left : 24;
   const width = Math.min(anchor?.width ?? 360, typeof window !== 'undefined' ? window.innerWidth - 24 : 360);
+  const showRetry =
+    state.phase === 'error' &&
+    state.frozenContext != null &&
+    isExplainRetryAllowed(state.errorCode);
+  const errorText =
+    state.phase === 'error'
+      ? userFacingExplainErrorMessage(state.errorCode, state.errorMessage)
+      : null;
 
   return createPortal(
     <div
       role="dialog"
-      aria-label="Explanation"
+      aria-label="Explanation · Beta"
       aria-busy={state.phase === 'loading'}
       data-nb-candidate-explain-panel="1"
       style={{
@@ -79,7 +92,7 @@ export function NotebookExplainSelectionPanel({
             color: 'rgba(226,232,240,0.95)',
           }}
         >
-          Explanation
+          Explanation · Beta
         </div>
         <button
           type="button"
@@ -127,10 +140,8 @@ export function NotebookExplainSelectionPanel({
 
         {state.phase === 'error' ? (
           <div data-nb-candidate-explain-error="1">
-            <div style={{ color: '#fca5a5', marginBottom: 10 }}>
-              {state.errorMessage ?? 'Something went wrong.'}
-            </div>
-            {state.frozenContext ? (
+            <div style={{ color: '#fca5a5', marginBottom: 10 }}>{errorText}</div>
+            {showRetry ? (
               <button
                 type="button"
                 data-nb-candidate-explain-retry="1"
