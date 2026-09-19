@@ -15,7 +15,18 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `007_workspace_extensions.sql` | `sections.exam_date`, `deadlines`, `schedule_blocks`, `course_links` + RLS | **Applied (production, verified pre-flight)** |
 | `008_user_content_storage.sql` | Private `user-content` Storage bucket + RLS | **Applied (production)** |
 | `009_user_workspace_state.sql` | `user_workspace_state` table (Desk + Math Zone JSON) | **Applied (production, verified 2026-08-28)** |
-| `010_ai_usage_control.sql` | AI entitlements, usage events, counters + RPCs (M0.4) | **Created locally — NOT applied until approved** |
+| `010_ai_usage_control.sql` | AI entitlements, usage events, counters + RPCs (M0.4) | **Applied (production, Release 1)** |
+| `011_ai_knowledge_foundation.sql` | AI knowledge sources + chunks + begin/finalize ingest RPCs (M0.5A) | **Applied (production, verified M0.5A closeout)** |
+
+## Migration 011 — AI knowledge foundation (M0.5A)
+
+- **Objects:** `ai_knowledge_sources`, `ai_knowledge_chunks`
+- **RPCs (service_role only):** `ai_knowledge_begin_ingest`, `ai_knowledge_finalize_ingest`
+- **Source V1:** `free_space_pdf` only (`source_object_id` → `free_space_objects.id` text)
+- **Lifecycle invariant:** a previously READY corpus (`content_hash` + chunks at `source_version`) is never deleted by `begin_ingest`. Replacement starts by setting `pending_content_hash` and status `stale`; old chunks are replaced only inside a successful `finalize_ingest(ready)` after full payload validation. A failed replacement restores `ready` and clears `pending_content_hash`.
+- **No pgvector / embeddings** (deferred to M0.5C)
+- **No extraction** (deferred to M0.5B)
+- **RLS:** owners may SELECT own rows; clients cannot INSERT/UPDATE/DELETE corpus
 
 ## Migration 007 — workspace extensions
 
