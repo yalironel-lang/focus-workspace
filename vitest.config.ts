@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['fake-indexeddb/auto', 'src/test/localStorageSetup.ts'],
     include: [
+      'src/lib/ai/context/**/*.test.ts',
       'src/lib/katexVisualExtract/**/*.test.ts',
       'src/lib/persistenceQa.test.ts',
       'src/lib/notebookImagePersist.test.ts',
