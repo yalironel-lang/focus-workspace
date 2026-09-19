@@ -15,6 +15,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `007_workspace_extensions.sql` | `sections.exam_date`, `deadlines`, `schedule_blocks`, `course_links` + RLS | **Applied (production, verified pre-flight)** |
 | `008_user_content_storage.sql` | Private `user-content` Storage bucket + RLS | **Applied (production)** |
 | `009_user_workspace_state.sql` | `user_workspace_state` table (Desk + Math Zone JSON) | **Applied (production, verified 2026-08-28)** |
+| `010_ai_usage_control.sql` | AI entitlements, usage events, counters + RPCs (M0.4) | **Created locally — NOT applied until approved** |
 
 ## Migration 007 — workspace extensions
 

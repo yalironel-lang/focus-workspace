@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { preflightGatewayRequest } from '../../../../supabase/functions/_shared/ai/preflightGatewayRequest.ts';
 import type { GatewayAiContext, ZikukAiRequest } from '../../../../supabase/functions/_shared/ai/requestTypes.ts';
 import { runGatewayPipeline } from '../../../../supabase/functions/_shared/ai/runGatewayPipeline.ts';
+import { createMemoryEnforcementStore } from '../../../../supabase/functions/_shared/ai/enforcement.ts';
 import type { AiProvider } from '../../../../supabase/functions/_shared/ai/providerTypes.ts';
 
 function baseContext(overrides?: Partial<GatewayAiContext>): GatewayAiContext {
@@ -137,6 +138,7 @@ describe('runGatewayPipeline after preflight refactor', () => {
       authUserId: 'user-auth-1',
       provider: { complete },
       routerConfig: { model: 'm' },
+      enforcement: createMemoryEnforcementStore(),
     });
     expect(response.ok).toBe(true);
     expect(complete).toHaveBeenCalledOnce();
@@ -154,6 +156,7 @@ describe('runGatewayPipeline after preflight refactor', () => {
       authUserId: 'user-auth-1',
       provider: { complete },
       routerConfig: { model: 'm' },
+      enforcement: createMemoryEnforcementStore(),
     });
     expect(response.ok).toBe(false);
     if (!response.ok) expect(response.error.code).toBe('auth_mismatch');

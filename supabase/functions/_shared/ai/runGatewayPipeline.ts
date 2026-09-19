@@ -1,16 +1,20 @@
 /**
- * Core Gateway pipeline (server-only). Injectable provider for tests.
+ * Core Gateway pipeline (server-only). Injectable provider + enforcement for tests.
  *
  * Flow:
  *   preflight (authz + validate)
+ *   → entitlement / safety / quota (fail-closed)
  *   → [future RAG]
  *   → sanitize → prompt → route → provider
+ *   → usage accounting (fail-open after provider success)
  *
  * Edge entry runs preflight BEFORE the AI config gate so auth_mismatch /
  * validation errors are observable without provider secrets.
  */
 
+import { estimateCostUsdMicros } from './aiPricing.ts';
 import { SERVER_MAX_OUTPUT_TOKENS } from './bounds.ts';
+import type { AiEnforcementStore, UsageOutcome } from './enforcement.ts';
 import { buildExplainSelectionMessages } from './promptExplainSelection.ts';
 import {
   preflightGatewayRequest,
@@ -29,6 +33,8 @@ export type GatewayPipelineInput = {
   provider: AiProvider;
   routerConfig: RouterConfig;
   signal?: AbortSignal;
+  /** Required for provider stage in production; tests may inject memory store. */
+  enforcement?: AiEnforcementStore;
 };
 
 export type GatewayPipelineAfterPreflightInput = {
@@ -37,6 +43,8 @@ export type GatewayPipelineAfterPreflightInput = {
   provider: AiProvider;
   routerConfig: RouterConfig;
   signal?: AbortSignal;
+  /** Fail-closed before provider when absent in production Edge. */
+  enforcement: AiEnforcementStore;
 };
 
 export type GatewayUsageLog = {
@@ -47,11 +55,16 @@ export type GatewayUsageLog = {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  estimatedCostUsdMicros?: number | null;
   latencyMs: number;
   ok: boolean;
   errorCode?: string;
   selectionChars: number;
   surroundingsBlocks: number;
+  plan?: string;
+  usageEventPersisted?: boolean;
 };
 
 function selectionCharCount(req: ZikukAiRequest): number {
@@ -62,6 +75,20 @@ function selectionCharCount(req: ZikukAiRequest): number {
   return 0;
 }
 
+function deniedResponse(
+  code: 'ai_disabled' | 'rate_limited' | 'quota_exceeded' | 'internal_error',
+  message: string,
+): ZikukAiResponse {
+  return { version: 1, ok: false, error: { code, message } };
+}
+
+function mapProviderOutcome(code: string): UsageOutcome {
+  if (code === 'provider_timeout') return 'provider_timeout';
+  if (code === 'rate_limited') return 'rate_limited';
+  if (code === 'bad_response') return 'bad_response';
+  return 'provider_error';
+}
+
 export type GatewayPipelineResult = {
   response: ZikukAiResponse;
   usageLog: GatewayUsageLog | null;
@@ -69,11 +96,52 @@ export type GatewayPipelineResult = {
 
 /**
  * Provider stage only — call after successful preflight (+ optional AI config gate).
+ * Enforcement is mandatory and fail-closed.
  */
 export async function runGatewayPipelineAfterPreflight(
   input: GatewayPipelineAfterPreflightInput,
 ): Promise<GatewayPipelineResult> {
-  const { request, authUserId } = input;
+  const { request, authUserId, enforcement } = input;
+
+  // --- M0.4: entitlement + safety + product quota (BEFORE provider) ---
+  let begin;
+  try {
+    begin = await enforcement.beginRequest(authUserId, request.capability);
+  } catch {
+    console.error(
+      JSON.stringify({
+        event: 'zikuk_ai_gateway',
+        ok: false,
+        errorCode: 'internal_error',
+        reason: 'enforcement_unavailable',
+      }),
+    );
+    return {
+      response: deniedResponse(
+        'internal_error',
+        'AI usage controls are temporarily unavailable. Try again shortly.',
+      ),
+      usageLog: null,
+    };
+  }
+
+  if (!begin.ok) {
+    const message =
+      begin.code === 'ai_disabled'
+        ? 'AI is disabled for this account.'
+        : begin.code === 'quota_exceeded'
+          ? 'Daily AI limit reached. Try again tomorrow.'
+          : begin.code === 'rate_limited'
+            ? 'Too many requests. Try again shortly.'
+            : 'Unable to start AI request.';
+    return {
+      response: deniedResponse(
+        begin.code === 'invalid_request' ? 'internal_error' : begin.code,
+        begin.code === 'invalid_request' ? 'Unable to start AI request.' : message,
+      ),
+      usageLog: null,
+    };
+  }
 
   // --- future retrieval seam (RAG) goes here ---
 
@@ -114,14 +182,46 @@ export async function runGatewayPipelineAfterPreflight(
     ok: providerResult.ok,
     selectionChars: selectionCharCount(request),
     surroundingsBlocks: request.context.surroundings.blocks.length,
+    plan: begin.plan,
   };
+
+  const sectionId = request.context.academic.sectionId;
 
   if (!providerResult.ok) {
     usageLog.errorCode = providerResult.code;
-    // Server-only diagnostics — never copy into the public client response.
     if (providerResult.diagnostics) {
       console.error(formatProviderDiagnosticLog(providerResult.diagnostics));
     }
+
+    const record = await enforcement.recordUsage({
+      userId: authUserId,
+      capability: request.capability,
+      providerId: route.providerId,
+      model: route.model,
+      outcome: mapProviderOutcome(providerResult.code),
+      errorCode: providerResult.code,
+      inputTokens: null,
+      outputTokens: null,
+      reasoningTokens: null,
+      totalTokens: null,
+      estimatedCostUsdMicros: null,
+      latencyMs: providerResult.latencyMs,
+      sectionId,
+      providerRequestId: providerResult.providerRequestId ?? null,
+    });
+    usageLog.usageEventPersisted = record.ok;
+    if (!record.ok) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: 'internal_error',
+          reason: 'usage_event_persist_failed',
+          providerOk: false,
+        }),
+      );
+    }
+
     const code =
       providerResult.code === 'rate_limited'
         ? 'rate_limited'
@@ -148,6 +248,46 @@ export async function runGatewayPipelineAfterPreflight(
 
   usageLog.inputTokens = providerResult.usage?.inputTokens;
   usageLog.outputTokens = providerResult.usage?.outputTokens;
+  usageLog.reasoningTokens = providerResult.usage?.reasoningTokens;
+  usageLog.totalTokens = providerResult.usage?.totalTokens;
+
+  const estimatedCost = estimateCostUsdMicros(route.model, {
+    inputTokens: providerResult.usage?.inputTokens,
+    outputTokens: providerResult.usage?.outputTokens,
+    reasoningTokens: providerResult.usage?.reasoningTokens,
+    totalTokens: providerResult.usage?.totalTokens,
+  });
+  usageLog.estimatedCostUsdMicros = estimatedCost;
+
+  const record = await enforcement.recordUsage({
+    userId: authUserId,
+    capability: request.capability,
+    providerId: route.providerId,
+    model: route.model,
+    outcome: 'success',
+    errorCode: null,
+    inputTokens: providerResult.usage?.inputTokens ?? null,
+    outputTokens: providerResult.usage?.outputTokens ?? null,
+    reasoningTokens: providerResult.usage?.reasoningTokens ?? null,
+    totalTokens: providerResult.usage?.totalTokens ?? null,
+    estimatedCostUsdMicros: estimatedCost,
+    latencyMs: providerResult.latencyMs,
+    sectionId,
+    providerRequestId: providerResult.providerRequestId ?? null,
+  });
+  usageLog.usageEventPersisted = record.ok;
+  if (!record.ok) {
+    // Fail-open: provider success must still reach the user.
+    console.error(
+      JSON.stringify({
+        event: 'zikuk_ai_gateway',
+        ok: false,
+        errorCode: 'internal_error',
+        reason: 'usage_event_persist_failed',
+        providerOk: true,
+      }),
+    );
+  }
 
   return {
     response: {
@@ -175,12 +315,23 @@ export async function runGatewayPipeline(
     return { response: preflight.response, usageLog: null };
   }
 
+  if (!input.enforcement) {
+    return {
+      response: deniedResponse(
+        'internal_error',
+        'AI usage controls are temporarily unavailable. Try again shortly.',
+      ),
+      usageLog: null,
+    };
+  }
+
   return runGatewayPipelineAfterPreflight({
     authUserId: preflight.authUserId,
     request: preflight.request,
     provider: input.provider,
     routerConfig: input.routerConfig,
     signal: input.signal,
+    enforcement: input.enforcement,
   });
 }
 
@@ -195,10 +346,15 @@ export function formatUsageLogLine(log: GatewayUsageLog): string {
     model: log.model,
     inputTokens: log.inputTokens ?? null,
     outputTokens: log.outputTokens ?? null,
+    reasoningTokens: log.reasoningTokens ?? null,
+    totalTokens: log.totalTokens ?? null,
+    estimatedCostUsdMicros: log.estimatedCostUsdMicros ?? null,
     latencyMs: log.latencyMs,
     ok: log.ok,
     errorCode: log.errorCode ?? null,
     selectionChars: log.selectionChars,
     surroundingsBlocks: log.surroundingsBlocks,
+    plan: log.plan ?? null,
+    usageEventPersisted: log.usageEventPersisted ?? null,
   });
 }

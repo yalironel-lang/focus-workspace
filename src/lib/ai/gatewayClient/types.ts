@@ -19,6 +19,7 @@ export type ZikukAiErrorCode =
   | 'provider_unavailable'
   | 'provider_timeout'
   | 'quota_exceeded'
+  | 'ai_disabled'
   | 'internal_error';
 
 /**

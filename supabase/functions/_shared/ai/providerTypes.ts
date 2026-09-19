@@ -7,6 +7,8 @@ import type { ChatMessage } from './promptExplainSelection.ts';
 export type ProviderUsage = {
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
 };
 
 export type ProviderSuccess = {
@@ -15,6 +17,8 @@ export type ProviderSuccess = {
   usage?: ProviderUsage;
   rawModel: string;
   latencyMs: number;
+  /** Provider x-request-id when present (metadata only). */
+  providerRequestId?: string;
 };
 
 /**
@@ -39,6 +43,7 @@ export type ProviderFailure = {
   latencyMs: number;
   /** Server-only; must not be forwarded to the client response. */
   diagnostics?: ProviderFailureDiagnostics;
+  providerRequestId?: string;
 };
 
 export type ProviderResult = ProviderSuccess | ProviderFailure;

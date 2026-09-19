@@ -13,6 +13,7 @@ import {
   formatProviderDiagnosticLog,
 } from '../../../../supabase/functions/_shared/ai/providerOpenAICompatible.ts';
 import { runGatewayPipeline } from '../../../../supabase/functions/_shared/ai/runGatewayPipeline.ts';
+import { createMemoryEnforcementStore } from '../../../../supabase/functions/_shared/ai/enforcement.ts';
 import type { GatewayAiContext, ZikukAiRequest } from '../../../../supabase/functions/_shared/ai/requestTypes.ts';
 
 function baseContext(overrides?: Partial<GatewayAiContext>): GatewayAiContext {
@@ -323,6 +324,7 @@ describe('I. client-safe mappings remain unchanged', () => {
         })),
       },
       routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
     });
 
     expect(response).toEqual({
@@ -373,6 +375,7 @@ describe('I. client-safe mappings remain unchanged', () => {
         })),
       },
       routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
     });
     expect(rate.response.ok).toBe(false);
     if (!rate.response.ok) {
@@ -392,6 +395,7 @@ describe('I. client-safe mappings remain unchanged', () => {
         })),
       },
       routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
     });
     expect(timeout.response.ok).toBe(false);
     if (!timeout.response.ok) {

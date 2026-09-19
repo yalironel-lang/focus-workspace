@@ -17,6 +17,7 @@ export type ZikukAiErrorCode =
   | 'provider_unavailable'
   | 'provider_timeout'
   | 'quota_exceeded'
+  | 'ai_disabled'
   | 'internal_error';
 
 /** Structural mirror of M0.1 ZikukAiContext for server validation (no Editor). */
@@ -136,4 +137,13 @@ export const FORBIDDEN_CLIENT_CONTROL_KEYS = [
   'maxTokens',
   'baseUrl',
   'base_url',
+  'plan',
+  'owner',
+  'quota',
+  'quotaLimit',
+  'daily_request_limit',
+  'dailyRequestLimit',
+  'entitlement',
+  'isOwner',
+  'is_owner',
 ] as const;

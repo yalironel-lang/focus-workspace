@@ -1,12 +1,14 @@
 /**
- * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 preflight).
+ * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 + M0.4 usage control).
  *
  * Flow:
  *   platform verify_jwt
  *   → auth.getUser()
  *   → preflight (authz + validate)   ← independent of AI secrets
  *   → AI_* config gate
+ *   → entitlement / safety / quota (fail-closed, service role)
  *   → sanitize / prompt / router / provider
+ *   → usage event (fail-open after provider success)
  *
  * Never mutates Notebook / Free Space / product tables.
  */
@@ -19,6 +21,7 @@ import {
   formatUsageLogLine,
   runGatewayPipelineAfterPreflight,
 } from '../_shared/ai/runGatewayPipeline.ts';
+import { createSupabaseEnforcementStore } from '../_shared/ai/supabaseEnforcement.ts';
 import type { ZikukAiResponse } from '../_shared/ai/requestTypes.ts';
 
 const corsHeaders: Record<string, string> = {
@@ -38,17 +41,18 @@ function httpStatusFor(code: string): number {
     case 'unauthenticated':
       return 401;
     case 'auth_mismatch':
+    case 'ai_disabled':
       return 403;
     case 'invalid_request':
     case 'unsupported_capability':
     case 'unsupported_content':
       return 400;
     case 'rate_limited':
+    case 'quota_exceeded':
       return 429;
     case 'provider_timeout':
       return 504;
     case 'provider_unavailable':
-    case 'quota_exceeded':
       return 502;
     default:
       return 500;
@@ -135,6 +139,7 @@ Deno.serve(async (req: Request) => {
     const apiKey = Deno.env.get('AI_PROVIDER_API_KEY') ?? '';
     const baseUrl = Deno.env.get('AI_PROVIDER_BASE_URL') ?? 'https://api.openai.com/v1';
     const model = Deno.env.get('AI_MODEL') ?? '';
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
     if (!apiKey || !model) {
       console.error(
@@ -158,12 +163,40 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: 'internal_error',
+          reason: 'missing_enforcement_config',
+        }),
+      );
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: 'AI usage controls are temporarily unavailable. Try again shortly.',
+          },
+        },
+        500,
+      );
+    }
+
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const enforcement = createSupabaseEnforcementStore(admin);
+
     const provider = createOpenAICompatibleProvider({ apiKey, baseUrl });
     const { response, usageLog } = await runGatewayPipelineAfterPreflight({
       authUserId: preflight.authUserId,
       request: preflight.request,
       provider,
       routerConfig: { model },
+      enforcement,
     });
 
     if (usageLog) {

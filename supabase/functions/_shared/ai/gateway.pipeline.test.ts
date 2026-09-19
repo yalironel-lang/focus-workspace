@@ -17,6 +17,7 @@ import { buildExplainSelectionMessages } from '../../../../supabase/functions/_s
 import type { AiProvider } from '../../../../supabase/functions/_shared/ai/providerTypes.ts';
 import { routeModel } from '../../../../supabase/functions/_shared/ai/routeModel.ts';
 import { runGatewayPipeline } from '../../../../supabase/functions/_shared/ai/runGatewayPipeline.ts';
+import { createMemoryEnforcementStore } from '../../../../supabase/functions/_shared/ai/enforcement.ts';
 import {
   FORBIDDEN_PROVIDER_PAYLOAD_KEYS,
   sanitizeForProvider,
@@ -309,6 +310,8 @@ describe('promptExplainSelection', () => {
 });
 
 describe('runGatewayPipeline', () => {
+  const enforcement = () => createMemoryEnforcementStore();
+
   it('rejects unauthenticated', async () => {
     const { response } = await runGatewayPipeline({
       body: validRequest(),
@@ -320,6 +323,7 @@ describe('runGatewayPipeline', () => {
         latencyMs: 1,
       }),
       routerConfig: { model: 'm' },
+      enforcement: enforcement(),
     });
     expect(response.ok).toBe(false);
     if (!response.ok) expect(response.error.code).toBe('unauthenticated');
@@ -336,6 +340,7 @@ describe('runGatewayPipeline', () => {
         latencyMs: 1,
       }),
       routerConfig: { model: 'm' },
+      enforcement: enforcement(),
     });
     expect(response.ok).toBe(false);
     if (!response.ok) expect(response.error.code).toBe('auth_mismatch');
@@ -354,6 +359,7 @@ describe('runGatewayPipeline', () => {
       authUserId: 'user-auth-1',
       provider,
       routerConfig: { model: 'server-model' },
+      enforcement: enforcement(),
     });
     expect(response).toMatchObject({
       version: 1,
@@ -382,6 +388,7 @@ describe('runGatewayPipeline', () => {
         latencyMs: 9,
       }),
       routerConfig: { model: 'm' },
+      enforcement: enforcement(),
     });
     expect(response.ok).toBe(false);
     if (!response.ok) {
@@ -406,6 +413,7 @@ describe('runGatewayPipeline', () => {
       authUserId: 'user-auth-1',
       provider,
       routerConfig: { model: 'm' },
+      enforcement: enforcement(),
     });
     expect(response.ok).toBe(false);
     if (!response.ok) expect(response.error.code).toBe('unsupported_content');

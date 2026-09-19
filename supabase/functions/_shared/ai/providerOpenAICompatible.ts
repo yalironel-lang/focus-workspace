@@ -9,6 +9,7 @@ import type {
   ProviderResult,
 } from './providerTypes.ts';
 import { buildChatCompletionsBody } from './chatCompletionsRequestPolicy.ts';
+import { normalizeProviderUsage } from './normalizeProviderUsage.ts';
 import type { ChatMessage } from './promptExplainSelection.ts';
 
 export type OpenAICompatibleConfig = {
@@ -30,7 +31,7 @@ export function chatCompletionsUrl(baseUrl: string): string {
 
 type RawResponse = {
   choices?: Array<{ message?: { content?: string } }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: unknown;
   error?: {
     message?: unknown;
     type?: unknown;
@@ -123,6 +124,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'Invalid response from model provider.',
             status: res.status,
             latencyMs,
+            providerRequestId: requestId ?? undefined,
             diagnostics: buildProviderFailureDiagnostics({
               status: res.status,
               model: input.model,
@@ -138,6 +140,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'The model provider rate-limited this request.',
             status: 429,
             latencyMs,
+            providerRequestId: requestId ?? undefined,
             diagnostics: buildProviderFailureDiagnostics({
               status: 429,
               model: input.model,
@@ -155,6 +158,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'The model provider could not complete this request.',
             status: res.status,
             latencyMs,
+            providerRequestId: requestId ?? undefined,
             diagnostics: buildProviderFailureDiagnostics({
               status: res.status,
               model: input.model,
@@ -173,18 +177,18 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'Empty response from model provider.',
             status: res.status,
             latencyMs,
+            providerRequestId: requestId ?? undefined,
           };
         }
-        const usage =
-          json.usage &&
-          (typeof json.usage.prompt_tokens === 'number' ||
-            typeof json.usage.completion_tokens === 'number')
-            ? {
-                inputTokens: json.usage.prompt_tokens,
-                outputTokens: json.usage.completion_tokens,
-              }
-            : undefined;
-        return { ok: true, text, usage, rawModel: input.model, latencyMs };
+        const usage = normalizeProviderUsage(json.usage);
+        return {
+          ok: true,
+          text,
+          usage,
+          rawModel: input.model,
+          latencyMs,
+          providerRequestId: requestId ?? undefined,
+        };
       } catch (e) {
         const latencyMs = Date.now() - started;
         const name = e instanceof Error ? e.name : '';
