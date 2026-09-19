@@ -15,6 +15,7 @@ import { buildExplainSelectionMessages } from './promptExplainSelection.ts';
 import {
   preflightGatewayRequest,
 } from './preflightGatewayRequest.ts';
+import { formatProviderDiagnosticLog } from './providerOpenAICompatible.ts';
 import type { AiProvider } from './providerTypes.ts';
 import { routeModel, type RouterConfig } from './routeModel.ts';
 import { sanitizeForProvider } from './sanitizeForProvider.ts';
@@ -117,6 +118,10 @@ export async function runGatewayPipelineAfterPreflight(
 
   if (!providerResult.ok) {
     usageLog.errorCode = providerResult.code;
+    // Server-only diagnostics — never copy into the public client response.
+    if (providerResult.diagnostics) {
+      console.error(formatProviderDiagnosticLog(providerResult.diagnostics));
+    }
     const code =
       providerResult.code === 'rate_limited'
         ? 'rate_limited'

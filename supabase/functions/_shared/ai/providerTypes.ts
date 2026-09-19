@@ -17,12 +17,28 @@ export type ProviderSuccess = {
   latencyMs: number;
 };
 
+/**
+ * Server-only provider failure diagnostics.
+ * Never include error.message, prompts, Authorization, or raw bodies.
+ * Never copy this object into the public ZikukAiResponse.
+ */
+export type ProviderFailureDiagnostics = {
+  providerHttpStatus: number;
+  providerErrorType?: string;
+  providerErrorCode?: string;
+  model: string;
+  endpoint: 'chat_completions';
+  requestId?: string;
+};
+
 export type ProviderFailure = {
   ok: false;
   code: 'provider_unavailable' | 'provider_timeout' | 'rate_limited' | 'bad_response';
   message: string;
   status?: number;
   latencyMs: number;
+  /** Server-only; must not be forwarded to the client response. */
+  diagnostics?: ProviderFailureDiagnostics;
 };
 
 export type ProviderResult = ProviderSuccess | ProviderFailure;

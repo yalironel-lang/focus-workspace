@@ -3,7 +3,12 @@
  * Do not import this into the browser bundle.
  */
 
-import type { AiProvider, ProviderResult } from './providerTypes.ts';
+import type {
+  AiProvider,
+  ProviderFailureDiagnostics,
+  ProviderResult,
+} from './providerTypes.ts';
+import { buildChatCompletionsBody } from './chatCompletionsRequestPolicy.ts';
 import type { ChatMessage } from './promptExplainSelection.ts';
 
 export type OpenAICompatibleConfig = {
@@ -26,8 +31,58 @@ export function chatCompletionsUrl(baseUrl: string): string {
 type RawResponse = {
   choices?: Array<{ message?: { content?: string } }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
-  error?: { message?: string };
+  error?: {
+    message?: unknown;
+    type?: unknown;
+    code?: unknown;
+  };
 };
+
+function asNonEmptyString(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/**
+ * Build safe server-only diagnostics from a provider HTTP response.
+ * Never copies error.message, bodies, or Authorization material.
+ */
+export function buildProviderFailureDiagnostics(input: {
+  status: number;
+  model: string;
+  requestId?: string | null;
+  errorType?: unknown;
+  errorCode?: unknown;
+}): ProviderFailureDiagnostics {
+  const diagnostics: ProviderFailureDiagnostics = {
+    providerHttpStatus: input.status,
+    model: input.model,
+    endpoint: 'chat_completions',
+  };
+  const type = asNonEmptyString(input.errorType);
+  const code = asNonEmptyString(input.errorCode);
+  const requestId = asNonEmptyString(input.requestId ?? undefined);
+  if (type) diagnostics.providerErrorType = type;
+  if (code) diagnostics.providerErrorCode = code;
+  if (requestId) diagnostics.requestId = requestId;
+  return diagnostics;
+}
+
+/** Privacy-safe structured log line for Edge Function console. */
+export function formatProviderDiagnosticLog(d: ProviderFailureDiagnostics): string {
+  const line: Record<string, unknown> = {
+    event: 'zikuk_ai_gateway_provider',
+    ok: false,
+    providerHttpStatus: d.providerHttpStatus,
+    model: d.model,
+    endpoint: d.endpoint,
+  };
+  if (d.providerErrorType) line.providerErrorType = d.providerErrorType;
+  if (d.providerErrorCode) line.providerErrorCode = d.providerErrorCode;
+  if (d.requestId) line.requestId = d.requestId;
+  return JSON.stringify(line);
+}
 
 export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): AiProvider {
   return {
@@ -42,26 +97,40 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             'Content-Type': 'application/json',
             Authorization: `Bearer ${config.apiKey}`,
           },
-          body: JSON.stringify({
-            model: input.model,
-            messages: input.messages as ChatMessage[],
-            temperature: 0.4,
-            max_tokens: input.maxTokens,
-          }),
+          body: JSON.stringify(
+            buildChatCompletionsBody({
+              model: input.model,
+              messages: input.messages as ChatMessage[],
+              maxTokens: input.maxTokens,
+            }),
+          ),
         });
         const latencyMs = Date.now() - started;
+        const requestId = res.headers.get('x-request-id');
+
         let json: RawResponse = {};
+        let jsonOk = true;
         try {
           json = (await res.json()) as RawResponse;
         } catch {
+          jsonOk = false;
+        }
+
+        if (!jsonOk) {
           return {
             ok: false,
             code: 'bad_response',
             message: 'Invalid response from model provider.',
             status: res.status,
             latencyMs,
+            diagnostics: buildProviderFailureDiagnostics({
+              status: res.status,
+              model: input.model,
+              requestId,
+            }),
           };
         }
+
         if (res.status === 429) {
           return {
             ok: false,
@@ -69,8 +138,16 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'The model provider rate-limited this request.',
             status: 429,
             latencyMs,
+            diagnostics: buildProviderFailureDiagnostics({
+              status: 429,
+              model: input.model,
+              requestId,
+              errorType: json.error?.type,
+              errorCode: json.error?.code,
+            }),
           };
         }
+
         if (!res.ok) {
           return {
             ok: false,
@@ -78,8 +155,16 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             message: 'The model provider could not complete this request.',
             status: res.status,
             latencyMs,
+            diagnostics: buildProviderFailureDiagnostics({
+              status: res.status,
+              model: input.model,
+              requestId,
+              errorType: json.error?.type,
+              errorCode: json.error?.code,
+            }),
           };
         }
+
         const text = json.choices?.[0]?.message?.content?.trim() ?? '';
         if (!text) {
           return {
