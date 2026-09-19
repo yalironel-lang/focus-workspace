@@ -1,24 +1,38 @@
 /**
  * Core Gateway pipeline (server-only). Injectable provider for tests.
  *
- * Flow: validate → authz → sanitize → prompt → route → provider
- * Future RAG inserts after authz, before sanitize.
+ * Flow:
+ *   preflight (authz + validate)
+ *   → [future RAG]
+ *   → sanitize → prompt → route → provider
+ *
+ * Edge entry runs preflight BEFORE the AI config gate so auth_mismatch /
+ * validation errors are observable without provider secrets.
  */
 
-import { authorizeGatewayUser } from './authorize.ts';
 import { SERVER_MAX_OUTPUT_TOKENS } from './bounds.ts';
 import { buildExplainSelectionMessages } from './promptExplainSelection.ts';
+import {
+  preflightGatewayRequest,
+} from './preflightGatewayRequest.ts';
 import type { AiProvider } from './providerTypes.ts';
 import { routeModel, type RouterConfig } from './routeModel.ts';
 import { sanitizeForProvider } from './sanitizeForProvider.ts';
 import type { ZikukAiRequest, ZikukAiResponse } from './requestTypes.ts';
-import { validateZikukAiRequest } from './validateRequest.ts';
 
 export type GatewayPipelineInput = {
   /** Raw JSON body from the client. */
   body: unknown;
   /** Verified auth uid from JWT; null if missing/invalid. */
   authUserId: string | null;
+  provider: AiProvider;
+  routerConfig: RouterConfig;
+  signal?: AbortSignal;
+};
+
+export type GatewayPipelineAfterPreflightInput = {
+  authUserId: string;
+  request: ZikukAiRequest;
   provider: AiProvider;
   routerConfig: RouterConfig;
   signal?: AbortSignal;
@@ -53,56 +67,12 @@ export type GatewayPipelineResult = {
 };
 
 /**
- * Run the full Gateway pipeline. Does not mutate Notebook / Free Space / DB content.
+ * Provider stage only — call after successful preflight (+ optional AI config gate).
  */
-export async function runGatewayPipeline(
-  input: GatewayPipelineInput,
+export async function runGatewayPipelineAfterPreflight(
+  input: GatewayPipelineAfterPreflightInput,
 ): Promise<GatewayPipelineResult> {
-  const authz = authorizeGatewayUser(
-    input.authUserId,
-    // Peek context userId only after light shape check; full validate next.
-    typeof (input.body as { context?: { identity?: { userId?: string } } })?.context?.identity
-      ?.userId === 'string'
-      ? (input.body as { context: { identity: { userId: string } } }).context.identity.userId
-      : undefined,
-  );
-
-  if (!authz.ok) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: authz.code, message: authz.message },
-      },
-      usageLog: null,
-    };
-  }
-
-  const validated = validateZikukAiRequest(input.body);
-  if (!validated.ok) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: validated.code, message: validated.message },
-      },
-      usageLog: null,
-    };
-  }
-
-  const { request } = validated;
-  // Re-check authz against validated context (authoritative).
-  const authz2 = authorizeGatewayUser(authz.authUserId, request.context.identity.userId);
-  if (!authz2.ok) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: authz2.code, message: authz2.message },
-      },
-      usageLog: null,
-    };
-  }
+  const { request, authUserId } = input;
 
   // --- future retrieval seam (RAG) goes here ---
 
@@ -134,7 +104,7 @@ export async function runGatewayPipeline(
   });
 
   const usageLog: GatewayUsageLog = {
-    authUserId: authz2.authUserId,
+    authUserId,
     sectionId: request.context.academic.sectionId,
     capability: request.capability,
     providerId: route.providerId,
@@ -183,6 +153,30 @@ export async function runGatewayPipeline(
     },
     usageLog,
   };
+}
+
+/**
+ * Full pipeline: preflight then provider stage.
+ * Does not mutate Notebook / Free Space / DB content.
+ */
+export async function runGatewayPipeline(
+  input: GatewayPipelineInput,
+): Promise<GatewayPipelineResult> {
+  const preflight = preflightGatewayRequest({
+    body: input.body,
+    authUserId: input.authUserId,
+  });
+  if (!preflight.ok) {
+    return { response: preflight.response, usageLog: null };
+  }
+
+  return runGatewayPipelineAfterPreflight({
+    authUserId: preflight.authUserId,
+    request: preflight.request,
+    provider: input.provider,
+    routerConfig: input.routerConfig,
+    signal: input.signal,
+  });
 }
 
 /** Privacy-safe structured log (lengths/metadata only — never selection text). */

@@ -1,17 +1,23 @@
 /**
- * ZIKUK AI Gateway — Supabase Edge Function (M0.2).
+ * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 preflight).
  *
- * Auth: JWT via Authorization header → auth.getUser()
- * Secrets: AI_PROVIDER_API_KEY, AI_PROVIDER_BASE_URL, AI_MODEL (server-only)
+ * Flow:
+ *   platform verify_jwt
+ *   → auth.getUser()
+ *   → preflight (authz + validate)   ← independent of AI secrets
+ *   → AI_* config gate
+ *   → sanitize / prompt / router / provider
+ *
  * Never mutates Notebook / Free Space / product tables.
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.0';
 import { MAX_REQUEST_BODY_BYTES } from '../_shared/ai/bounds.ts';
+import { preflightGatewayRequest } from '../_shared/ai/preflightGatewayRequest.ts';
 import { createOpenAICompatibleProvider } from '../_shared/ai/providerOpenAICompatible.ts';
 import {
   formatUsageLogLine,
-  runGatewayPipeline,
+  runGatewayPipelineAfterPreflight,
 } from '../_shared/ai/runGatewayPipeline.ts';
 import type { ZikukAiResponse } from '../_shared/ai/requestTypes.ts';
 
@@ -119,6 +125,13 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Authz + validation BEFORE AI provider configuration.
+    const preflight = preflightGatewayRequest({ body, authUserId });
+    if (!preflight.ok) {
+      const status = httpStatusFor(preflight.response.error.code);
+      return jsonResponse(preflight.response, status);
+    }
+
     const apiKey = Deno.env.get('AI_PROVIDER_API_KEY') ?? '';
     const baseUrl = Deno.env.get('AI_PROVIDER_BASE_URL') ?? 'https://api.openai.com/v1';
     const model = Deno.env.get('AI_MODEL') ?? '';
@@ -146,9 +159,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const provider = createOpenAICompatibleProvider({ apiKey, baseUrl });
-    const { response, usageLog } = await runGatewayPipeline({
-      body,
-      authUserId,
+    const { response, usageLog } = await runGatewayPipelineAfterPreflight({
+      authUserId: preflight.authUserId,
+      request: preflight.request,
       provider,
       routerConfig: { model },
     });
