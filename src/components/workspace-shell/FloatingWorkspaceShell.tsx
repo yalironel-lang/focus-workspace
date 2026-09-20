@@ -2,7 +2,7 @@
  * Floating spatial OS controls — single primary bar, minimal permanent chrome.
  */
 
-import { useState, useRef, useEffect, type CSSProperties, type RefObject } from 'react';
+import { useState, useRef, useEffect, useCallback, type CSSProperties, type RefObject } from 'react';
 import { ArrowLeft, ChevronDown, MoreHorizontal, Palette, Search, Sliders } from 'lucide-react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { FocusMode } from '../../focusMode/focusModeTypes';
@@ -13,6 +13,8 @@ import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
 import { glassIsland, shellIconBtn } from './shellGlass';
 import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
+import { AskZikukPanel } from '../ai/AskZikukPanel';
+import type { AskCourseSourceRef } from '../../lib/ai/gatewayClient';
 
 const VIEW_MODES_ALL = [
   { id: 'free-space' as const, label: 'Workspace' },
@@ -84,6 +86,11 @@ interface Props {
   organize?: OrganizeProps;
   /** Lower visual weight while study session reader is active. */
   dimmed?: boolean;
+  /** M0.6 Ask ZIKUK — course-scoped Q&A entry (ephemeral panel; no layout resize). */
+  askZikuk?: {
+    sectionId: string;
+    onOpenSource: (source: AskCourseSourceRef) => void;
+  };
 }
 
 export function FloatingWorkspaceShell({
@@ -110,24 +117,35 @@ export function FloatingWorkspaceShell({
   onCreateBoard,
   organize,
   dimmed = false,
+  askZikuk,
 }: Props) {
   const [searchHover, setSearchHover] = useState(false);
   const [overflowHover, setOverflowHover] = useState(false);
+  const [askHover, setAskHover] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [spaceOpen, setSpaceOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowView, setOverflowView] = useState<'root' | 'organize'>('root');
 
   const spaceRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
+  const askRef = useRef<HTMLDivElement>(null);
+  const askTriggerRef = useRef<HTMLButtonElement>(null);
 
   const closeSpace = () => setSpaceOpen(false);
   const closeOverflow = () => {
     setOverflowOpen(false);
     setOverflowView('root');
   };
+  const closeAsk = useCallback(() => setAskOpen(false), []);
 
   useDismissOnOutside(spaceOpen, closeSpace, spaceRef);
   useDismissOnOutside(overflowOpen, closeOverflow, overflowRef);
+
+  // Close Ask when section changes
+  useEffect(() => {
+    setAskOpen(false);
+  }, [askZikuk?.sectionId]);
 
   const displayTitle = isExploreFocus ? EXPLORE_FOCUS_SECTION_TITLE : title;
   const activeBoard = boards?.find(b => b.id === activeBoardId);
@@ -406,6 +424,50 @@ export function FloatingWorkspaceShell({
                     ) : null}
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {askZikuk ? (
+              <div ref={askRef} style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  ref={askTriggerRef}
+                  type="button"
+                  aria-label="Ask ZIKUK"
+                  aria-expanded={askOpen}
+                  aria-haspopup="dialog"
+                  title="Ask ZIKUK"
+                  data-ask-zikuk-trigger="1"
+                  onClick={() => {
+                    setAskOpen(o => !o);
+                    closeSpace();
+                    closeOverflow();
+                  }}
+                  style={{
+                    ...shellIconBtn(tokens, askOpen || askHover ? 'hover' : 'idle'),
+                    flexShrink: 0,
+                    width: 'auto',
+                    minWidth: 36,
+                    padding: '0 11px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.02em',
+                    color: askOpen ? tokens.accent : tokens.textSecondary,
+                  }}
+                  onMouseEnter={() => setAskHover(true)}
+                  onMouseLeave={() => setAskHover(false)}
+                >
+                  Ask ZIKUK
+                </button>
+                <AskZikukPanel
+                  open={askOpen}
+                  onClose={closeAsk}
+                  sectionId={askZikuk.sectionId}
+                  tokens={tokens}
+                  accent={accent}
+                  onOpenSource={askZikuk.onOpenSource}
+                  triggerRef={askTriggerRef}
+                  dismissRootRef={askRef}
+                />
               </div>
             ) : null}
 

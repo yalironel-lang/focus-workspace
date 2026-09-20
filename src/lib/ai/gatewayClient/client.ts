@@ -96,6 +96,24 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
 }
 
 /**
+ * Supabase functions-js sets `data: null` on non-2xx and places the Response
+ * on `error.context`. Parse that body once through the shared contract.
+ */
+async function parseStructuredErrorFromInvoke(error: unknown): Promise<ZikukAiResponse | null> {
+  if (!error || typeof error !== 'object') return null;
+  const ctx = (error as { context?: unknown }).context;
+  if (!ctx || typeof ctx !== 'object') return null;
+  const json = (ctx as { json?: unknown }).json;
+  if (typeof json !== 'function') return null;
+  try {
+    const body = await (json as () => Promise<unknown>).call(ctx);
+    return parseResponseBody(body);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Invoke the secure ZIKUK AI Gateway with the current Supabase session JWT.
  * Does not accept provider/model/apiKey — those are server-only.
  */
@@ -128,12 +146,17 @@ export async function zikukAiRequest(
     });
 
     if (error) {
+      // Prefer authoritative gateway JSON from FunctionsHttpError.context (Response).
+      const fromContext = await parseStructuredErrorFromInvoke(error);
+      if (fromContext) return fromContext;
+
+      const fromData = parseResponseBody(data);
+      if (fromData) return fromData;
+
       const status = (error as { context?: { status?: number } }).context?.status;
       if (status === 401) {
         return asError('unauthenticated', 'Sign in required to use ZIKUK AI.');
       }
-      const parsed = parseResponseBody(data);
-      if (parsed) return parsed;
       return asError('provider_unavailable', 'AI Gateway is temporarily unavailable.');
     }
 

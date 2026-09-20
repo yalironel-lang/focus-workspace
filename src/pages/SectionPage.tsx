@@ -29,6 +29,8 @@ import {
   isExploreFocusWorkspace,
 } from '../lib/exploreFocus';
 import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWorkspaceShell';
+import { openAskCourseSource } from '../lib/ai/askCourse';
+import type { AskCourseSourceRef } from '../lib/ai/gatewayClient';
 import { InkPenTraceHud } from '../components/notebook/InkPenTraceHud';
 import { installInkPenTraceGlobal, isInkPenTraceEnabled } from '../lib/inkPenTrace';
 import { MathZone } from '../components/math-zone/MathZone';
@@ -1182,6 +1184,19 @@ export function SectionPage() {
       // Free Space surface reactivates and the viewer remounts at content.page.
     },
     [setSectionViewMode, seedMissingPositions, initPos],
+  );
+
+  const handleAskZikukOpenSource = useCallback(
+    (source: AskCourseSourceRef) => {
+      openAskCourseSource(source, {
+        getObject: id => sectionObjectsRef.current.getObject(id),
+        focusObject: focusNotebookOnCanvas,
+        updateObjectContent: (id, content) => {
+          sectionObjectsRef.current.updateObjectContent(id, content);
+        },
+      });
+    },
+    [focusNotebookOnCanvas],
   );
 
   const handleResumeSuggestion = useCallback(
@@ -3814,6 +3829,14 @@ export function SectionPage() {
                 onAutoArrange: handleAutoArrange,
                 onArrangeSelected: handleArrangeSelected,
                 onArrangeByGoal: handleArrangeByGoal,
+              }
+            : undefined
+        }
+        askZikuk={
+          sectionId
+            ? {
+                sectionId,
+                onOpenSource: handleAskZikukOpenSource,
               }
             : undefined
         }
