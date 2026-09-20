@@ -283,6 +283,9 @@ describe('M0.5B runKnowledgeIngest pipeline', () => {
     );
     const call = vi.mocked(deps.finalizeIngest).mock.calls[0]![0]!;
     expect(call.chunks?.every((c) => c.char_count === c.text.length)).toBe(true);
+    expect(typeof call.pageCount).toBe('number');
+    expect(call.pageCount).toBeGreaterThanOrEqual(1);
+    expect(res.result.pageCount).toBe(call.pageCount);
   });
 
   it('same hash ready → reused without finalize extract path', async () => {

@@ -17,6 +17,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `009_user_workspace_state.sql` | `user_workspace_state` table (Desk + Math Zone JSON) | **Applied (production, verified 2026-08-28)** |
 | `010_ai_usage_control.sql` | AI entitlements, usage events, counters + RPCs (M0.4) | **Applied (production, Release 1)** |
 | `011_ai_knowledge_foundation.sql` | AI knowledge sources + chunks + begin/finalize ingest RPCs (M0.5A) | **Applied (production, verified M0.5A closeout)** |
+| `012_ai_knowledge_semantic_index.sql` | Vector extension + embeddings + version index state + search/index RPCs (M0.5C) | **Applied (production, verified M0.5C Phase 3/4)** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 
@@ -27,6 +28,19 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **No pgvector / embeddings** (deferred to M0.5C)
 - **No extraction** (deferred to M0.5B)
 - **RLS:** owners may SELECT own rows; clients cannot INSERT/UPDATE/DELETE corpus
+
+## Migration 012 — AI knowledge semantic index (M0.5C)
+
+- **Applied on production** after Phase 3 Postgres/pgvector verification and Phase 4 first real index.
+- **Extension:** `vector` in schema `extensions` (width contract **1536**; no HNSW/IVFFlat)
+- **Search RPC:** `ai_knowledge_search` uses `search_path = public, extensions` and positional `RETURN QUERY` (OUT-column conflict fix)
+- **Objects:** `retrieval_source_version` on sources; `ai_knowledge_version_index`; `ai_knowledge_embeddings`
+- **Index state model:** per `(source_id, source_version)` — avoids ambiguous source-level `index_status` when text v2 fails while retrieval stays on v1
+- **RPCs (service_role only):** `ai_knowledge_begin_index`, `ai_knowledge_finalize_index_success`, `ai_knowledge_finalize_index_failure`, `ai_knowledge_upsert_embeddings`, `ai_knowledge_gc_non_retrieval_versions`, `ai_knowledge_search`
+- **Finalize change:** retain prior text versions (no retrieval blackout); persist server-derived `page_count`
+- **Upsert:** job-scoped embedding writes; stale jobs cannot persist vectors
+- **GC:** separate from retrieval flip; deletes versions that are neither current text nor retrieval-active
+- **Vectors:** never SELECT-granted to `authenticated`/`anon`
 
 ## Migration 007 — workspace extensions
 

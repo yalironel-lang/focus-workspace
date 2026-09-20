@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.ai-knowledge-ingest]
 verify_jwt = true
+
+[functions.ai-knowledge-index]
+verify_jwt = true

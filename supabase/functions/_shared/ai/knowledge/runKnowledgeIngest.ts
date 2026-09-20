@@ -80,6 +80,8 @@ export type KnowledgeIngestDeps = {
     status: 'ready' | 'failed';
     errorCode?: string;
     chunks?: KnowledgeChunk[];
+    /** Server-derived extraction page count only (never client authority). */
+    pageCount?: number;
   }) => Promise<FinalizeIngestResult>;
   pdfjs: PdfJsModule;
   nowMs?: () => number;
@@ -312,6 +314,7 @@ export async function runKnowledgeIngest(input: {
     sourceVersion,
     status: 'ready',
     chunks,
+    pageCount: extracted.pageCount,
   });
 
   if (!finalized.ok || finalized.source_version == null) {

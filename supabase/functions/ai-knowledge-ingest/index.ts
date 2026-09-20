@@ -407,13 +407,18 @@ Deno.serve(async (req: Request) => {
         };
       },
 
-      async finalizeIngest({ sourceId, sourceVersion, status, errorCode, chunks }) {
+      async finalizeIngest({ sourceId, sourceVersion, status, errorCode, chunks, pageCount }) {
         const { data, error } = await admin.rpc('ai_knowledge_finalize_ingest', {
           p_source_id: sourceId,
           p_source_version: sourceVersion,
           p_status: status,
           p_error_code: errorCode ?? null,
           p_chunks: chunks ?? null,
+          // Server-derived extraction page count only (M0.5C backlog fix).
+          p_page_count:
+            typeof pageCount === 'number' && pageCount >= 1 && pageCount <= 50
+              ? pageCount
+              : null,
         });
         if (error) return { ok: false, code: 'internal_error' };
         const result = (data ?? { ok: false, code: 'internal_error' }) as {
