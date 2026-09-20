@@ -129,10 +129,19 @@ function cancelPendingUpload(ids: SpatialAssetIds): void {
   pendingUploads.delete(key);
 }
 
+/**
+ * Enqueue a spatial asset upload from current local IDB bytes.
+ *
+ * @param forceUpload When true (explicit local save), skip the "already in cloud"
+ *   short-circuit. Presence of any object at the canonical path is NOT proof that
+ *   cloud bytes equal the latest local bytes (PDF replacement). Passive hydrate /
+ *   reconcile paths must leave forceUpload false to avoid upload loops.
+ */
 async function enqueueSpatialUploadNow(
   ids: SpatialAssetIds,
   updatedAt: number,
   referenced = true,
+  forceUpload = false,
 ): Promise<boolean> {
   ensureSpatialAssetResolversRegistered();
   cancelPendingUpload(ids);
@@ -162,7 +171,14 @@ async function enqueueSpatialUploadNow(
     return true;
   }
 
-  if (isSupabaseConfigured && typeof navigator !== 'undefined' && navigator.onLine !== false) {
+  // Presence ≠ equality. Only skip when this is a passive probe (not an explicit
+  // local save). Explicit PDF saves pass forceUpload=true via onSpatialPdfSaved.
+  if (
+    !forceUpload &&
+    isSupabaseConfigured &&
+    typeof navigator !== 'undefined' &&
+    navigator.onLine !== false
+  ) {
     const path = buildSpatialAssetPath(ids);
     const downloaded = await downloadUserContentAsset(path);
     if (downloaded.ok) {
@@ -240,14 +256,18 @@ export async function onSpatialImageSaved(
   return flushSpatialAssetCloudEnqueueNow(ids, referenced);
 }
 
-/** After local PDF blob save — enqueue cloud upload immediately (honest Saved). */
+/**
+ * After an explicit local PDF blob save/replacement — enqueue cloud upload.
+ * Always treats local IDB bytes as authoritative (forceUpload); does not treat
+ * existing cloud presence as "already synced".
+ */
 export async function onSpatialPdfSaved(
   ids: Partial<SpatialAssetIds>,
   referenced = true,
 ): Promise<boolean> {
   if (!idsReady(ids) || ids.assetType !== 'pdf' || !referenced) return true;
   clearUserContentAssetDeleted(entityKey(ids));
-  return flushSpatialAssetCloudEnqueueNow(ids, referenced);
+  return flushSpatialAssetCloudEnqueueNow(ids, referenced, /* forceUpload */ true);
 }
 
 export function scheduleSpatialAssetCloudUpload(
@@ -263,7 +283,8 @@ export function scheduleSpatialAssetCloudUpload(
     key,
     setTimeout(() => {
       pendingUploads.delete(key);
-      void enqueueSpatialUploadNow(ids, updatedAt, referenced);
+      // Passive schedule — keep alreadyInCloud skip (forceUpload=false).
+      void enqueueSpatialUploadNow(ids, updatedAt, referenced, false);
     }, ENQUEUE_DEBOUNCE_MS),
   );
 }
@@ -271,10 +292,11 @@ export function scheduleSpatialAssetCloudUpload(
 export async function flushSpatialAssetCloudEnqueueNow(
   ids: Partial<SpatialAssetIds>,
   referenced = true,
+  forceUpload = false,
 ): Promise<boolean> {
   if (!idsReady(ids)) return true;
   cancelPendingUpload(ids);
-  return enqueueSpatialUploadNow(ids, Date.now(), referenced);
+  return enqueueSpatialUploadNow(ids, Date.now(), referenced, forceUpload);
 }
 
 export async function enqueueSpatialAssetCloudDelete(
