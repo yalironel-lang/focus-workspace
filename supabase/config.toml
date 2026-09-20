@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.ai-knowledge-index]
 verify_jwt = true
+
+[functions.ai-knowledge-process]
+verify_jwt = true
