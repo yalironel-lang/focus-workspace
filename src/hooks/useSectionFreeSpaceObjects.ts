@@ -1232,7 +1232,21 @@ export function useSectionFreeSpaceObjects(
     if (!ns.ok) return;
     registerFreeSpaceAutoFlushScope(ns.namespace);
     requestFreeSpacePendingFlushNow(ns.namespace);
-    const onOnline = () => requestFreeSpacePendingFlushNow(ns.namespace);
+    // M0.7B.3: drain existing needsProcess markers for this section only
+    // (no historical PDF scan/mark). Piggybacks mount + online recovery.
+    void import('../lib/ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
+      ({ recoverKnowledgeProcessForSection }) => {
+        recoverKnowledgeProcessForSection(sectionId, userId);
+      },
+    ).catch(() => undefined);
+    const onOnline = () => {
+      requestFreeSpacePendingFlushNow(ns.namespace);
+      void import('../lib/ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
+        ({ recoverKnowledgeProcessForSection }) => {
+          recoverKnowledgeProcessForSection(sectionId, userId);
+        },
+      ).catch(() => undefined);
+    };
     window.addEventListener('online', onOnline);
     return () => {
       window.removeEventListener('online', onOnline);
@@ -1877,6 +1891,14 @@ export function useSectionFreeSpaceObjects(
               assetType: victim.type === 'pdf' ? 'pdf' : 'spatial-image',
             });
           });
+          // M0.7B.3: cancel knowledge process for deleted Free Space PDF (side-effect only).
+          if (victim.type === 'pdf') {
+            void import('../lib/ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
+              ({ cancelPdfKnowledgeProcessSafe }) => {
+                cancelPdfKnowledgeProcessSafe(sectionId, victim.id);
+              },
+            ).catch(() => undefined);
+          }
         }
         // M7.0: do NOT cascade-delete notebook ink/images on soft-delete.
         // Assets remain until permanent delete / tombstone expiry (deleteTombstonePermanently).

@@ -1,6 +1,6 @@
 /**
  * Client invoke seam for M0.7A ai-knowledge-process.
- * NOT wired to PDF upload — call explicitly / via handoff controller only.
+ * M0.7B.3 wires Free Space PDF Storage success → handoff controller → this client.
  */
 
 export const AI_KNOWLEDGE_PROCESS_FUNCTION_NAME = 'ai-knowledge-process' as const;

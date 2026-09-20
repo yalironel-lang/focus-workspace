@@ -6,7 +6,7 @@
  * - generation-safe marker clear
  * - permanent vs retryable failure policy
  *
- * NOT wired to PDF upload lifecycle yet.
+ * M0.7B.3 wires PDF Storage success → markNeedsProcess via pdfKnowledgeWiring.
  */
 
 import {

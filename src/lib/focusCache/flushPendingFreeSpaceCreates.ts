@@ -47,7 +47,10 @@ import {
   isUserContentAssetWrite,
   processUserContentAssetOp,
 } from '../userContentAssetFlush';
-import { USER_CONTENT_ASSET_ENTITY_TYPE } from '../userContentAssetDescriptor';
+import {
+  parseUserContentAssetDescriptor,
+  USER_CONTENT_ASSET_ENTITY_TYPE,
+} from '../userContentAssetDescriptor';
 import {
   upsertWorkspaceState,
 } from './userWorkspaceStateCloud';
@@ -292,6 +295,28 @@ export async function flushPendingFreeSpaceCreates(
         if (removeStatus === 'remove_failed') {
           return { ...result, stoppedReason: 'remove_failed' };
         }
+        // M0.7B.3: durable PDF Storage upload → knowledge handoff (side-effect only).
+        // Must never change flush success / stop reason — AI is best-effort follow-on.
+        try {
+          const descriptor = parseUserContentAssetDescriptor(op.payload);
+          if (
+            descriptor &&
+            descriptor.assetType === 'pdf' &&
+            descriptor.assetOp === 'upload'
+          ) {
+            void import('../ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
+              ({ notifyPdfStorageUploadSucceededSafe }) => {
+                notifyPdfStorageUploadSucceededSafe({
+                  userId: descriptor.userId,
+                  sectionId: descriptor.sectionId,
+                  sourceObjectId: descriptor.objectId,
+                });
+              },
+            ).catch(() => undefined);
+          }
+        } catch {
+          // Swallow — Storage upload already succeeded and op was removed.
+        }
         continue;
       }
 
@@ -509,6 +534,21 @@ export async function flushPendingFreeSpaceCreates(
         if (prev == null || version >= prev) {
           latestWrittenUpdatedAt.set(op.entityId, version);
         }
+      }
+      // M0.7B.3: FSO durable → drain knowledge if PDF marker already set.
+      // Side-effect only — must not alter flush success after cloud upsert.
+      try {
+        void import('../ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
+          ({ notifyFreeSpaceObjectCloudWriteSucceededSafe }) => {
+            notifyFreeSpaceObjectCloudWriteSucceededSafe({
+              userId: ns.namespace.userId,
+              sectionId: ns.namespace.workspaceId,
+              objectId: op.entityId,
+            });
+          },
+        ).catch(() => undefined);
+      } catch {
+        // Swallow — FSO cloud write already succeeded and op was removed.
       }
     }
 

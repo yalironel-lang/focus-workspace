@@ -21,3 +21,14 @@ export {
   type DrainKnowledgeProcessResult,
   type KnowledgeProcessRequestFn,
 } from './controller';
+export {
+  cancelPdfKnowledgeProcessSafe,
+  isStructuredFsoSafeForKnowledgeProcess,
+  notifyFreeSpaceObjectCloudWriteSucceededSafe,
+  notifyPdfStorageUploadSucceededSafe,
+  onFreeSpaceObjectCloudWriteSucceeded,
+  onPdfStorageUploadSucceeded,
+  recoverKnowledgeProcessForSection,
+  scheduleKnowledgeProcessDrainSafe,
+  type PdfKnowledgeHandoffIds,
+} from './pdfKnowledgeWiring';
