@@ -168,11 +168,23 @@ describe('validateZikukAiRequest', () => {
   it('rejects unsupported capability', () => {
     const r = validateZikukAiRequest({
       version: 1,
-      capability: 'ask_course',
+      capability: 'ask_notebook',
       context: baseContext(),
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('unsupported_capability');
+  });
+
+  it('rejects ask_course when Explain-shaped context is attached', () => {
+    const r = validateZikukAiRequest({
+      version: 1,
+      capability: 'ask_course',
+      sectionId: 'e2cfb231-cb28-4a4c-8aed-15eec307bac0',
+      question: 'What is this?',
+      context: baseContext(),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('invalid_request');
   });
 
   it('rejects non-notebook surface', () => {

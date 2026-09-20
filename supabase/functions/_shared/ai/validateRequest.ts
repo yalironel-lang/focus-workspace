@@ -8,7 +8,14 @@ import {
   MAX_SURROUNDING_BLOCKS,
   MAX_TABLE_PREVIEW_CHARS,
 } from './bounds.ts';
-import { FORBIDDEN_CLIENT_CONTROL_KEYS, type GatewayAiContext, type ZikukAiRequest } from './requestTypes.ts';
+import { MAX_ASK_COURSE_QUESTION_CHARS } from './askCourse/bounds.ts';
+import {
+  ASK_COURSE_ALLOWED_KEYS,
+  FORBIDDEN_CLIENT_CONTROL_KEYS,
+  type GatewayAiContext,
+  type ZikukAiAskCourseRequest,
+  type ZikukAiRequest,
+} from './requestTypes.ts';
 import type { ZikukAiErrorCode } from './requestTypes.ts';
 
 export type ValidateOk = { ok: true; request: ZikukAiRequest };
@@ -29,6 +36,9 @@ function hasForbiddenControlKeys(body: Record<string, unknown>): string | null {
 function strLen(v: unknown): number {
   return typeof v === 'string' ? v.length : 0;
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function validateFocusContent(focus: GatewayAiContext['focus']): ValidateErr | null {
   if (focus.kind === 'empty') {
@@ -88,8 +98,6 @@ function validateFocusContent(focus: GatewayAiContext['focus']): ValidateErr | n
         message: 'Selected table cell text is empty.',
       };
     }
-    // whole_table with no cell text is still explainable as structure-only — allow,
-    // but prefer having some preview in surroundings.
     if (text.length > MAX_SELECTION_CHARS) {
       return {
         ok: false,
@@ -146,15 +154,69 @@ function validateSurroundings(ctx: GatewayAiContext): ValidateErr | null {
   return null;
 }
 
-/**
- * Validate unknown JSON body into a ZikukAiRequest.
- * Strict: rejects forbidden provider-control keys and unsupported shapes.
- */
-export function validateZikukAiRequest(body: unknown): ValidateResult {
-  if (!isRecord(body)) {
-    return { ok: false, code: 'invalid_request', message: 'Request must be a JSON object.' };
+function validateAskCourse(body: Record<string, unknown>): ValidateResult {
+  const forbidden = hasForbiddenControlKeys(body);
+  if (forbidden) {
+    return {
+      ok: false,
+      code: 'invalid_request',
+      message: `Unsupported field: ${forbidden}.`,
+    };
   }
 
+  const keys = Object.keys(body);
+  for (const k of keys) {
+    if (!(ASK_COURSE_ALLOWED_KEYS as readonly string[]).includes(k)) {
+      return {
+        ok: false,
+        code: 'invalid_request',
+        message: `Unsupported field: ${k}.`,
+      };
+    }
+  }
+
+  if (body.version !== 1) {
+    return { ok: false, code: 'invalid_request', message: 'Unsupported request version.' };
+  }
+  if (body.capability !== 'ask_course') {
+    return {
+      ok: false,
+      code: 'unsupported_capability',
+      message: 'This AI capability is not available.',
+    };
+  }
+  if (typeof body.sectionId !== 'string' || !body.sectionId.trim()) {
+    return { ok: false, code: 'invalid_request', message: 'Invalid sectionId.' };
+  }
+  const sectionId = body.sectionId.trim();
+  if (!UUID_RE.test(sectionId)) {
+    return { ok: false, code: 'invalid_request', message: 'Invalid sectionId.' };
+  }
+  if (typeof body.question !== 'string') {
+    return { ok: false, code: 'invalid_request', message: 'Invalid question.' };
+  }
+  const question = body.question.trim();
+  if (!question) {
+    return { ok: false, code: 'invalid_request', message: 'Question is empty.' };
+  }
+  if (question.length > MAX_ASK_COURSE_QUESTION_CHARS) {
+    return {
+      ok: false,
+      code: 'invalid_request',
+      message: 'Question exceeds the maximum allowed size.',
+    };
+  }
+
+  const request: ZikukAiAskCourseRequest = {
+    version: 1,
+    capability: 'ask_course',
+    sectionId,
+    question,
+  };
+  return { ok: true, request };
+}
+
+function validateExplainSelection(body: Record<string, unknown>): ValidateResult {
   const forbidden = hasForbiddenControlKeys(body);
   if (forbidden) {
     return {
@@ -221,6 +283,14 @@ export function validateZikukAiRequest(body: unknown): ValidateResult {
 
   const request = body as unknown as ZikukAiRequest;
 
+  if (request.capability !== 'explain_selection') {
+    return {
+      ok: false,
+      code: 'unsupported_capability',
+      message: 'This AI capability is not available.',
+    };
+  }
+
   const focusErr = validateFocusContent(request.context.focus);
   if (focusErr) return focusErr;
 
@@ -228,4 +298,38 @@ export function validateZikukAiRequest(body: unknown): ValidateResult {
   if (surrErr) return surrErr;
 
   return { ok: true, request };
+}
+
+/**
+ * Validate unknown JSON body into a ZikukAiRequest.
+ * Strict: rejects forbidden provider-control keys and unsupported shapes.
+ */
+export function validateZikukAiRequest(body: unknown): ValidateResult {
+  if (!isRecord(body)) {
+    return { ok: false, code: 'invalid_request', message: 'Request must be a JSON object.' };
+  }
+
+  if (body.capability === 'ask_course') {
+    return validateAskCourse(body);
+  }
+
+  if (body.capability === 'explain_selection') {
+    return validateExplainSelection(body);
+  }
+
+  // Unknown capability — still reject forbidden keys first when present
+  const forbidden = hasForbiddenControlKeys(body);
+  if (forbidden) {
+    return {
+      ok: false,
+      code: 'invalid_request',
+      message: `Unsupported field: ${forbidden}.`,
+    };
+  }
+
+  return {
+    ok: false,
+    code: 'unsupported_capability',
+    message: 'This AI capability is not available.',
+  };
 }

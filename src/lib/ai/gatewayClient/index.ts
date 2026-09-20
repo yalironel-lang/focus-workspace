@@ -4,8 +4,11 @@
  */
 
 export type {
+  AskCourseSourceRef,
+  ZikukAiAskCourseRequest,
   ZikukAiCapability,
   ZikukAiErrorCode,
+  ZikukAiExplainSelectionRequest,
   ZikukAiRequest,
   ZikukAiResponse,
 } from './types';

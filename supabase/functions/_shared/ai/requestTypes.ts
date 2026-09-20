@@ -1,18 +1,20 @@
 /**
- * Server-side ZIKUK AI Gateway wire types (M0.2).
+ * Server-side ZIKUK AI Gateway wire types (M0.2 + M0.5D ask_course).
  * Must stay aligned with src/lib/ai/gatewayClient/types.ts (client contract).
  * No provider SDKs, no TipTap, no secrets.
  */
 
-/** M0.2: only explain_selection. */
-export type ZikukAiCapability = 'explain_selection';
+/** Release 1 + M0.5D. */
+export type ZikukAiCapability = 'explain_selection' | 'ask_course';
 
 export type ZikukAiErrorCode =
   | 'unauthenticated'
   | 'auth_mismatch'
+  | 'not_found'
   | 'invalid_request'
   | 'unsupported_capability'
   | 'unsupported_content'
+  | 'knowledge_not_found'
   | 'rate_limited'
   | 'provider_unavailable'
   | 'provider_timeout'
@@ -106,10 +108,26 @@ export type GatewayAiContext = {
   surroundings: { blocks: GatewaySurroundingBlock[]; truncated: boolean };
 };
 
-export type ZikukAiRequest = {
+export type ZikukAiExplainSelectionRequest = {
   version: 1;
-  capability: ZikukAiCapability;
+  capability: 'explain_selection';
   context: GatewayAiContext;
+};
+
+export type ZikukAiAskCourseRequest = {
+  version: 1;
+  capability: 'ask_course';
+  sectionId: string;
+  question: string;
+};
+
+export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
+
+export type AskCourseSourceRef = {
+  index: number;
+  sourceObjectId: string;
+  fileName: string | null;
+  pageNumber: number;
 };
 
 export type ZikukAiResponse =
@@ -117,7 +135,21 @@ export type ZikukAiResponse =
       version: 1;
       ok: true;
       result: { type: 'text'; text: string };
-      meta?: { capability: ZikukAiCapability; latencyMs?: number };
+      meta?: { capability: 'explain_selection'; latencyMs?: number };
+    }
+  | {
+      version: 1;
+      ok: true;
+      result: {
+        type: 'ask_course';
+        text: string;
+        sources: AskCourseSourceRef[];
+      };
+      meta?: {
+        capability: 'ask_course';
+        latencyMs?: number;
+        retrievalHitCount?: number;
+      };
     }
   | {
       version: 1;
@@ -125,7 +157,10 @@ export type ZikukAiResponse =
       error: { code: ZikukAiErrorCode; message: string };
     };
 
-/** Forbidden client-control fields — presence → invalid_request. */
+/**
+ * Forbidden client-control / authority fields — presence → invalid_request.
+ * ask_course also uses a strict allowlist of keys.
+ */
 export const FORBIDDEN_CLIENT_CONTROL_KEYS = [
   'provider',
   'model',
@@ -146,4 +181,32 @@ export const FORBIDDEN_CLIENT_CONTROL_KEYS = [
   'entitlement',
   'isOwner',
   'is_owner',
+  'userId',
+  'user_id',
+  'embeddingModel',
+  'embedding_model',
+  'embeddingDimensions',
+  'embedding_dimensions',
+  'dimensions',
+  'topK',
+  'top_k',
+  'limit',
+  'similarityThreshold',
+  'similarity_threshold',
+  'threshold',
+  'vectors',
+  'vector',
+  'chunks',
+  'sources',
+  'sourceIds',
+  'source_ids',
+  'sourceObjectIds',
+  'source_object_ids',
+  'retrievedContext',
+  'retrieved_context',
+  'systemPrompt',
+  'system_prompt',
 ] as const;
+
+/** Strict allowlist for ask_course request objects. */
+export const ASK_COURSE_ALLOWED_KEYS = ['version', 'capability', 'sectionId', 'question'] as const;

@@ -6,6 +6,7 @@
 import { isSupabaseConfigured, supabase } from '../../supabase';
 import {
   AI_GATEWAY_FUNCTION_NAME,
+  type AskCourseSourceRef,
   type ZikukAiErrorCode,
   type ZikukAiRequest,
   type ZikukAiResponse,
@@ -15,23 +16,67 @@ function asError(code: ZikukAiErrorCode, message: string): ZikukAiResponse {
   return { version: 1, ok: false, error: { code, message } };
 }
 
+function parseSources(raw: unknown): AskCourseSourceRef[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: AskCourseSourceRef[] = [];
+  for (const s of raw) {
+    if (!s || typeof s !== 'object') return null;
+    const o = s as Record<string, unknown>;
+    if (typeof o.index !== 'number' || typeof o.sourceObjectId !== 'string') return null;
+    if (typeof o.pageNumber !== 'number') return null;
+    if (o.fileName !== null && typeof o.fileName !== 'string') return null;
+    out.push({
+      index: o.index,
+      sourceObjectId: o.sourceObjectId,
+      fileName: (o.fileName as string | null) ?? null,
+      pageNumber: o.pageNumber,
+    });
+  }
+  return out;
+}
+
 function parseResponseBody(data: unknown): ZikukAiResponse | null {
   if (!data || typeof data !== 'object') return null;
   const o = data as Record<string, unknown>;
   if (o.version !== 1 || typeof o.ok !== 'boolean') return null;
   if (o.ok === true) {
-    const result = o.result as { type?: string; text?: string } | undefined;
+    const result = o.result as Record<string, unknown> | undefined;
     if (result?.type === 'text' && typeof result.text === 'string') {
       const meta = o.meta as { capability?: string; latencyMs?: number } | undefined;
       return {
         version: 1,
         ok: true,
         result: { type: 'text', text: result.text },
-        ...(meta && typeof meta.capability === 'string'
+        ...(meta && meta.capability === 'explain_selection'
           ? {
               meta: {
-                capability: meta.capability as import('./types').ZikukAiCapability,
+                capability: 'explain_selection' as const,
                 ...(typeof meta.latencyMs === 'number' ? { latencyMs: meta.latencyMs } : {}),
+              },
+            }
+          : {}),
+      };
+    }
+    if (result?.type === 'ask_course' && typeof result.text === 'string') {
+      const sources = parseSources(result.sources);
+      if (!sources) return null;
+      const meta = o.meta as {
+        capability?: string;
+        latencyMs?: number;
+        retrievalHitCount?: number;
+      } | undefined;
+      return {
+        version: 1,
+        ok: true,
+        result: { type: 'ask_course', text: result.text, sources },
+        ...(meta && meta.capability === 'ask_course'
+          ? {
+              meta: {
+                capability: 'ask_course' as const,
+                ...(typeof meta.latencyMs === 'number' ? { latencyMs: meta.latencyMs } : {}),
+                ...(typeof meta.retrievalHitCount === 'number'
+                  ? { retrievalHitCount: meta.retrievalHitCount }
+                  : {}),
               },
             }
           : {}),
@@ -62,12 +107,19 @@ export async function zikukAiRequest(
     return asError('internal_error', 'ZIKUK is not connected to the cloud.');
   }
 
-  // Strip any accidental provider-control fields if a caller spreads extras.
-  const body: ZikukAiRequest = {
-    version: 1,
-    capability: request.capability,
-    context: request.context,
-  };
+  const body: ZikukAiRequest =
+    request.capability === 'ask_course'
+      ? {
+          version: 1,
+          capability: 'ask_course',
+          sectionId: request.sectionId,
+          question: request.question,
+        }
+      : {
+          version: 1,
+          capability: 'explain_selection',
+          context: request.context,
+        };
 
   try {
     const { data, error } = await supabase.functions.invoke(AI_GATEWAY_FUNCTION_NAME, {
@@ -80,7 +132,6 @@ export async function zikukAiRequest(
       if (status === 401) {
         return asError('unauthenticated', 'Sign in required to use ZIKUK AI.');
       }
-      // Function may still return a JSON error body in `data`
       const parsed = parseResponseBody(data);
       if (parsed) return parsed;
       return asError('provider_unavailable', 'AI Gateway is temporarily unavailable.');

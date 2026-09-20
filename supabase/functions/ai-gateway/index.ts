@@ -1,5 +1,5 @@
 /**
- * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 + M0.4 usage control).
+ * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 + M0.4 + M0.5D ask_course).
  *
  * Flow:
  *   platform verify_jwt
@@ -7,7 +7,8 @@
  *   → preflight (authz + validate)   ← independent of AI secrets
  *   → AI_* config gate
  *   → entitlement / safety / quota (fail-closed, service role)
- *   → sanitize / prompt / router / provider
+ *   → [ask_course: section auth → embed → search → grounded generate]
+ *   → explain_selection: sanitize / prompt / router / provider
  *   → usage event (fail-open after provider success)
  *
  * Never mutates Notebook / Free Space / product tables.
@@ -15,6 +16,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.0';
 import { MAX_REQUEST_BODY_BYTES } from '../_shared/ai/bounds.ts';
+import { KNOWLEDGE_EMBEDDING_DIMENSIONS } from '../_shared/ai/knowledge/bounds.ts';
+import { createOpenAICompatibleEmbeddingProvider } from '../_shared/ai/knowledge/providerEmbeddings.ts';
 import { preflightGatewayRequest } from '../_shared/ai/preflightGatewayRequest.ts';
 import { createOpenAICompatibleProvider } from '../_shared/ai/providerOpenAICompatible.ts';
 import {
@@ -47,6 +50,9 @@ function httpStatusFor(code: string): number {
     case 'unsupported_capability':
     case 'unsupported_content':
       return 400;
+    case 'not_found':
+    case 'knowledge_not_found':
+      return 404;
     case 'rate_limited':
     case 'quota_exceeded':
       return 429;
@@ -191,12 +197,56 @@ Deno.serve(async (req: Request) => {
     const enforcement = createSupabaseEnforcementStore(admin);
 
     const provider = createOpenAICompatibleProvider({ apiKey, baseUrl });
+    const embeddingModel = Deno.env.get('AI_EMBEDDING_MODEL')?.trim() || undefined;
+    const dimsRaw = Deno.env.get('AI_EMBEDDING_DIMENSIONS');
+    const embeddingDimensions = dimsRaw ? Number(dimsRaw) : undefined;
+
+    const askCourseDeps =
+      preflight.request.capability === 'ask_course'
+        ? {
+            loadSectionOwner: async (sectionId: string) => {
+              const { data, error } = await admin
+                .from('sections')
+                .select('user_id')
+                .eq('id', sectionId)
+                .maybeSingle();
+              if (error || !data?.user_id) return null;
+              return { userId: data.user_id as string };
+            },
+            embeddingProvider: createOpenAICompatibleEmbeddingProvider({ apiKey, baseUrl }),
+            embeddingRouterConfig: {
+              model: embeddingModel,
+              dimensions: embeddingDimensions,
+            },
+            searchKnowledge: async (input: {
+              userId: string;
+              sectionId: string;
+              queryEmbedding: number[];
+              limit: number;
+              embeddingModel: string;
+              embeddingDimensions: number;
+            }) => {
+              const { data, error } = await admin.rpc('ai_knowledge_search', {
+                p_user_id: input.userId,
+                p_section_id: input.sectionId,
+                p_query_embedding: input.queryEmbedding,
+                p_limit: input.limit,
+                p_embedding_model: input.embeddingModel,
+                p_embedding_dimensions: input.embeddingDimensions ?? KNOWLEDGE_EMBEDDING_DIMENSIONS,
+              });
+              if (error) return { ok: false as const };
+              return { ok: true as const, raw: data ?? [] };
+            },
+          }
+        : undefined;
+
     const { response, usageLog } = await runGatewayPipelineAfterPreflight({
       authUserId: preflight.authUserId,
       request: preflight.request,
       provider,
       routerConfig: { model },
       enforcement,
+      askCourseDeps,
     });
 
     if (usageLog) {

@@ -39,13 +39,22 @@ function peekContextUserId(body: unknown): string | undefined {
   return typeof identity?.userId === 'string' ? identity.userId : undefined;
 }
 
+function peekCapability(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const c = (body as { capability?: unknown }).capability;
+  return typeof c === 'string' ? c : undefined;
+}
+
 /**
  * Authorize + validate before any provider configuration or model call.
+ * Section ownership for ask_course is enforced later (before embed).
  */
 export function preflightGatewayRequest(input: PreflightGatewayInput): PreflightGatewayResult {
-  // Early authz using peeked userId (catches unauthenticated / obvious mismatch
-  // even when the body is malformed). Full validate follows.
-  const authzPeek = authorizeGatewayUser(input.authUserId, peekContextUserId(input.body));
+  const capability = peekCapability(input.body);
+
+  // Early authz: for ask_course there is no context.identity — only require JWT uid.
+  const peekUserId = capability === 'ask_course' ? undefined : peekContextUserId(input.body);
+  const authzPeek = authorizeGatewayUser(input.authUserId, peekUserId);
   if (!authzPeek.ok) {
     return {
       ok: false,
@@ -70,7 +79,17 @@ export function preflightGatewayRequest(input: PreflightGatewayInput): Preflight
   }
 
   const { request } = validated;
-  // Authoritative authz against validated context.identity.userId
+
+  if (request.capability === 'ask_course') {
+    // JWT uid only; section ownership checked in ask_course pipeline before embed.
+    return {
+      ok: true,
+      authUserId: authzPeek.authUserId,
+      request,
+    };
+  }
+
+  // Authoritative authz against validated context.identity.userId (Explain)
   const authz = authorizeGatewayUser(authzPeek.authUserId, request.context.identity.userId);
   if (!authz.ok) {
     return {

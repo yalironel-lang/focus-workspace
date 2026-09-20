@@ -1,5 +1,5 @@
 /**
- * Client-facing ZIKUK AI Gateway contracts (M0.2).
+ * Client-facing ZIKUK AI Gateway contracts (M0.2 + M0.5D ask_course).
  * Provider-independent. No secrets, models, or provider SDKs.
  *
  * Wire shape must stay aligned with supabase/functions/_shared/ai/requestTypes.ts.
@@ -7,14 +7,16 @@
 
 import type { ZikukAiContext } from '../context/types';
 
-export type ZikukAiCapability = 'explain_selection';
+export type ZikukAiCapability = 'explain_selection' | 'ask_course';
 
 export type ZikukAiErrorCode =
   | 'unauthenticated'
   | 'auth_mismatch'
+  | 'not_found'
   | 'invalid_request'
   | 'unsupported_capability'
   | 'unsupported_content'
+  | 'knowledge_not_found'
   | 'rate_limited'
   | 'provider_unavailable'
   | 'provider_timeout'
@@ -25,10 +27,26 @@ export type ZikukAiErrorCode =
 /**
  * Provider-independent request. Client must NOT include provider/model/apiKey/messages.
  */
-export type ZikukAiRequest = {
+export type ZikukAiExplainSelectionRequest = {
   version: 1;
-  capability: ZikukAiCapability;
+  capability: 'explain_selection';
   context: ZikukAiContext;
+};
+
+export type ZikukAiAskCourseRequest = {
+  version: 1;
+  capability: 'ask_course';
+  sectionId: string;
+  question: string;
+};
+
+export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
+
+export type AskCourseSourceRef = {
+  index: number;
+  sourceObjectId: string;
+  fileName: string | null;
+  pageNumber: number;
 };
 
 export type ZikukAiResponse =
@@ -36,7 +54,21 @@ export type ZikukAiResponse =
       version: 1;
       ok: true;
       result: { type: 'text'; text: string };
-      meta?: { capability: ZikukAiCapability; latencyMs?: number };
+      meta?: { capability: 'explain_selection'; latencyMs?: number };
+    }
+  | {
+      version: 1;
+      ok: true;
+      result: {
+        type: 'ask_course';
+        text: string;
+        sources: AskCourseSourceRef[];
+      };
+      meta?: {
+        capability: 'ask_course';
+        latencyMs?: number;
+        retrievalHitCount?: number;
+      };
     }
   | {
       version: 1;

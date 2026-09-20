@@ -4,8 +4,8 @@
  * Flow:
  *   preflight (authz + validate)
  *   → entitlement / safety / quota (fail-closed)
- *   → [future RAG]
- *   → sanitize → prompt → route → provider
+ *   → [retrieval seam: ask_course only]
+ *   → sanitize → prompt → route → provider  (explain_selection)
  *   → usage accounting (fail-open after provider success)
  *
  * Edge entry runs preflight BEFORE the AI config gate so auth_mismatch /
@@ -24,6 +24,10 @@ import type { AiProvider } from './providerTypes.ts';
 import { routeModel, type RouterConfig } from './routeModel.ts';
 import { sanitizeForProvider } from './sanitizeForProvider.ts';
 import type { ZikukAiRequest, ZikukAiResponse } from './requestTypes.ts';
+import {
+  runAskCoursePipeline,
+  type AskCourseDeps,
+} from './askCourse/runAskCourse.ts';
 
 export type GatewayPipelineInput = {
   /** Raw JSON body from the client. */
@@ -35,6 +39,8 @@ export type GatewayPipelineInput = {
   signal?: AbortSignal;
   /** Required for provider stage in production; tests may inject memory store. */
   enforcement?: AiEnforcementStore;
+  /** Required for ask_course (section auth + embed + search). */
+  askCourseDeps?: Omit<AskCourseDeps, 'generationProvider' | 'routerConfig' | 'enforcement' | 'signal'>;
 };
 
 export type GatewayPipelineAfterPreflightInput = {
@@ -45,6 +51,7 @@ export type GatewayPipelineAfterPreflightInput = {
   signal?: AbortSignal;
   /** Fail-closed before provider when absent in production Edge. */
   enforcement: AiEnforcementStore;
+  askCourseDeps?: Omit<AskCourseDeps, 'generationProvider' | 'routerConfig' | 'enforcement' | 'signal'>;
 };
 
 export type GatewayUsageLog = {
@@ -65,9 +72,11 @@ export type GatewayUsageLog = {
   surroundingsBlocks: number;
   plan?: string;
   usageEventPersisted?: boolean;
+  retrievalHitCount?: number;
+  embeddingInputTokens?: number;
 };
 
-function selectionCharCount(req: ZikukAiRequest): number {
+function selectionCharCount(req: Extract<ZikukAiRequest, { capability: 'explain_selection' }>): number {
   const f = req.context.focus;
   if (f.kind === 'text') return f.text.length;
   if (f.kind === 'math_block' || f.kind === 'math_inline') return f.latex.length;
@@ -102,6 +111,52 @@ export async function runGatewayPipelineAfterPreflight(
   input: GatewayPipelineAfterPreflightInput,
 ): Promise<GatewayPipelineResult> {
   const { request, authUserId, enforcement } = input;
+
+  // --- M0.5D retrieval seam: ask_course (does its own beginRequest after section auth) ---
+  if (request.capability === 'ask_course') {
+    if (!input.askCourseDeps) {
+      return {
+        response: deniedResponse(
+          'internal_error',
+          'Course-aware AI is temporarily unavailable. Try again shortly.',
+        ),
+        usageLog: null,
+      };
+    }
+    const ask = await runAskCoursePipeline({
+      authUserId,
+      request,
+      deps: {
+        ...input.askCourseDeps,
+        generationProvider: input.provider,
+        routerConfig: input.routerConfig,
+        enforcement,
+        signal: input.signal,
+      },
+    });
+    const usageLog: GatewayUsageLog = {
+      authUserId,
+      sectionId: ask.meta.sectionId,
+      capability: 'ask_course',
+      providerId: ask.meta.providerId ?? 'openai_compatible',
+      model: ask.meta.model ?? '',
+      inputTokens: ask.meta.inputTokens,
+      outputTokens: ask.meta.outputTokens,
+      reasoningTokens: ask.meta.reasoningTokens,
+      totalTokens: ask.meta.totalTokens,
+      estimatedCostUsdMicros: ask.meta.estimatedCostUsdMicros,
+      latencyMs: ask.meta.latencyMs,
+      ok: ask.meta.ok,
+      errorCode: ask.meta.errorCode,
+      selectionChars: ask.meta.selectionChars,
+      surroundingsBlocks: 0,
+      plan: ask.meta.plan,
+      usageEventPersisted: ask.meta.usageEventPersisted,
+      retrievalHitCount: ask.meta.retrievalHitCount,
+      embeddingInputTokens: ask.meta.embeddingInputTokens,
+    };
+    return { response: ask.response, usageLog };
+  }
 
   // --- M0.4: entitlement + safety + product quota (BEFORE provider) ---
   let begin;
@@ -143,7 +198,7 @@ export async function runGatewayPipelineAfterPreflight(
     };
   }
 
-  // --- future retrieval seam (RAG) goes here ---
+  // --- retrieval seam: explain_selection does NOT retrieve course PDFs ---
 
   let providerPayload;
   try {
@@ -277,7 +332,6 @@ export async function runGatewayPipelineAfterPreflight(
   });
   usageLog.usageEventPersisted = record.ok;
   if (!record.ok) {
-    // Fail-open: provider success must still reach the user.
     console.error(
       JSON.stringify({
         event: 'zikuk_ai_gateway',
@@ -294,7 +348,7 @@ export async function runGatewayPipelineAfterPreflight(
       version: 1,
       ok: true,
       result: { type: 'text', text: providerResult.text },
-      meta: { capability: request.capability, latencyMs: providerResult.latencyMs },
+      meta: { capability: 'explain_selection', latencyMs: providerResult.latencyMs },
     },
     usageLog,
   };
@@ -332,10 +386,11 @@ export async function runGatewayPipeline(
     routerConfig: input.routerConfig,
     signal: input.signal,
     enforcement: input.enforcement,
+    askCourseDeps: input.askCourseDeps,
   });
 }
 
-/** Privacy-safe structured log (lengths/metadata only — never selection text). */
+/** Privacy-safe structured log (lengths/metadata only — never selection/question/chunk text). */
 export function formatUsageLogLine(log: GatewayUsageLog): string {
   return JSON.stringify({
     event: 'zikuk_ai_gateway',
@@ -356,5 +411,7 @@ export function formatUsageLogLine(log: GatewayUsageLog): string {
     surroundingsBlocks: log.surroundingsBlocks,
     plan: log.plan ?? null,
     usageEventPersisted: log.usageEventPersisted ?? null,
+    retrievalHitCount: log.retrievalHitCount ?? null,
+    embeddingInputTokens: log.embeddingInputTokens ?? null,
   });
 }
