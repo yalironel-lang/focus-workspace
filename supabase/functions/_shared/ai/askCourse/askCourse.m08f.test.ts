@@ -171,11 +171,53 @@ describe('M0.8F migration 016 mixed search contract', () => {
     expect(sql).toContain('s.user_id = p_user_id');
     expect(sql).toContain('s.section_id = p_section_id');
     expect(sql).toContain('s.retrieval_source_version is not null');
-    expect(sql).toContain('vi.status = \'indexed\'');
+    expect(sql).toContain("vi.status = 'indexed'");
     expect(sql).toContain('never returns vectors');
     expect(sql).not.toContain('e.embedding as');
     expect(sql).toContain('to service_role');
-    expect(sql).toContain('from public, anon, authenticated');
+    expect(sql).toContain('from public');
+    expect(sql).toContain('from anon');
+    expect(sql).toContain('from authenticated');
+  });
+
+  it('replaces search atomically: BEGIN → DROP → CREATE → REVOKE/GRANT → COMMIT', () => {
+    const sql = readFileSync(SQL_016, 'utf8');
+    const beginIdx = sql.search(/^\s*begin\s*;/im);
+    const dropIdx = sql.search(
+      /drop\s+function\s+if\s+exists\s+public\.ai_knowledge_search\(\s*uuid,\s*uuid,\s*extensions\.vector,\s*integer,\s*text,\s*integer\s*\)/i,
+    );
+    const createIdx = sql.search(/create\s+function\s+public\.ai_knowledge_search\s*\(/i);
+    const revokePublic = sql.search(
+      /revoke\s+all\s+on\s+function\s+public\.ai_knowledge_search\([\s\S]*?\)\s+from\s+public\s*;/i,
+    );
+    const revokeAnon = sql.search(
+      /revoke\s+all\s+on\s+function\s+public\.ai_knowledge_search\([\s\S]*?\)\s+from\s+anon\s*;/i,
+    );
+    const revokeAuth = sql.search(
+      /revoke\s+all\s+on\s+function\s+public\.ai_knowledge_search\([\s\S]*?\)\s+from\s+authenticated\s*;/i,
+    );
+    const grantIdx = sql.search(
+      /grant\s+execute\s+on\s+function\s+public\.ai_knowledge_search\([\s\S]*?\)\s+to\s+service_role\s*;/i,
+    );
+    const commitIdx = sql.search(/^\s*commit\s*;/im);
+
+    expect(beginIdx).toBeGreaterThanOrEqual(0);
+    expect(dropIdx).toBeGreaterThan(beginIdx);
+    expect(createIdx).toBeGreaterThan(dropIdx);
+    expect(revokePublic).toBeGreaterThan(createIdx);
+    expect(revokeAnon).toBeGreaterThan(createIdx);
+    expect(revokeAuth).toBeGreaterThan(createIdx);
+    expect(grantIdx).toBeGreaterThan(Math.max(revokePublic, revokeAnon, revokeAuth));
+    expect(commitIdx).toBeGreaterThan(grantIdx);
+
+    expect(sql).toContain('security definer');
+    expect(sql).toContain('set search_path = public, extensions');
+    expect(sql).toContain('p_embedding_dimensions is distinct from 1536');
+    expect(sql).toContain('vi.embedding_model = trim(p_embedding_model)');
+    expect(sql).toContain('e.embedding_dimensions = 1536');
+    expect(sql).toContain("s.source_kind = 'free_space_pdf'");
+    expect(sql).toContain("s.source_kind = 'notebook_page'");
+    expect(sql).not.toMatch(/create\s+or\s+replace\s+function\s+public\.ai_knowledge_search/i);
   });
 
   it('013 remains historically PDF-only (016 supersedes at apply time)', () => {

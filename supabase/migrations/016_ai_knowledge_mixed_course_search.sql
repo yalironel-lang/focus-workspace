@@ -8,10 +8,19 @@
 -- Returns source_kind + notebook_object_id; never returns vectors.
 -- Titles for notebook citations are resolved from live FSO at Ask time.
 --
--- DO NOT apply to Production in M0.8F.
+-- RETURNS TABLE shape changes vs Production/012/013, so CREATE OR REPLACE is
+-- insufficient. Replacement MUST be atomic: DROP + CREATE + grants in one txn.
+-- If CREATE or GRANT fails, the transaction aborts and the old function remains.
 -- =============================================================================
 
-create or replace function public.ai_knowledge_search(
+begin;
+
+-- Exact Production input signature (uuid, uuid, vector, integer, text, integer).
+drop function if exists public.ai_knowledge_search(
+  uuid, uuid, extensions.vector, integer, text, integer
+);
+
+create function public.ai_knowledge_search(
   p_user_id uuid,
   p_section_id uuid,
   p_query_embedding extensions.vector(1536),
@@ -102,7 +111,15 @@ $$;
 
 revoke all on function public.ai_knowledge_search(
   uuid, uuid, extensions.vector, integer, text, integer
-) from public, anon, authenticated;
+) from public;
+revoke all on function public.ai_knowledge_search(
+  uuid, uuid, extensions.vector, integer, text, integer
+) from anon;
+revoke all on function public.ai_knowledge_search(
+  uuid, uuid, extensions.vector, integer, text, integer
+) from authenticated;
 grant execute on function public.ai_knowledge_search(
   uuid, uuid, extensions.vector, integer, text, integer
 ) to service_role;
+
+commit;
