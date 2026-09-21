@@ -1900,6 +1900,14 @@ export function useSectionFreeSpaceObjects(
             ).catch(() => undefined);
           }
         }
+        // M0.8E: cancel all notebook_page markers for deleted parent Notebook FSO.
+        if (victim.type === 'notebook') {
+          void import('../lib/ai/knowledgeProcessHandoff/notebookKnowledgeWiring').then(
+            ({ cancelNotebookKnowledgeProcessForNotebookSafe }) => {
+              cancelNotebookKnowledgeProcessForNotebookSafe(sectionId, victim.id);
+            },
+          ).catch(() => undefined);
+        }
         // M7.0: do NOT cascade-delete notebook ink/images on soft-delete.
         // Assets remain until permanent delete / tombstone expiry (deleteTombstonePermanently).
       }

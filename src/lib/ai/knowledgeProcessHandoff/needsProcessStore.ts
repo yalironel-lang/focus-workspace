@@ -1,28 +1,49 @@
 /**
- * Persistent local markers: PDF still needs ai-knowledge-process handoff.
- * Metadata only — never PDF text, paths, hashes, vectors, or JWT.
+ * Persistent local markers: knowledge source still needs process handoff.
+ * Metadata only — never Notebook/PDF text, hashes, vectors, or JWT.
  *
  * Dedicated IndexedDB (not pending_operations / not Supabase).
+ *
+ * Backward compatible with M0.7B PDF markers:
+ * - missing sourceKind → free_space_pdf
+ * - PDF id remains `${sectionId}::${sourceObjectId}`
+ * - Notebook id: `${sectionId}::notebook_page::${notebookObjectId}::${pageId}`
  */
 
 const DB_NAME = 'fw_ai_knowledge_process_pending_v1';
 const DB_VERSION = 1;
 export const NEEDS_PROCESS_STORE = 'needs_process';
 
+export type KnowledgeSourceKind = 'free_space_pdf' | 'notebook_page';
+
 export type KnowledgeNeedsProcessMarker = {
-  /** `${sectionId}::${sourceObjectId}` */
   id: string;
   sectionId: string;
+  /** Defaults to free_space_pdf when absent (legacy PDF rows). */
+  sourceKind: KnowledgeSourceKind;
+  /** PDF FSO id, or NotebookPage.id for notebook_page. */
   sourceObjectId: string;
+  /** Parent notebook FSO id — required for notebook_page. */
+  notebookObjectId?: string;
   /** Monotonic client generation; bumped on each mark. */
   generation: number;
   updatedAt: number;
+  /** Earliest wall time a drain may run (idle debounce). */
+  notBefore?: number;
 };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-function markerId(sectionId: string, sourceObjectId: string): string {
+export function pdfNeedsProcessMarkerId(sectionId: string, sourceObjectId: string): string {
   return `${sectionId}::${sourceObjectId}`;
+}
+
+export function notebookNeedsProcessMarkerId(
+  sectionId: string,
+  notebookObjectId: string,
+  pageId: string,
+): string {
+  return `${sectionId}::notebook_page::${notebookObjectId}::${pageId}`;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -43,13 +64,54 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** Normalize legacy PDF rows that lack sourceKind. */
+export function normalizeNeedsProcessMarker(
+  raw: unknown,
+): KnowledgeNeedsProcessMarker | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== 'string' || typeof o.sectionId !== 'string') return null;
+  if (typeof o.sourceObjectId !== 'string') return null;
+  if (typeof o.generation !== 'number' || typeof o.updatedAt !== 'number') return null;
+
+  let sourceKind: KnowledgeSourceKind = 'free_space_pdf';
+  if (o.sourceKind === 'notebook_page' || o.sourceKind === 'free_space_pdf') {
+    sourceKind = o.sourceKind;
+  } else if (o.id.includes('::notebook_page::')) {
+    sourceKind = 'notebook_page';
+  }
+
+  const notebookObjectId =
+    typeof o.notebookObjectId === 'string' && o.notebookObjectId.length > 0
+      ? o.notebookObjectId
+      : undefined;
+
+  if (sourceKind === 'notebook_page' && !notebookObjectId) {
+    // Incomplete notebook marker — treat as unusable.
+    return null;
+  }
+
+  return {
+    id: o.id,
+    sectionId: o.sectionId,
+    sourceKind,
+    sourceObjectId: o.sourceObjectId,
+    ...(notebookObjectId ? { notebookObjectId } : {}),
+    generation: o.generation,
+    updatedAt: o.updatedAt,
+    ...(typeof o.notBefore === 'number' ? { notBefore: o.notBefore } : {}),
+  };
+}
+
 async function idbGet(key: string): Promise<KnowledgeNeedsProcessMarker | undefined> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(NEEDS_PROCESS_STORE, 'readonly');
     const req = tx.objectStore(NEEDS_PROCESS_STORE).get(key);
-    req.onsuccess = () =>
-      resolve(req.result as KnowledgeNeedsProcessMarker | undefined);
+    req.onsuccess = () => {
+      const normalized = normalizeNeedsProcessMarker(req.result);
+      resolve(normalized ?? undefined);
+    };
     req.onerror = () => reject(req.error ?? new Error('IndexedDB get failed'));
   });
 }
@@ -79,7 +141,12 @@ async function idbGetBySection(sectionId: string): Promise<KnowledgeNeedsProcess
   return new Promise((resolve, reject) => {
     const tx = db.transaction(NEEDS_PROCESS_STORE, 'readonly');
     const req = tx.objectStore(NEEDS_PROCESS_STORE).index('sectionId').getAll(sectionId);
-    req.onsuccess = () => resolve((req.result ?? []) as KnowledgeNeedsProcessMarker[]);
+    req.onsuccess = () => {
+      const rows = (req.result ?? [])
+        .map(normalizeNeedsProcessMarker)
+        .filter((m): m is KnowledgeNeedsProcessMarker => m !== null);
+      resolve(rows);
+    };
     req.onerror = () => reject(req.error ?? new Error('IndexedDB index read failed'));
   });
 }
@@ -92,15 +159,44 @@ export async function markNeedsKnowledgeProcess(
   sectionId: string,
   sourceObjectId: string,
 ): Promise<KnowledgeNeedsProcessMarker> {
-  const id = markerId(sectionId, sourceObjectId);
+  const id = pdfNeedsProcessMarkerId(sectionId, sourceObjectId);
   const existing = await idbGet(id);
   const now = Date.now();
   const next: KnowledgeNeedsProcessMarker = {
     id,
     sectionId,
+    sourceKind: 'free_space_pdf',
     sourceObjectId,
     generation: (existing?.generation ?? 0) + 1,
     updatedAt: now,
+  };
+  await idbPut(next);
+  return next;
+}
+
+/** Mark Notebook page needs process (optional notBefore for idle debounce). */
+export async function markNeedsNotebookKnowledgeProcess(input: {
+  sectionId: string;
+  notebookObjectId: string;
+  pageId: string;
+  notBefore?: number;
+}): Promise<KnowledgeNeedsProcessMarker> {
+  const id = notebookNeedsProcessMarkerId(
+    input.sectionId,
+    input.notebookObjectId,
+    input.pageId,
+  );
+  const existing = await idbGet(id);
+  const now = Date.now();
+  const next: KnowledgeNeedsProcessMarker = {
+    id,
+    sectionId: input.sectionId,
+    sourceKind: 'notebook_page',
+    sourceObjectId: input.pageId,
+    notebookObjectId: input.notebookObjectId,
+    generation: (existing?.generation ?? 0) + 1,
+    updatedAt: now,
+    ...(typeof input.notBefore === 'number' ? { notBefore: input.notBefore } : {}),
   };
   await idbPut(next);
   return next;
@@ -110,7 +206,18 @@ export async function getNeedsKnowledgeProcessMarker(
   sectionId: string,
   sourceObjectId: string,
 ): Promise<KnowledgeNeedsProcessMarker | null> {
-  const row = await idbGet(markerId(sectionId, sourceObjectId));
+  const row = await idbGet(pdfNeedsProcessMarkerId(sectionId, sourceObjectId));
+  return row ?? null;
+}
+
+export async function getNeedsNotebookKnowledgeProcessMarker(
+  sectionId: string,
+  notebookObjectId: string,
+  pageId: string,
+): Promise<KnowledgeNeedsProcessMarker | null> {
+  const row = await idbGet(
+    notebookNeedsProcessMarkerId(sectionId, notebookObjectId, pageId),
+  );
   return row ?? null;
 }
 
@@ -118,6 +225,16 @@ export async function listNeedsKnowledgeProcessForSection(
   sectionId: string,
 ): Promise<KnowledgeNeedsProcessMarker[]> {
   return idbGetBySection(sectionId);
+}
+
+export async function listNeedsNotebookKnowledgeProcessForNotebook(
+  sectionId: string,
+  notebookObjectId: string,
+): Promise<KnowledgeNeedsProcessMarker[]> {
+  const all = await idbGetBySection(sectionId);
+  return all.filter(
+    m => m.sourceKind === 'notebook_page' && m.notebookObjectId === notebookObjectId,
+  );
 }
 
 /**
@@ -129,7 +246,21 @@ export async function clearNeedsKnowledgeProcessMarker(
   sourceObjectId: string,
   generation: number | null,
 ): Promise<boolean> {
-  const id = markerId(sectionId, sourceObjectId);
+  const id = pdfNeedsProcessMarkerId(sectionId, sourceObjectId);
+  const existing = await idbGet(id);
+  if (!existing) return false;
+  if (generation != null && existing.generation !== generation) return false;
+  await idbDelete(id);
+  return true;
+}
+
+export async function clearNeedsNotebookKnowledgeProcessMarker(
+  sectionId: string,
+  notebookObjectId: string,
+  pageId: string,
+  generation: number | null,
+): Promise<boolean> {
+  const id = notebookNeedsProcessMarkerId(sectionId, notebookObjectId, pageId);
   const existing = await idbGet(id);
   if (!existing) return false;
   if (generation != null && existing.generation !== generation) return false;
@@ -160,7 +291,16 @@ export async function resetNeedsKnowledgeProcessDbForTests(): Promise<void> {
 export function assertSafeNeedsProcessMarker(marker: unknown): boolean {
   if (!marker || typeof marker !== 'object') return false;
   const o = marker as Record<string, unknown>;
-  const allowed = new Set(['id', 'sectionId', 'sourceObjectId', 'generation', 'updatedAt']);
+  const allowed = new Set([
+    'id',
+    'sectionId',
+    'sourceKind',
+    'sourceObjectId',
+    'notebookObjectId',
+    'generation',
+    'updatedAt',
+    'notBefore',
+  ]);
   for (const key of Object.keys(o)) {
     if (!allowed.has(key)) return false;
   }
@@ -178,6 +318,8 @@ export function assertSafeNeedsProcessMarker(marker: unknown): boolean {
     'apiKey',
     'model',
     'userId',
+    'documentBody',
+    'body',
   ];
   const s = JSON.stringify(o).toLowerCase();
   for (const f of forbidden) {

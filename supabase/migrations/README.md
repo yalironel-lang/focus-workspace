@@ -20,6 +20,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `012_ai_knowledge_semantic_index.sql` | Vector extension + embeddings + version index state + search/index RPCs (M0.5C) | **Applied (production, verified M0.5C Phase 3/4)** |
 | `013_ai_knowledge_notebook_pages.sql` | Notebook page source_kind + ownership/FK foundation (M0.8B) | **Local/create only — NOT applied to Production in M0.8B** |
 | `014_ai_knowledge_notebook_page_ingest.sql` | Notebook page begin-ingest + blank invalidation RPCs (M0.8C) | **Local/create only — NOT applied to Production in M0.8C** |
+| `015_ai_knowledge_notebook_page_remove.sql` | Notebook page knowledge remove on soft-delete (M0.8E) | **Local/create only — NOT applied to Production in M0.8E** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 

@@ -5,11 +5,19 @@ export {
 export {
   assertSafeNeedsProcessMarker,
   clearNeedsKnowledgeProcessMarker,
+  clearNeedsNotebookKnowledgeProcessMarker,
   getNeedsKnowledgeProcessMarker,
+  getNeedsNotebookKnowledgeProcessMarker,
   listNeedsKnowledgeProcessForSection,
+  listNeedsNotebookKnowledgeProcessForNotebook,
   markNeedsKnowledgeProcess,
+  markNeedsNotebookKnowledgeProcess,
+  notebookNeedsProcessMarkerId,
+  normalizeNeedsProcessMarker,
+  pdfNeedsProcessMarkerId,
   resetNeedsKnowledgeProcessDbForTests,
   type KnowledgeNeedsProcessMarker,
+  type KnowledgeSourceKind,
 } from './needsProcessStore';
 export {
   cancelKnowledgeProcessForSource,
@@ -32,3 +40,22 @@ export {
   scheduleKnowledgeProcessDrainSafe,
   type PdfKnowledgeHandoffIds,
 } from './pdfKnowledgeWiring';
+export {
+  NOTEBOOK_KNOWLEDGE_DRAIN_CONCURRENCY,
+  NOTEBOOK_KNOWLEDGE_IDLE_MS,
+  cancelNotebookKnowledgeProcessForNotebookSafe,
+  cancelNotebookKnowledgeProcessForPageSafe,
+  drainNotebookKnowledgeProcessForPage,
+  markNotebookPageNeedsProcess,
+  markNotebookPageNeedsProcessSafe,
+  notifyNotebookFreeSpaceObjectCloudWriteSucceededSafe,
+  onNotebookFreeSpaceObjectCloudWriteSucceeded,
+  onNotebookPageSoftDeletedSafe,
+  recoverNotebookKnowledgeProcessForSectionSafe,
+  resetNotebookKnowledgeHandoffForTests,
+  scheduleNotebookKnowledgeDrainSafe,
+  setNotebookKnowledgeProcessRequestForTests,
+  setNotebookKnowledgeRemoveRequestForTests,
+  type NotebookDrainResult,
+  type NotebookKnowledgeHandoffIds,
+} from './notebookKnowledgeWiring';

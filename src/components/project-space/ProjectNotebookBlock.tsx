@@ -1928,7 +1928,26 @@ export function ProjectNotebookBlock({
     if (!pending) return;
     pendingNotebookContentRef.current = null;
     pending.commit(pending.content);
-  }, []);
+    // M0.8E: durable local semantic persist → mark page needs knowledge (idle debounce).
+    // Never awaits AI; never blocks editor.
+    const pageId =
+      navigationActivePageIdRef.current ??
+      pending.content.activePageId ??
+      null;
+    if (freeSpaceSectionId && objectId && pageId && handwritingUserId) {
+      void import('../../lib/ai/knowledgeProcessHandoff/notebookKnowledgeWiring').then(
+        ({ markNotebookPageNeedsProcessSafe }) => {
+          markNotebookPageNeedsProcessSafe({
+            sectionId: freeSpaceSectionId,
+            notebookObjectId: objectId,
+            pageId,
+            mode: 'idle',
+            userId: handwritingUserId,
+          });
+        },
+      ).catch(() => undefined);
+    }
+  }, [freeSpaceSectionId, objectId, handwritingUserId]);
 
   const schedulePosePersist = useCallback(
     (scrollTop: number, blockId: string | null) => {
@@ -2394,11 +2413,32 @@ export function ProjectNotebookBlock({
         navigationOverlay?.activePageId ??
         contentRef.current.activePageId;
       if (pageId === currentActive) return;
+      // M0.8E: leaving a page may allow early knowledge drain after flush.
+      if (freeSpaceSectionId && objectId && currentActive && handwritingUserId) {
+        void import('../../lib/ai/knowledgeProcessHandoff/notebookKnowledgeWiring').then(
+          ({ markNotebookPageNeedsProcessSafe }) => {
+            markNotebookPageNeedsProcessSafe({
+              sectionId: freeSpaceSectionId,
+              notebookObjectId: objectId,
+              pageId: currentActive,
+              mode: 'page_leave',
+              userId: handwritingUserId,
+            });
+          },
+        ).catch(() => undefined);
+      }
       applyShellMutation((current, body, codec) => switchNotebookPage(current, pageId, body, codec), {
         navigationOnly: true,
       });
     },
-    [applyShellMutation, effectiveContent.activePageId, navigationOverlay?.activePageId],
+    [
+      applyShellMutation,
+      effectiveContent.activePageId,
+      navigationOverlay?.activePageId,
+      freeSpaceSectionId,
+      objectId,
+      handwritingUserId,
+    ],
   );
 
   const handleShellSwitchSection = useCallback(
@@ -2445,8 +2485,22 @@ export function ProjectNotebookBlock({
       applyShellMutation((current, body, codec) =>
         renameNotebookPage(saveNotebookPageBody(current, body, codec), pageId, title),
       );
+      // Page title participates in semantic hash (M0.8C) → mark dirty.
+      if (freeSpaceSectionId && objectId && pageId && handwritingUserId) {
+        void import('../../lib/ai/knowledgeProcessHandoff/notebookKnowledgeWiring').then(
+          ({ markNotebookPageNeedsProcessSafe }) => {
+            markNotebookPageNeedsProcessSafe({
+              sectionId: freeSpaceSectionId,
+              notebookObjectId: objectId,
+              pageId,
+              mode: 'idle',
+              userId: handwritingUserId,
+            });
+          },
+        ).catch(() => undefined);
+      }
     },
-    [applyShellMutation],
+    [applyShellMutation, freeSpaceSectionId, objectId, handwritingUserId],
   );
 
   /**
@@ -2532,6 +2586,19 @@ export function ProjectNotebookBlock({
         navigationOverlayRef.current = null;
         setNavigationOverlay(null);
         setBlocks(parseBodyToBlocksForCodec(next.body ?? '', undefined, next.bodyCodecVersion));
+        // M0.8E: cancel marker + authoritative server remove (non-blocking).
+        if (handwritingUserId) {
+          void import('../../lib/ai/knowledgeProcessHandoff/notebookKnowledgeWiring').then(
+            ({ onNotebookPageSoftDeletedSafe }) => {
+              onNotebookPageSoftDeletedSafe({
+                userId: handwritingUserId,
+                sectionId: freeSpaceSectionId,
+                notebookObjectId: objectId,
+                pageId,
+              });
+            },
+          ).catch(() => undefined);
+        }
         toast.success('Page moved to Recently Deleted');
       })();
     },
@@ -2540,6 +2607,7 @@ export function ProjectNotebookBlock({
       freeSpaceBoardId,
       objectId,
       objectTitle,
+      handwritingUserId,
       flushHandwritingBeforeTransition,
       flushNotebookPersist,
       persistNotebookContent,

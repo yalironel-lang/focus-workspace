@@ -156,6 +156,57 @@ Deno.serve(async (req: Request) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
+    // M0.8E: authoritative page-source removal (soft-delete).
+    if (
+      body &&
+      typeof body === 'object' &&
+      (body as { action?: string }).action === 'remove_page_source'
+    ) {
+      const o = body as Record<string, unknown>;
+      const sectionId = typeof o.sectionId === 'string' ? o.sectionId : '';
+      const notebookObjectId =
+        typeof o.notebookObjectId === 'string' ? o.notebookObjectId.trim() : '';
+      const pageId = typeof o.pageId === 'string' ? o.pageId.trim() : '';
+      if (!sectionId || !notebookObjectId || !pageId) {
+        return jsonResponse(
+          {
+            version: 1,
+            ok: false,
+            error: {
+              code: 'invalid_request',
+              message: 'Invalid remove request.',
+              class: 'permanent',
+            },
+          },
+          400,
+        );
+      }
+      const { data, error } = await admin.rpc('ai_knowledge_remove_notebook_page_source', {
+        p_user_id: user.id,
+        p_section_id: sectionId,
+        p_notebook_object_id: notebookObjectId,
+        p_page_id: pageId,
+      });
+      if (error) {
+        return jsonResponse(
+          {
+            version: 1,
+            ok: false,
+            error: {
+              code: 'internal_error',
+              message: 'Could not remove Notebook knowledge source.',
+              class: 'retryable',
+            },
+          },
+          500,
+        );
+      }
+      return new Response(JSON.stringify(data ?? { ok: true }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const ingestDeps: NotebookKnowledgeIngestDeps = {
       loadOwnedNotebookFso: async ({ userId, sectionId, notebookObjectId }) => {
         const { data, error } = await admin

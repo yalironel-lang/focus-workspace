@@ -119,16 +119,27 @@ export async function onFreeSpaceObjectCloudWriteSucceeded(input: {
       input.sectionId,
       input.objectId,
     );
-    if (!marker) return;
+    if (marker && marker.sourceKind !== 'notebook_page') {
+      const pending = await hasPendingStructuredFsoWrite(
+        input.userId,
+        input.sectionId,
+        input.objectId,
+      );
+      if (pending === 'none') {
+        scheduleKnowledgeProcessDrainSafe(input.sectionId, input.objectId);
+      }
+    }
 
-    const pending = await hasPendingStructuredFsoWrite(
-      input.userId,
-      input.sectionId,
-      input.objectId,
-    );
-    if (pending !== 'none') return;
-
-    scheduleKnowledgeProcessDrainSafe(input.sectionId, input.objectId);
+    // M0.8E: parent Notebook FSO success may unlock notebook_page markers.
+    void import('./notebookKnowledgeWiring').then(
+      ({ notifyNotebookFreeSpaceObjectCloudWriteSucceededSafe }) => {
+        notifyNotebookFreeSpaceObjectCloudWriteSucceededSafe({
+          userId: input.userId,
+          sectionId: input.sectionId,
+          notebookObjectId: input.objectId,
+        });
+      },
+    ).catch(() => undefined);
   } catch (err) {
     fwPersistWarn(
       `knowledge process drain after FSO write failed: object=${input.objectId} err=${
@@ -152,17 +163,22 @@ export function recoverKnowledgeProcessForSection(
   void (async () => {
     const markers = await listNeedsKnowledgeProcessForSection(sectionId);
     for (const m of markers) {
+      if (m.sourceKind === 'notebook_page') continue; // handled below
       const pending = await hasPendingStructuredFsoWrite(
         userId,
         sectionId,
         m.sourceObjectId,
       );
       if (pending !== 'none') {
-        // Retain marker; later FSO success / recovery retries when safe.
         continue;
       }
       scheduleKnowledgeProcessDrainSafe(m.sectionId, m.sourceObjectId);
     }
+    void import('./notebookKnowledgeWiring').then(
+      ({ recoverNotebookKnowledgeProcessForSectionSafe }) => {
+        recoverNotebookKnowledgeProcessForSectionSafe(sectionId, userId);
+      },
+    ).catch(() => undefined);
   })().catch(err => {
     fwPersistWarn(
       `knowledge process section recovery failed: section=${sectionId} err=${

@@ -16,9 +16,13 @@ const PERMANENT = new Set<string>([
   'too_large',
   'too_many_pages',
   'not_pdf',
+  'not_notebook',
   'invalid_request',
   'auth_mismatch',
   'extract_failed',
+  'notebook_page_not_found',
+  'notebook_codec_unsupported',
+  'notebook_extract_failed',
 ]);
 
 /**
