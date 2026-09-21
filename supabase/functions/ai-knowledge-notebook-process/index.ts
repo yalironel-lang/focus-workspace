@@ -131,10 +131,36 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    // Same embedding secrets as PDF ai-knowledge-process / ai-gateway (project-global).
+    const apiKey = Deno.env.get('AI_PROVIDER_API_KEY') ?? '';
+    const baseUrl = Deno.env.get('AI_PROVIDER_BASE_URL') ?? '';
+    const embeddingModel =
+      Deno.env.get('AI_EMBEDDING_MODEL')?.trim() || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT;
+    const dimsRaw = Deno.env.get('AI_EMBEDDING_DIMENSIONS');
+    const embeddingDimensions = dimsRaw
+      ? Number(dimsRaw)
+      : KNOWLEDGE_EMBEDDING_DIMENSIONS;
+
+    if (!supabaseUrl || !anonKey || !serviceKey || !apiKey || !baseUrl) {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: 'Server configuration error.',
+            class: 'retryable',
+          },
+        },
+        500,
+      );
+    }
+
     const authHeader = req.headers.get('Authorization') ?? '';
 
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
     const {
       data: { user },
@@ -154,7 +180,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const admin = createClient(supabaseUrl, serviceKey);
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     // M0.8E: authoritative page-source removal (soft-delete).
     if (
@@ -287,17 +315,14 @@ Deno.serve(async (req: Request) => {
       },
     };
 
-    const apiKey = Deno.env.get('AI_EMBEDDING_API_KEY') ?? Deno.env.get('OPENAI_API_KEY') ?? '';
-    const baseUrl = Deno.env.get('AI_EMBEDDING_BASE_URL') ?? 'https://api.openai.com/v1';
     const embeddingProvider = createOpenAICompatibleEmbeddingProvider({
       apiKey,
       baseUrl,
     });
 
     const indexDeps: Omit<KnowledgeIndexDeps, 'loadSourceForObject'> = {
-      embeddingModel:
-        Deno.env.get('AI_EMBEDDING_MODEL') ?? KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
-      embeddingDimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS,
+      embeddingModel,
+      embeddingDimensions,
       embeddingProvider,
       beginIndex: async (input) => {
         const { data, error } = await admin.rpc('ai_knowledge_begin_index', {
