@@ -19,6 +19,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `011_ai_knowledge_foundation.sql` | AI knowledge sources + chunks + begin/finalize ingest RPCs (M0.5A) | **Applied (production, verified M0.5A closeout)** |
 | `012_ai_knowledge_semantic_index.sql` | Vector extension + embeddings + version index state + search/index RPCs (M0.5C) | **Applied (production, verified M0.5C Phase 3/4)** |
 | `013_ai_knowledge_notebook_pages.sql` | Notebook page source_kind + ownership/FK foundation (M0.8B) | **Local/create only — NOT applied to Production in M0.8B** |
+| `014_ai_knowledge_notebook_page_ingest.sql` | Notebook page begin-ingest + blank invalidation RPCs (M0.8C) | **Local/create only — NOT applied to Production in M0.8C** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 
@@ -52,6 +53,15 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Soft page delete:** not DB-cascaded (page removed from JSON; client tombstone). Explicit knowledge delete remains a later lifecycle (M0.8E+)
 - **Search:** `ai_knowledge_search` fail-closed to `free_space_pdf` until M0.8F
 - **RPCs:** `ai_knowledge_begin_ingest` remains PDF-only; no Notebook extraction/index in this migration
+- **Do NOT apply to Production** until a later approved release gate
+
+## Migration 014 — Notebook page ingest RPCs (M0.8C)
+
+- **RPCs (service_role only):** `ai_knowledge_begin_notebook_page_ingest`, `ai_knowledge_invalidate_notebook_page_corpus`
+- **Reuses:** `ai_knowledge_finalize_ingest` for ready/failed text corpus writes
+- **Hash authority:** server semantic extraction hash (not Storage bytes)
+- **Blank invalidation:** clears `retrieval_source_version` so old Notebook text cannot remain searchable after a page becomes empty
+- **No embeddings / no search widening** in this migration
 - **Do NOT apply to Production** until a later approved release gate
 
 ## Migration 007 — workspace extensions

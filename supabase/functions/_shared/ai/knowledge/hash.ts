@@ -1,5 +1,5 @@
 /**
- * Deterministic SHA-256 hex of PDF bytes (Web Crypto).
+ * Deterministic SHA-256 hex (Web Crypto).
  */
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -12,4 +12,10 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
     out += view[i]!.toString(16).padStart(2, '0');
   }
   return out;
+}
+
+/** SHA-256 hex of a UTF-8 string (Notebook semantic corpus). */
+export async function sha256HexUtf8(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  return sha256Hex(bytes);
 }
