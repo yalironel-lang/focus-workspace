@@ -18,6 +18,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `010_ai_usage_control.sql` | AI entitlements, usage events, counters + RPCs (M0.4) | **Applied (production, Release 1)** |
 | `011_ai_knowledge_foundation.sql` | AI knowledge sources + chunks + begin/finalize ingest RPCs (M0.5A) | **Applied (production, verified M0.5A closeout)** |
 | `012_ai_knowledge_semantic_index.sql` | Vector extension + embeddings + version index state + search/index RPCs (M0.5C) | **Applied (production, verified M0.5C Phase 3/4)** |
+| `013_ai_knowledge_notebook_pages.sql` | Notebook page source_kind + ownership/FK foundation (M0.8B) | **Local/create only — NOT applied to Production in M0.8B** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 
@@ -41,6 +42,17 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Upsert:** job-scoped embedding writes; stale jobs cannot persist vectors
 - **GC:** separate from retrieval flip; deletes versions that are neither current text nor retrieval-active
 - **Vectors:** never SELECT-granted to `authenticated`/`anon`
+
+## Migration 013 — Notebook page knowledge foundation (M0.8B)
+
+- **Additive:** `source_kind` adds `notebook_page`; column `notebook_object_id` (parent notebook FSO)
+- **Identity:** PDF unique `(source_kind, source_object_id)`; notebook page unique `(source_kind, notebook_object_id, source_object_id)` (page IDs are not globally unique)
+- **FK:** `source_object_id` no longer FKs to FSO (page IDs are not FSO rows). Parent cascade via `notebook_object_id` → `free_space_objects` ON DELETE CASCADE. PDF cascade via AFTER DELETE trigger on FSO.
+- **Ownership trigger:** kind-aware; notebook_page proves parent type=`notebook`, section/user match, and live page membership in `object.content.pages`
+- **Soft page delete:** not DB-cascaded (page removed from JSON; client tombstone). Explicit knowledge delete remains a later lifecycle (M0.8E+)
+- **Search:** `ai_knowledge_search` fail-closed to `free_space_pdf` until M0.8F
+- **RPCs:** `ai_knowledge_begin_ingest` remains PDF-only; no Notebook extraction/index in this migration
+- **Do NOT apply to Production** until a later approved release gate
 
 ## Migration 007 — workspace extensions
 
