@@ -21,5 +21,7 @@ export * from './runKnowledgeIndex.ts';
 export * from './runKnowledgeIngest.ts';
 export * from './runKnowledgeProcess.ts';
 export * from './runNotebookKnowledgeIngest.ts';
+export * from './runNotebookKnowledgeProcess.ts';
 export * from './types.ts';
+
 

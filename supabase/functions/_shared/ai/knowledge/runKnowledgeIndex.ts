@@ -213,47 +213,27 @@ export function knowledgeIndexRequestBodyTooLarge(byteLength: number): boolean {
   return byteLength > KNOWLEDGE_MAX_REQUEST_BODY_BYTES;
 }
 
-export async function runKnowledgeIndex(input: {
-  authUserId: string | null;
-  body: unknown;
+/**
+ * Shared index lifecycle for an already-resolved knowledge source.
+ * Used by PDF (via runKnowledgeIndex) and Notebook (via runNotebookKnowledgeProcess).
+ * Does not assume PDF Storage or physical page identity.
+ */
+export async function runKnowledgeIndexForSource(input: {
+  sectionId: string;
+  source: SourceIndexMeta;
   deps: KnowledgeIndexDeps;
 }): Promise<KnowledgeIndexResponse> {
-  if (!input.authUserId) {
-    return fail('unauthenticated', 'Sign in to index course knowledge.');
-  }
-
-  const parsed = parseKnowledgeIndexRequest(input.body);
-  if (!parsed.ok) {
-    return fail('invalid_request', 'Invalid index request.');
-  }
-  const { request } = parsed;
+  const { source, deps, sectionId } = input;
 
   let route;
   try {
     route = routeEmbeddingModel({
-      model: input.deps.embeddingModel,
-      dimensions: input.deps.embeddingDimensions,
+      model: deps.embeddingModel,
+      dimensions: deps.embeddingDimensions,
     });
   } catch {
     return fail('internal_error', 'Embedding model is not configured.');
   }
-
-  const loaded = await input.deps.loadSourceForObject({
-    userId: input.authUserId,
-    sectionId: request.sectionId,
-    sourceObjectId: request.sourceObjectId,
-  });
-  if (!loaded.ok) {
-    if (loaded.code === 'auth_mismatch') {
-      return fail('auth_mismatch', 'You do not have access to this section.');
-    }
-    if (loaded.code === 'not_ready') {
-      return fail('not_ready', 'Knowledge text is not ready to index yet.');
-    }
-    return fail('not_found', 'Knowledge source not found.');
-  }
-
-  const { source } = loaded;
 
   // Idempotent: already indexed current version with matching model/dims.
   if (
@@ -279,7 +259,7 @@ export async function runKnowledgeIndex(input: {
     };
   }
 
-  const begin = await input.deps.beginIndex({
+  const begin = await deps.beginIndex({
     sourceId: source.sourceId,
     sourceVersion: source.sourceVersion,
     embeddingModel: route.model,
@@ -305,7 +285,7 @@ export async function runKnowledgeIndex(input: {
     sqlCode: string,
   ): Promise<KnowledgeIndexResponse> => {
     try {
-      await input.deps.finalizeIndexFailure({
+      await deps.finalizeIndexFailure({
         sourceId: source.sourceId,
         sourceVersion,
         jobId,
@@ -314,9 +294,9 @@ export async function runKnowledgeIndex(input: {
     } catch {
       /* best-effort */
     }
-    if (input.deps.recordUsage) {
+    if (deps.recordUsage) {
       try {
-        await input.deps.recordUsage({
+        await deps.recordUsage({
           capability: 'knowledge_index_embed',
           model: route.model,
           outcome:
@@ -333,7 +313,7 @@ export async function runKnowledgeIndex(input: {
           inputTokens: hadTokenUsage ? inputTokensAcc : null,
           totalTokens: hadTokenUsage ? inputTokensAcc : null,
           latencyMs: Date.now() - started,
-          sectionId: request.sectionId,
+          sectionId,
           chunkCount: 0,
           batchCount,
         });
@@ -344,7 +324,7 @@ export async function runKnowledgeIndex(input: {
     return fail(code, message);
   };
 
-  const chunks = await input.deps.loadChunks({
+  const chunks = await deps.loadChunks({
     sourceId: source.sourceId,
     sourceVersion,
   });
@@ -357,7 +337,7 @@ export async function runKnowledgeIndex(input: {
   for (const batch of batches) {
     batchCount += 1;
     const texts = batch.chunks.map(embeddingInputForChunk);
-    const embedded = await input.deps.embeddingProvider.embed({
+    const embedded = await deps.embeddingProvider.embed({
       model: route.model,
       dimensions: route.dimensions,
       inputs: texts,
@@ -396,7 +376,7 @@ export async function runKnowledgeIndex(input: {
       embedding: embedded.embeddings[i]!,
     }));
 
-    const upserted = await input.deps.upsertEmbeddings({
+    const upserted = await deps.upsertEmbeddings({
       sourceId: source.sourceId,
       sourceVersion,
       jobId,
@@ -412,7 +392,7 @@ export async function runKnowledgeIndex(input: {
     }
   }
 
-  const finalized = await input.deps.finalizeIndexSuccess({
+  const finalized = await deps.finalizeIndexSuccess({
     sourceId: source.sourceId,
     sourceVersion,
     jobId,
@@ -434,16 +414,16 @@ export async function runKnowledgeIndex(input: {
     return failJob('internal_error', 'Could not finalize knowledge index.', 'internal_error');
   }
 
-  if (input.deps.recordUsage) {
+  if (deps.recordUsage) {
     try {
-      await input.deps.recordUsage({
+      await deps.recordUsage({
         capability: 'knowledge_index_embed',
         model: route.model,
         outcome: 'success',
         inputTokens: hadTokenUsage ? inputTokensAcc : null,
         totalTokens: hadTokenUsage ? inputTokensAcc : null,
         latencyMs: Date.now() - started,
-        sectionId: request.sectionId,
+        sectionId,
         chunkCount: chunks.length,
         batchCount,
       });
@@ -467,4 +447,41 @@ export async function runKnowledgeIndex(input: {
       embeddingDimensions: route.dimensions,
     },
   };
+}
+
+export async function runKnowledgeIndex(input: {
+  authUserId: string | null;
+  body: unknown;
+  deps: KnowledgeIndexDeps;
+}): Promise<KnowledgeIndexResponse> {
+  if (!input.authUserId) {
+    return fail('unauthenticated', 'Sign in to index course knowledge.');
+  }
+
+  const parsed = parseKnowledgeIndexRequest(input.body);
+  if (!parsed.ok) {
+    return fail('invalid_request', 'Invalid index request.');
+  }
+  const { request } = parsed;
+
+  const loaded = await input.deps.loadSourceForObject({
+    userId: input.authUserId,
+    sectionId: request.sectionId,
+    sourceObjectId: request.sourceObjectId,
+  });
+  if (!loaded.ok) {
+    if (loaded.code === 'auth_mismatch') {
+      return fail('auth_mismatch', 'You do not have access to this section.');
+    }
+    if (loaded.code === 'not_ready') {
+      return fail('not_ready', 'Knowledge text is not ready to index yet.');
+    }
+    return fail('not_found', 'Knowledge source not found.');
+  }
+
+  return runKnowledgeIndexForSource({
+    sectionId: request.sectionId,
+    source: loaded.source,
+    deps: input.deps,
+  });
 }
