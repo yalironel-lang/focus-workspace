@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.ai-knowledge-process]
 verify_jwt = true
+
+[functions.ai-knowledge-notebook-process]
+verify_jwt = true
