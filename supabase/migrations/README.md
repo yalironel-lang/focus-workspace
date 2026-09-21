@@ -21,6 +21,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `013_ai_knowledge_notebook_pages.sql` | Notebook page source_kind + ownership/FK foundation (M0.8B) | **Local/create only — NOT applied to Production in M0.8B** |
 | `014_ai_knowledge_notebook_page_ingest.sql` | Notebook page begin-ingest + blank invalidation RPCs (M0.8C) | **Local/create only — NOT applied to Production in M0.8C** |
 | `015_ai_knowledge_notebook_page_remove.sql` | Notebook page knowledge remove on soft-delete (M0.8E) | **Local/create only — NOT applied to Production in M0.8E** |
+| `016_ai_knowledge_mixed_course_search.sql` | Mixed PDF + Notebook course search (M0.8F) | **Local/create only — NOT applied to Production in M0.8F** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 
@@ -54,6 +55,14 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Soft page delete:** not DB-cascaded (page removed from JSON; client tombstone). Explicit knowledge delete remains a later lifecycle (M0.8E+)
 - **Search:** `ai_knowledge_search` fail-closed to `free_space_pdf` until M0.8F
 - **RPCs:** `ai_knowledge_begin_ingest` remains PDF-only; no Notebook extraction/index in this migration
+- **Do NOT apply to Production** until a later approved release gate
+
+## Migration 016 — Mixed course search (M0.8F)
+
+- **Replaces** `ai_knowledge_search` body to include `free_space_pdf` + `notebook_page` in one section-scoped ranking
+- **Returns:** `source_kind`, `notebook_object_id` (nullable), never vectors
+- **Scope:** `user_id` + `section_id` only (no canvas/object enumeration)
+- **Lifecycle:** current `retrieval_source_version` + `indexed` version index only
 - **Do NOT apply to Production** until a later approved release gate
 
 ## Migration 014 — Notebook page ingest RPCs (M0.8C)

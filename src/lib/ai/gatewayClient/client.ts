@@ -22,11 +22,39 @@ function parseSources(raw: unknown): AskCourseSourceRef[] | null {
   for (const s of raw) {
     if (!s || typeof s !== 'object') return null;
     const o = s as Record<string, unknown>;
-    if (typeof o.index !== 'number' || typeof o.sourceObjectId !== 'string') return null;
+    if (typeof o.index !== 'number') return null;
+
+    const kind =
+      o.sourceKind === 'notebook_page' || o.sourceKind === 'free_space_pdf'
+        ? o.sourceKind
+        : // Legacy PDF responses before M0.8F
+          o.sourceObjectId !== undefined
+          ? 'free_space_pdf'
+          : null;
+    if (!kind) return null;
+
+    if (kind === 'notebook_page') {
+      if (typeof o.notebookObjectId !== 'string' || !o.notebookObjectId.trim()) return null;
+      if (typeof o.pageId !== 'string' || !o.pageId.trim()) return null;
+      if (o.notebookTitle !== null && typeof o.notebookTitle !== 'string') return null;
+      if (o.pageTitle !== null && typeof o.pageTitle !== 'string') return null;
+      out.push({
+        index: o.index,
+        sourceKind: 'notebook_page',
+        notebookObjectId: o.notebookObjectId.trim(),
+        pageId: o.pageId.trim(),
+        notebookTitle: (o.notebookTitle as string | null) ?? null,
+        pageTitle: (o.pageTitle as string | null) ?? null,
+      });
+      continue;
+    }
+
+    if (typeof o.sourceObjectId !== 'string') return null;
     if (typeof o.pageNumber !== 'number') return null;
     if (o.fileName !== null && typeof o.fileName !== 'string') return null;
     out.push({
       index: o.index,
+      sourceKind: 'free_space_pdf',
       sourceObjectId: o.sourceObjectId,
       fileName: (o.fileName as string | null) ?? null,
       pageNumber: o.pageNumber,

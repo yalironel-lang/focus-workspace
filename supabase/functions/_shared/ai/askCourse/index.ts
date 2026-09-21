@@ -26,4 +26,10 @@ export type {
   KnowledgeSearchHit,
   CitedCourseSource,
   PromptCourseChunk,
+  AskCourseSourceKind,
 } from './retrievalTypes.ts';
+export { askCourseSourceDiversityKey } from './retrievalTypes.ts';
+export {
+  resolveAskCourseHitMetadata,
+  type LoadNotebookFsoForCitation,
+} from './resolveCitationMetadata.ts';

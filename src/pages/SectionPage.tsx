@@ -3836,6 +3836,7 @@ export function SectionPage() {
           sectionId
             ? {
                 sectionId,
+                sectionTitle: section.title,
                 onOpenSource: handleAskZikukOpenSource,
               }
             : undefined

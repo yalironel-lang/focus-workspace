@@ -1,6 +1,9 @@
 /**
  * Deterministic ask_course retrieval filtering (beta heuristics).
  * Diagnostics expose stage counts without changing filter behavior.
+ *
+ * M0.8F: PDF + Notebook chunks compete in one pool.
+ * Per-source cap uses askCourseSourceDiversityKey (PDF object / Notebook PAGE).
  */
 
 import {
@@ -14,7 +17,12 @@ import {
   resolveAskCourseRetrievalReason,
   type AskCourseRetrievalDiagnostics,
 } from './retrievalDiagnostics.ts';
-import type { KnowledgeSearchHit, PromptCourseChunk } from './retrievalTypes.ts';
+import {
+  askCourseSourceDiversityKey,
+  type KnowledgeSearchHit,
+  type PromptCourseChunk,
+  type CitedCourseSource,
+} from './retrievalTypes.ts';
 
 function sortHits(hits: KnowledgeSearchHit[]): KnowledgeSearchHit[] {
   return [...hits].sort((a, b) => {
@@ -43,10 +51,18 @@ function applyCharacterBudget(diversified: KnowledgeSearchHit[]): KnowledgeSearc
 function toPromptChunks(hits: KnowledgeSearchHit[]): PromptCourseChunk[] {
   return hits.map((h, i) => ({
     citationIndex: i + 1,
+    sourceKind: h.sourceKind,
     sourceObjectId: h.sourceObjectId,
+    notebookObjectId: h.notebookObjectId,
     fileName: h.fileName,
     pageNumber: h.pageNumber,
     text: h.text,
+    ...(h.sourceKind === 'notebook_page'
+      ? {
+          notebookTitle: h.notebookTitle ?? null,
+          pageTitle: h.pageTitle ?? null,
+        }
+      : {}),
   }));
 }
 
@@ -66,7 +82,7 @@ export function filterAskCourseHitsWithDiagnostics(hits: KnowledgeSearchHit[]): 
     pageNumber: h.pageNumber,
     chunkIndex: h.chunkIndex,
   }));
-  const uniqueSourceCount = new Set(sorted.map((h) => h.sourceObjectId)).size;
+  const uniqueSourceCount = new Set(sorted.map((h) => askCourseSourceDiversityKey(h))).size;
   const topSimilarity = candidateCount > 0 ? sorted[0]!.similarity : null;
 
   if (sorted.length === 0) {
@@ -96,9 +112,10 @@ export function filterAskCourseHitsWithDiagnostics(hits: KnowledgeSearchHit[]): 
   const perSource = new Map<string, number>();
   const diversified: KnowledgeSearchHit[] = [];
   for (const h of afterGap) {
-    const n = perSource.get(h.sourceObjectId) ?? 0;
+    const key = askCourseSourceDiversityKey(h);
+    const n = perSource.get(key) ?? 0;
     if (n >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
-    perSource.set(h.sourceObjectId, n + 1);
+    perSource.set(key, n + 1);
     diversified.push(h);
   }
 
@@ -145,13 +162,24 @@ export function filterAskCourseHits(hits: KnowledgeSearchHit[]): PromptCourseChu
   return filterAskCourseHitsWithDiagnostics(hits).chunks;
 }
 
-export function sourcesFromPromptChunks(
-  chunks: PromptCourseChunk[],
-): import('./retrievalTypes.ts').CitedCourseSource[] {
-  return chunks.map((c) => ({
-    index: c.citationIndex,
-    sourceObjectId: c.sourceObjectId,
-    fileName: c.fileName,
-    pageNumber: c.pageNumber,
-  }));
+export function sourcesFromPromptChunks(chunks: PromptCourseChunk[]): CitedCourseSource[] {
+  return chunks.map((c) => {
+    if (c.sourceKind === 'notebook_page') {
+      return {
+        index: c.citationIndex,
+        sourceKind: 'notebook_page' as const,
+        notebookObjectId: c.notebookObjectId!,
+        pageId: c.sourceObjectId,
+        notebookTitle: c.notebookTitle ?? null,
+        pageTitle: c.pageTitle ?? null,
+      };
+    }
+    return {
+      index: c.citationIndex,
+      sourceKind: 'free_space_pdf' as const,
+      sourceObjectId: c.sourceObjectId,
+      fileName: c.fileName,
+      pageNumber: c.pageNumber,
+    };
+  });
 }

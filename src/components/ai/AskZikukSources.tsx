@@ -15,11 +15,24 @@ type Props = {
 };
 
 export function formatAskCourseSourceLabel(source: AskCourseSourceRef): string {
+  if ((source as { sourceKind?: string }).sourceKind === 'notebook_page') {
+    const nb = source as Extract<AskCourseSourceRef, { sourceKind: 'notebook_page' }>;
+    const notebook =
+      typeof nb.notebookTitle === 'string' && nb.notebookTitle.trim()
+        ? nb.notebookTitle.trim()
+        : 'Notebook';
+    const page =
+      typeof nb.pageTitle === 'string' && nb.pageTitle.trim()
+        ? nb.pageTitle.trim()
+        : 'Page';
+    return `Notebook: ${notebook} · ${page}`;
+  }
+  const pdf = source as Extract<AskCourseSourceRef, { sourceKind: 'free_space_pdf' }>;
   const name =
-    typeof source.fileName === 'string' && source.fileName.trim()
-      ? source.fileName.trim()
+    typeof pdf.fileName === 'string' && pdf.fileName.trim()
+      ? pdf.fileName.trim()
       : 'Course material';
-  const page = Number.isFinite(source.pageNumber) ? source.pageNumber : 1;
+  const page = Number.isFinite(pdf.pageNumber) ? pdf.pageNumber : 1;
   return `${name} · p. ${page}`;
 }
 
@@ -58,7 +71,14 @@ export const AskZikukSources = memo(function AskZikukSources({
         {sources.map(source => {
           const label = formatAskCourseSourceLabel(source);
           return (
-            <li key={`${source.index}-${source.sourceObjectId}`}>
+            <li
+              key={`${source.index}-${
+                (source as { sourceKind?: string }).sourceKind === 'notebook_page'
+                  ? (source as Extract<AskCourseSourceRef, { sourceKind: 'notebook_page' }>).pageId
+                  : (source as Extract<AskCourseSourceRef, { sourceKind: 'free_space_pdf' }>)
+                      .sourceObjectId
+              }`}
+            >
               <button
                 type="button"
                 data-ask-zikuk-source-index={source.index}

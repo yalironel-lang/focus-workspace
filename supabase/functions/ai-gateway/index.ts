@@ -237,6 +237,24 @@ Deno.serve(async (req: Request) => {
               if (error) return { ok: false as const };
               return { ok: true as const, raw: data ?? [] };
             },
+            loadNotebookFsoForCitation: async (input: {
+              userId: string;
+              sectionId: string;
+              notebookObjectId: string;
+            }) => {
+              const { data, error } = await admin
+                .from('free_space_objects')
+                .select('id, user_id, section_id, object')
+                .eq('id', input.notebookObjectId)
+                .maybeSingle();
+              if (error || !data) return null;
+              return {
+                id: data.id as string,
+                user_id: data.user_id as string,
+                section_id: data.section_id as string,
+                object: data.object,
+              };
+            },
           }
         : undefined;
 

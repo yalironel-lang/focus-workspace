@@ -90,11 +90,25 @@ describe('formatAskCourseSourceLabel', () => {
     expect(
       formatAskCourseSourceLabel({
         index: 1,
+        sourceKind: 'free_space_pdf',
         sourceObjectId: 'secret-uuid',
         fileName: null,
         pageNumber: 3,
       }),
     ).toBe('Course material · p. 3');
+  });
+
+  it('formats Notebook citations distinctly', () => {
+    expect(
+      formatAskCourseSourceLabel({
+        index: 2,
+        sourceKind: 'notebook_page',
+        notebookObjectId: 'nb-1',
+        pageId: 'page-1',
+        notebookTitle: 'Legal Relationships',
+        pageTitle: 'Capacity',
+      }),
+    ).toBe('Notebook: Legal Relationships · Capacity');
   });
 });
 
@@ -107,6 +121,7 @@ describe('AskZikukSources privacy', () => {
         sources: [
           {
             index: 1,
+            sourceKind: 'free_space_pdf',
             sourceObjectId: 'uuid-should-not-leak',
             fileName: 'Lecture.pdf',
             pageNumber: 2,
@@ -132,6 +147,7 @@ describe('AskZikukAnswer citations', () => {
         sources: [
           {
             index: 1,
+            sourceKind: 'free_space_pdf',
             sourceObjectId: 'pdf-1',
             fileName: 'A.pdf',
             pageNumber: 1,
@@ -214,6 +230,7 @@ describe('AskZikukPanel', () => {
           sources: [
             {
               index: 1,
+              sourceKind: 'free_space_pdf',
               sourceObjectId: 'pdf-hidden',
               fileName: 'Course.pdf',
               pageNumber: 5,

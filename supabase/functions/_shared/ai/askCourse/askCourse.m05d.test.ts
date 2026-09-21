@@ -49,7 +49,9 @@ function validAsk(overrides?: Partial<ZikukAiAskCourseRequest>): ZikukAiAskCours
 
 function hit(partial: Partial<KnowledgeSearchHit> & Pick<KnowledgeSearchHit, 'similarity' | 'text'>): KnowledgeSearchHit {
   return {
+    sourceKind: 'free_space_pdf',
     sourceObjectId: OBJ,
+    notebookObjectId: null,
     fileName: 'notes.pdf',
     pageNumber: 1,
     chunkIndex: 0,
@@ -87,7 +89,9 @@ function baseDeps(overrides?: Partial<AskCourseDeps>): AskCourseDeps {
       ok: true,
       raw: [
         {
+          source_kind: 'free_space_pdf',
           source_object_id: OBJ,
+          notebook_object_id: null,
           file_name: 'notes.pdf',
           page_number: 1,
           chunk_index: 0,
@@ -96,6 +100,7 @@ function baseDeps(overrides?: Partial<AskCourseDeps>): AskCourseDeps {
         },
       ],
     }),
+    loadNotebookFsoForCitation: async () => null,
     generationProvider: gen,
     routerConfig: { model: 'gpt-test' },
     enforcement: createMemoryEnforcementStore(),
@@ -223,7 +228,9 @@ describe('M0.5D embed + retrieval policy', () => {
             ok: true,
             raw: [
               {
+                source_kind: 'free_space_pdf',
                 source_object_id: OBJ,
+                notebook_object_id: null,
                 file_name: 'notes.pdf',
                 page_number: 1,
                 chunk_index: 0,
@@ -341,7 +348,9 @@ describe('M0.5D embed + retrieval policy', () => {
           ok: true,
           raw: [
             {
+              source_kind: 'free_space_pdf',
               source_object_id: OBJ,
+              notebook_object_id: null,
               file_name: 'notes.pdf',
               page_number: 1,
               chunk_index: 0,
@@ -509,6 +518,7 @@ describe('M0.5D quota / privacy / failures / regression', () => {
         loadSectionOwner: async () => ({ userId: USER_A }),
         embeddingProvider: emb,
         searchKnowledge: search,
+        loadNotebookFsoForCitation: async () => null,
       },
     });
     expect(response.ok).toBe(true);

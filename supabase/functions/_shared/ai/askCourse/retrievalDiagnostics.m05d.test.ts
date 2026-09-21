@@ -35,7 +35,9 @@ function hit(
   partial: Partial<KnowledgeSearchHit> & Pick<KnowledgeSearchHit, 'similarity' | 'text'>,
 ): KnowledgeSearchHit {
   return {
+    sourceKind: 'free_space_pdf',
     sourceObjectId: OBJ,
+    notebookObjectId: null,
     fileName: 'notes.pdf',
     pageNumber: 1,
     chunkIndex: 0,
@@ -45,7 +47,9 @@ function hit(
 
 function rawRow(h: KnowledgeSearchHit) {
   return {
+    source_kind: h.sourceKind,
     source_object_id: h.sourceObjectId,
+    notebook_object_id: h.notebookObjectId,
     file_name: h.fileName,
     page_number: h.pageNumber,
     chunk_index: h.chunkIndex,
@@ -182,6 +186,7 @@ describe('M0.5D retrieval diagnostics', () => {
             rawRow(hit({ similarity: 0.1, text: 'weak irrelevant', pageNumber: 1, chunkIndex: 0 })),
           ],
         }),
+        loadNotebookFsoForCitation: async () => null,
         generationProvider: gen,
         routerConfig: { model: 'gpt-test' },
         enforcement: store,
@@ -250,6 +255,7 @@ describe('M0.5D retrieval diagnostics', () => {
         loadSectionOwner: async () => ({ userId: USER_A }),
         embeddingProvider: emb,
         searchKnowledge: search,
+        loadNotebookFsoForCitation: async () => null,
       },
     });
     logSpy.mockRestore();
@@ -274,9 +280,13 @@ describe('M0.5D retrieval diagnostics', () => {
       const perSource = new Map<string, number>();
       const diversified: KnowledgeSearchHit[] = [];
       for (const h of afterGap) {
-        const n = perSource.get(h.sourceObjectId) ?? 0;
+        const key =
+          h.sourceKind === 'notebook_page'
+            ? `notebook_page::${h.notebookObjectId ?? ''}::${h.sourceObjectId}`
+            : `free_space_pdf::${h.sourceObjectId}`;
+        const n = perSource.get(key) ?? 0;
         if (n >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
-        perSource.set(h.sourceObjectId, n + 1);
+        perSource.set(key, n + 1);
         diversified.push(h);
       }
       const budgeted: KnowledgeSearchHit[] = [];
@@ -294,7 +304,9 @@ describe('M0.5D retrieval diagnostics', () => {
       }
       return budgeted.map((h, i) => ({
         citationIndex: i + 1,
+        sourceKind: h.sourceKind,
         sourceObjectId: h.sourceObjectId,
+        notebookObjectId: h.notebookObjectId,
         fileName: h.fileName,
         pageNumber: h.pageNumber,
         text: h.text,

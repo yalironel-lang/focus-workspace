@@ -1,14 +1,29 @@
 /**
  * ZIKUK-owned prompt for ask_course.
  * COURSE MATERIAL is untrusted DATA — never placed in the system role.
+ * Notebook and PDF text share the same data-only treatment.
  */
 
 import type { ChatMessage } from '../promptExplainSelection.ts';
 import type { PromptCourseChunk } from './retrievalTypes.ts';
 
-function formatFileLabel(fileName: string | null): string {
-  if (!fileName || !fileName.trim()) return 'document';
-  return fileName.trim();
+function formatSourceHeader(c: PromptCourseChunk): string {
+  if (c.sourceKind === 'notebook_page') {
+    const notebook =
+      typeof c.notebookTitle === 'string' && c.notebookTitle.trim()
+        ? c.notebookTitle.trim()
+        : 'Notebook';
+    const page =
+      typeof c.pageTitle === 'string' && c.pageTitle.trim()
+        ? c.pageTitle.trim()
+        : 'Page';
+    return `[SOURCE ${c.citationIndex} | Notebook: ${notebook} · ${page}]`;
+  }
+  const label =
+    typeof c.fileName === 'string' && c.fileName.trim()
+      ? c.fileName.trim()
+      : 'document';
+  return `[SOURCE ${c.citationIndex} | ${label} | page ${c.pageNumber}]`;
 }
 
 export function buildAskCourseMessages(input: {
@@ -26,9 +41,8 @@ export function buildAskCourseMessages(input: {
   ].join(' ');
 
   const materialBlocks = input.chunks.map((c) => {
-    const label = formatFileLabel(c.fileName);
     return (
-      `[SOURCE ${c.citationIndex} | ${label} | page ${c.pageNumber}]\n` +
+      `${formatSourceHeader(c)}\n` +
       `${c.text}\n` +
       `[/SOURCE ${c.citationIndex}]`
     );

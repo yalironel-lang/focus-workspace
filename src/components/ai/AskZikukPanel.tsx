@@ -27,6 +27,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   sectionId: string;
+  /** Display title for current-section scope indicator (V1 fixed scope). */
+  sectionTitle?: string;
   tokens: AtmosphereTokens;
   accent: string;
   onOpenSource: (source: AskCourseSourceRef) => void;
@@ -55,6 +57,7 @@ export function AskZikukPanel({
   open,
   onClose,
   sectionId,
+  sectionTitle,
   tokens,
   accent,
   onOpenSource,
@@ -192,7 +195,12 @@ export function AskZikukPanel({
             Ask ZIKUK
           </div>
           <div style={{ fontSize: 12, color: tokens.textMuted, marginTop: 2 }}>
-            Ask your course
+            {sectionTitle?.trim()
+              ? `Searching: ${sectionTitle.trim()}`
+              : 'Ask your course'}
+          </div>
+          <div style={{ fontSize: 11, color: tokens.textMuted, marginTop: 4, lineHeight: 1.35 }}>
+            Answers are grounded in your indexed course material.
           </div>
         </div>
         <button

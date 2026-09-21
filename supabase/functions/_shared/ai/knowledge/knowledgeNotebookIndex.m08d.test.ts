@@ -29,6 +29,10 @@ const SQL_013 = resolve(
   process.cwd(),
   'supabase/migrations/013_ai_knowledge_notebook_pages.sql',
 );
+const SQL_016 = resolve(
+  process.cwd(),
+  'supabase/migrations/016_ai_knowledge_mixed_course_search.sql',
+);
 
 function nb1(kind: string, text: string, detail: unknown = null): string {
   return `~nb1:${JSON.stringify([kind, text, [], detail])}`;
@@ -559,11 +563,13 @@ describe('M0.8D failure / empty / security', () => {
 });
 
 describe('M0.8D search fail-closed + limits', () => {
-  it('28–29. search remains PDF-only in migration 013', () => {
-    const sql = readFileSync(SQL_013, 'utf8');
-    const search = sql.slice(sql.indexOf('create or replace function public.ai_knowledge_search'));
-    expect(search).toContain("s.source_kind = 'free_space_pdf'");
-    expect(search).not.toContain("notebook_page'");
+  it('28–29. search remains PDF-only in migration 013; 016 widens', () => {
+    const sql013 = readFileSync(SQL_013, 'utf8');
+    const search013 = sql013.slice(sql013.indexOf('create or replace function public.ai_knowledge_search'));
+    expect(search013).toContain("s.source_kind = 'free_space_pdf'");
+
+    const sql016 = readFileSync(SQL_016, 'utf8');
+    expect(sql016).toContain("s.source_kind in ('free_space_pdf', 'notebook_page')");
   });
 
   it('36–37. oversized chunk count fails safely (no silent truncation)', async () => {

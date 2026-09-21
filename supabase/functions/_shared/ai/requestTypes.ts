@@ -123,12 +123,22 @@ export type ZikukAiAskCourseRequest = {
 
 export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
 
-export type AskCourseSourceRef = {
-  index: number;
-  sourceObjectId: string;
-  fileName: string | null;
-  pageNumber: number;
-};
+export type AskCourseSourceRef =
+  | {
+      index: number;
+      sourceKind: 'free_space_pdf';
+      sourceObjectId: string;
+      fileName: string | null;
+      pageNumber: number;
+    }
+  | {
+      index: number;
+      sourceKind: 'notebook_page';
+      notebookObjectId: string;
+      pageId: string;
+      notebookTitle: string | null;
+      pageTitle: string | null;
+    };
 
 export type ZikukAiResponse =
   | {

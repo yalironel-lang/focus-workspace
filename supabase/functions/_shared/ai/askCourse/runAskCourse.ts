@@ -24,6 +24,10 @@ import { filterAskCourseHitsWithDiagnostics, sourcesFromPromptChunks } from './r
 import {
   formatAskCourseRetrievalLogLine,
 } from './retrievalDiagnostics.ts';
+import {
+  resolveAskCourseHitMetadata,
+  type LoadNotebookFsoForCitation,
+} from './resolveCitationMetadata.ts';
 import type { KnowledgeSearchHit } from './retrievalTypes.ts';
 
 export type AskCourseSearchFn = (input: {
@@ -40,6 +44,8 @@ export type AskCourseDeps = {
   embeddingProvider: AiEmbeddingProvider;
   embeddingRouterConfig?: EmbeddingRouterConfig;
   searchKnowledge: AskCourseSearchFn;
+  /** Required for notebook_page citation title resolution (fail-closed). */
+  loadNotebookFsoForCitation: LoadNotebookFsoForCitation;
   generationProvider: AiProvider;
   routerConfig: RouterConfig;
   enforcement: AiEnforcementStore;
@@ -281,7 +287,15 @@ export async function runAskCoursePipeline(input: {
 
   // Defense: drop any hit that somehow isn't for this section's search contract
   // (RPC already scopes; this is belt-and-suspenders on object shape only.)
-  const hits: KnowledgeSearchHit[] = parsed.hits;
+  const parsedHits: KnowledgeSearchHit[] = parsed.hits;
+
+  // Resolve live Notebook titles; drop unresolvable notebook evidence.
+  const hits = await resolveAskCourseHitMetadata({
+    userId: authUserId,
+    sectionId,
+    hits: parsedHits,
+    loadNotebookFso: deps.loadNotebookFsoForCitation,
+  });
 
   const { chunks, diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
   console.log(formatAskCourseRetrievalLogLine(diagnostics));

@@ -87,6 +87,7 @@ function okResponse(text: string): ZikukAiResponse {
       sources: [
         {
           index: 1,
+          sourceKind: 'free_space_pdf',
           sourceObjectId: 'pdf-1',
           fileName: 'Notes.pdf',
           pageNumber: 3,

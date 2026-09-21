@@ -89,6 +89,7 @@ interface Props {
   /** M0.6 Ask ZIKUK — course-scoped Q&A entry (ephemeral panel; no layout resize). */
   askZikuk?: {
     sectionId: string;
+    sectionTitle?: string;
     onOpenSource: (source: AskCourseSourceRef) => void;
   };
 }
@@ -462,6 +463,7 @@ export function FloatingWorkspaceShell({
                   open={askOpen}
                   onClose={closeAsk}
                   sectionId={askZikuk.sectionId}
+                  sectionTitle={askZikuk.sectionTitle}
                   tokens={tokens}
                   accent={accent}
                   onOpenSource={askZikuk.onOpenSource}
