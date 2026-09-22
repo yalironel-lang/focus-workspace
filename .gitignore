@@ -8,6 +8,10 @@ dist
 dist-ssr
 *.local
 
+# M1.0B B2 isolated OCR worker (local deps + validation artifacts)
+scripts/m10b2-page-ocr-recovery/node_modules/
+tmp/m10b2_*/
+
 # Environment
 .env
 .env.local

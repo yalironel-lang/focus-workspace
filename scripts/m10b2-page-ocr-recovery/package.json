@@ -1,0 +1,21 @@
+{
+  "name": "@zikuk/m10b2-page-ocr-recovery",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
+    "pdfjs-dist": "^6.3.289"
+  }
+}

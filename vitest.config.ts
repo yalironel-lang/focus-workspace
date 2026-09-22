@@ -12,6 +12,7 @@ export default defineConfig({
       'src/lib/ai/askCourse/**/*.test.ts',
       'src/lib/ai/askCourse/**/*.test.tsx',
       'supabase/functions/_shared/ai/**/*.test.ts',
+      'scripts/m10b2-page-ocr-recovery/tests/**/*.test.ts',
       'src/lib/ai/knowledgeIngestClient/**/*.test.ts',
       'src/lib/ai/knowledgeProcessClient/**/*.test.ts',
       'src/lib/ai/knowledgeProcessHandoff/**/*.test.ts',
