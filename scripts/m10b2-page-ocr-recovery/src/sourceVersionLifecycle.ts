@@ -1,36 +1,31 @@
 /**
- * M1.0B B3.2 — Source version lifecycle notes (documentation-as-code).
+ * M1.0B B3.2.1 — Source version lifecycle (approved Option A).
  *
- * CURRENT PRODUCTION BEHAVIOR (migrations 011/012):
- * - `ai_knowledge_sources.source_version` = tip of extracted text corpus.
- * - `retrieval_source_version` = version eligible for search (may lag).
- * - `begin_ingest` sets pending_content_hash + status pending/stale but does
- *   NOT allocate a new source_version.
- * - `finalize_ingest(ready)` allocates N+1 (when replacing) and writes chunks
- *   for that version in the same transaction; does NOT flip retrieval.
+ * Implemented in migration 018 (apply to STAGING only when ACTIVE):
+ * - `source_version` = immutable processing/text tip, allocated at NEW PDF begin.
+ * - `retrieval_source_version` = published retrieval pointer; may lag during recovery.
  *
- * B3 RECOVERY REQUIREMENT:
- * Recovery jobs/page_texts must bind to ONE immutable processing version
- * BEFORE OCR, while active retrieval may remain on N.
+ * PDF begin_ingest (018):
+ * - First ingest → tip 1.
+ * - NEW replacement hash with chunks at tip → reserve N+1 immediately; retrieval stays N.
+ * - Same pending hash resume → NO bump.
+ * - NEW hash after abandoned tip (older chunks, none at tip) → N+2; do not mutate N+1.
  *
- * GAP (blocker for full N-active / N+1-processing proof against real schema):
- * There is no reserved processing version while status=processing and before
- * finalize. Binding jobs to current tip N would risk conflating live retrieval
- * evidence with in-flight recovery. Binding to N+1 requires allocating N+1
- * before finalize — not present today.
+ * Shared finalize_ingest (018):
+ * - No chunks at tip → write at early-reserved p_source_version (no double bump).
+ * - Chunks already at tip → legacy bump (Notebook + pre-018 PDF).
+ * - Never flips retrieval_source_version (B3.3 publishes later).
  *
- * MINIMUM CORRECTION CANDIDATES (NOT implemented in B3.2 — needs approval):
- * A) Early-allocate processing version (bump source_version to N+1 at recovery
- *    begin; keep retrieval_source_version=N; status stays non-ready until B3.3).
- * B) Add explicit `processing_source_version` column used by page_texts/jobs
- *    until B3.3 assembly finalize promotes it.
+ * Notebook:
+ * - `ai_knowledge_begin_notebook_page_ingest` UNCHANGED (no early bump).
+ * - Finalize path preserves Notebook replacement via chunks-at-tip bump.
  *
- * B3.2 worker code assumes jobs already carry an immutable source_version and
- * never invents one from OCR timing.
+ * Worker:
+ * - Jobs carry immutable source_version; never invent version from OCR timing.
  */
 
 export const SOURCE_VERSION_LIFECYCLE_NOTE =
-  'processing_version_must_be_allocated_before_recovery_jobs';
+  'processing_version_allocated_at_pdf_begin_ingest_option_a';
 
 /** Documents that OCR structural floor is not academic usability. */
 export const OCR_STRUCTURAL_ACCEPTANCE_NOTE =

@@ -41,6 +41,16 @@ claimJob (ledger RPC / in-memory)
 
 Feature gate: `recoveryEnabled: false` skips claim/OCR.
 
-Remote Supabase ledger adapter is stubbed until a **non-production**
-database has migration 017 applied. Production must never be the first
-environment for 017.
+## B3.2.1 staging ledger
+
+`createSupabaseTrustedLedger(client, { projectRef })` talks to real claim /
+commit RPCs and downloads PDF bytes only from the authoritative
+`ai_knowledge_sources.storage_path`.
+
+- **Allowed project ref:** `lmgrhmyurhjlwwdedojk` (`focus-workspace-staging`)
+- **Refused:** Production `comxmviofnotfwzbupxg`
+- Requires migrations **017** (+ **018** for early tip allocation) on that project
+- Staging must be **ACTIVE** before any remote apply or live OCR proof
+
+OCR `>= 8` meaningful characters remains a **structural sanity floor only** —
+not academic usability or student readiness.

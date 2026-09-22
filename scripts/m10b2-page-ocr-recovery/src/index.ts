@@ -9,6 +9,7 @@ export * from './resolveTrustedJobPdf.ts';
 export * from './runClaimedRecoveryJob.ts';
 export * from './scoreMvtSemantic.ts';
 export * from './sourceVersionLifecycle.ts';
+export * from './supabaseTrustedLedger.ts';
 export * from './tempArtifacts.ts';
 export * from './trustedJobTypes.ts';
 export * from './types.ts';

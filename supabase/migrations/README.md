@@ -74,6 +74,16 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Policy (TS):** auto-recover `SHELL_WITH_MISSING_CONTENT` + `LOW_TEXT_ITEM_COUNT`; observe `SPARSE_TEXT`; experimental `SUSPICIOUS_UNICODE`
 - **Does not:** wire OCR worker, change finalize/retrieval publish, backfill history
 - **Do NOT apply to Production** until an explicit B3 release gate
+- **Staging target:** `focus-workspace-staging` / `lmgrhmyurhjlwwdedojk` (must be ACTIVE before apply)
+
+## Migration 018 — Early source_version allocation (M1.0B B3.2.1)
+
+- **Model (Option A):** `source_version` = immutable processing tip at NEW PDF `begin_ingest`; `retrieval_source_version` may lag
+- **PDF begin:** NEW replacement hash → tip N+1 immediately; same-hash resume → no bump; abandoned tip + NEW hash → N+2
+- **Finalize:** no chunks at tip → write tip (no double bump); chunks at tip → legacy bump (Notebook-safe)
+- **Notebook:** `ai_knowledge_begin_notebook_page_ingest` unchanged
+- **Does not:** publish retrieval, assemble recovered corpus, wire Production recovery
+- **Apply to STAGING only** after `lmgrhmyurhjlwwdedojk` is ACTIVE; never Production without a later gate
 
 ## Migration 014 — Notebook page ingest RPCs (M0.8C)
 
