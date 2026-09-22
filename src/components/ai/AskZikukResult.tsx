@@ -35,7 +35,7 @@ export function AskZikukResult({
       data-ask-zikuk-turn-id={turnId}
       style={{
         width: '100%',
-        maxWidth: 680,
+        maxWidth: 720,
         margin: '0 auto',
         paddingTop: 4,
         paddingBottom: 20,

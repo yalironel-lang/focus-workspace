@@ -17,6 +17,10 @@ export {
   ASK_SESSION_MAX_TURNS,
 } from './askSessionStorage';
 export {
+  prepareAskAcademicMarkdown,
+  splitAskInlinePieces,
+} from './prepareAskAcademicMarkdown';
+export {
   buildAskCourseRecentTurns,
   ASK_CLIENT_MAX_PRIOR_USER_TURNS,
   ASK_CLIENT_MAX_PRIOR_ASSISTANT_TURNS,
