@@ -33,12 +33,27 @@ export type ZikukAiExplainSelectionRequest = {
   context: ZikukAiContext;
 };
 
-export type ZikukAiAskCourseRequest = {
+export type ZikukAiAskCourseRequestV1 = {
   version: 1;
   capability: 'ask_course';
   sectionId: string;
   question: string;
 };
+
+export type AskCourseRecentTurn = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+export type ZikukAiAskCourseRequestV2 = {
+  version: 2;
+  capability: 'ask_course';
+  sectionId: string;
+  question: string;
+  recentTurns?: AskCourseRecentTurn[];
+};
+
+export type ZikukAiAskCourseRequest = ZikukAiAskCourseRequestV1 | ZikukAiAskCourseRequestV2;
 
 export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
 

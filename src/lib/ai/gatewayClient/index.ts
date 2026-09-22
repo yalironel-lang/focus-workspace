@@ -4,8 +4,11 @@
  */
 
 export type {
+  AskCourseRecentTurn,
   AskCourseSourceRef,
   ZikukAiAskCourseRequest,
+  ZikukAiAskCourseRequestV1,
+  ZikukAiAskCourseRequestV2,
   ZikukAiCapability,
   ZikukAiErrorCode,
   ZikukAiExplainSelectionRequest,

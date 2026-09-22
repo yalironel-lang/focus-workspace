@@ -114,12 +114,33 @@ export type ZikukAiExplainSelectionRequest = {
   context: GatewayAiContext;
 };
 
-export type ZikukAiAskCourseRequest = {
+/** Untrusted conversational turn for ask_course v2 (never factual authority). */
+export type AskCourseRecentTurn = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+/** ask_course v1 — single question, no conversational context. */
+export type ZikukAiAskCourseRequestV1 = {
   version: 1;
   capability: 'ask_course';
   sectionId: string;
   question: string;
 };
+
+/**
+ * ask_course v2 — current question + optional bounded recentTurns.
+ * Conversation resolves referents; COURSE MATERIAL remains factual authority.
+ */
+export type ZikukAiAskCourseRequestV2 = {
+  version: 2;
+  capability: 'ask_course';
+  sectionId: string;
+  question: string;
+  recentTurns?: AskCourseRecentTurn[];
+};
+
+export type ZikukAiAskCourseRequest = ZikukAiAskCourseRequestV1 | ZikukAiAskCourseRequestV2;
 
 export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
 
@@ -218,5 +239,22 @@ export const FORBIDDEN_CLIENT_CONTROL_KEYS = [
   'system_prompt',
 ] as const;
 
-/** Strict allowlist for ask_course request objects. */
-export const ASK_COURSE_ALLOWED_KEYS = ['version', 'capability', 'sectionId', 'question'] as const;
+/** Strict allowlist for ask_course v1 request objects. */
+export const ASK_COURSE_ALLOWED_KEYS_V1 = [
+  'version',
+  'capability',
+  'sectionId',
+  'question',
+] as const;
+
+/** Strict allowlist for ask_course v2 request objects. */
+export const ASK_COURSE_ALLOWED_KEYS_V2 = [
+  'version',
+  'capability',
+  'sectionId',
+  'question',
+  'recentTurns',
+] as const;
+
+/** @deprecated Prefer ASK_COURSE_ALLOWED_KEYS_V1 — kept for existing imports/tests. */
+export const ASK_COURSE_ALLOWED_KEYS = ASK_COURSE_ALLOWED_KEYS_V1;

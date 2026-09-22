@@ -9,11 +9,14 @@ import {
   MAX_TABLE_PREVIEW_CHARS,
 } from './bounds.ts';
 import { MAX_ASK_COURSE_QUESTION_CHARS } from './askCourse/bounds.ts';
+import { normalizeAskCourseRecentTurns } from './askCourse/normalizeRecentTurns.ts';
 import {
-  ASK_COURSE_ALLOWED_KEYS,
+  ASK_COURSE_ALLOWED_KEYS_V1,
+  ASK_COURSE_ALLOWED_KEYS_V2,
   FORBIDDEN_CLIENT_CONTROL_KEYS,
   type GatewayAiContext,
-  type ZikukAiAskCourseRequest,
+  type ZikukAiAskCourseRequestV1,
+  type ZikukAiAskCourseRequestV2,
   type ZikukAiRequest,
 } from './requestTypes.ts';
 import type { ZikukAiErrorCode } from './requestTypes.ts';
@@ -164,9 +167,24 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
     };
   }
 
+  if (body.capability !== 'ask_course') {
+    return {
+      ok: false,
+      code: 'unsupported_capability',
+      message: 'This AI capability is not available.',
+    };
+  }
+
+  const version = body.version;
+  if (version !== 1 && version !== 2) {
+    return { ok: false, code: 'invalid_request', message: 'Unsupported request version.' };
+  }
+
+  const allowed =
+    version === 1 ? ASK_COURSE_ALLOWED_KEYS_V1 : ASK_COURSE_ALLOWED_KEYS_V2;
   const keys = Object.keys(body);
   for (const k of keys) {
-    if (!(ASK_COURSE_ALLOWED_KEYS as readonly string[]).includes(k)) {
+    if (!(allowed as readonly string[]).includes(k)) {
       return {
         ok: false,
         code: 'invalid_request',
@@ -175,16 +193,6 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
     }
   }
 
-  if (body.version !== 1) {
-    return { ok: false, code: 'invalid_request', message: 'Unsupported request version.' };
-  }
-  if (body.capability !== 'ask_course') {
-    return {
-      ok: false,
-      code: 'unsupported_capability',
-      message: 'This AI capability is not available.',
-    };
-  }
   if (typeof body.sectionId !== 'string' || !body.sectionId.trim()) {
     return { ok: false, code: 'invalid_request', message: 'Invalid sectionId.' };
   }
@@ -207,11 +215,34 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
     };
   }
 
-  const request: ZikukAiAskCourseRequest = {
-    version: 1,
+  if (version === 1) {
+    const request: ZikukAiAskCourseRequestV1 = {
+      version: 1,
+      capability: 'ask_course',
+      sectionId,
+      question,
+    };
+    return { ok: true, request };
+  }
+
+  // v2 — recentTurns optional; wrong type fails; malformed entries degrade to [].
+  if ('recentTurns' in body && body.recentTurns !== undefined) {
+    if (!Array.isArray(body.recentTurns)) {
+      return {
+        ok: false,
+        code: 'invalid_request',
+        message: 'Invalid recentTurns.',
+      };
+    }
+  }
+
+  const recentTurns = normalizeAskCourseRecentTurns(body.recentTurns);
+  const request: ZikukAiAskCourseRequestV2 = {
+    version: 2,
     capability: 'ask_course',
     sectionId,
     question,
+    ...(recentTurns.length > 0 ? { recentTurns } : {}),
   };
   return { ok: true, request };
 }

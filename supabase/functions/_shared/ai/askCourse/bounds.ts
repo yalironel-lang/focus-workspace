@@ -29,3 +29,13 @@ export const ASK_COURSE_BETA_MIN_SIMILARITY = 0.4 as const;
  * Not a correctness truth.
  */
 export const ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP = 0.25 as const;
+
+/** M0.9C1 — ask_course v2 recentTurns (conversational context, not authority). */
+export const ASK_COURSE_MAX_RECENT_TURNS = 3 as const;
+export const ASK_COURSE_MAX_PRIOR_USER_TURNS = 2 as const;
+export const ASK_COURSE_MAX_PRIOR_ASSISTANT_TURNS = 1 as const;
+export const ASK_COURSE_MAX_PRIOR_USER_TURN_CHARS = 500 as const;
+export const ASK_COURSE_MAX_PRIOR_ASSISTANT_TURN_CHARS = 1200 as const;
+export const ASK_COURSE_MAX_RECENT_TURNS_TOTAL_CHARS = 2500 as const;
+/** Cap prior-user contribution inside the contextual retrieval embedding string. */
+export const ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS = 800 as const;

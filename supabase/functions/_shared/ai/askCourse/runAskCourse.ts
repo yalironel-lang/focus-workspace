@@ -29,6 +29,8 @@ import {
   type LoadNotebookFsoForCitation,
 } from './resolveCitationMetadata.ts';
 import type { KnowledgeSearchHit } from './retrievalTypes.ts';
+import { buildAskCourseRetrievalQuery } from './buildAskCourseRetrievalQuery.ts';
+import type { AskCourseRecentTurn } from '../requestTypes.ts';
 
 export type AskCourseSearchFn = (input: {
   userId: string;
@@ -115,6 +117,13 @@ export async function runAskCoursePipeline(input: {
   const { authUserId, request, deps } = input;
   const sectionId = request.sectionId;
   const question = request.question;
+  const recentTurns: AskCourseRecentTurn[] =
+    request.version === 2 && request.recentTurns ? request.recentTurns : [];
+  // v1: embed question only. v2: deterministic contextual retrieval text (user prior only).
+  const embeddingInputText =
+    request.version === 2
+      ? buildAskCourseRetrievalQuery({ question, recentTurns })
+      : question;
 
   const baseMeta = {
     sectionId,
@@ -182,12 +191,12 @@ export async function runAskCoursePipeline(input: {
     };
   }
 
-  // 3) Embed question text only
+  // 3) Embed retrieval text (v1 = question; v2 = contextual query)
   const routeEmb = routeEmbeddingModel(deps.embeddingRouterConfig ?? {});
   const embedded = await deps.embeddingProvider.embed({
     model: routeEmb.model,
     dimensions: routeEmb.dimensions,
-    inputs: [question],
+    inputs: [embeddingInputText],
     signal: deps.signal,
   });
   if (!embedded.ok) {
@@ -334,7 +343,11 @@ export async function runAskCoursePipeline(input: {
   }
 
   const sources = sourcesFromPromptChunks(chunks);
-  const messages = buildAskCourseMessages({ question, chunks });
+  const messages = buildAskCourseMessages({
+    question,
+    chunks,
+    recentTurns: request.version === 2 ? recentTurns : undefined,
+  });
   const route = routeModel({ capability: 'ask_course', modality: 'text' }, deps.routerConfig);
 
   const providerResult = await deps.generationProvider.complete({
