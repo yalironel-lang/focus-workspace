@@ -280,7 +280,13 @@ export function FloatingWorkspaceShell({
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => onViewModeChange(opt.id)}
+                    data-workspace-view-mode={opt.id}
+                    onClick={() => {
+                      // Visibility ≠ persistence: hide Ask when leaving to a top-level mode.
+                      // Do not clear the active Ask session — only close the overlay.
+                      closeAsk();
+                      onViewModeChange(opt.id);
+                    }}
                     style={{
                       position: 'relative',
                       border: 'none',

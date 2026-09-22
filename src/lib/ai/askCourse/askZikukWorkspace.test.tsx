@@ -1074,3 +1074,271 @@ describe('FloatingWorkspaceShell Ask trigger', () => {
     expect(ctx).toContain('Course context active');
   });
 });
+
+describe('M0.9C2.3.1 Ask visibility vs top-level navigation', () => {
+  const USER = 'user-vis-1';
+  const SEC = 'sec-vis-1';
+
+  function ShellHarness(props: {
+    sectionViewMode: 'free-space' | 'work-surface' | 'math-zone';
+    onViewModeChange: (mode: 'free-space' | 'work-surface' | 'math-zone') => void;
+  }) {
+    return createElement(FloatingWorkspaceShell, {
+      title: 'Calculus II',
+      accent: '#38bdf8',
+      tokens: TOKENS,
+      isCustomizing: false,
+      onBack: () => {},
+      onOpenSearch: () => {},
+      onOpenAppearance: () => {},
+      onCustomize: () => {},
+      onExitCustomize: () => {},
+      onResetCustomize: () => {},
+      sectionViewMode: props.sectionViewMode,
+      onViewModeChange: props.onViewModeChange,
+      focusMode: null,
+      askZikuk: {
+        sectionId: SEC,
+        sectionTitle: 'Calculus II',
+        userId: USER,
+        onOpenSource: () => {},
+      },
+    });
+  }
+
+  async function openAskAndCompleteTurn(answer = 'Violet answer') {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: answer, sources: [] },
+    });
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeTruthy();
+    await typeQuestion('What is Violet Doctrine?');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+  }
+
+  it('1–2. Workspace mode hides Ask but preserves session; reopen restores', async () => {
+    const onViewModeChange = vi.fn();
+    let mode: 'free-space' | 'work-surface' | 'math-zone' = 'free-space';
+    function Wrap() {
+      return ShellHarness({
+        sectionViewMode: mode,
+        onViewModeChange: next => {
+          onViewModeChange(next);
+          mode = next;
+          root!.render(createElement(Wrap));
+        },
+      });
+    }
+    mount(createElement(Wrap));
+    await openAskAndCompleteTurn();
+    const { readAskSession } = await import('./askSessionStorage');
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+
+    act(() => {
+      (host!.querySelector('[data-workspace-view-mode="free-space"]') as HTMLButtonElement).click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    expect(onViewModeChange).toHaveBeenCalledWith('free-space');
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    expect(workspaceRoot().textContent).toContain('Violet answer');
+  });
+
+  it('3. Mission Control hides Ask and preserves session', async () => {
+    const onViewModeChange = vi.fn();
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange,
+      }),
+    );
+    await openAskAndCompleteTurn('MC answer');
+    const { readAskSession } = await import('./askSessionStorage');
+
+    act(() => {
+      (host!.querySelector('[data-workspace-view-mode="work-surface"]') as HTMLButtonElement).click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    expect(onViewModeChange).toHaveBeenCalledWith('work-surface');
+    expect(readAskSession(USER, SEC)?.turns[0]?.answer).toBe('MC answer');
+  });
+
+  it('4. Σ Studio hides Ask and preserves session', async () => {
+    const onViewModeChange = vi.fn();
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange,
+      }),
+    );
+    await openAskAndCompleteTurn('Studio answer');
+    const { readAskSession } = await import('./askSessionStorage');
+
+    const studioBtn = host!.querySelector(
+      '[data-workspace-view-mode="math-zone"]',
+    ) as HTMLButtonElement | null;
+    expect(studioBtn).toBeTruthy();
+    act(() => {
+      studioBtn!.click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    expect(onViewModeChange).toHaveBeenCalledWith('math-zone');
+    expect(readAskSession(USER, SEC)?.turns[0]?.answer).toBe('Studio answer');
+  });
+
+  it('5–6. Back to course and Escape hide Ask without clearing session', async () => {
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange: () => {},
+      }),
+    );
+    await openAskAndCompleteTurn('Back answer');
+    const { readAskSession } = await import('./askSessionStorage');
+
+    act(() => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-close]') as HTMLButtonElement).click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+  });
+
+  it('7. New conversation still clears session intentionally', async () => {
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange: () => {},
+      }),
+    );
+    await openAskAndCompleteTurn('Clear me');
+    const { readAskSession } = await import('./askSessionStorage');
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-new-conversation]') as HTMLButtonElement).click();
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('0');
+    expect(readAskSession(USER, SEC)).toBeNull();
+  });
+
+  it('8. Persisted session alone does not force Ask visible on Workspace', async () => {
+    const { writeAskSession } = await import('./askSessionStorage');
+    writeAskSession(USER, SEC, {
+      turns: [
+        {
+          id: 't1',
+          question: 'Q',
+          answer: 'Persisted',
+          sources: [],
+          status: 'success',
+        },
+      ],
+      draft: '',
+    });
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange: () => {},
+      }),
+    );
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    expect(workspaceRoot().textContent).toContain('Persisted');
+  });
+
+  it('9. In-flight Ask → Workspace: stale result does not appear; prior turns remain', async () => {
+    let resolve!: (v: ZikukAiResponse) => void;
+    zikukAiRequest
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: { type: 'ask_course', text: 'Prior', sources: [] },
+      })
+      .mockImplementation(
+        () =>
+          new Promise<ZikukAiResponse>(r => {
+            resolve = r;
+          }),
+      );
+
+    const onViewModeChange = vi.fn();
+    mount(
+      ShellHarness({
+        sectionViewMode: 'free-space',
+        onViewModeChange,
+      }),
+    );
+
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    await typeQuestion('Prior Q');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+
+    await typeQuestion('In flight');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(workspaceRoot().querySelector('[data-ask-zikuk-thread]')?.getAttribute('aria-busy')).toBe(
+        'true',
+      );
+    });
+
+    act(() => {
+      (host!.querySelector('[data-workspace-view-mode="free-space"]') as HTMLButtonElement).click();
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+
+    await act(async () => {
+      resolve({
+        version: 1,
+        ok: true,
+        result: { type: 'ask_course', text: 'Late stale', sources: [] },
+      });
+      await Promise.resolve();
+    });
+
+    act(() => {
+      (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
+    });
+    expect(workspaceRoot().textContent).toContain('Prior');
+    expect(workspaceRoot().textContent).not.toContain('Late stale');
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    const { readAskSession } = await import('./askSessionStorage');
+    expect(readAskSession(USER, SEC)?.turns.map(t => t.answer)).toEqual(['Prior']);
+  });
+});
