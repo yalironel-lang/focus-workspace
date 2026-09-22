@@ -2,6 +2,8 @@
 export const Z_CANVAS_OBJECTS = 10;
 export const Z_STUDY_SESSION_BACKDROP = 598;
 export const Z_STUDY_SESSION_SHELL = 599;
+/** Ask ZIKUK course workspace — under floating chrome, above canvas (preserves course shell). */
+export const Z_ASK_ZIKUK_WORKSPACE = 597;
 /** Universal notebook fullscreen — above workspace shell chrome (600). */
 export const Z_UNIVERSAL_VIEW_BACKDROP = 610;
 export const Z_UNIVERSAL_VIEW_PANEL = 611;

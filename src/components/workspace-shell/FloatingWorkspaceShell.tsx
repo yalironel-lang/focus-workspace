@@ -13,7 +13,7 @@ import { EXPLORE_FOCUS_SECTION_TITLE } from '../../lib/exploreFocus';
 import { glassIsland, shellIconBtn } from './shellGlass';
 import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
-import { AskZikukPanel } from '../ai/AskZikukPanel';
+import { AskZikukWorkspace } from '../ai/AskZikukWorkspace';
 import type { AskCourseSourceRef } from '../../lib/ai/gatewayClient';
 
 const VIEW_MODES_ALL = [
@@ -86,7 +86,7 @@ interface Props {
   organize?: OrganizeProps;
   /** Lower visual weight while study session reader is active. */
   dimmed?: boolean;
-  /** M0.6 Ask ZIKUK — course-scoped Q&A entry (ephemeral panel; no layout resize). */
+  /** M0.9B Ask ZIKUK — course-scoped AI workspace (ephemeral; no layout resize of course). */
   askZikuk?: {
     sectionId: string;
     sectionTitle?: string;
@@ -459,7 +459,7 @@ export function FloatingWorkspaceShell({
                 >
                   Ask ZIKUK
                 </button>
-                <AskZikukPanel
+                <AskZikukWorkspace
                   open={askOpen}
                   onClose={closeAsk}
                   sectionId={askZikuk.sectionId}
@@ -468,7 +468,6 @@ export function FloatingWorkspaceShell({
                   accent={accent}
                   onOpenSource={askZikuk.onOpenSource}
                   triggerRef={askTriggerRef}
-                  dismissRootRef={askRef}
                 />
               </div>
             ) : null}
