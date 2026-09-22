@@ -22,6 +22,16 @@ export type PageText = {
   text: string;
 };
 
+/**
+ * M1.0B B1 — native PDF page extraction with detector metrics.
+ * Extra fields are observational; chunking continues to use only pageNumber + text.
+ */
+export type ExtractedPdfPage = PageText & {
+  itemCount: number;
+  meaningfulChars: number;
+  suspiciousUnicodeCount: number;
+};
+
 function splitIntoBlocks(pageText: string): string[] {
   const paragraphs = pageText
     .split(/\n{2,}/)

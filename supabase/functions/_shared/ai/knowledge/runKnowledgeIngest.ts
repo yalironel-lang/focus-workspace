@@ -9,7 +9,7 @@
  *   → SHA-256
  *   → begin_ingest
  *   → (idempotent ready? return reused)
- *   → extract pages → chunk → finalize ready
+ *   → extract pages → (observe suspicion; B1 does not recover) → chunk → finalize ready
  *   → on failure: finalize failed (preserves prior READY)
  */
 
@@ -26,7 +26,12 @@ import {
 } from './extractPdfText.ts';
 import { sha256Hex } from './hash.ts';
 import { meaningfulCharCount } from './normalizeText.ts';
+import {
+  buildSuspicionObservationSummary,
+  isPageSuspicionDetectEnabled,
+} from './pageSuspicionObserve.ts';
 import { buildFreeSpacePdfStoragePath } from './path.ts';
+import { formatKnowledgeSuspicionLogLine } from './privacyLogSuspicion.ts';
 import type {
   KnowledgeIngestErrorCode,
   KnowledgeIngestRequest,
@@ -299,7 +304,16 @@ export async function runKnowledgeIngest(input: {
     );
   }
 
-  const chunks = chunkPageTexts(extracted.pages);
+  // M1.0B B1 — observational only. Does not alter text, chunks, status, or indexing.
+  if (isPageSuspicionDetectEnabled()) {
+    const { logLine } = buildSuspicionObservationSummary(extracted.pages);
+    console.log(formatKnowledgeSuspicionLogLine(logLine));
+  }
+
+  // Canonical chunk input remains pageNumber + text only (ignore metric fields).
+  const chunks = chunkPageTexts(
+    extracted.pages.map((p) => ({ pageNumber: p.pageNumber, text: p.text })),
+  );
   if (chunks.length === 0) {
     await finalizeFailedPreserve(input.deps, sourceId, sourceVersion, 'no_extractable_text');
     return fail('no_extractable_text', 'No usable text chunks were produced.');

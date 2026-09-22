@@ -1,14 +1,19 @@
 /**
  * Digital/text-layer PDF page extraction via pdf.js getDocument API.
  * OCR is out of scope. Rendering/canvas not required.
+ *
+ * M1.0B B1: pages include observational metrics (itemCount, meaningfulChars,
+ * suspiciousUnicodeCount). Canonical `text` normalization is unchanged.
  */
 
 import {
   KNOWLEDGE_MAX_EXTRACTED_CHARS,
   KNOWLEDGE_MAX_PAGES,
+  KNOWLEDGE_PDF_EXTRACTION_VERSION,
 } from './bounds.ts';
+import type { ExtractedPdfPage } from './chunkPages.ts';
+import { countSuspiciousUnicodeChars } from './extractionMetrics.ts';
 import { meaningfulCharCount, normalizeExtractedPageText } from './normalizeText.ts';
-import type { PageText } from './chunkPages.ts';
 
 /** Minimal pdf.js surface used by extraction (injectable for tests). */
 export type PdfJsDocument = {
@@ -36,9 +41,10 @@ export type PdfJsModule = {
 export type ExtractPdfTextSuccess = {
   ok: true;
   pageCount: number;
-  pages: PageText[];
+  pages: ExtractedPdfPage[];
   extractedChars: number;
   pagesWithText: number;
+  extractionVersion: typeof KNOWLEDGE_PDF_EXTRACTION_VERSION;
 };
 
 export type ExtractPdfTextFailure = {
@@ -119,30 +125,41 @@ export async function extractPdfTextFromBytes(
       return { ok: false, code: 'too_many_pages' };
     }
 
-    const pages: PageText[] = [];
+    const pages: ExtractedPdfPage[] = [];
     let extractedChars = 0;
     let pagesWithText = 0;
 
     for (let n = 1; n <= pageCount; n++) {
       let pageText = '';
+      let itemCount = 0;
       try {
         const page = await doc.getPage(n);
         const content = await page.getTextContent();
-        const raw = itemsToRawText(content.items ?? []);
+        const items = content.items ?? [];
+        itemCount = items.length;
+        const raw = itemsToRawText(items);
         pageText = normalizeExtractedPageText(raw);
       } catch {
         // Treat page extraction failure as empty page; continue.
         pageText = '';
+        itemCount = 0;
       }
 
-      if (meaningfulCharCount(pageText) > 0) {
+      const meaningfulChars = meaningfulCharCount(pageText);
+      if (meaningfulChars > 0) {
         pagesWithText += 1;
       }
       extractedChars += pageText.length;
       if (extractedChars > maxChars) {
         return { ok: false, code: 'too_large' };
       }
-      pages.push({ pageNumber: n, text: pageText });
+      pages.push({
+        pageNumber: n,
+        text: pageText,
+        itemCount,
+        meaningfulChars,
+        suspiciousUnicodeCount: countSuspiciousUnicodeChars(pageText),
+      });
     }
 
     return {
@@ -151,6 +168,7 @@ export async function extractPdfTextFromBytes(
       pages,
       extractedChars,
       pagesWithText,
+      extractionVersion: KNOWLEDGE_PDF_EXTRACTION_VERSION,
     };
   } finally {
     try {
