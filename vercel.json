@@ -5,7 +5,11 @@
   "routes": [
     { "handle": "filesystem" },
     {
-      "src": "/.*",
+      "src": "/assets/(.*)",
+      "status": 404
+    },
+    {
+      "src": "/(.*)",
       "dest": "/index.html"
     }
   ]
