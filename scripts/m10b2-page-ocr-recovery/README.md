@@ -30,8 +30,17 @@ node --experimental-strip-types runMvtEvidence.ts
 
 Writes `tmp/m10b2_validate/SANITIZED_B2_SUMMARY.json` (no raw page text).
 
-## Dependencies
+## B3.2 trusted claim loop (local)
 
-- Node 22+ (strip-types) / tested on Node 26
-- `@napi-rs/canvas`, `pdfjs-dist` (this package)
-- System `tesseract` + `eng` tessdata
+```
+claimJob (ledger RPC / in-memory)
+  → resolveTrustedJobPdf (source row → storagePath → bytes)
+  → recoverPdfPage (render + Tesseract)
+  → commitRecoveryResult (re-validates claim + versions)
+```
+
+Feature gate: `recoveryEnabled: false` skips claim/OCR.
+
+Remote Supabase ledger adapter is stubbed until a **non-production**
+database has migration 017 applied. Production must never be the first
+environment for 017.
