@@ -17,4 +17,4 @@ export type {
 } from './types';
 
 export { AI_GATEWAY_FUNCTION_NAME } from './types';
-export { zikukAiRequest } from './client';
+export { zikukAiRequest, serializeAskCourseGatewayBody } from './client';

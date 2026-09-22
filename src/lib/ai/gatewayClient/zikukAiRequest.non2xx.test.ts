@@ -226,6 +226,7 @@ describe('zikukAiRequest non-2xx structured errors', () => {
         sources: [
           {
             index: 1,
+            sourceKind: 'free_space_pdf',
             sourceObjectId: 'pdf-1',
             fileName: 'Notes.pdf',
             pageNumber: 2,

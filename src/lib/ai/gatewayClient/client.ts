@@ -1,12 +1,16 @@
 /**
  * Client invoke wrapper for the ZIKUK AI Gateway.
  * Sends a provider-independent request; never talks to OpenAI/Gemini/etc. directly.
+ *
+ * M0.9C2.2.6: faithfully serialize ask_course v1/v2 (never silently downgrade v2 → v1).
  */
 
 import { isSupabaseConfigured, supabase } from '../../supabase';
 import {
   AI_GATEWAY_FUNCTION_NAME,
+  type AskCourseRecentTurn,
   type AskCourseSourceRef,
+  type ZikukAiAskCourseRequest,
   type ZikukAiErrorCode,
   type ZikukAiRequest,
   type ZikukAiResponse,
@@ -141,6 +145,51 @@ async function parseStructuredErrorFromInvoke(error: unknown): Promise<ZikukAiRe
   }
 }
 
+/** Serialize ask_course without downgrading v2 or stripping recentTurns. */
+export function serializeAskCourseGatewayBody(
+  request: ZikukAiAskCourseRequest,
+): ZikukAiAskCourseRequest {
+  if (request.version === 2) {
+    const recentTurns = request.recentTurns;
+    const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
+    return {
+      version: 2,
+      capability: 'ask_course',
+      sectionId: request.sectionId,
+      question: request.question,
+      ...(hasTurns ? { recentTurns: recentTurns as AskCourseRecentTurn[] } : {}),
+    };
+  }
+  return {
+    version: 1,
+    capability: 'ask_course',
+    sectionId: request.sectionId,
+    question: request.question,
+  };
+}
+
+function logAskCourseWireDiag(body: ZikukAiAskCourseRequest): void {
+  if (!import.meta.env.DEV) return;
+  const turns = body.version === 2 ? body.recentTurns ?? [] : [];
+  let recentUserTurnCount = 0;
+  let recentAssistantTurnCount = 0;
+  for (const t of turns) {
+    if (t.role === 'user') recentUserTurnCount += 1;
+    else recentAssistantTurnCount += 1;
+  }
+  // eslint-disable-next-line no-console
+  console.info('[ask_course_wire_diag]', {
+    version: body.version,
+    capability: body.capability,
+    hasSectionId: Boolean(body.sectionId),
+    hasRecentTurns: turns.length > 0,
+    recentTurnsCount: turns.length,
+    recentUserTurnCount,
+    recentAssistantTurnCount,
+    questionLength: body.question.length,
+  });
+}
+
 /**
  * Invoke the secure ZIKUK AI Gateway with the current Supabase session JWT.
  * Does not accept provider/model/apiKey — those are server-only.
@@ -155,17 +204,16 @@ export async function zikukAiRequest(
 
   const body: ZikukAiRequest =
     request.capability === 'ask_course'
-      ? {
-          version: 1,
-          capability: 'ask_course',
-          sectionId: request.sectionId,
-          question: request.question,
-        }
+      ? serializeAskCourseGatewayBody(request)
       : {
           version: 1,
           capability: 'explain_selection',
           context: request.context,
         };
+
+  if (body.capability === 'ask_course') {
+    logAskCourseWireDiag(body);
+  }
 
   try {
     const { data, error } = await supabase.functions.invoke(AI_GATEWAY_FUNCTION_NAME, {
