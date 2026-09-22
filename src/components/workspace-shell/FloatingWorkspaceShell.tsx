@@ -90,6 +90,7 @@ interface Props {
   askZikuk?: {
     sectionId: string;
     sectionTitle?: string;
+    userId?: string | null;
     onOpenSource: (source: AskCourseSourceRef) => void;
   };
 }
@@ -464,6 +465,7 @@ export function FloatingWorkspaceShell({
                   onClose={closeAsk}
                   sectionId={askZikuk.sectionId}
                   sectionTitle={askZikuk.sectionTitle}
+                  userId={askZikuk.userId ?? null}
                   tokens={tokens}
                   accent={accent}
                   onOpenSource={askZikuk.onOpenSource}

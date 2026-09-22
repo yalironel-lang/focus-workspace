@@ -104,11 +104,28 @@ export function useAskCourseController(input: {
     setState(IDLE);
   }, [sectionId, abortInFlight]);
 
-  // Panel close → abort + clear
+  // Panel close → abort + invalidate in-flight.
+  // Session mode (getSubmitContext): preserve composer draft; do not wipe conversation ownership.
+  // Single-result mode: clear ephemeral state entirely.
   useEffect(() => {
     if (open) return;
     abortInFlight();
     genRef.current += 1;
+    const sessionMode = typeof getSubmitContextRef.current === 'function';
+    if (sessionMode) {
+      setState(prev => {
+        const draft =
+          prev.phase === 'loading'
+            ? (prev.submittedQuestion ?? prev.question)
+            : prev.question;
+        questionRef.current = draft;
+        return {
+          ...IDLE,
+          question: draft,
+        };
+      });
+      return;
+    }
     questionRef.current = '';
     setState(IDLE);
   }, [open, abortInFlight]);

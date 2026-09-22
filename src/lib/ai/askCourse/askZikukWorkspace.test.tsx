@@ -91,10 +91,12 @@ async function typeQuestion(value: string) {
 
 beforeEach(() => {
   zikukAiRequest.mockReset();
+  localStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
 });
 
 describe('formatAskCourseSourceLabel', () => {
@@ -863,7 +865,7 @@ describe('AskZikukWorkspace', () => {
     expect(zikukAiRequest.mock.calls.at(-1)![0]).not.toHaveProperty('recentTurns');
   });
 
-  it('close then reopen starts a fresh empty session', async () => {
+  it('close then reopen preserves the active conversation', async () => {
     zikukAiRequest.mockResolvedValue({
       version: 1,
       ok: true,
@@ -876,6 +878,7 @@ describe('AskZikukWorkspace', () => {
         onClose,
         sectionId: 'sec-1',
         sectionTitle: 'Calculus II',
+        userId: 'user-ws-1',
         tokens: TOKENS,
         accent: '#38bdf8',
         onOpenSource: () => {},
@@ -899,8 +902,112 @@ describe('AskZikukWorkspace', () => {
     act(() => {
       root!.render(createElement(Wrap, { open: true }));
     });
-    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('0');
-    expect(workspaceRoot().querySelector('[data-ask-zikuk-empty]')).toBeTruthy();
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    expect(workspaceRoot().textContent).toContain('A1');
+  });
+
+  it('restored session keeps PDF/Notebook source navigation via onOpenSource', async () => {
+    const onOpen = vi.fn();
+    zikukAiRequest
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: 'PDF answer [1]',
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'free_space_pdf',
+              sourceObjectId: 'pdf-restored',
+              fileName: 'Restored.pdf',
+              pageNumber: 5,
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: 'NB answer [1]',
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'notebook_page',
+              notebookObjectId: 'nb-restored',
+              pageId: 'pg-restored',
+              notebookTitle: 'Restored NB',
+              pageTitle: 'Page',
+            },
+          ],
+        },
+      });
+
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-restore-nav',
+        sectionTitle: 'Calculus II',
+        userId: 'user-ws-nav',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: onOpen,
+      }),
+    );
+    await typeQuestion('PDF q');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await typeQuestion('NB q');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('2');
+    });
+
+    cleanup();
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-restore-nav',
+        sectionTitle: 'Calculus II',
+        userId: 'user-ws-nav',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: onOpen,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('2');
+    });
+    const results = workspaceRoot().querySelectorAll('[data-ask-zikuk-result]');
+    act(() => {
+      (results[0].querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
+    });
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKind: 'free_space_pdf',
+        sourceObjectId: 'pdf-restored',
+        pageNumber: 5,
+      }),
+    );
+    act(() => {
+      (results[1].querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
+    });
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKind: 'notebook_page',
+        notebookObjectId: 'nb-restored',
+        pageId: 'pg-restored',
+      }),
+    );
   });
 
   it('marks narrow layout attribute without overflow structure', () => {

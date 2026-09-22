@@ -1,6 +1,6 @@
 /**
- * M0.9B / M0.9C2 Ask ZIKUK course workspace — session-only academic thread.
- * Asks use ask_course v2 + bounded recentTurns. No persisted history.
+ * M0.9B / M0.9C2 / M0.9C2.3 Ask ZIKUK course workspace — session continuity.
+ * Asks use ask_course v2 + bounded recentTurns. Active session is local to user+course.
  */
 
 import {
@@ -33,6 +33,8 @@ export type AskZikukWorkspaceProps = {
   sectionId: string;
   /** Display title for current-section scope (presentation only). */
   sectionTitle?: string;
+  /** Authenticated user id — scopes local Ask session continuity. */
+  userId?: string | null;
   tokens: AtmosphereTokens;
   accent: string;
   onOpenSource: (source: AskCourseSourceRef) => void;
@@ -50,6 +52,7 @@ export function AskZikukWorkspace({
   onClose,
   sectionId,
   sectionTitle,
+  userId = null,
   tokens,
   accent,
   onOpenSource,
@@ -79,6 +82,7 @@ export function AskZikukWorkspace({
   } = useAskCourseSession({
     sectionId,
     open,
+    userId,
   });
 
   useEffect(() => {

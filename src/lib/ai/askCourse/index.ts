@@ -8,6 +8,15 @@ export {
   type AskSessionTurn,
 } from './useAskCourseSession';
 export {
+  askSessionStorageKey,
+  readAskSession,
+  writeAskSession,
+  clearAskSession,
+  parsePersistedAskSession,
+  ASK_SESSION_STORAGE_VERSION,
+  ASK_SESSION_MAX_TURNS,
+} from './askSessionStorage';
+export {
   buildAskCourseRecentTurns,
   ASK_CLIENT_MAX_PRIOR_USER_TURNS,
   ASK_CLIENT_MAX_PRIOR_ASSISTANT_TURNS,
