@@ -91,3 +91,28 @@ export const KNOWLEDGE_SUSPICION_LOW_ITEM_MAX_MEANINGFUL_CHARS = 8;
 
 /** SUSPICIOUS_UNICODE: Private Use Area / supplementary PUA code points. */
 export const KNOWLEDGE_SUSPICION_MIN_PUA_CHARS = 2;
+
+// ---------------------------------------------------------------------------
+// M1.0B B3.1 — Selective page recovery policy + job bounds (durable foundation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Master gate for selective page recovery. When false, ingest must retain the
+ * pre-recovery fast path (native → chunk → index). B3.2/B3.3 honor this.
+ */
+export const KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED = true;
+
+/** Versioned initial recovery-trigger policy (tiered; not universal). */
+export const KNOWLEDGE_PAGE_RECOVERY_POLICY_VERSION = 'page-recovery-policy-v1' as const;
+
+/** Matches B2 worker recoveryVersion contract. */
+export const KNOWLEDGE_PAGE_OCR_RECOVERY_VERSION = 'page-ocr-recovery-v1' as const;
+
+/** Maximum total attempts per recovery identity (bounded retries). */
+export const KNOWLEDGE_PAGE_RECOVERY_MAX_ATTEMPTS = 3;
+
+/** Claim lease duration (seconds) before another worker may reclaim. */
+export const KNOWLEDGE_PAGE_RECOVERY_LEASE_SECONDS = 120;
+
+/** Initial retry backoff base (seconds); exponential in claim/retry RPC. */
+export const KNOWLEDGE_PAGE_RECOVERY_RETRY_BASE_SECONDS = 30;

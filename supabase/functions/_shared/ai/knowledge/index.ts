@@ -1,5 +1,6 @@
 export * from './batchChunks.ts';
 export * from './bounds.ts';
+export * from './canonicalPageText.ts';
 export * from './chunkNotebookSegments.ts';
 export * from './chunkPages.ts';
 export * from './detectPageExtractionSuspicion.ts';
@@ -12,6 +13,8 @@ export * from './loadNotebookPageSource.ts';
 export * from './notebookDialectDecode.ts';
 export * from './notebookTypes.ts';
 export * from './normalizeText.ts';
+export * from './pageRecoveryJobState.ts';
+export * from './pageRecoveryPolicy.ts';
 export * from './pageSuspicionObserve.ts';
 export * from './path.ts';
 export * from './privacyLog.ts';

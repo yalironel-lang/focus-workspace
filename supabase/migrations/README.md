@@ -22,6 +22,7 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 | `014_ai_knowledge_notebook_page_ingest.sql` | Notebook page begin-ingest + blank invalidation RPCs (M0.8C) | **Local/create only — NOT applied to Production in M0.8C** |
 | `015_ai_knowledge_notebook_page_remove.sql` | Notebook page knowledge remove on soft-delete (M0.8E) | **Local/create only — NOT applied to Production in M0.8E** |
 | `016_ai_knowledge_mixed_course_search.sql` | Mixed PDF + Notebook course search (M0.8F) | **Local/create only — NOT applied to Production in M0.8F** |
+| `017_ai_knowledge_page_recovery.sql` | Selective page OCR recovery: page texts + recovery jobs + claim/commit RPCs (M1.0B B3.1) | **Local/create only — NOT applied to Production in B3.1** |
 
 ## Migration 011 — AI knowledge foundation (M0.5A)
 
@@ -64,6 +65,15 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Scope:** `user_id` + `section_id` only (no canvas/object enumeration)
 - **Lifecycle:** current `retrieval_source_version` + `indexed` version index only
 - **Do NOT apply to Production** until a later approved release gate
+
+## Migration 017 — Selective page recovery foundation (M1.0B B3.1)
+
+- **Objects:** `ai_knowledge_page_texts` (evidence/provenance), `ai_knowledge_page_recovery_jobs` (async lifecycle)
+- **Identity:** page unique `(source_id, source_version, page_number)`; job unique `(source_id, source_version, page_number, recovery_version)`
+- **RPCs (service_role only):** `ai_knowledge_upsert_page_texts_native`, `ai_knowledge_enqueue_page_recovery_jobs`, `ai_knowledge_claim_page_recovery_job`, `ai_knowledge_commit_page_recovery_result`
+- **Policy (TS):** auto-recover `SHELL_WITH_MISSING_CONTENT` + `LOW_TEXT_ITEM_COUNT`; observe `SPARSE_TEXT`; experimental `SUSPICIOUS_UNICODE`
+- **Does not:** wire OCR worker, change finalize/retrieval publish, backfill history
+- **Do NOT apply to Production** until an explicit B3 release gate
 
 ## Migration 014 — Notebook page ingest RPCs (M0.8C)
 
