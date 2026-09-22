@@ -1,24 +1,21 @@
 /**
- * M0.9C1 — deterministic contextual retrieval query for ask_course v2.
+ * M0.9C1 / M0.9C2.2 — deterministic contextual retrieval query for ask_course v2.
  *
  * CONVERSATION tells ZIKUK what we are talking about (prior USER questions only).
  * COURSE MATERIAL (retrieved later) tells ZIKUK what is true.
  *
  * Never includes prior assistant text in the embedding input.
- * Current question always dominates (first, full).
+ *
+ * M0.9C2.2: referential follow-ups lead with prior topical user question so
+ * short anaphora ("Why?", "explain that more simply") still retrieve the topic.
+ * Explicit standalone topics keep current-question dominance (no context hijack).
  */
 
 import type { AskCourseRecentTurn } from '../requestTypes.ts';
 import { ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS } from './bounds.ts';
+import { shouldLeadRetrievalWithPriorUserContext } from './isReferentialAskCourseFollowUp.ts';
 
-export function buildAskCourseRetrievalQuery(input: {
-  question: string;
-  recentTurns?: AskCourseRecentTurn[];
-}): string {
-  const question = input.question.trim();
-  const priorUsers = (input.recentTurns ?? []).filter((t) => t.role === 'user');
-
-  // Newest preferred when packing the prior budget; emit chronological.
+function packPriorUserLines(priorUsers: AskCourseRecentTurn[]): string[] {
   let budget = ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS;
   const linesNewestFirst: string[] = [];
   for (let i = priorUsers.length - 1; i >= 0; i--) {
@@ -30,17 +27,45 @@ export function buildAskCourseRetrievalQuery(input: {
     linesNewestFirst.push(text);
     budget -= text.length;
   }
-  const priorLines = linesNewestFirst.reverse();
+  return linesNewestFirst.reverse();
+}
+
+function boundPriorBlock(priorLines: string[]): string {
+  let priorBlock = priorLines.join('\n');
+  if (priorBlock.length > ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS) {
+    priorBlock = priorBlock.slice(0, ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS).trimEnd();
+  }
+  return priorBlock;
+}
+
+export function buildAskCourseRetrievalQuery(input: {
+  question: string;
+  recentTurns?: AskCourseRecentTurn[];
+}): string {
+  const question = input.question.trim();
+  const priorUsers = (input.recentTurns ?? []).filter((t) => t.role === 'user');
+  const priorLines = packPriorUserLines(priorUsers);
 
   if (priorLines.length === 0) {
     return `CURRENT QUESTION:\n${question}`;
   }
 
-  let priorBlock = priorLines.join('\n');
-  if (priorBlock.length > ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS) {
-    priorBlock = priorBlock.slice(0, ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS).trimEnd();
+  const priorBlock = boundPriorBlock(priorLines);
+
+  if (
+    shouldLeadRetrievalWithPriorUserContext({
+      question,
+      hasPriorUserContext: true,
+    })
+  ) {
+    // Prior topic first — short referential follow-ups need topical vocabulary in the embedding.
+    return (
+      `Previous question:\n${priorBlock}\n\n` +
+      `Follow-up:\n${question}`
+    );
   }
 
+  // Non-referential / explicit new topic: current question remains dominant.
   return (
     `CURRENT QUESTION:\n${question}\n\n` +
     `RECENT USER CONTEXT:\n${priorBlock}`

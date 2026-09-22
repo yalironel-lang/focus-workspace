@@ -15,6 +15,11 @@ export {
   ASK_CLIENT_MAX_PRIOR_ASSISTANT_CHARS,
 } from './buildAskCourseRecentTurns';
 export {
+  prepareAskCourseSubmitContext,
+  type AskCourseSubmitContext,
+  type PrepareAskCourseSubmitContextResult,
+} from './prepareAskCourseSubmitContext';
+export {
   userFacingAskCourseErrorMessage,
   isAskCourseRetryAllowed,
 } from './userFacingAskCourseError';

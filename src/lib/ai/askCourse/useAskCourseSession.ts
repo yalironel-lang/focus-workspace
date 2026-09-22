@@ -1,12 +1,14 @@
 /**
- * M0.9C2 — ephemeral Ask session (in-memory turns + v2 request wiring).
+ * M0.9C2 / M0.9C2.2 — ephemeral Ask session (in-memory turns + v2 request wiring).
  * UI history may grow; model context is bounded via buildAskCourseRecentTurns.
+ * M0.9C2.2: single submit-context snapshot with recentTurns invariant.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AskCourseRecentTurn, AskCourseSourceRef } from '../gatewayClient';
+import type { AskCourseSourceRef } from '../gatewayClient';
 import { useAskCourseController } from './useAskCourseController';
 import { buildAskCourseRecentTurns } from './buildAskCourseRecentTurns';
+import { prepareAskCourseSubmitContext } from './prepareAskCourseSubmitContext';
 
 export type AskSessionTurn = {
   id: string;
@@ -29,8 +31,9 @@ export function useAskCourseSession(input: {
   const turnsRef = useRef<AskSessionTurn[]>([]);
   turnsRef.current = turns;
 
-  const getRecentTurns = useCallback((): AskCourseRecentTurn[] => {
-    return buildAskCourseRecentTurns(turnsRef.current);
+  const getSubmitContext = useCallback(() => {
+    // Snapshot current successful turns once for this submit.
+    return prepareAskCourseSubmitContext(turnsRef.current);
   }, []);
 
   const onAskSuccess = useCallback(
@@ -60,7 +63,7 @@ export function useAskCourseSession(input: {
   } = useAskCourseController({
     sectionId,
     open,
-    getRecentTurns,
+    getSubmitContext,
     onAskSuccess,
   });
 
@@ -93,6 +96,8 @@ export function useAskCourseSession(input: {
     canSubmit,
     isLoading,
     /** Test seam: inspect what would be sent as recentTurns right now. */
-    getRecentTurnsForTest: getRecentTurns,
+    getRecentTurnsForTest: () => buildAskCourseRecentTurns(turnsRef.current),
+    /** Test seam: full submit-context preparation. */
+    getSubmitContextForTest: getSubmitContext,
   };
 }

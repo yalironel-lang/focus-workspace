@@ -329,8 +329,11 @@ describe('M0.9C1 pipeline call counts + contextual embed', () => {
     expect(out.response.ok).toBe(true);
     expect(beginSpy).toHaveBeenCalledTimes(1);
     expect(embInputs).toHaveLength(1);
-    expect(embInputs[0]![0]).toContain('CURRENT QUESTION:');
+    // Default v2 question is referential ("I do not understand the second step.") → prior leads.
+    expect(embInputs[0]![0]).toContain('Previous question:');
     expect(embInputs[0]![0]).toContain("Explain Euler's theorem.");
+    expect(embInputs[0]![0]).toContain('Follow-up:');
+    expect(embInputs[0]![0]).toContain('second step');
     expect(embInputs[0]![0]).not.toContain('Step one');
     expect(gen.calls).toHaveLength(1);
     const prompt = (gen.calls[0] as { messages: { content: string }[] }).messages

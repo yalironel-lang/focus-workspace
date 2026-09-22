@@ -568,6 +568,155 @@ describe('AskZikukWorkspace', () => {
     expect(zikukAiRequest).not.toHaveBeenCalled();
   });
 
+  it('M0.9C2.2 Violet UI: Turn 2 must send non-empty recentTurns', async () => {
+    const violetQ =
+      'What is the Violet Doctrine, and what must happen before the Silver Gate may be opened?';
+    const violetA =
+      'The Violet Doctrine requires exactly three witnesses before the Silver Gate may be opened.';
+    zikukAiRequest
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: violetA,
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'notebook_page',
+              notebookObjectId: 'nb-violet',
+              pageId: 'page-violet',
+              notebookTitle: 'Notebook',
+              pageTitle: 'Violet Doctrine',
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: 'In short: three witnesses are required.',
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'notebook_page',
+              notebookObjectId: 'nb-violet',
+              pageId: 'page-violet',
+              notebookTitle: 'Notebook',
+              pageTitle: 'Violet Doctrine',
+            },
+          ],
+        },
+      });
+
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-persist-test',
+        sectionTitle: 'PERSIST_TEST_SECTION',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+      }),
+    );
+
+    await typeQuestion(violetQ);
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().textContent).toContain('three witnesses');
+    });
+
+    expect(zikukAiRequest.mock.calls[0][0]).toEqual({
+      version: 2,
+      capability: 'ask_course',
+      sectionId: 'sec-persist-test',
+      question: violetQ,
+    });
+    expect(zikukAiRequest.mock.calls[0][0]).not.toHaveProperty('recentTurns');
+
+    // Exact Turn 2 on the live workspace session (one prior successful turn).
+    await typeQuestion('Can you explain that more simply?');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(zikukAiRequest.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    const turn2 = zikukAiRequest.mock.calls[1][0];
+    expect(turn2.version).toBe(2);
+    expect(turn2.capability).toBe('ask_course');
+    expect(turn2.sectionId).toBe('sec-persist-test');
+    expect(turn2.question).toBe('Can you explain that more simply?');
+    expect(turn2.recentTurns).toBeDefined();
+    expect(turn2.recentTurns).not.toEqual([]);
+    expect(turn2.recentTurns).toEqual([
+      { role: 'user', content: violetQ },
+      { role: 'assistant', content: violetA },
+    ]);
+    expect(JSON.stringify(turn2.recentTurns)).not.toContain('source');
+    expect(JSON.stringify(turn2.recentTurns)).not.toContain('nb-violet');
+    expect(turn2.recentTurns.some((t: { content: string }) => t.content === turn2.question)).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    'What do you mean by that?',
+    'Why?',
+    'Can you give me an example?',
+  ])('M0.9C2.2 follow-up %s carries prior recentTurns', async followUp => {
+    const priorQ = 'What is the Violet Doctrine?';
+    const priorA = 'It requires three witnesses.';
+    zikukAiRequest
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: { type: 'ask_course', text: priorA, sources: [] },
+      })
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: { type: 'ask_course', text: 'ok', sources: [] },
+      });
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-1',
+        sectionTitle: 'Course',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+      }),
+    );
+    await typeQuestion(priorQ);
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+    await typeQuestion(followUp);
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    const body = zikukAiRequest.mock.calls[1][0];
+    expect(body.question).toBe(followUp);
+    expect(body.recentTurns?.length).toBeGreaterThanOrEqual(2);
+    expect(body.recentTurns[0]).toEqual({ role: 'user', content: priorQ });
+    expect(body.recentTurns.some((t: { content: string }) => t.content === followUp)).toBe(false);
+  });
+
   it('renders multi-turn thread with per-turn sources and local citation numbers', async () => {
     const onOpen = vi.fn();
     zikukAiRequest
@@ -647,7 +796,6 @@ describe('AskZikukWorkspace', () => {
     expect(results[1].textContent).toContain('Second answer');
     expect(results[1].textContent).toContain('Notebook · Euler · Notes');
 
-    // Follow-up request includes prior context, not current Q2
     expect(zikukAiRequest.mock.calls[1][0].question).toBe('Q2');
     expect(zikukAiRequest.mock.calls[1][0].recentTurns).toEqual([
       { role: 'user', content: 'Q1' },

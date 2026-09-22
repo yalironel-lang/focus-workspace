@@ -253,6 +253,38 @@ describe('useAskCourseController', () => {
     expect(zikukAiRequest.mock.calls[0][0]).not.toHaveProperty('recentTurns');
   });
 
+  it('fail-closes when getSubmitContext reports empty recentTurns with prior turns', async () => {
+    function SessionHarness(props: { sectionId: string; open: boolean }) {
+      const c = useAskCourseController({
+        ...props,
+        getSubmitContext: () => ({
+          ok: false as const,
+          reason: 'empty_recent_turns_with_prior' as const,
+          priorSuccessfulTurnCount: 1,
+        }),
+        onAskSuccess: vi.fn(),
+      });
+      useEffect(() => {
+        api = c;
+      });
+      return createElement('div');
+    }
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(createElement(SessionHarness, { sectionId: 'sec-1', open: true }));
+    });
+    await act(async () => {
+      api!.setQuestion('Follow up?');
+      api!.submit();
+    });
+    expect(zikukAiRequest).not.toHaveBeenCalled();
+    expect(api!.state.phase).toBe('error');
+    expect(api!.state.errorCode).toBe('internal_error');
+    expect(api!.state.question).toBe('Follow up?');
+  });
+
   it('preserves composer question on error for retry', async () => {
     zikukAiRequest.mockResolvedValue(errResponse('provider_timeout', 'timeout'));
     mount('sec-1');

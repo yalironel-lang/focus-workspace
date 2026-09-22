@@ -1,9 +1,8 @@
 /**
- * M0.6 / M0.9C2 Ask ZIKUK — single-request lifecycle (client-only).
+ * M0.6 / M0.9C2 / M0.9C2.2 Ask ZIKUK — single-request lifecycle (client-only).
  * IDLE | LOADING | SUCCESS | ERROR.
  *
- * M0.9B.1: on success without onAskSuccess, composer clears; submittedQuestion kept for single result.
- * M0.9C2: sends ask_course v2; optional getRecentTurns + onAskSuccess for session threads.
+ * M0.9C2.2: single immutable submit-context snapshot; prior turns ⇒ non-empty recentTurns.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -13,6 +12,8 @@ import {
   type AskCourseSourceRef,
   type ZikukAiErrorCode,
 } from '../gatewayClient';
+import { logAskCourseSubmitDiag } from './logAskCourseSubmitDiag';
+import type { PrepareAskCourseSubmitContextResult } from './prepareAskCourseSubmitContext';
 
 export type AskCoursePhase = 'idle' | 'loading' | 'success' | 'error';
 
@@ -48,8 +49,13 @@ export function useAskCourseController(input: {
   /** When false, abort in-flight work and clear ephemeral result. */
   open: boolean;
   /**
-   * Called at submit time to build prior-turn context for ask_course v2.
+   * M0.9C2.2 — capture ONE immutable prior-turn snapshot at submit time.
    * Must NOT include the current question.
+   */
+  getSubmitContext?: () => PrepareAskCourseSubmitContextResult;
+  /**
+   * @deprecated Prefer getSubmitContext. Still accepted for thin unit tests.
+   * Called only when getSubmitContext is absent.
    */
   getRecentTurns?: () => AskCourseRecentTurn[];
   /**
@@ -62,7 +68,7 @@ export function useAskCourseController(input: {
     sources: AskCourseSourceRef[];
   }) => void;
 }) {
-  const { sectionId, open, getRecentTurns, onAskSuccess } = input;
+  const { sectionId, open, getSubmitContext, getRecentTurns, onAskSuccess } = input;
   const [state, setState] = useState<AskCourseState>(IDLE);
   const genRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -71,6 +77,8 @@ export function useAskCourseController(input: {
   phaseRef.current = state.phase;
   const sectionIdRef = useRef(sectionId);
   sectionIdRef.current = sectionId;
+  const getSubmitContextRef = useRef(getSubmitContext);
+  getSubmitContextRef.current = getSubmitContext;
   const getRecentTurnsRef = useRef(getRecentTurns);
   getRecentTurnsRef.current = getRecentTurns;
   const onAskSuccessRef = useRef(onAskSuccess);
@@ -126,19 +134,63 @@ export function useAskCourseController(input: {
       const sid = sectionIdRef.current;
       if (!sid) return;
 
-      // Capture prior context BEFORE this turn (never includes current question).
-      const recentTurnsRaw = getRecentTurnsRef.current?.() ?? [];
-      const recentTurns =
-        Array.isArray(recentTurnsRaw) && recentTurnsRaw.length > 0
-          ? recentTurnsRaw
-          : undefined;
+      // ONE immutable snapshot of prior context BEFORE this turn.
+      let recentTurns: AskCourseRecentTurn[] | undefined;
+      let priorSuccessfulTurnCount = 0;
+      let recentUserTurnCount = 0;
+      let recentAssistantTurnCount = 0;
+      let recentTurnsTotalChars = 0;
+
+      const capture = getSubmitContextRef.current;
+      if (capture) {
+        const prepared = capture();
+        if (!prepared.ok) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.error('[ask_course] recentTurns invariant failed', {
+              reason: prepared.reason,
+              priorSuccessfulTurnCount: prepared.priorSuccessfulTurnCount,
+            });
+          }
+          questionRef.current = question;
+          setState({
+            phase: 'error',
+            question,
+            submittedQuestion: null,
+            resultText: null,
+            sources: [],
+            errorMessage: 'That question could not be sent. Try again.',
+            errorCode: 'internal_error',
+          });
+          return;
+        }
+        const ctx = prepared.context;
+        priorSuccessfulTurnCount = ctx.priorSuccessfulTurnCount;
+        recentUserTurnCount = ctx.recentUserTurnCount;
+        recentAssistantTurnCount = ctx.recentAssistantTurnCount;
+        recentTurnsTotalChars = ctx.recentTurnsTotalChars;
+        recentTurns = ctx.recentTurns.length > 0 ? ctx.recentTurns : undefined;
+      } else {
+        const recentTurnsRaw = getRecentTurnsRef.current?.() ?? [];
+        recentTurns =
+          Array.isArray(recentTurnsRaw) && recentTurnsRaw.length > 0
+            ? recentTurnsRaw
+            : undefined;
+        if (recentTurns) {
+          priorSuccessfulTurnCount = -1; // unknown without session snapshot
+          for (const t of recentTurns) {
+            if (t.role === 'user') recentUserTurnCount += 1;
+            else recentAssistantTurnCount += 1;
+            recentTurnsTotalChars += t.content.length;
+          }
+        }
+      }
 
       abortInFlight();
       const gen = ++genRef.current;
       const ac = new AbortController();
       abortRef.current = ac;
       // Session mode: clear composer while the pending turn shows the question.
-      // Single-result mode: keep draft visible until success clears it.
       const sessionMode = typeof onAskSuccessRef.current === 'function';
       questionRef.current = sessionMode ? '' : question;
 
@@ -150,6 +202,19 @@ export function useAskCourseController(input: {
         sources: [],
         errorMessage: null,
         errorCode: null,
+      });
+
+      logAskCourseSubmitDiag({
+        event: 'ask_course_submit_diag',
+        version: 2,
+        requestGen: gen,
+        hasSectionId: Boolean(sid),
+        priorSuccessfulTurnCount,
+        recentTurnsCount: recentTurns?.length ?? 0,
+        recentUserTurnCount,
+        recentAssistantTurnCount,
+        currentQuestionLength: question.length,
+        recentTurnsTotalChars,
       });
 
       const response = await zikukAiRequest(
@@ -219,7 +284,6 @@ export function useAskCourseController(input: {
         return;
       }
 
-      // Restore failed question into composer for retry.
       questionRef.current = question;
       setState({
         phase: 'error',

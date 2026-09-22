@@ -33,6 +33,11 @@ export type {
 export { buildAskCourseMessages, assertSourcesIndependentOfModelText } from './promptAskCourse.ts';
 export { buildAskCourseRetrievalQuery } from './buildAskCourseRetrievalQuery.ts';
 export {
+  isReferentialAskCourseFollowUp,
+  isExplicitStandaloneAskCourseQuestion,
+  shouldLeadRetrievalWithPriorUserContext,
+} from './isReferentialAskCourseFollowUp.ts';
+export {
   normalizeAskCourseRecentTurns,
   sanitizeAskCourseAssistantTurnContent,
 } from './normalizeRecentTurns.ts';
