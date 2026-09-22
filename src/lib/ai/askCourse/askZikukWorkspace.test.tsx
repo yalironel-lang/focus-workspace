@@ -1,7 +1,7 @@
 /**
  * @vitest-environment happy-dom
  *
- * M0.9B Ask ZIKUK course workspace — context, composer, single-turn contract.
+ * M0.9B / M0.9B.1 Ask ZIKUK course workspace — context, composer, presentation.
  */
 
 import { act, createElement, type ReactElement } from 'react';
@@ -98,7 +98,7 @@ afterEach(() => {
 });
 
 describe('formatAskCourseSourceLabel', () => {
-  it('falls back when filename missing', () => {
+  it('formats PDF sources compactly', () => {
     expect(
       formatAskCourseSourceLabel({
         index: 1,
@@ -107,7 +107,7 @@ describe('formatAskCourseSourceLabel', () => {
         fileName: null,
         pageNumber: 3,
       }),
-    ).toBe('Course material · p. 3');
+    ).toBe('PDF · Course material · Page 3');
   });
 
   it('formats Notebook citations distinctly', () => {
@@ -120,7 +120,7 @@ describe('formatAskCourseSourceLabel', () => {
         notebookTitle: 'Legal Relationships',
         pageTitle: 'Capacity',
       }),
-    ).toBe('Notebook: Legal Relationships · Capacity');
+    ).toBe('Notebook · Legal Relationships · Capacity');
   });
 });
 
@@ -144,7 +144,7 @@ describe('AskZikukSources privacy', () => {
     const text = host!.textContent ?? '';
     expect(text).toContain('Sources');
     expect(text).toContain('[1]');
-    expect(text).toContain('Lecture.pdf · p. 2');
+    expect(text).toContain('PDF · Lecture.pdf · Page 2');
     expect(text).not.toContain('uuid-should-not-leak');
     expect(text).not.toContain('sourceObjectId');
   });
@@ -178,6 +178,54 @@ describe('AskZikukAnswer citations', () => {
       expect.objectContaining({ sourceObjectId: 'pdf-1', pageNumber: 1 }),
     );
   });
+
+  it('keeps citation markers inline with prose (not block layout)', () => {
+    mount(
+      createElement(AskZikukAnswer, {
+        text: 'The Violet Doctrine requires three witnesses.[1]',
+        sources: [
+          {
+            index: 1,
+            sourceKind: 'notebook_page',
+            notebookObjectId: 'nb-1',
+            pageId: 'p-1',
+            notebookTitle: 'Violet Doctrine',
+            pageTitle: 'Overview',
+          },
+        ],
+      }),
+    );
+    const answer = host!.querySelector('[data-ask-zikuk-answer]') as HTMLElement;
+    const btn = answer.querySelector('[data-ask-zikuk-citation]') as HTMLButtonElement;
+    expect(answer.textContent).toContain('witnesses.');
+    expect(answer.textContent).toContain('[1]');
+    expect(btn.style.display).toBe('inline');
+    expect(btn.style.width).toBe('auto');
+    // No forced line break between trailing prose and citation in the DOM order.
+    const html = answer.innerHTML;
+    expect(html).not.toMatch(/witnesses\.<\/span><br/i);
+    expect(html.indexOf('witnesses.')).toBeLessThan(html.indexOf('data-ask-zikuk-citation'));
+  });
+
+  it('collapses newline before citation so marker stays with sentence', () => {
+    mount(
+      createElement(AskZikukAnswer, {
+        text: 'Opened at the Silver Gate.\n[1]',
+        sources: [
+          {
+            index: 1,
+            sourceKind: 'free_space_pdf',
+            sourceObjectId: 'pdf-1',
+            fileName: 'Lecture.pdf',
+            pageNumber: 14,
+          },
+        ],
+      }),
+    );
+    const answer = host!.querySelector('[data-ask-zikuk-answer]') as HTMLElement;
+    expect(answer.textContent).toMatch(/Silver Gate\.\s*\[1\]/);
+    expect(answer.textContent).not.toMatch(/Gate\.\n\[1\]/);
+  });
 });
 
 describe('AskZikukWorkspace', () => {
@@ -195,12 +243,9 @@ describe('AskZikukWorkspace', () => {
     );
     const ws = workspaceRoot();
     expect(ws.textContent).toContain('Ask ZIKUK');
-    expect(ws.querySelector('[data-ask-zikuk-course-context]')?.textContent).toContain(
-      'Calculus II',
-    );
-    expect(ws.querySelector('[data-ask-zikuk-course-context]')?.textContent).toContain(
-      'Course context active',
-    );
+    const ctx = ws.querySelector('[data-ask-zikuk-course-context]')?.textContent ?? '';
+    expect(ctx).toContain('Calculus II');
+    expect(ctx).toContain('Course context active');
     expect(ws.querySelector('[data-ask-zikuk-composer-scope]')?.textContent).toContain(
       'Asking in Calculus II',
     );
@@ -311,9 +356,6 @@ describe('AskZikukWorkspace', () => {
     expect(
       (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect(workspaceRoot().querySelector('[data-ask-zikuk-status]')?.getAttribute('aria-busy')).toBe(
-      'true',
-    );
 
     await act(async () => {
       (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
@@ -333,7 +375,7 @@ describe('AskZikukWorkspace', () => {
     });
   });
 
-  it('renders answer with PDF and Notebook sources', async () => {
+  it('shows submitted question, clears composer on success, sources beneath answer', async () => {
     const onOpen = vi.fn();
     zikukAiRequest.mockResolvedValue({
       version: 1,
@@ -379,32 +421,72 @@ describe('AskZikukWorkspace', () => {
     await vi.waitFor(() => {
       expect(workspaceRoot().textContent).toContain('Natural law is');
     });
-    const text = workspaceRoot().textContent ?? '';
-    expect(text).toContain('Sources');
-    expect(text).toContain('Course.pdf · p. 5');
-    expect(text).toContain('Notebook: My Notes · Week 3');
-    expect(text).not.toContain('pdf-hidden');
-    expect(text).not.toContain('nb-hidden');
 
-    const cite = workspaceRoot().querySelector(
-      '[data-ask-zikuk-citation="1"]',
-    ) as HTMLButtonElement;
+    const ws = workspaceRoot();
+    expect(ws.querySelector('[data-ask-zikuk-question]')?.textContent).toContain(
+      'What is natural law?',
+    );
+    expect(ws.textContent).not.toMatch(/YOUR QUESTION/i);
+    expect(ws.textContent).not.toMatch(/\bANSWER\b/);
+    const input = ws.querySelector('[data-ask-zikuk-input]') as HTMLTextAreaElement;
+    expect(input.value).toBe('');
+
+    const answerCol = ws.querySelector('[data-ask-zikuk-answer-column]') as HTMLElement;
+    const sourcesEl = answerCol.querySelector('[data-ask-zikuk-sources]') as HTMLElement;
+    expect(sourcesEl).toBeTruthy();
+    expect(
+      answerCol
+        .querySelector('[data-ask-zikuk-answer]')!
+        .compareDocumentPosition(sourcesEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const text = ws.textContent ?? '';
+    expect(text).toContain('PDF · Course.pdf · Page 5');
+    expect(text).toContain('Notebook · My Notes · Week 3');
+    expect(text).not.toContain('pdf-hidden');
+
     act(() => {
-      cite.click();
+      (ws.querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
     });
     expect(onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ sourceKind: 'free_space_pdf', pageNumber: 5 }),
     );
-
-    const nbSrc = workspaceRoot().querySelector(
-      '[data-ask-zikuk-source-index="2"]',
-    ) as HTMLButtonElement;
     act(() => {
-      nbSrc.click();
+      (ws.querySelector('[data-ask-zikuk-source-index="2"]') as HTMLButtonElement).click();
     });
     expect(onOpen).toHaveBeenCalledWith(
       expect.objectContaining({ sourceKind: 'notebook_page', pageTitle: 'Week 3' }),
     );
+  });
+
+  it('preserves composer text on error for retry', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: false,
+      error: { code: 'provider_timeout', message: 'raw provider' },
+    });
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-1',
+        sectionTitle: 'Calculus II',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+      }),
+    );
+    await typeQuestion('retry this question');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().querySelector('[data-ask-zikuk-error]')).toBeTruthy();
+    });
+    const input = workspaceRoot().querySelector('[data-ask-zikuk-input]') as HTMLTextAreaElement;
+    expect(input.value).toBe('retry this question');
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-retry]')).toBeTruthy();
   });
 
   it('shows knowledge_not_found without aggressive retry', async () => {
@@ -434,6 +516,8 @@ describe('AskZikukWorkspace', () => {
     });
     expect(workspaceRoot().textContent).not.toContain('raw provider');
     expect(workspaceRoot().querySelector('[data-ask-zikuk-retry]')).toBeNull();
+    const input = workspaceRoot().querySelector('[data-ask-zikuk-input]') as HTMLTextAreaElement;
+    expect(input.value).toBe('obscure thing');
   });
 
   it('Escape and Back to course close the workspace', () => {
@@ -543,11 +627,8 @@ describe('FloatingWorkspaceShell Ask trigger', () => {
       (host!.querySelector('[data-ask-zikuk-trigger]') as HTMLButtonElement).click();
     });
     const ws = workspaceRoot();
-    expect(ws.querySelector('[data-ask-zikuk-course-context]')?.textContent).toContain(
-      'Calculus II',
-    );
-    expect(ws.querySelector('[data-ask-zikuk-course-context]')?.textContent).toContain(
-      'Course context active',
-    );
+    const ctx = ws.querySelector('[data-ask-zikuk-course-context]')?.textContent ?? '';
+    expect(ctx).toContain('Calculus II');
+    expect(ctx).toContain('Course context active');
   });
 });

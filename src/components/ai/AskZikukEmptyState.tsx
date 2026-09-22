@@ -1,14 +1,31 @@
 /**
- * M0.9B — empty Ask workspace for a selected course (honest capability copy).
+ * M0.9B.1 — empty Ask workspace: compact intro + subtle suggestion chips.
  */
 
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 
-export const ASK_ZIKUK_SUGGESTIONS = [
-  'Explain a concept from my course materials',
-  'Summarize a topic from my notes',
-  'Help me understand something in my PDFs',
-  'Explain this topic step by step',
+export type AskZikukSuggestion = {
+  label: string;
+  prompt: string;
+};
+
+export const ASK_ZIKUK_SUGGESTIONS: readonly AskZikukSuggestion[] = [
+  {
+    label: 'Explain a concept',
+    prompt: 'Explain a concept from my course materials',
+  },
+  {
+    label: 'Summarize my notes',
+    prompt: 'Summarize a topic from my notes',
+  },
+  {
+    label: 'Help with a PDF',
+    prompt: 'Help me understand something in my PDFs',
+  },
+  {
+    label: 'Explain step by step',
+    prompt: 'Explain this topic step by step',
+  },
 ] as const;
 
 type Props = {
@@ -33,17 +50,17 @@ export function AskZikukEmptyState({
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
         maxWidth: 560,
         width: '100%',
         margin: '0 auto',
-        padding: '24px 0',
+        padding: '20px 0 8px',
       }}
     >
       <h2
         style={{
           margin: 0,
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: 700,
           letterSpacing: '-0.02em',
           color: tokens.textPrimary,
@@ -54,65 +71,57 @@ export function AskZikukEmptyState({
       </h2>
       <p
         style={{
-          margin: '12px 0 0',
-          fontSize: 14,
-          lineHeight: 1.55,
+          margin: '8px 0 0',
+          fontSize: 13,
+          lineHeight: 1.5,
           color: tokens.textSecondary,
+          maxWidth: 440,
         }}
       >
-        ZIKUK can answer using course materials currently available to it, including indexed
-        Notebook pages and PDFs.
+        Answers use indexed Notebook pages and PDFs available for this course.
       </p>
       <div
         style={{
-          marginTop: 28,
+          marginTop: 20,
           display: 'flex',
-          flexDirection: 'column',
+          flexWrap: 'wrap',
           gap: 8,
         }}
       >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            color: tokens.textGhost,
-            marginBottom: 4,
-          }}
-        >
-          Try asking
-        </div>
-        {ASK_ZIKUK_SUGGESTIONS.map(text => (
+        {ASK_ZIKUK_SUGGESTIONS.map(item => (
           <button
-            key={text}
+            key={item.label}
             type="button"
             data-ask-zikuk-suggestion="1"
+            data-ask-zikuk-suggestion-prompt={item.prompt}
             disabled={disabled}
-            onClick={() => onSuggestionSelect(text)}
+            onClick={() => onSuggestionSelect(item.prompt)}
             style={{
               textAlign: 'left',
-              padding: '12px 14px',
-              borderRadius: 12,
-              border: `1px solid ${tokens.cardBorder}88`,
-              background: `${tokens.wellBg}aa`,
+              padding: '9px 12px',
+              borderRadius: 10,
+              border: `1px solid ${tokens.cardBorder}77`,
+              background: `${tokens.cardBg}cc`,
               color: tokens.textSecondary,
-              fontSize: 13,
-              lineHeight: 1.4,
+              fontSize: 12,
+              fontWeight: 600,
+              lineHeight: 1.35,
               cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.6 : 1,
+              flex: '1 1 140px',
+              maxWidth: '100%',
             }}
             onMouseEnter={e => {
               if (disabled) return;
-              e.currentTarget.style.borderColor = `${accent}66`;
+              e.currentTarget.style.borderColor = `${accent}55`;
               e.currentTarget.style.color = tokens.textPrimary;
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.borderColor = `${tokens.cardBorder}88`;
+              e.currentTarget.style.borderColor = `${tokens.cardBorder}77`;
               e.currentTarget.style.color = tokens.textSecondary;
             }}
           >
-            {text}
+            {item.label}
           </button>
         ))}
       </div>

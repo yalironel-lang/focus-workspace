@@ -1,5 +1,5 @@
 /**
- * M0.9B — academic Ask composer (single-turn; no fake actions).
+ * M0.9B.1 — academic Ask composer (single-turn; no fake actions).
  */
 
 import {
@@ -55,31 +55,30 @@ export function AskZikukComposer({
     flex: 1,
     minWidth: 0,
     resize: 'none',
-    borderRadius: 12,
-    border: `1px solid ${tokens.cardBorder}99`,
-    background: tokens.wellBg,
+    border: 'none',
+    background: 'transparent',
     color: tokens.textPrimary,
-    padding: '12px 14px',
+    padding: '2px 0',
     fontSize: 14,
     lineHeight: 1.45,
     outline: 'none',
     boxSizing: 'border-box',
-    minHeight: 52,
-    maxHeight: 140,
+    minHeight: 44,
+    maxHeight: 120,
   };
 
   const sendStyle: CSSProperties = {
     flexShrink: 0,
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     border: 'none',
-    background: canSubmit ? accent : `${tokens.cardBorder}66`,
+    background: canSubmit ? accent : `${tokens.cardBorder}55`,
     color: canSubmit ? '#0a0a0b' : tokens.textMuted,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 700,
     cursor: canSubmit ? 'pointer' : 'not-allowed',
-    opacity: canSubmit ? 1 : 0.7,
+    opacity: canSubmit ? 1 : 0.65,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -90,27 +89,46 @@ export function AskZikukComposer({
       data-ask-zikuk-composer="1"
       style={{
         flexShrink: 0,
-        paddingTop: 14,
-        borderTop: `1px solid ${tokens.divider}`,
+        paddingTop: 12,
       }}
     >
-      <label
-        htmlFor={inputId}
+      <div
         style={{
-          position: 'absolute',
-          width: 1,
-          height: 1,
-          padding: 0,
-          margin: -1,
-          overflow: 'hidden',
-          clip: 'rect(0,0,0,0)',
-          whiteSpace: 'nowrap',
-          border: 0,
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: 10,
+          padding: '10px 12px',
+          borderRadius: 14,
+          border: `1px solid ${tokens.cardBorder}99`,
+          background: `linear-gradient(180deg, ${tokens.cardBg}ee, ${tokens.wellBg}f2)`,
+          boxShadow: '0 8px 28px rgba(0,0,0,0.18)',
+          boxSizing: 'border-box',
+        }}
+        onFocusCapture={e => {
+          const box = e.currentTarget;
+          box.style.borderColor = tokens.focusBorder;
+        }}
+        onBlurCapture={e => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          e.currentTarget.style.borderColor = `${tokens.cardBorder}99`;
         }}
       >
-        Ask about {courseLabel}
-      </label>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+        <label
+          htmlFor={inputId}
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0,0,0,0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          Ask about {courseLabel}
+        </label>
         <textarea
           ref={inputRef}
           id={inputId}
@@ -123,12 +141,6 @@ export function AskZikukComposer({
           }}
           onCompositionEnd={() => {
             composingRef.current = false;
-          }}
-          onFocus={e => {
-            e.currentTarget.style.borderColor = tokens.focusBorder;
-          }}
-          onBlur={e => {
-            e.currentTarget.style.borderColor = `${tokens.cardBorder}99`;
           }}
           disabled={isLoading}
           rows={2}
@@ -154,6 +166,7 @@ export function AskZikukComposer({
           fontSize: 12,
           color: tokens.textMuted,
           lineHeight: 1.35,
+          paddingLeft: 2,
         }}
       >
         Asking in {courseLabel}

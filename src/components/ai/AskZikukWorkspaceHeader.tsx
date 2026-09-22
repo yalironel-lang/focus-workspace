@@ -1,5 +1,5 @@
 /**
- * M0.9B — Ask ZIKUK workspace header: product identity + course context + close.
+ * M0.9B / M0.9B.1 — Ask ZIKUK workspace header: compact identity + course context.
  */
 
 import type { CSSProperties } from 'react';
@@ -18,8 +18,8 @@ export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose 
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    height: 32,
-    padding: '0 12px',
+    height: 30,
+    padding: '0 11px',
     borderRadius: 8,
     border: `1px solid ${tokens.cardBorder}88`,
     background: 'transparent',
@@ -36,8 +36,8 @@ export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose 
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
-        gap: 16,
-        paddingBottom: 16,
+        gap: 14,
+        paddingBottom: 12,
         borderBottom: `1px solid ${tokens.divider}`,
         flexShrink: 0,
       }}
@@ -46,7 +46,7 @@ export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose 
         <div
           id={titleId}
           style={{
-            fontSize: 18,
+            fontSize: 16,
             fontWeight: 700,
             letterSpacing: '-0.01em',
             color: tokens.textPrimary,
@@ -58,44 +58,32 @@ export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose 
         <div
           data-ask-zikuk-course-context="1"
           style={{
-            marginTop: 8,
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'baseline',
-            gap: '6px 10px',
+            marginTop: 4,
+            fontSize: 13,
+            lineHeight: 1.35,
+            color: tokens.textSecondary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
           }}
         >
-          <span
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: tokens.textPrimary,
-              lineHeight: 1.3,
-            }}
-          >
-            {courseLabel}
+          <span style={{ fontWeight: 600, color: tokens.textPrimary }}>{courseLabel}</span>
+          <span style={{ color: tokens.textMuted }} aria-hidden="true">
+            {' '}
+            ·{' '}
           </span>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: tokens.textMuted,
-              lineHeight: 1.3,
-            }}
-          >
-            Course context active
-          </span>
+          <span style={{ color: tokens.textMuted }}>Course context active</span>
         </div>
         <p
           style={{
-            margin: '8px 0 0',
-            fontSize: 12,
-            lineHeight: 1.45,
-            color: tokens.textMuted,
-            maxWidth: 520,
+            margin: '4px 0 0',
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: tokens.textGhost,
+            maxWidth: 480,
           }}
         >
-          ZIKUK uses available course materials when answering.
+          Grounded in available course materials
         </p>
       </div>
       <button

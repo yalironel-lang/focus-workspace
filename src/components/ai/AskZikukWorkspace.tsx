@@ -1,7 +1,6 @@
 /**
  * M0.9B Ask ZIKUK course workspace — course-scoped single-turn AI surface.
- * Replaces the ephemeral popup as the primary Ask experience.
- * Preserves ask_course contract via useAskCourseController; no chat history / multi-turn memory.
+ * M0.9B.1: visual density + presentation refinements (still single-turn; no chat history).
  */
 
 import {
@@ -138,11 +137,11 @@ export function AskZikukWorkspace({
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
-    maxWidth: 920,
+    maxWidth: 760,
     margin: '0 auto',
     padding: narrow
-      ? '16px 16px max(16px, env(safe-area-inset-bottom))'
-      : '20px 28px max(20px, env(safe-area-inset-bottom))',
+      ? '12px 14px max(14px, env(safe-area-inset-bottom))'
+      : '14px 24px max(16px, env(safe-area-inset-bottom))',
     boxSizing: 'border-box',
     minHeight: 0,
   };
@@ -152,8 +151,8 @@ export function AskZikukWorkspace({
     minHeight: 0,
     overflowY: 'auto',
     overflowX: 'hidden',
-    paddingTop: 20,
-    paddingBottom: 12,
+    paddingTop: 14,
+    paddingBottom: 8,
     display: 'flex',
     flexDirection: 'column',
   };
@@ -197,7 +196,7 @@ export function AskZikukWorkspace({
             <p
               data-ask-zikuk-loading="1"
               style={{
-                margin: '32px auto',
+                margin: '20px auto',
                 fontSize: 14,
                 color: tokens.textSecondary,
                 textAlign: 'center',
@@ -209,12 +208,11 @@ export function AskZikukWorkspace({
 
           {state.phase === 'success' && state.resultText != null ? (
             <AskZikukResult
-              question={state.question}
+              question={state.submittedQuestion ?? ''}
               text={state.resultText}
               sources={state.sources}
               tokens={tokens}
               accent={accent}
-              narrow={narrow}
               onOpenSource={onOpenSource}
             />
           ) : null}
@@ -224,7 +222,7 @@ export function AskZikukWorkspace({
               data-ask-zikuk-error="1"
               style={{
                 maxWidth: 520,
-                margin: '32px auto',
+                margin: '20px auto 0',
                 width: '100%',
               }}
             >
@@ -245,7 +243,7 @@ export function AskZikukWorkspace({
                   data-ask-zikuk-retry="1"
                   onClick={retry}
                   style={{
-                    marginTop: 14,
+                    marginTop: 12,
                     padding: '8px 14px',
                     borderRadius: 8,
                     border: `1px solid ${tokens.cardBorder}`,

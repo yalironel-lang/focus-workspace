@@ -1,6 +1,9 @@
 /**
  * M0.6 Ask ZIKUK — single-result request lifecycle (client-only).
  * IDLE | LOADING | SUCCESS | ERROR. No history, threads, or persistence.
+ *
+ * M0.9B.1: on success, composer (`question`) clears while `submittedQuestion`
+ * remains for the result surface. On error, composer keeps the question for retry.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -14,7 +17,10 @@ export type AskCoursePhase = 'idle' | 'loading' | 'success' | 'error';
 
 export type AskCourseState = {
   phase: AskCoursePhase;
+  /** Composer draft / retry text. */
   question: string;
+  /** Last successfully submitted question (result surface). Cleared on idle/loading reset. */
+  submittedQuestion: string | null;
   resultText: string | null;
   sources: AskCourseSourceRef[];
   errorMessage: string | null;
@@ -24,6 +30,7 @@ export type AskCourseState = {
 const IDLE: AskCourseState = {
   phase: 'idle',
   question: '',
+  submittedQuestion: null,
   resultText: null,
   sources: [],
   errorMessage: null,
@@ -109,6 +116,7 @@ export function useAskCourseController(input: {
       setState({
         phase: 'loading',
         question,
+        submittedQuestion: null,
         resultText: null,
         sources: [],
         errorMessage: null,
@@ -146,6 +154,7 @@ export function useAskCourseController(input: {
           setState({
             phase: 'error',
             question,
+            submittedQuestion: null,
             resultText: null,
             sources: [],
             errorMessage: 'Unexpected response.',
@@ -153,9 +162,11 @@ export function useAskCourseController(input: {
           });
           return;
         }
+        questionRef.current = '';
         setState({
           phase: 'success',
-          question,
+          question: '',
+          submittedQuestion: question,
           resultText: response.result.text,
           sources: response.result.sources,
           errorMessage: null,
@@ -171,6 +182,7 @@ export function useAskCourseController(input: {
       setState({
         phase: 'error',
         question,
+        submittedQuestion: null,
         resultText: null,
         sources: [],
         errorMessage: response.error.message,

@@ -1,6 +1,8 @@
 /**
  * Authoritative ask_course Sources list.
  * Only sources[] drives labels and interaction — never model-fabricated metadata.
+ *
+ * M0.9B.1: compact cards stacked under the answer (no side column).
  */
 
 import { memo } from 'react';
@@ -25,7 +27,10 @@ export function formatAskCourseSourceLabel(source: AskCourseSourceRef): string {
       typeof nb.pageTitle === 'string' && nb.pageTitle.trim()
         ? nb.pageTitle.trim()
         : 'Page';
-    return `Notebook: ${notebook} · ${page}`;
+    if (notebook === page || page === 'Page') {
+      return `Notebook · ${notebook}`;
+    }
+    return `Notebook · ${notebook} · ${page}`;
   }
   const pdf = source as Extract<AskCourseSourceRef, { sourceKind: 'free_space_pdf' }>;
   const name =
@@ -33,7 +38,7 @@ export function formatAskCourseSourceLabel(source: AskCourseSourceRef): string {
       ? pdf.fileName.trim()
       : 'Course material';
   const page = Number.isFinite(pdf.pageNumber) ? pdf.pageNumber : 1;
-  return `${name} · p. ${page}`;
+  return `PDF · ${name} · Page ${page}`;
 }
 
 export const AskZikukSources = memo(function AskZikukSources({
@@ -45,7 +50,7 @@ export const AskZikukSources = memo(function AskZikukSources({
   if (!sources.length) return null;
 
   return (
-    <div data-ask-zikuk-sources="1" style={{ marginTop: 12 }}>
+    <div data-ask-zikuk-sources="1" style={{ marginTop: 18 }}>
       <div
         style={{
           fontSize: 11,
@@ -83,27 +88,40 @@ export const AskZikukSources = memo(function AskZikukSources({
                 type="button"
                 data-ask-zikuk-source-index={source.index}
                 aria-label={`Open source ${source.index}: ${label}`}
+                title={label}
                 onClick={() => onSourceActivate?.(source)}
                 style={{
                   display: 'flex',
                   alignItems: 'baseline',
                   gap: 8,
                   width: '100%',
+                  maxWidth: '100%',
                   textAlign: 'left',
-                  padding: '8px 10px',
+                  padding: '9px 11px',
                   borderRadius: 10,
                   border: `1px solid ${tokens.cardBorder}66`,
-                  background: `${tokens.wellBg}88`,
+                  background: `${tokens.wellBg}99`,
                   color: tokens.textSecondary,
                   fontSize: 12,
                   lineHeight: 1.4,
                   cursor: onSourceActivate ? 'pointer' : 'default',
+                  boxSizing: 'border-box',
                 }}
               >
                 <span style={{ color: accent, fontWeight: 700, flexShrink: 0 }}>
                   [{source.index}]
                 </span>
-                <span style={{ color: tokens.textPrimary }}>{label}</span>
+                <span
+                  style={{
+                    color: tokens.textPrimary,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                  }}
+                >
+                  {label}
+                </span>
               </button>
             </li>
           );

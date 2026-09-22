@@ -158,6 +158,23 @@ describe('useAskCourseController', () => {
     expect(api!.state.phase).toBe('success');
     expect(api!.state.resultText).toBe('Grounded answer.');
     expect(api!.state.sources).toHaveLength(1);
+    expect(api!.state.submittedQuestion).toBe('What is natural law?');
+    expect(api!.state.question).toBe('');
+  });
+
+  it('preserves composer question on error for retry', async () => {
+    zikukAiRequest.mockResolvedValue(errResponse('provider_timeout', 'timeout'));
+    mount('sec-1');
+    await act(async () => {
+      api!.setQuestion('Keep me');
+      api!.submit();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api!.state.phase).toBe('error');
+    expect(api!.state.question).toBe('Keep me');
+    expect(api!.state.submittedQuestion).toBeNull();
   });
 
   it('blocks empty question and duplicate loading submit', async () => {
