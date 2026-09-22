@@ -148,7 +148,7 @@ describe('useAskCourseController', () => {
     expect(zikukAiRequest).toHaveBeenCalledTimes(1);
     const [body, opts] = zikukAiRequest.mock.calls[0];
     expect(body).toEqual({
-      version: 1,
+      version: 2,
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'What is natural law?',
@@ -160,6 +160,97 @@ describe('useAskCourseController', () => {
     expect(api!.state.sources).toHaveLength(1);
     expect(api!.state.submittedQuestion).toBe('What is natural law?');
     expect(api!.state.question).toBe('');
+  });
+
+  it('sends recentTurns from getRecentTurns and sessions return to idle on success', async () => {
+    const onAskSuccess = vi.fn();
+    const getRecentTurns = vi.fn(() => [
+      { role: 'user' as const, content: 'Prior Q' },
+      { role: 'assistant' as const, content: 'Prior A' },
+    ]);
+
+    function SessionHarness(props: { sectionId: string; open: boolean }) {
+      const c = useAskCourseController({
+        ...props,
+        getRecentTurns,
+        onAskSuccess,
+      });
+      useEffect(() => {
+        api = c;
+      });
+      return createElement('div', { 'data-phase': c.state.phase });
+    }
+
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(createElement(SessionHarness, { sectionId: 'sec-1', open: true }));
+    });
+
+    zikukAiRequest.mockResolvedValue(okResponse('Follow-up answer'));
+    await act(async () => {
+      api!.setQuestion('Follow up?');
+      api!.submit();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(getRecentTurns).toHaveBeenCalled();
+    expect(zikukAiRequest.mock.calls[0][0]).toEqual({
+      version: 2,
+      capability: 'ask_course',
+      sectionId: 'sec-1',
+      question: 'Follow up?',
+      recentTurns: [
+        { role: 'user', content: 'Prior Q' },
+        { role: 'assistant', content: 'Prior A' },
+      ],
+    });
+    expect(onAskSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Follow up?',
+        text: 'Follow-up answer',
+      }),
+    );
+    expect(api!.state.phase).toBe('idle');
+    expect(api!.state.question).toBe('');
+    expect(api!.state.resultText).toBeNull();
+  });
+
+  it('omits empty recentTurns from the request body', async () => {
+    zikukAiRequest.mockResolvedValue(okResponse('A'));
+    function SessionHarness(props: { sectionId: string; open: boolean }) {
+      const c = useAskCourseController({
+        ...props,
+        getRecentTurns: () => [],
+      });
+      useEffect(() => {
+        api = c;
+      });
+      return createElement('div');
+    }
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(createElement(SessionHarness, { sectionId: 'sec-1', open: true }));
+    });
+    await act(async () => {
+      api!.setQuestion('First');
+      api!.submit();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(zikukAiRequest.mock.calls[0][0]).toEqual({
+      version: 2,
+      capability: 'ask_course',
+      sectionId: 'sec-1',
+      question: 'First',
+    });
+    expect(zikukAiRequest.mock.calls[0][0]).not.toHaveProperty('recentTurns');
   });
 
   it('preserves composer question on error for retry', async () => {

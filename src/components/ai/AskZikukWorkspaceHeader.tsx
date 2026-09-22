@@ -1,5 +1,5 @@
 /**
- * M0.9B / M0.9B.1 — Ask ZIKUK workspace header: compact identity + course context.
+ * M0.9B / M0.9B.1 / M0.9C2 — Ask ZIKUK workspace header.
  */
 
 import type { CSSProperties } from 'react';
@@ -10,10 +10,20 @@ type Props = {
   courseLabel: string;
   tokens: AtmosphereTokens;
   onClose: () => void;
+  /** Shown when the session has completed turns. */
+  showNewConversation?: boolean;
+  onNewConversation?: () => void;
 };
 
-export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose }: Props) {
-  const closeBtn: CSSProperties = {
+export function AskZikukWorkspaceHeader({
+  titleId,
+  courseLabel,
+  tokens,
+  onClose,
+  showNewConversation = false,
+  onNewConversation,
+}: Props) {
+  const actionBtn: CSSProperties = {
     flexShrink: 0,
     display: 'inline-flex',
     alignItems: 'center',
@@ -86,15 +96,36 @@ export function AskZikukWorkspaceHeader({ titleId, courseLabel, tokens, onClose 
           Grounded in available course materials
         </p>
       </div>
-      <button
-        type="button"
-        data-ask-zikuk-close="1"
-        aria-label="Close Ask ZIKUK"
-        onClick={onClose}
-        style={closeBtn}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          justifyContent: 'flex-end',
+          flexShrink: 0,
+        }}
       >
-        Back to course
-      </button>
+        {showNewConversation && onNewConversation ? (
+          <button
+            type="button"
+            data-ask-zikuk-new-conversation="1"
+            aria-label="New conversation"
+            onClick={onNewConversation}
+            style={actionBtn}
+          >
+            New conversation
+          </button>
+        ) : null}
+        <button
+          type="button"
+          data-ask-zikuk-close="1"
+          aria-label="Close Ask ZIKUK"
+          onClick={onClose}
+          style={actionBtn}
+        >
+          Back to course
+        </button>
+      </div>
     </header>
   );
 }

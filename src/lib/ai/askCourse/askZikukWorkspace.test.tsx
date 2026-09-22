@@ -322,7 +322,7 @@ describe('AskZikukWorkspace', () => {
     await flush();
     expect(zikukAiRequest).toHaveBeenCalledTimes(1);
     expect(zikukAiRequest.mock.calls[0][0]).toEqual({
-      version: 1,
+      version: 2,
       capability: 'ask_course',
       sectionId: 'sec-calc',
       question: 'Explain Euler',
@@ -566,6 +566,193 @@ describe('AskZikukWorkspace', () => {
     const input = workspaceRoot().querySelector('[data-ask-zikuk-input]') as HTMLTextAreaElement;
     expect(input.value.length).toBeGreaterThan(0);
     expect(zikukAiRequest).not.toHaveBeenCalled();
+  });
+
+  it('renders multi-turn thread with per-turn sources and local citation numbers', async () => {
+    const onOpen = vi.fn();
+    zikukAiRequest
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: 'First answer [1]',
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'free_space_pdf',
+              sourceObjectId: 'pdf-old',
+              fileName: 'Old.pdf',
+              pageNumber: 4,
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text: 'Second answer [1]',
+          sources: [
+            {
+              index: 1,
+              sourceKind: 'notebook_page',
+              notebookObjectId: 'nb-new',
+              pageId: 'p-new',
+              notebookTitle: 'Euler',
+              pageTitle: 'Notes',
+            },
+          ],
+        },
+      });
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-1',
+        sectionTitle: 'Calculus II',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: onOpen,
+      }),
+    );
+
+    await typeQuestion('Q1');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().textContent).toContain('First answer');
+    });
+
+    await typeQuestion('Q2');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().textContent).toContain('Second answer');
+    });
+
+    const ws = workspaceRoot();
+    expect(ws.getAttribute('data-ask-zikuk-turn-count')).toBe('2');
+    const results = ws.querySelectorAll('[data-ask-zikuk-result]');
+    expect(results).toHaveLength(2);
+    expect(results[0].textContent).toContain('Q1');
+    expect(results[0].textContent).toContain('First answer');
+    expect(results[0].textContent).toContain('PDF · Old.pdf · Page 4');
+    expect(results[1].textContent).toContain('Q2');
+    expect(results[1].textContent).toContain('Second answer');
+    expect(results[1].textContent).toContain('Notebook · Euler · Notes');
+
+    // Follow-up request includes prior context, not current Q2
+    expect(zikukAiRequest.mock.calls[1][0].question).toBe('Q2');
+    expect(zikukAiRequest.mock.calls[1][0].recentTurns).toEqual([
+      { role: 'user', content: 'Q1' },
+      { role: 'assistant', content: 'First answer [1]' },
+    ]);
+
+    act(() => {
+      (results[0].querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
+    });
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceObjectId: 'pdf-old', pageNumber: 4 }),
+    );
+    act(() => {
+      (results[1].querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
+    });
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ notebookObjectId: 'nb-new', pageTitle: 'Notes' }),
+    );
+  });
+
+  it('New conversation returns empty state and clears prior context', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: 'A1', sources: [] },
+    });
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-1',
+        sectionTitle: 'Calculus II',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+      }),
+    );
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-new-conversation]')).toBeNull();
+
+    await typeQuestion('Q1');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+
+    const newBtn = workspaceRoot().querySelector(
+      '[data-ask-zikuk-new-conversation]',
+    ) as HTMLButtonElement;
+    expect(newBtn).toBeTruthy();
+    await act(async () => {
+      newBtn.click();
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('0');
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-empty]')).toBeTruthy();
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-new-conversation]')).toBeNull();
+
+    await typeQuestion('Fresh');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    expect(zikukAiRequest.mock.calls.at(-1)![0]).not.toHaveProperty('recentTurns');
+  });
+
+  it('close then reopen starts a fresh empty session', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: 'A1', sources: [] },
+    });
+    const onClose = vi.fn();
+    function Wrap({ open }: { open: boolean }) {
+      return createElement(AskZikukWorkspace, {
+        open,
+        onClose,
+        sectionId: 'sec-1',
+        sectionTitle: 'Calculus II',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+      });
+    }
+    mount(createElement(Wrap, { open: true }));
+    await typeQuestion('Q1');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+
+    act(() => {
+      root!.render(createElement(Wrap, { open: false }));
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+
+    act(() => {
+      root!.render(createElement(Wrap, { open: true }));
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('0');
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-empty]')).toBeTruthy();
   });
 
   it('marks narrow layout attribute without overflow structure', () => {

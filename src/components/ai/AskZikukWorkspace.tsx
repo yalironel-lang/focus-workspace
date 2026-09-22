@@ -1,6 +1,6 @@
 /**
- * M0.9B Ask ZIKUK course workspace — course-scoped single-turn AI surface.
- * M0.9B.1: visual density + presentation refinements (still single-turn; no chat history).
+ * M0.9B / M0.9C2 Ask ZIKUK course workspace — session-only academic thread.
+ * Asks use ask_course v2 + bounded recentTurns. No persisted history.
  */
 
 import {
@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import type { AskCourseSourceRef } from '../../lib/ai/gatewayClient';
 import {
-  useAskCourseController,
+  useAskCourseSession,
   userFacingAskCourseErrorMessage,
   isAskCourseRetryAllowed,
 } from '../../lib/ai/askCourse';
@@ -59,12 +59,24 @@ export function AskZikukWorkspace({
   const inputId = useId();
   const statusId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadScrollRef = useRef<HTMLDivElement>(null);
+  const activeAnchorRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
   const [narrow, setNarrow] = useState(false);
 
   const courseLabel = courseDisplayLabel(sectionTitle);
 
-  const { state, setQuestion, submit, retry, canSubmit, isLoading } = useAskCourseController({
+  const {
+    turns,
+    activePendingQuestion,
+    state,
+    setQuestion,
+    submit,
+    retry,
+    newConversation,
+    canSubmit,
+    isLoading,
+  } = useAskCourseSession({
     sectionId,
     open,
   });
@@ -104,6 +116,18 @@ export function AskZikukWorkspace({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Soft-scroll newly submitted question into view (once per loading start).
+  useEffect(() => {
+    if (!isLoading) return;
+    const el = activeAnchorRef.current;
+    if (!el) return;
+    try {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch {
+      el.scrollIntoView(false);
+    }
+  }, [isLoading, activePendingQuestion]);
+
   const handleSuggestion = useCallback(
     (text: string) => {
       setQuestion(text);
@@ -116,7 +140,8 @@ export function AskZikukWorkspace({
 
   const errorCopy = userFacingAskCourseErrorMessage(state.errorCode, state.errorMessage);
   const showRetry = state.phase === 'error' && isAskCourseRetryAllowed(state.errorCode);
-  const showEmpty = state.phase === 'idle' && !isLoading;
+  const showEmpty =
+    turns.length === 0 && state.phase === 'idle' && !isLoading && !activePendingQuestion;
 
   const shell: CSSProperties = {
     position: 'fixed',
@@ -164,6 +189,7 @@ export function AskZikukWorkspace({
       aria-labelledby={titleId}
       data-ask-zikuk-workspace="1"
       data-ask-zikuk-narrow={narrow ? '1' : '0'}
+      data-ask-zikuk-turn-count={String(turns.length)}
       style={shell}
     >
       <div style={inner}>
@@ -172,14 +198,18 @@ export function AskZikukWorkspace({
           courseLabel={courseLabel}
           tokens={tokens}
           onClose={onClose}
+          showNewConversation={turns.length > 0}
+          onNewConversation={newConversation}
         />
 
         <div
           id={statusId}
+          ref={threadScrollRef}
           role="status"
           aria-live="polite"
           aria-busy={isLoading}
           data-ask-zikuk-status="1"
+          data-ask-zikuk-thread="1"
           style={main}
         >
           {showEmpty ? (
@@ -192,29 +222,28 @@ export function AskZikukWorkspace({
             />
           ) : null}
 
-          {isLoading ? (
-            <p
-              data-ask-zikuk-loading="1"
-              style={{
-                margin: '20px auto',
-                fontSize: 14,
-                color: tokens.textSecondary,
-                textAlign: 'center',
-              }}
-            >
-              Searching your course materials…
-            </p>
-          ) : null}
-
-          {state.phase === 'success' && state.resultText != null ? (
+          {turns.map(turn => (
             <AskZikukResult
-              question={state.submittedQuestion ?? ''}
-              text={state.resultText}
-              sources={state.sources}
+              key={turn.id}
+              turnId={turn.id}
+              question={turn.question}
+              text={turn.answer}
+              sources={turn.sources}
               tokens={tokens}
               accent={accent}
               onOpenSource={onOpenSource}
             />
+          ))}
+
+          {activePendingQuestion ? (
+            <div ref={activeAnchorRef} data-ask-zikuk-active-turn="1">
+              <AskZikukResult
+                question={activePendingQuestion}
+                loading
+                tokens={tokens}
+                accent={accent}
+              />
+            </div>
           ) : null}
 
           {state.phase === 'error' ? (
@@ -222,7 +251,7 @@ export function AskZikukWorkspace({
               data-ask-zikuk-error="1"
               style={{
                 maxWidth: 520,
-                margin: '20px auto 0',
+                margin: '8px auto 16px',
                 width: '100%',
               }}
             >
