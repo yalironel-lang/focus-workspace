@@ -213,6 +213,16 @@ Deno.serve(async (req: Request) => {
       },
 
       async loadChunks({ sourceId, sourceVersion }) {
+        const { data: sourceRow } = await admin
+          .from('ai_knowledge_sources')
+          .select('file_name, source_kind')
+          .eq('id', sourceId)
+          .maybeSingle();
+        const fileName =
+          sourceRow?.source_kind === 'free_space_pdf'
+            ? ((sourceRow.file_name as string | null) ?? null)
+            : null;
+
         const { data, error } = await admin
           .from('ai_knowledge_chunks')
           .select('id, page_number, chunk_index, text, source_version')
@@ -221,7 +231,9 @@ Deno.serve(async (req: Request) => {
           .order('page_number', { ascending: true })
           .order('chunk_index', { ascending: true });
         if (error || !data) return [];
-        return data as IndexableChunk[];
+        return (data as IndexableChunk[]).map((c) =>
+          fileName ? { ...c, fileName } : c,
+        );
       },
 
       async upsertEmbeddings({

@@ -548,8 +548,8 @@ describe('M0.5D quota / privacy / failures / regression', () => {
 
 describe('M0.5D constants documented', () => {
   it('exports beta retrieval constants', () => {
-    expect(ASK_COURSE_RPC_CANDIDATE_LIMIT).toBe(8);
-    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(8);
+    expect(ASK_COURSE_RPC_CANDIDATE_LIMIT).toBe(12);
+    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(5);
     expect(ASK_COURSE_MAX_CHUNKS_PER_SOURCE).toBe(2);
     expect(ASK_COURSE_MAX_RETRIEVED_CHARS).toBe(4500);
     expect(ASK_COURSE_BETA_MIN_SIMILARITY).toBe(0.4);

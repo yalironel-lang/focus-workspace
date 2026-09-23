@@ -6,14 +6,31 @@
 /** Conservative max question length (chars). Same order as Explain selection. */
 export const MAX_ASK_COURSE_QUESTION_CHARS = 2000 as const;
 
-/** Candidates requested from ai_knowledge_search. */
-export const ASK_COURSE_RPC_CANDIDATE_LIMIT = 8 as const;
+/**
+ * Candidates requested from ai_knowledge_search.
+ * Keep broader than FINAL_HARD_MAX so discovery is not tied to prompt size.
+ */
+export const ASK_COURSE_RPC_CANDIDATE_LIMIT = 12 as const;
 
-/** Hard max hits that may enter the generation prompt. */
-export const ASK_COURSE_FINAL_HARD_MAX = 8 as const;
+/**
+ * Hard max hits that may enter the generation prompt.
+ * B4.1: restored to 5 after removing filename-prefix ranking distortion
+ * (measured: MVT page 3 still reaches context under hard max 5).
+ */
+export const ASK_COURSE_FINAL_HARD_MAX = 5 as const;
 
-/** Max chunks retained from any single sourceObjectId. */
+/**
+ * Max chunks retained from any single PDF *page* (or Notebook page key).
+ * PDF diversity key = source object + page.
+ */
 export const ASK_COURSE_MAX_CHUNKS_PER_SOURCE = 2 as const;
+
+/**
+ * Secondary cap: max chunks from one Free Space PDF object across all pages.
+ * Allows multiple relevant pages from one PDF without letting that PDF fill
+ * the entire final context when other sources compete.
+ */
+export const ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT = 4 as const;
 
 /** Max sum of chunk text lengths included in COURSE MATERIAL. */
 export const ASK_COURSE_MAX_RETRIEVED_CHARS = 4500 as const;

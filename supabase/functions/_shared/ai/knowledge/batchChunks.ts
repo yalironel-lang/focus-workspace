@@ -7,6 +7,7 @@ import {
   KNOWLEDGE_EMBED_MAX_CHARS_PER_BATCH,
   KNOWLEDGE_EMBED_MAX_CHUNKS_PER_BATCH,
 } from './bounds.ts';
+import { buildPdfEmbeddingText } from './chunkPages.ts';
 
 export type IndexableChunk = {
   id: string;
@@ -14,6 +15,12 @@ export type IndexableChunk = {
   chunk_index: number;
   text: string;
   source_version: number;
+  /**
+   * Free Space PDF file name for embed-only title cue (optional).
+   * Not stored on the chunk row; attached by loadChunks for PDF sources.
+   * Notebook paths leave this unset so embed input remains chunk.text.
+   */
+  fileName?: string | null;
 };
 
 export type EmbeddingBatch = {
@@ -67,7 +74,15 @@ export function batchChunksForEmbedding(
   return batches;
 }
 
-/** Embed input = chunk text only (no ids/page prefixes). */
+/**
+ * Embed input for a chunk.
+ * - Notebook / no fileName: canonical body only.
+ * - Free Space PDF with fileName: sparse-safe title cue via buildPdfEmbeddingText
+ *   (canonical stored text unchanged; model-visible COURSE MATERIAL uses body).
+ */
 export function embeddingInputForChunk(chunk: IndexableChunk): string {
+  if (chunk.fileName != null && String(chunk.fileName).trim().length > 0) {
+    return buildPdfEmbeddingText({ fileName: chunk.fileName, text: chunk.text });
+  }
   return chunk.text;
 }

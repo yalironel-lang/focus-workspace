@@ -3,12 +3,14 @@
  * Diagnostics expose stage counts without changing filter behavior.
  *
  * M0.8F: PDF + Notebook chunks compete in one pool.
- * Per-source cap uses askCourseSourceDiversityKey (PDF object / Notebook PAGE).
+ * Per-source cap uses askCourseSourceDiversityKey (PDF page / Notebook PAGE)
+ * plus ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT secondary object cap.
  */
 
 import {
   ASK_COURSE_BETA_MIN_SIMILARITY,
   ASK_COURSE_FINAL_HARD_MAX,
+  ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT,
   ASK_COURSE_MAX_CHUNKS_PER_SOURCE,
   ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP,
   ASK_COURSE_MAX_RETRIEVED_CHARS,
@@ -18,6 +20,7 @@ import {
   type AskCourseRetrievalDiagnostics,
 } from './retrievalDiagnostics.ts';
 import {
+  askCoursePdfObjectDiversityKey,
   askCourseSourceDiversityKey,
   type KnowledgeSearchHit,
   type PromptCourseChunk,
@@ -109,13 +112,22 @@ export function filterAskCourseHitsWithDiagnostics(hits: KnowledgeSearchHit[]): 
     (h) => topSimilarity! - h.similarity <= ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP,
   );
 
-  const perSource = new Map<string, number>();
+  const perPage = new Map<string, number>();
+  const perPdfObject = new Map<string, number>();
   const diversified: KnowledgeSearchHit[] = [];
   for (const h of afterGap) {
-    const key = askCourseSourceDiversityKey(h);
-    const n = perSource.get(key) ?? 0;
-    if (n >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
-    perSource.set(key, n + 1);
+    const pageKey = askCourseSourceDiversityKey(h);
+    const pageN = perPage.get(pageKey) ?? 0;
+    if (pageN >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
+
+    const objectKey = askCoursePdfObjectDiversityKey(h);
+    if (objectKey) {
+      const objectN = perPdfObject.get(objectKey) ?? 0;
+      if (objectN >= ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT) continue;
+      perPdfObject.set(objectKey, objectN + 1);
+    }
+
+    perPage.set(pageKey, pageN + 1);
     diversified.push(h);
   }
 

@@ -1,7 +1,10 @@
 /**
- * Staging-only embed probe for B4 ranking diagnostics.
+ * Staging-only embed probe for B4/B4.1 ranking diagnostics.
  * Uses Edge secrets; returns embedding vectors for input texts.
- * DO NOT deploy to Production.
+ *
+ * TEST / STAGING ONLY — do not deploy to Production.
+ * Product Edge functions must not import or call this.
+ * Undeploy from staging after acceptance measurements.
  */
 import { createOpenAICompatibleEmbeddingProvider } from '../_shared/ai/knowledge/providerEmbeddings.ts';
 import {

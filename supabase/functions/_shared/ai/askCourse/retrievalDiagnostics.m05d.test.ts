@@ -8,6 +8,7 @@ import {
   ASK_COURSE_BETA_MIN_SIMILARITY,
   ASK_COURSE_FINAL_HARD_MAX,
   ASK_COURSE_MAX_CHUNKS_PER_SOURCE,
+  ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT,
   ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP,
   ASK_COURSE_MAX_RETRIEVED_CHARS,
 } from './bounds.ts';
@@ -26,6 +27,7 @@ import type { AiProvider } from '../providerTypes.ts';
 import { runGatewayPipeline } from '../runGatewayPipeline.ts';
 import type { GatewayAiContext } from '../requestTypes.ts';
 import type { KnowledgeSearchHit } from './retrievalTypes.ts';
+import { askCoursePdfObjectDiversityKey, askCourseSourceDiversityKey } from './retrievalTypes.ts';
 
 const SECTION_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER_A = 'user-a-uuid';
@@ -113,9 +115,9 @@ describe('M0.5D retrieval diagnostics', () => {
     expect(diagnostics.afterPerSourceLimitCount).toBe(ASK_COURSE_MAX_CHUNKS_PER_SOURCE);
   });
 
-  it('4b. multi-page PDF diversity allows more than 2 chunks from one PDF object', () => {
+  it('4b. multi-page PDF diversity allows multiple pages but object cap applies', () => {
     const hits: KnowledgeSearchHit[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       hits.push(
         hit({
           similarity: 0.9 - i * 0.01,
@@ -127,9 +129,10 @@ describe('M0.5D retrieval diagnostics', () => {
       );
     }
     const { diagnostics, chunks } = filterAskCourseHitsWithDiagnostics(hits);
-    expect(diagnostics.afterPerSourceLimitCount).toBe(5);
-    expect(chunks.length).toBe(5);
+    // Per-page allows all 6; secondary PDF object cap = 4.
+    expect(diagnostics.afterPerSourceLimitCount).toBe(4);
     expect(chunks.length).toBeLessThanOrEqual(ASK_COURSE_FINAL_HARD_MAX);
+    expect(chunks.length).toBe(Math.min(4, ASK_COURSE_FINAL_HARD_MAX));
   });
 
   it('5. character budget stage counts correct', () => {
@@ -282,8 +285,8 @@ describe('M0.5D retrieval diagnostics', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
-  it('17. retrieval output behaviorally identical to pre-diagnostic policy', () => {
-    /** Frozen pre-diagnostic filter (M0.5D Phase 1 original). Do not “improve”. */
+  it('17. retrieval output behaviorally identical to B4.1 policy reference', () => {
+    /** Reference filter matching B4.1 policy (page + PDF object caps; budget then hard max). */
     function filterAskCourseHitsPreDiagnostic(hits: KnowledgeSearchHit[]) {
       const sorted = [...hits].sort((a, b) => {
         if (b.similarity !== a.similarity) return b.similarity - a.similarity;
@@ -296,22 +299,25 @@ describe('M0.5D retrieval diagnostics', () => {
       const afterGap = afterFloor.filter(
         (h) => top - h.similarity <= ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP,
       );
-      const perSource = new Map<string, number>();
+      const perPage = new Map<string, number>();
+      const perObject = new Map<string, number>();
       const diversified: KnowledgeSearchHit[] = [];
       for (const h of afterGap) {
-        const key =
-          h.sourceKind === 'notebook_page'
-            ? `notebook_page::${h.notebookObjectId ?? ''}::${h.sourceObjectId}`
-            : `free_space_pdf::${h.sourceObjectId}::${h.pageNumber}`;
-        const n = perSource.get(key) ?? 0;
-        if (n >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
-        perSource.set(key, n + 1);
+        const pageKey = askCourseSourceDiversityKey(h);
+        const pageN = perPage.get(pageKey) ?? 0;
+        if (pageN >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
+        const objectKey = askCoursePdfObjectDiversityKey(h);
+        if (objectKey) {
+          const objectN = perObject.get(objectKey) ?? 0;
+          if (objectN >= ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT) continue;
+          perObject.set(objectKey, objectN + 1);
+        }
+        perPage.set(pageKey, pageN + 1);
         diversified.push(h);
       }
       const budgeted: KnowledgeSearchHit[] = [];
       let chars = 0;
       for (const h of diversified) {
-        if (budgeted.length >= ASK_COURSE_FINAL_HARD_MAX) break;
         const len = h.text.length;
         if (budgeted.length > 0 && chars + len > ASK_COURSE_MAX_RETRIEVED_CHARS) continue;
         if (budgeted.length === 0 && len > ASK_COURSE_MAX_RETRIEVED_CHARS) {
@@ -321,7 +327,7 @@ describe('M0.5D retrieval diagnostics', () => {
         budgeted.push(h);
         chars += len;
       }
-      return budgeted.map((h, i) => ({
+      return budgeted.slice(0, ASK_COURSE_FINAL_HARD_MAX).map((h, i) => ({
         citationIndex: i + 1,
         sourceKind: h.sourceKind,
         sourceObjectId: h.sourceObjectId,
@@ -382,8 +388,9 @@ describe('M0.5D retrieval diagnostics', () => {
     }
     expect(ASK_COURSE_BETA_MIN_SIMILARITY).toBe(0.4);
     expect(ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP).toBe(0.25);
-    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(8);
+    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(5);
     expect(ASK_COURSE_MAX_CHUNKS_PER_SOURCE).toBe(2);
+    expect(ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT).toBe(4);
     expect(ASK_COURSE_MAX_RETRIEVED_CHARS).toBe(4500);
   });
 });

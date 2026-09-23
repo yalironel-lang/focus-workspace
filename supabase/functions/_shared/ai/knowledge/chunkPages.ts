@@ -7,6 +7,7 @@ import {
   KNOWLEDGE_CHUNK_MAX_CHARS,
   KNOWLEDGE_CHUNK_MIN_CHARS,
   KNOWLEDGE_CHUNK_TARGET_CHARS,
+  KNOWLEDGE_SUSPICION_THIN_MAX_MEANINGFUL_CHARS,
 } from './bounds.ts';
 import { meaningfulCharCount } from './normalizeText.ts';
 
@@ -224,17 +225,25 @@ export function chunkPageTexts(pages: PageText[]): KnowledgeChunk[] {
 }
 
 /**
- * Prefix Free Space PDF page text so retrieval embeddings can match the document
- * title (e.g. "Mean Value Theorem") even when OCR body is noisy.
- * Does not change page_number identity or citation provenance.
+ * Embed-only PDF title cue (M1.0B B4.1).
+ *
+ * Stored chunk.text stays canonical academic body (classic ingest + recovery).
+ * Citation/page identity stays in metadata — do not bake `filename — page N`
+ * into the model-visible COURSE MATERIAL body.
+ *
+ * Sparse / ultra-short pages skip the cue so repeated filename tokens cannot
+ * dominate ranking. Threshold reuses the existing thin-page meaningful-char signal.
  */
-export function prefixPdfChunkForRetrieval(input: {
+export function buildPdfEmbeddingText(input: {
   fileName: string | null | undefined;
-  pageNumber: number;
   text: string;
 }): string {
-  const name = (input.fileName ?? '').trim() || 'PDF';
-  const body = input.text.replace(/\s+/g, ' ').trim();
-  const heading = `${name} — page ${input.pageNumber}`;
-  return body.length > 0 ? `${heading}\n${body}` : heading;
+  const body = input.text.trim();
+  if (!body) return body;
+  if (meaningfulCharCount(body) <= KNOWLEDGE_SUSPICION_THIN_MAX_MEANINGFUL_CHARS) {
+    return body;
+  }
+  const name = (input.fileName ?? '').trim();
+  if (!name) return body;
+  return `${name}\n${body}`;
 }

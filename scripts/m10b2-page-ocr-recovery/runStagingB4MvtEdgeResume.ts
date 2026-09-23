@@ -13,10 +13,17 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
+  ASK_COURSE_FINAL_HARD_MAX,
+  ASK_COURSE_RPC_CANDIDATE_LIMIT,
+} from '../../supabase/functions/_shared/ai/askCourse/bounds.ts';
+import { filterAskCourseHitsWithDiagnostics } from '../../supabase/functions/_shared/ai/askCourse/retrievalPolicy.ts';
+import type { KnowledgeSearchHit } from '../../supabase/functions/_shared/ai/askCourse/retrievalTypes.ts';
+import {
   KNOWLEDGE_EMBEDDING_DIMENSIONS,
   KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
   KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
 } from '../../supabase/functions/_shared/ai/knowledge/bounds.ts';
+import { meaningfulCharCount } from '../../supabase/functions/_shared/ai/knowledge/normalizeText.ts';
 import { loadPdfJsModule } from '../../supabase/functions/_shared/ai/knowledge/loadPdfJs.ts';
 import { decidePageRecoveryTrigger } from '../../supabase/functions/_shared/ai/knowledge/pageRecoveryPolicy.ts';
 import { detectPageExtractionSuspicion } from '../../supabase/functions/_shared/ai/knowledge/detectPageExtractionSuspicion.ts';
@@ -809,9 +816,139 @@ async function main() {
       throw new Error('healthy_ask_failed');
     }
 
+    // B4.1 — question-rank diagnostics via staging embed probe (real embeddings)
+    const { data: allChunks } = await sb
+      .from('ai_knowledge_chunks')
+      .select('page_number,chunk_index,text')
+      .eq('source_id', sourceId)
+      .eq('source_version', publishedVersion);
+    const prefixedChunks = (allChunks ?? []).filter((c) =>
+      String(c.text ?? '').includes(' — page '),
+    );
+    const page3Stored = String(
+      (allChunks ?? []).find((c) => c.page_number === MVT_PAGE)?.text ?? '',
+    );
+    step('b41_stored_text', {
+      chunkCount: allChunks?.length ?? 0,
+      prefixedCount: prefixedChunks.length,
+      page3Meaningful: meaningfulCharCount(page3Stored),
+      page3HasPrefix: page3Stored.includes(' — page '),
+      page3Frag: shortFrag(page3Stored, 100),
+    });
+    if (prefixedChunks.length > 0) {
+      throw new Error('b41_stored_chunks_still_prefixed');
+    }
+
+    const probeRes = await fetch(`${keys.url}/functions/v1/ai-staging-embed-probe`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${keys.serviceKey}`,
+        apikey: keys.anonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ texts: [ASK_QUESTION] }),
+    });
+    const probeJson = (await probeRes.json()) as {
+      ok?: boolean;
+      embeddings?: number[][];
+      error?: string;
+    };
+    if (!probeJson.ok || !probeJson.embeddings?.[0]) {
+      throw new Error(`b41_probe_embed:${probeJson.error ?? probeRes.status}`);
+    }
+
+    const { data: qSearchRaw, error: qSearchErr } = await sb.rpc('ai_knowledge_search', {
+      p_user_id: userId,
+      p_section_id: sectionId,
+      p_query_embedding: probeJson.embeddings[0],
+      p_limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
+      p_embedding_model: KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
+      p_embedding_dimensions: KNOWLEDGE_EMBEDDING_DIMENSIONS,
+    });
+    if (qSearchErr) throw new Error(`b41_qsearch:${qSearchErr.message}`);
+    const qRows = (Array.isArray(qSearchRaw) ? qSearchRaw : []) as Array<{
+      source_id?: string;
+      source_object_id?: string;
+      file_name?: string | null;
+      page_number?: number;
+      chunk_index?: number;
+      text?: string;
+      similarity?: number;
+    }>;
+    const ranked = qRows.map((r, i) => ({
+      rank: i + 1,
+      page: r.page_number,
+      similarity: r.similarity,
+      hasPrefix: String(r.text ?? '').includes(' — page '),
+      meaningful: meaningfulCharCount(String(r.text ?? '')),
+      frag: shortFrag(String(r.text ?? ''), 60),
+    }));
+    const page3Rank = ranked.find((r) => r.page === MVT_PAGE)?.rank ?? null;
+    const page3Sim = ranked.find((r) => r.page === MVT_PAGE)?.similarity ?? null;
+    const sparsePages = [10, 17, 18].map((p) => ({
+      page: p,
+      rank: ranked.find((r) => r.page === p)?.rank ?? null,
+      similarity: ranked.find((r) => r.page === p)?.similarity ?? null,
+    }));
+    const sparseBeatPage3 = sparsePages.some(
+      (s) =>
+        s.rank != null &&
+        page3Rank != null &&
+        s.rank < page3Rank,
+    );
+
+    const policyHits: KnowledgeSearchHit[] = qRows
+      .filter((r) => r.source_id === sourceId)
+      .map((r) => ({
+        sourceKind: 'free_space_pdf' as const,
+        sourceObjectId: String(r.source_object_id ?? objectId),
+        notebookObjectId: null,
+        fileName: r.file_name ?? null,
+        pageNumber: Number(r.page_number ?? 0),
+        chunkIndex: Number(r.chunk_index ?? 0),
+        text: String(r.text ?? ''),
+        similarity: Number(r.similarity ?? 0),
+      }));
+    const filtered = filterAskCourseHitsWithDiagnostics(policyHits);
+    const page3InHardMax = filtered.chunks.some((c) => c.pageNumber === MVT_PAGE);
+    const page3InTop8 = page3Rank != null && page3Rank <= 8;
+
+    step('b41_question_rank', {
+      hardMax: ASK_COURSE_FINAL_HARD_MAX,
+      rpcLimit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
+      page3Rank,
+      page3Sim,
+      sparsePages,
+      sparseBeatPage3,
+      page3InHardMax,
+      page3InTop8,
+      finalPages: filtered.chunks.map((c) => c.pageNumber),
+      rankedTop: ranked.slice(0, 12),
+    });
+    if (page3Rank == null) throw new Error('b41_page3_missing_from_question_search');
+    if (sparseBeatPage3) throw new Error('b41_sparse_outranked_page3');
+    if (!page3InHardMax) {
+      throw new Error(
+        `b41_page3_not_in_hard_max_${ASK_COURSE_FINAL_HARD_MAX}:rank=${page3Rank}:inTop8=${page3InTop8}`,
+      );
+    }
+
     report.result = 'PASS';
     report.askAnswerFrag = shortFrag(answer, 240);
-    step('done', { result: 'PASS', productionWrites: 0 });
+    report.b41 = {
+      page3Rank,
+      page3Sim,
+      sparsePages,
+      page3InHardMax,
+      hardMax: ASK_COURSE_FINAL_HARD_MAX,
+    };
+    step('done', {
+      result: 'PASS',
+      productionWrites: 0,
+      sourceId,
+      sectionId,
+      userId,
+    });
   } catch (e) {
     report.result = 'FAIL';
     step('failed', {

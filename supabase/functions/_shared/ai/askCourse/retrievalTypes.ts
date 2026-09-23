@@ -49,7 +49,7 @@ export type PromptCourseChunk = {
   pageTitle?: string | null;
 };
 
-/** Stable per-source key for ASK_COURSE_MAX_CHUNKS_PER_SOURCE. */
+/** Stable per-page key for ASK_COURSE_MAX_CHUNKS_PER_SOURCE. */
 export function askCourseSourceDiversityKey(hit: {
   sourceKind: AskCourseSourceKind;
   sourceObjectId: string;
@@ -66,4 +66,13 @@ export function askCourseSourceDiversityKey(hit: {
       ? hit.pageNumber
       : 'unknown';
   return `free_space_pdf::${hit.sourceObjectId}::${page}`;
+}
+
+/** Secondary object-level key for ASK_COURSE_MAX_CHUNKS_PER_PDF_OBJECT (PDF only). */
+export function askCoursePdfObjectDiversityKey(hit: {
+  sourceKind: AskCourseSourceKind;
+  sourceObjectId: string;
+}): string | null {
+  if (hit.sourceKind !== 'free_space_pdf') return null;
+  return `free_space_pdf_object::${hit.sourceObjectId}`;
 }

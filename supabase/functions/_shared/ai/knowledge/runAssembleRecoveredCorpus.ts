@@ -13,7 +13,7 @@ import {
   assertRecoveryTerminalGate,
   type RecoveryJobSnapshot,
 } from './assertRecoveryTerminalGate.ts';
-import { chunkPageTexts, prefixPdfChunkForRetrieval, type KnowledgeChunk } from './chunkPages.ts';
+import { chunkPageTexts, type KnowledgeChunk } from './chunkPages.ts';
 import {
   validateCanonicalPageSet,
   type CanonicalPageRow,
@@ -255,14 +255,13 @@ export async function runAssembleRecoveredCorpus(input: {
       });
     }
 
+    // Canonical body only (matches classic runKnowledgeIngest). Filename/page
+    // identity stays in citation metadata; embed-time title cue is applied in
+    // embeddingInputForChunk via buildPdfEmbeddingText (sparse-page safe).
     const chunks = chunkPageTexts(
       validated.pages.map((p) => ({
         pageNumber: p.pageNumber,
-        text: prefixPdfChunkForRetrieval({
-          fileName: reloaded.source.fileName ?? null,
-          pageNumber: p.pageNumber,
-          text: p.text,
-        }),
+        text: p.text,
       })),
     );
     // Empty document (all blank pages) → zero chunks is allowed only if P>=1
