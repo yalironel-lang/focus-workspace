@@ -109,6 +109,15 @@ async function makeIngestDeps(
         preserved_corpus: false,
       };
     }),
+    upsertPageTextsNative: vi.fn(async ({ pages }) => ({
+      ok: true,
+      page_count: pages.length,
+    })),
+    enqueuePageRecoveryJobs: vi.fn(async () => ({
+      ok: true,
+      enqueued: 0,
+      already_present: 0,
+    })),
     pdfjs: await pdfjs(),
     ...overrides,
   };

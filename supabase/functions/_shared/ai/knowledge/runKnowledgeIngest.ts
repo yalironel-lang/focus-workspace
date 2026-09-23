@@ -17,6 +17,7 @@ import {
   KNOWLEDGE_MAX_CHUNKS,
   KNOWLEDGE_MAX_PDF_BYTES,
   KNOWLEDGE_MIN_DOCUMENT_CHARS,
+  KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
   USER_CONTENT_BUCKET,
 } from './bounds.ts';
 import { chunkPageTexts, type KnowledgeChunk } from './chunkPages.ts';
@@ -31,6 +32,11 @@ import {
   isPageSuspicionDetectEnabled,
 } from './pageSuspicionObserve.ts';
 import { buildFreeSpacePdfStoragePath } from './path.ts';
+import {
+  buildNativePageLedgerPlan,
+  type NativePageLedgerRow,
+  type RecoveryEnqueuePage,
+} from './persistNativePageLedger.ts';
 import { formatKnowledgeSuspicionLogLine } from './privacyLogSuspicion.ts';
 import type {
   KnowledgeIngestErrorCode,
@@ -88,8 +94,31 @@ export type KnowledgeIngestDeps = {
     /** Server-derived extraction page count only (never client authority). */
     pageCount?: number;
   }) => Promise<FinalizeIngestResult>;
+  /**
+   * M1.0B B3.3A.1 — persist complete native page ledger (1..P) for the
+   * exact processing source_version. RPC preserves OCR canonical on conflict.
+   */
+  upsertPageTextsNative: (input: {
+    sourceId: string;
+    sourceVersion: number;
+    extractionVersion: string;
+    pages: NativePageLedgerRow[];
+  }) => Promise<{ ok: boolean; code?: string; page_count?: number }>;
+  /**
+   * Enqueue selective recovery jobs (policy auto_recover pages only).
+   * Idempotent by (source_id, source_version, page_number, recovery_version).
+   */
+  enqueuePageRecoveryJobs: (input: {
+    sourceId: string;
+    sourceVersion: number;
+    extractionVersion: string;
+    recoveryVersion: string;
+    pages: RecoveryEnqueuePage[];
+  }) => Promise<{ ok: boolean; code?: string; enqueued?: number; already_present?: number }>;
   pdfjs: PdfJsModule;
   nowMs?: () => number;
+  /** Override selective recovery master gate (defaults to bounds constant). */
+  recoveryEnabled?: boolean;
 };
 
 function fail(
@@ -304,10 +333,46 @@ export async function runKnowledgeIngest(input: {
     );
   }
 
-  // M1.0B B1 — observational only. Does not alter text, chunks, status, or indexing.
+  // M1.0B B1 — suspicion detect (observational log). Does not alter chunk text.
+  const suspicion = buildSuspicionObservationSummary(extracted.pages);
   if (isPageSuspicionDetectEnabled()) {
-    const { logLine } = buildSuspicionObservationSummary(extracted.pages);
-    console.log(formatKnowledgeSuspicionLogLine(logLine));
+    console.log(formatKnowledgeSuspicionLogLine(suspicion.logLine));
+  }
+
+  // M1.0B B3.3A.1 — complete native page ledger for exact processing tip.
+  // Must run after begin_ingest (source_version known) and before finalize.
+  const ledger = buildNativePageLedgerPlan({
+    pages: extracted.pages,
+    suspicionResults: suspicion.results,
+    recoveryEnabled:
+      input.deps.recoveryEnabled ?? KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
+  });
+  if (ledger.nativePages.length !== extracted.pageCount) {
+    await finalizeFailedPreserve(input.deps, sourceId, sourceVersion, 'extract_failed');
+    return fail('extract_failed', 'Extracted page set is incomplete for ledger persistence.');
+  }
+  const upserted = await input.deps.upsertPageTextsNative({
+    sourceId,
+    sourceVersion,
+    extractionVersion: ledger.extractionVersion,
+    pages: ledger.nativePages,
+  });
+  if (!upserted.ok) {
+    await finalizeFailedPreserve(input.deps, sourceId, sourceVersion, 'internal_error');
+    return fail('internal_error', 'Could not persist native page evidence.');
+  }
+  if (ledger.recoveryPages.length > 0) {
+    const enqueued = await input.deps.enqueuePageRecoveryJobs({
+      sourceId,
+      sourceVersion,
+      extractionVersion: ledger.extractionVersion,
+      recoveryVersion: ledger.recoveryVersion,
+      pages: ledger.recoveryPages,
+    });
+    if (!enqueued.ok) {
+      await finalizeFailedPreserve(input.deps, sourceId, sourceVersion, 'internal_error');
+      return fail('internal_error', 'Could not enqueue selective page recovery.');
+    }
   }
 
   // Canonical chunk input remains pageNumber + text only (ignore metric fields).

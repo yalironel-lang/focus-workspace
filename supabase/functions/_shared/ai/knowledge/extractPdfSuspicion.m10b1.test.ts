@@ -169,6 +169,15 @@ describe('M1.0B B1 pipeline non-regression', () => {
         }
         return { ok: true, source_id: 'src-1', source_version: 1, status: 'failed' };
       }),
+      upsertPageTextsNative: vi.fn(async ({ pages }) => ({
+        ok: true,
+        page_count: pages.length,
+      })),
+      enqueuePageRecoveryJobs: vi.fn(async () => ({
+        ok: true,
+        enqueued: 0,
+        already_present: 0,
+      })),
       pdfjs: await pdfjs(),
     };
 

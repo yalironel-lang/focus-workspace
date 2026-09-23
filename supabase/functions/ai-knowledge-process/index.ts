@@ -273,6 +273,47 @@ Deno.serve(async (req: Request) => {
         };
       },
 
+      async upsertPageTextsNative({ sourceId, sourceVersion, extractionVersion, pages }) {
+        const { data, error } = await admin.rpc('ai_knowledge_upsert_page_texts_native', {
+          p_source_id: sourceId,
+          p_source_version: sourceVersion,
+          p_extraction_version: extractionVersion,
+          p_pages: pages,
+        });
+        if (error) return { ok: false, code: 'internal_error' };
+        return (data ?? { ok: false, code: 'internal_error' }) as {
+          ok: boolean;
+          code?: string;
+          page_count?: number;
+        };
+      },
+
+      async enqueuePageRecoveryJobs({
+        sourceId,
+        sourceVersion,
+        extractionVersion,
+        recoveryVersion,
+        pages,
+      }) {
+        if (pages.length === 0) {
+          return { ok: true, enqueued: 0, already_present: 0 };
+        }
+        const { data, error } = await admin.rpc('ai_knowledge_enqueue_page_recovery_jobs', {
+          p_source_id: sourceId,
+          p_source_version: sourceVersion,
+          p_extraction_version: extractionVersion,
+          p_recovery_version: recoveryVersion,
+          p_pages: pages,
+        });
+        if (error) return { ok: false, code: 'internal_error' };
+        return (data ?? { ok: false, code: 'internal_error' }) as {
+          ok: boolean;
+          code?: string;
+          enqueued?: number;
+          already_present?: number;
+        };
+      },
+
       pdfjs,
     };
 

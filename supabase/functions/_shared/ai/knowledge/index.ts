@@ -18,6 +18,7 @@ export * from './pageRecoveryJobState.ts';
 export * from './pageRecoveryPolicy.ts';
 export * from './pageSuspicionObserve.ts';
 export * from './path.ts';
+export * from './persistNativePageLedger.ts';
 export * from './privacyLog.ts';
 export * from './privacyLogAssemble.ts';
 export * from './privacyLogIndex.ts';
