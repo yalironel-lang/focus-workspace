@@ -119,6 +119,8 @@ async function makeIngestDeps(
       already_present: 0,
     })),
     pdfjs: await pdfjs(),
+    // Classic path regressions — B3.3C finalize covered separately.
+    recoveryEnabled: false,
     ...overrides,
   };
 }

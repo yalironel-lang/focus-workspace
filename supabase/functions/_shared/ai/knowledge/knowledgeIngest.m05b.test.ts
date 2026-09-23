@@ -231,6 +231,8 @@ describe('M0.5B runKnowledgeIngest pipeline', () => {
         already_present: 0,
       })),
       pdfjs: await pdfjs(),
+      // Classic finalize path for M0.5B regressions (B3.3C defers when enabled).
+      recoveryEnabled: false,
       ...overrides,
     };
   }

@@ -179,6 +179,7 @@ describe('M1.0B B1 pipeline non-regression', () => {
         already_present: 0,
       })),
       pdfjs: await pdfjs(),
+      recoveryEnabled: false,
     };
 
     const res = await runKnowledgeIngest({

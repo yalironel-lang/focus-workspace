@@ -1,20 +1,31 @@
 /**
- * M0.7A — knowledge process orchestrator (direct reuse of ingest → index).
+ * M0.7A / M1.0B B3.3C — knowledge process orchestrator.
  *
- * Flow:
+ * Flow (PDF / free_space_pdf):
  *   validate request
  *   → runKnowledgeIngest(...)
- *   → on ingest failure: STOP (do not index)
- *   → runKnowledgeIndex(...) for authoritative current source state
- *   → return normalized process result
+ *   → on ingest failure: STOP
+ *   → when selective recovery ENABLED:
+ *        runFinalizeRecoveredPdfCorpus (assemble → 019 publish)
+ *        may return recovery_pending (do not publish; resume later)
+ *   → when selective recovery DISABLED:
+ *        classic runKnowledgeIndex (finalize_index_success)
  *
  * Does NOT call Edge Functions over HTTP.
- * Does NOT flip retrieval_source_version (index finalize only).
  * Does NOT debit Ask/Explain quota.
+ * Notebook uses a separate orchestrator (unchanged).
  */
 
-import { KNOWLEDGE_MAX_REQUEST_BODY_BYTES } from './bounds.ts';
+import {
+  KNOWLEDGE_MAX_REQUEST_BODY_BYTES,
+  KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
+} from './bounds.ts';
 import type { KnowledgeProcessLogEvent } from './privacyLogProcess.ts';
+import {
+  runFinalizeRecoveredPdfCorpus,
+  type FinalizeRecoveredPdfDeps,
+  type FinalizeRecoveredPdfErrorCode,
+} from './runFinalizeRecoveredPdf.ts';
 import {
   runKnowledgeIngest,
   type KnowledgeIngestDeps,
@@ -34,7 +45,8 @@ export type KnowledgeProcessRequest = {
 
 export type KnowledgeProcessErrorCode =
   | KnowledgeIngestErrorCode
-  | KnowledgeIndexErrorCode;
+  | KnowledgeIndexErrorCode
+  | FinalizeRecoveredPdfErrorCode;
 
 export type KnowledgeProcessSuccess = {
   version: 1;
@@ -42,13 +54,13 @@ export type KnowledgeProcessSuccess = {
   result: {
     type: 'knowledge_process';
     ingest: {
-      outcome: 'ready' | 'reused';
+      outcome: 'ready' | 'reused' | 'awaiting_finalize';
       sourceVersion: number;
       pageCount: number;
       chunkCount: number;
     };
     index: {
-      outcome: 'indexed' | 'reused';
+      outcome: 'indexed' | 'reused' | 'published' | 'already_published';
       retrievalSourceVersion: number;
     };
   };
@@ -68,6 +80,11 @@ export type KnowledgeProcessResponse = KnowledgeProcessSuccess | KnowledgeProces
 export type KnowledgeProcessDeps = {
   ingest: KnowledgeIngestDeps;
   index: KnowledgeIndexDeps;
+  /**
+   * Required when selective recovery is enabled (default bounds gate).
+   * Owns assemble + atomic publish for the PDF recovered-corpus path.
+   */
+  finalize?: FinalizeRecoveredPdfDeps;
   /** Optional metadata-only diagnostics (never content). */
   onEvent?: (event: KnowledgeProcessLogEvent) => void;
 };
@@ -139,6 +156,10 @@ export function knowledgeProcessRequestBodyTooLarge(byteLength: number): boolean
   return byteLength > KNOWLEDGE_MAX_REQUEST_BODY_BYTES;
 }
 
+function recoveryFeatureEnabled(deps: KnowledgeProcessDeps): boolean {
+  return deps.ingest.recoveryEnabled ?? KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED;
+}
+
 export async function runKnowledgeProcess(input: {
   authUserId: string | null;
   body: unknown;
@@ -201,7 +222,12 @@ export async function runKnowledgeProcess(input: {
     return fail(ingest.error.code, ingest.error.message);
   }
 
-  const ingestOutcome = ingest.result.reused ? 'reused' : 'ready';
+  const ingestOutcome =
+    ingest.result.status === 'reused'
+      ? 'reused'
+      : ingest.result.status === 'awaiting_finalize'
+        ? 'awaiting_finalize'
+        : 'ready';
   emit({
     event: 'knowledge_process_ingest_ok',
     outcome: ingestOutcome,
@@ -210,6 +236,69 @@ export async function runKnowledgeProcess(input: {
     chunkCount: ingest.result.chunkCount,
   });
 
+  // B3.3C recovered-corpus path (feature on): assemble + atomic publish.
+  if (recoveryFeatureEnabled(input.deps)) {
+    if (!input.deps.finalize) {
+      emit({
+        event: 'knowledge_process_failed',
+        stage: 'finalize',
+        code: 'internal_error',
+      });
+      return fail('internal_error', 'Finalize deps are required when recovery is enabled.');
+    }
+
+    const finalized = await runFinalizeRecoveredPdfCorpus({
+      sourceId: ingest.result.sourceId,
+      sourceVersion: ingest.result.sourceVersion,
+      sectionId: parsed.request.sectionId,
+      userId: input.authUserId,
+      deps: input.deps.finalize,
+    });
+
+    if (!finalized.ok) {
+      emit({
+        event: 'knowledge_process_failed',
+        stage: 'finalize',
+        code: finalized.code,
+      });
+      if (finalized.code === 'recovery_pending') {
+        return fail(
+          'recovery_pending',
+          'Page recovery is still in progress; retry after jobs are terminal.',
+        );
+      }
+      return fail(finalized.code, finalized.message);
+    }
+
+    emit({
+      event: 'knowledge_process_finalize_ok',
+      outcome: finalized.outcome,
+      sourceVersion: finalized.sourceVersion,
+      retrievalSourceVersion: finalized.retrievalSourceVersion,
+      chunkCount: finalized.chunkCount,
+      pageCount: finalized.pageCount,
+    });
+
+    return {
+      version: 1,
+      ok: true,
+      result: {
+        type: 'knowledge_process',
+        ingest: {
+          outcome: ingestOutcome,
+          sourceVersion: ingest.result.sourceVersion,
+          pageCount: ingest.result.pageCount || finalized.pageCount,
+          chunkCount: finalized.chunkCount,
+        },
+        index: {
+          outcome: finalized.outcome,
+          retrievalSourceVersion: finalized.retrievalSourceVersion,
+        },
+      },
+    };
+  }
+
+  // Classic path (recovery feature off): index publishes via finalize_index_success.
   const index = await runKnowledgeIndex({
     authUserId: input.authUserId,
     body: stageBody,
@@ -240,7 +329,7 @@ export async function runKnowledgeProcess(input: {
     result: {
       type: 'knowledge_process',
       ingest: {
-        outcome: ingestOutcome,
+        outcome: ingestOutcome === 'awaiting_finalize' ? 'ready' : ingestOutcome,
         sourceVersion: ingest.result.sourceVersion,
         pageCount: ingest.result.pageCount,
         chunkCount: ingest.result.chunkCount,

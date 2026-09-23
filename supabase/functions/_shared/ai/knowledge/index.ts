@@ -29,6 +29,7 @@ export * from './privacyLogSuspicion.ts';
 export * from './providerEmbeddings.ts';
 export * from './routeEmbedding.ts';
 export * from './runAssembleRecoveredCorpus.ts';
+export * from './runFinalizeRecoveredPdf.ts';
 export * from './runKnowledgeIndex.ts';
 export * from './runKnowledgeIndexUnpublished.ts';
 export * from './runKnowledgeIngest.ts';

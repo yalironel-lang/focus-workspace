@@ -13,9 +13,11 @@ import {
   KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
   KNOWLEDGE_MAX_PDF_BYTES,
   KNOWLEDGE_MAX_REQUEST_BODY_BYTES,
+  KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
   USER_CONTENT_BUCKET,
 } from '../_shared/ai/knowledge/bounds.ts';
 import type { IndexableChunk } from '../_shared/ai/knowledge/batchChunks.ts';
+import type { KnowledgeChunk } from '../_shared/ai/knowledge/chunkPages.ts';
 import {
   installPdfJsEdgeCompatGlobals,
   loadPdfJsModule,
@@ -30,6 +32,8 @@ import {
 } from '../_shared/ai/knowledge/runKnowledgeProcess.ts';
 import type { KnowledgeIngestDeps } from '../_shared/ai/knowledge/runKnowledgeIngest.ts';
 import type { KnowledgeIndexDeps } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
+import type { FinalizeRecoveredPdfDeps } from '../_shared/ai/knowledge/runFinalizeRecoveredPdf.ts';
+import type { SourceIndexMeta } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -55,6 +59,7 @@ function httpStatusFor(code: KnowledgeProcessErrorCode): number {
     case 'not_found':
       return 404;
     case 'not_ready':
+    case 'recovery_pending':
       return 409;
     case 'too_large':
     case 'too_many_pages':
@@ -68,6 +73,7 @@ function httpStatusFor(code: KnowledgeProcessErrorCode): number {
     case 'embedding_timeout':
       return 504;
     case 'stale_job':
+    case 'stale_processing_version':
     case 'incomplete_embeddings':
     case 'embedding_invalid_response':
       return 422;
@@ -466,14 +472,183 @@ Deno.serve(async (req: Request) => {
       },
     };
 
+    async function loadSourceMetaById(
+      sourceId: string,
+    ): Promise<
+      | {
+          ok: true;
+          source: SourceIndexMeta & { sourceKind: string; pageCount: number | null };
+        }
+      | { ok: false; code: 'not_found' | 'auth_mismatch' }
+    > {
+      const { data: source, error } = await admin
+        .from('ai_knowledge_sources')
+        .select(
+          'id, user_id, section_id, source_version, status, retrieval_source_version, source_kind, page_count',
+        )
+        .eq('id', sourceId)
+        .maybeSingle();
+      if (error || !source) return { ok: false, code: 'not_found' };
+      const { data: vidx } = await admin
+        .from('ai_knowledge_version_index')
+        .select('status, embedding_model, embedding_dimensions')
+        .eq('source_id', source.id)
+        .eq('source_version', source.source_version)
+        .maybeSingle();
+      return {
+        ok: true,
+        source: {
+          sourceId: source.id as string,
+          userId: source.user_id as string,
+          sectionId: source.section_id as string,
+          sourceVersion: source.source_version as number,
+          status: source.status as string,
+          retrievalSourceVersion: (source.retrieval_source_version as number | null) ?? null,
+          indexStatus: (vidx?.status as SourceIndexMeta['indexStatus']) ?? null,
+          indexModel: (vidx?.embedding_model as string | null) ?? null,
+          indexDimensions: (vidx?.embedding_dimensions as number | null) ?? null,
+          sourceKind: source.source_kind as string,
+          pageCount: (source.page_count as number | null) ?? null,
+        },
+      };
+    }
+
+    // B3.3C — assemble + 019 publish deps (used when selective recovery is enabled).
+    const finalizeDeps: FinalizeRecoveredPdfDeps = {
+      embeddingModel,
+      embeddingDimensions,
+      embeddingProvider: indexDeps.embeddingProvider,
+      loadSourceForObject: indexDeps.loadSourceForObject,
+      loadSourceById: loadSourceMetaById,
+      async loadPageTexts({ sourceId, sourceVersion }) {
+        const { data, error } = await admin
+          .from('ai_knowledge_page_texts')
+          .select('source_id, source_version, page_number, canonical_text, detector_reasons')
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion)
+          .order('page_number', { ascending: true });
+        if (error || !data) return [];
+        return data.map((r) => ({
+          sourceId: r.source_id as string,
+          sourceVersion: r.source_version as number,
+          pageNumber: r.page_number as number,
+          canonicalText: (r.canonical_text as string | null) ?? '',
+          detectorReasons: (r.detector_reasons as string[] | null) ?? [],
+        }));
+      },
+      async loadRecoveryJobs({ sourceId, sourceVersion }) {
+        const { data, error } = await admin
+          .from('ai_knowledge_page_recovery_jobs')
+          .select('page_number, status, detector_reasons')
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion);
+        if (error || !data) return [];
+        return data.map((r) => ({
+          pageNumber: r.page_number as number,
+          status: r.status as string,
+          detectorReasons: (r.detector_reasons as string[] | null) ?? [],
+        }));
+      },
+      async countChunks({ sourceId, sourceVersion }) {
+        const { count, error } = await admin
+          .from('ai_knowledge_chunks')
+          .select('id', { count: 'exact', head: true })
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion);
+        if (error) return 0;
+        return count ?? 0;
+      },
+      async deleteVersionChunks({ sourceId, sourceVersion }) {
+        const loaded = await loadSourceMetaById(sourceId);
+        if (
+          loaded.ok &&
+          loaded.source.retrievalSourceVersion === sourceVersion
+        ) {
+          throw new Error('refused_delete_published_version');
+        }
+        await admin
+          .from('ai_knowledge_embeddings')
+          .delete()
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion);
+        await admin
+          .from('ai_knowledge_chunks')
+          .delete()
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion);
+      },
+      async finalizeIngest({ sourceId, sourceVersion, status, chunks, pageCount }) {
+        const { data, error } = await admin.rpc('ai_knowledge_finalize_ingest', {
+          p_source_id: sourceId,
+          p_source_version: sourceVersion,
+          p_status: status,
+          p_chunks: (chunks as KnowledgeChunk[]).map((c) => ({
+            page_number: c.page_number,
+            chunk_index: c.chunk_index,
+            text: c.text,
+          })),
+          p_page_count: pageCount,
+        });
+        if (error) return { ok: false, code: 'internal_error' };
+        return (data ?? { ok: false, code: 'internal_error' }) as {
+          ok: boolean;
+          source_version?: number;
+          chunk_count?: number;
+          code?: string;
+        };
+      },
+      beginIndex: indexDeps.beginIndex,
+      loadChunks: indexDeps.loadChunks,
+      upsertEmbeddings: indexDeps.upsertEmbeddings,
+      finalizeIndexSuccess: async () => {
+        // Never publish via classic finalize on the recovered-corpus path.
+        return { ok: false, code: 'internal_error' };
+      },
+      finalizeIndexFailure: indexDeps.finalizeIndexFailure,
+      async countEmbeddings({ sourceId, sourceVersion, embeddingModel, embeddingDimensions }) {
+        const { count, error } = await admin
+          .from('ai_knowledge_embeddings')
+          .select('chunk_id', { count: 'exact', head: true })
+          .eq('source_id', sourceId)
+          .eq('source_version', sourceVersion)
+          .eq('embedding_model', embeddingModel)
+          .eq('embedding_dimensions', embeddingDimensions);
+        if (error) return 0;
+        return count ?? 0;
+      },
+      recoveryEnabled: KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
+      async publishRecoveredCorpus({ sourceId, expectedSourceVersion }) {
+        const { data, error } = await admin.rpc('ai_knowledge_publish_recovered_corpus', {
+          p_source_id: sourceId,
+          p_expected_source_version: expectedSourceVersion,
+        });
+        if (error) return { ok: false, code: 'internal_error' };
+        return (data ?? { ok: false, code: 'internal_error' }) as {
+          ok: boolean;
+          code?: string;
+          already_published?: boolean;
+          source_id?: string;
+          source_version?: number;
+          retrieval_source_version?: number | null;
+          previous_retrieval_source_version?: number | null;
+          chunk_count?: number;
+          page_count?: number;
+        };
+      },
+    };
+
     void KNOWLEDGE_MAX_REQUEST_BODY_BYTES;
 
     const response = await runKnowledgeProcess({
       authUserId,
       body,
       deps: {
-        ingest: ingestDeps,
+        ingest: {
+          ...ingestDeps,
+          recoveryEnabled: KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED,
+        },
         index: indexDeps,
+        finalize: finalizeDeps,
         onEvent: (event) => {
           console.log(
             formatKnowledgeProcessLogLine({

@@ -1,5 +1,5 @@
 /**
- * Privacy-safe operational logging for knowledge process (M0.7A).
+ * Privacy-safe operational logging for knowledge process (M0.7A / B3.3C).
  * NEVER logs extracted text, chunk text, vectors, PDF bytes, JWT, or provider bodies.
  */
 
@@ -12,7 +12,7 @@ export type KnowledgeProcessLogEvent =
     }
   | {
       event: 'knowledge_process_ingest_ok';
-      outcome: 'ready' | 'reused';
+      outcome: 'ready' | 'reused' | 'awaiting_finalize';
       sourceVersion: number;
       pageCount: number;
       chunkCount: number;
@@ -25,8 +25,16 @@ export type KnowledgeProcessLogEvent =
       batchCount?: number;
     }
   | {
+      event: 'knowledge_process_finalize_ok';
+      outcome: 'published' | 'already_published';
+      sourceVersion: number;
+      retrievalSourceVersion: number;
+      chunkCount?: number;
+      pageCount?: number;
+    }
+  | {
       event: 'knowledge_process_failed';
-      stage: 'request' | 'ingest' | 'index';
+      stage: 'request' | 'ingest' | 'index' | 'finalize';
       code: string;
     };
 
@@ -67,6 +75,15 @@ export function formatKnowledgeProcessLogLine(line: KnowledgeProcessLogLine): st
         retrievalSourceVersion: line.retrievalSourceVersion,
         ...(typeof line.chunkCount === 'number' ? { chunkCount: line.chunkCount } : {}),
         ...(typeof line.batchCount === 'number' ? { batchCount: line.batchCount } : {}),
+      });
+    case 'knowledge_process_finalize_ok':
+      return JSON.stringify({
+        ...base,
+        outcome: line.outcome,
+        sourceVersion: line.sourceVersion,
+        retrievalSourceVersion: line.retrievalSourceVersion,
+        ...(typeof line.chunkCount === 'number' ? { chunkCount: line.chunkCount } : {}),
+        ...(typeof line.pageCount === 'number' ? { pageCount: line.pageCount } : {}),
       });
     case 'knowledge_process_failed':
       return JSON.stringify({

@@ -30,6 +30,17 @@ export type ProcessClaimedJobOptions = {
    * to simulate stale-during-OCR.
    */
   afterResolveBeforeOcr?: (job: ClaimedRecoveryJob) => Promise<void> | void;
+  /**
+   * Optional B3.3C hook: after a terminal commit (succeeded/unusable/failed/
+   * discarded_stale), allow the host to attempt finalize (assemble+publish)
+   * when all required jobs for the tip are terminal. Must be idempotent.
+   * Does NOT run OCR or mutate recovery results.
+   */
+  afterTerminalCommit?: (input: {
+    job: ClaimedRecoveryJob;
+    commitStatus: string | undefined;
+    errorCode: string | null | undefined;
+  }) => Promise<void> | void;
   /** Injectable OCR core (defaults to B2 recoverPdfPage). */
   recoverPageFn?: typeof recoverPdfPage;
 };
@@ -217,6 +228,18 @@ export async function processClaimedRecoveryJob(
     durationMs: Date.now() - t0,
     recoveredCharCount: ocr.metadata.recoveredCharCount,
   });
+
+  if (opts.afterTerminalCommit) {
+    try {
+      await opts.afterTerminalCommit({
+        job,
+        commitStatus: commit.status,
+        errorCode: commit.code ?? ocr.errorCode ?? null,
+      });
+    } catch {
+      // Finalize hook must never fail the OCR commit path; process retry resumes.
+    }
+  }
 
   return {
     processed: true,

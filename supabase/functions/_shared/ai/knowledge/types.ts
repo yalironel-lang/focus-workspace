@@ -24,13 +24,21 @@ export type KnowledgeIngestSuccess = {
   version: 1;
   ok: true;
   result: {
-    status: 'ready' | 'reused';
+    /**
+     * ready — classic finalize completed (recovery feature off).
+     * reused — same-hash READY short-circuit.
+     * awaiting_finalize — native ledger (+ optional recovery enqueue) done;
+     *   READY chunks deferred to assemble/publish (B3.3C).
+     */
+    status: 'ready' | 'reused' | 'awaiting_finalize';
     sourceId: string;
     sourceVersion: number;
     pageCount: number;
     chunkCount: number;
     contentChanged: boolean;
     reused: boolean;
+    /** True when selective recovery jobs were enqueued this attempt. */
+    recoveryEnqueued?: boolean;
   };
 };
 

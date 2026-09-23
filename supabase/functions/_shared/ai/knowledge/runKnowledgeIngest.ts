@@ -375,7 +375,31 @@ export async function runKnowledgeIngest(input: {
     }
   }
 
-  // Canonical chunk input remains pageNumber + text only (ignore metric fields).
+  const recoveryEnabled =
+    input.deps.recoveryEnabled ?? KNOWLEDGE_SELECTIVE_PAGE_RECOVERY_ENABLED;
+
+  // M1.0B B3.3C — when selective recovery is enabled, do NOT finalize READY
+  // native chunks here. Assembly owns canonical chunk finalize + unpublished
+  // index; publication is atomic via migration 019. Leaving status
+  // pending/processing/stale keeps retrieval on N until publish.
+  if (recoveryEnabled) {
+    return {
+      version: 1,
+      ok: true,
+      result: {
+        status: 'awaiting_finalize',
+        sourceId,
+        sourceVersion,
+        pageCount: extracted.pageCount,
+        chunkCount: 0,
+        contentChanged: begin.idempotent !== true,
+        reused: false,
+        recoveryEnqueued: ledger.recoveryPages.length > 0,
+      },
+    };
+  }
+
+  // Classic path (recovery feature off): finalize native chunks immediately.
   const chunks = chunkPageTexts(
     extracted.pages.map((p) => ({ pageNumber: p.pageNumber, text: p.text })),
   );

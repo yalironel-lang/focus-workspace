@@ -31,6 +31,7 @@ export type KnowledgeProcessClientErrorCode =
   | 'embedding_invalid_response'
   | 'embedding_quota_exceeded'
   | 'embedding_internal_error'
+  | 'recovery_pending'
   | 'internal_error'
   | 'aborted'
   | 'network_error';
@@ -41,13 +42,13 @@ export type KnowledgeProcessClientSuccess = {
   result: {
     type: 'knowledge_process';
     ingest: {
-      outcome: 'ready' | 'reused';
+      outcome: 'ready' | 'reused' | 'awaiting_finalize';
       sourceVersion: number;
       pageCount: number;
       chunkCount: number;
     };
     index: {
-      outcome: 'indexed' | 'reused';
+      outcome: 'indexed' | 'reused' | 'published' | 'already_published';
       retrievalSourceVersion: number;
     };
   };

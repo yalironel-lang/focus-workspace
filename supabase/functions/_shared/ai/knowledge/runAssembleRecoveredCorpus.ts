@@ -202,10 +202,18 @@ export async function runAssembleRecoveredCorpus(input: {
     );
   }
 
+  // Prefer authoritative source.page_count; when deferred finalize has not yet
+  // written it, infer P from the complete native ledger row set (1..max).
+  const inferredPageCount =
+    pageRows.length > 0
+      ? Math.max(...pageRows.map((p) => p.pageNumber))
+      : null;
+  const expectedPageCount = reloaded.source.pageCount ?? inferredPageCount;
+
   const validated = validateCanonicalPageSet({
     sourceId: request.sourceId,
     sourceVersion: request.sourceVersion,
-    expectedPageCount: reloaded.source.pageCount,
+    expectedPageCount,
     rows: pageRows,
   });
   if (!validated.ok) {
