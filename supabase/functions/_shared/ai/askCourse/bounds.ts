@@ -7,10 +7,10 @@
 export const MAX_ASK_COURSE_QUESTION_CHARS = 2000 as const;
 
 /** Candidates requested from ai_knowledge_search. */
-export const ASK_COURSE_RPC_CANDIDATE_LIMIT = 5 as const;
+export const ASK_COURSE_RPC_CANDIDATE_LIMIT = 8 as const;
 
 /** Hard max hits that may enter the generation prompt. */
-export const ASK_COURSE_FINAL_HARD_MAX = 5 as const;
+export const ASK_COURSE_FINAL_HARD_MAX = 8 as const;
 
 /** Max chunks retained from any single sourceObjectId. */
 export const ASK_COURSE_MAX_CHUNKS_PER_SOURCE = 2 as const;

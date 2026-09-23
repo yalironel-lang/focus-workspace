@@ -30,6 +30,7 @@ import { preflightGatewayRequest } from '../preflightGatewayRequest.ts';
 import { runGatewayPipeline } from '../runGatewayPipeline.ts';
 import type { GatewayAiContext, ZikukAiAskCourseRequest } from '../requestTypes.ts';
 import type { KnowledgeSearchHit } from './retrievalTypes.ts';
+import { askCourseSourceDiversityKey } from './retrievalTypes.ts';
 
 const SECTION_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const SECTION_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -312,7 +313,8 @@ describe('M0.5D embed + retrieval policy', () => {
     const perSource = new Map<string, number>();
     let chars = 0;
     for (const c of filtered) {
-      perSource.set(c.sourceObjectId, (perSource.get(c.sourceObjectId) ?? 0) + 1);
+      const key = askCourseSourceDiversityKey(c);
+      perSource.set(key, (perSource.get(key) ?? 0) + 1);
       chars += c.text.length;
     }
     for (const n of perSource.values()) {
@@ -546,8 +548,8 @@ describe('M0.5D quota / privacy / failures / regression', () => {
 
 describe('M0.5D constants documented', () => {
   it('exports beta retrieval constants', () => {
-    expect(ASK_COURSE_RPC_CANDIDATE_LIMIT).toBe(5);
-    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(5);
+    expect(ASK_COURSE_RPC_CANDIDATE_LIMIT).toBe(8);
+    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(8);
     expect(ASK_COURSE_MAX_CHUNKS_PER_SOURCE).toBe(2);
     expect(ASK_COURSE_MAX_RETRIEVED_CHARS).toBe(4500);
     expect(ASK_COURSE_BETA_MIN_SIMILARITY).toBe(0.4);

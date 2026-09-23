@@ -13,7 +13,7 @@ import {
   assertRecoveryTerminalGate,
   type RecoveryJobSnapshot,
 } from './assertRecoveryTerminalGate.ts';
-import { chunkPageTexts, type KnowledgeChunk } from './chunkPages.ts';
+import { chunkPageTexts, prefixPdfChunkForRetrieval, type KnowledgeChunk } from './chunkPages.ts';
 import {
   validateCanonicalPageSet,
   type CanonicalPageRow,
@@ -79,6 +79,7 @@ export type AssembleRecoveredCorpusDeps = UnpublishedIndexDeps & {
         source: SourceIndexMeta & {
           sourceKind: string;
           pageCount: number | null;
+          fileName?: string | null;
         };
       }
     | { ok: false; code: 'not_found' | 'auth_mismatch' }
@@ -254,7 +255,16 @@ export async function runAssembleRecoveredCorpus(input: {
       });
     }
 
-    const chunks = chunkPageTexts(validated.pages);
+    const chunks = chunkPageTexts(
+      validated.pages.map((p) => ({
+        pageNumber: p.pageNumber,
+        text: prefixPdfChunkForRetrieval({
+          fileName: reloaded.source.fileName ?? null,
+          pageNumber: p.pageNumber,
+          text: p.text,
+        }),
+      })),
+    );
     // Empty document (all blank pages) → zero chunks is allowed only if P>=1
     // and every page row exists. Index path requires >=1 chunk today.
     // Fail closed if zero chunks (matches existing index invariant).

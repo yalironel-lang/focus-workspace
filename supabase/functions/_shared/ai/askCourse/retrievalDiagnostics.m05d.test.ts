@@ -95,7 +95,25 @@ describe('M0.5D retrieval diagnostics', () => {
     expect(diagnostics.reason).toBe('evidence_ready');
   });
 
-  it('4. source diversity stage counts correct', () => {
+  it('4. source diversity stage counts correct (same PDF page)', () => {
+    const hits: KnowledgeSearchHit[] = [];
+    for (let i = 0; i < 5; i++) {
+      hits.push(
+        hit({
+          similarity: 0.9 - i * 0.01,
+          text: `c${i}`.padEnd(40, 'z'),
+          pageNumber: 3,
+          chunkIndex: i,
+          sourceObjectId: 'same-source',
+        }),
+      );
+    }
+    const { diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
+    expect(diagnostics.afterRelativeGapCount).toBeGreaterThan(ASK_COURSE_MAX_CHUNKS_PER_SOURCE);
+    expect(diagnostics.afterPerSourceLimitCount).toBe(ASK_COURSE_MAX_CHUNKS_PER_SOURCE);
+  });
+
+  it('4b. multi-page PDF diversity allows more than 2 chunks from one PDF object', () => {
     const hits: KnowledgeSearchHit[] = [];
     for (let i = 0; i < 5; i++) {
       hits.push(
@@ -104,13 +122,14 @@ describe('M0.5D retrieval diagnostics', () => {
           text: `c${i}`.padEnd(40, 'z'),
           pageNumber: i + 1,
           chunkIndex: 0,
-          sourceObjectId: 'same-source',
+          sourceObjectId: 'same-pdf',
         }),
       );
     }
-    const { diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
-    expect(diagnostics.afterRelativeGapCount).toBeGreaterThan(ASK_COURSE_MAX_CHUNKS_PER_SOURCE);
-    expect(diagnostics.afterPerSourceLimitCount).toBe(ASK_COURSE_MAX_CHUNKS_PER_SOURCE);
+    const { diagnostics, chunks } = filterAskCourseHitsWithDiagnostics(hits);
+    expect(diagnostics.afterPerSourceLimitCount).toBe(5);
+    expect(chunks.length).toBe(5);
+    expect(chunks.length).toBeLessThanOrEqual(ASK_COURSE_FINAL_HARD_MAX);
   });
 
   it('5. character budget stage counts correct', () => {
@@ -283,7 +302,7 @@ describe('M0.5D retrieval diagnostics', () => {
         const key =
           h.sourceKind === 'notebook_page'
             ? `notebook_page::${h.notebookObjectId ?? ''}::${h.sourceObjectId}`
-            : `free_space_pdf::${h.sourceObjectId}`;
+            : `free_space_pdf::${h.sourceObjectId}::${h.pageNumber}`;
         const n = perSource.get(key) ?? 0;
         if (n >= ASK_COURSE_MAX_CHUNKS_PER_SOURCE) continue;
         perSource.set(key, n + 1);
@@ -363,7 +382,7 @@ describe('M0.5D retrieval diagnostics', () => {
     }
     expect(ASK_COURSE_BETA_MIN_SIMILARITY).toBe(0.4);
     expect(ASK_COURSE_MAX_RELATIVE_GAP_FROM_TOP).toBe(0.25);
-    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(5);
+    expect(ASK_COURSE_FINAL_HARD_MAX).toBe(8);
     expect(ASK_COURSE_MAX_CHUNKS_PER_SOURCE).toBe(2);
     expect(ASK_COURSE_MAX_RETRIEVED_CHARS).toBe(4500);
   });

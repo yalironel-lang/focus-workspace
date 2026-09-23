@@ -222,3 +222,19 @@ export function chunkPageTexts(pages: PageText[]): KnowledgeChunk[] {
   }
   return out;
 }
+
+/**
+ * Prefix Free Space PDF page text so retrieval embeddings can match the document
+ * title (e.g. "Mean Value Theorem") even when OCR body is noisy.
+ * Does not change page_number identity or citation provenance.
+ */
+export function prefixPdfChunkForRetrieval(input: {
+  fileName: string | null | undefined;
+  pageNumber: number;
+  text: string;
+}): string {
+  const name = (input.fileName ?? '').trim() || 'PDF';
+  const body = input.text.replace(/\s+/g, ' ').trim();
+  const heading = `${name} — page ${input.pageNumber}`;
+  return body.length > 0 ? `${heading}\n${body}` : heading;
+}

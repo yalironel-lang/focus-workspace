@@ -54,9 +54,16 @@ export function askCourseSourceDiversityKey(hit: {
   sourceKind: AskCourseSourceKind;
   sourceObjectId: string;
   notebookObjectId?: string | null;
+  pageNumber?: number;
 }): string {
   if (hit.sourceKind === 'notebook_page') {
     return `notebook_page::${hit.notebookObjectId ?? ''}::${hit.sourceObjectId}`;
   }
-  return `free_space_pdf::${hit.sourceObjectId}`;
+  // Per PDF *page* so multi-page Free Space PDFs are not capped to 2 chunks total
+  // (title/TOC pages must not crowd out recovered theorem pages).
+  const page =
+    typeof hit.pageNumber === 'number' && Number.isFinite(hit.pageNumber)
+      ? hit.pageNumber
+      : 'unknown';
+  return `free_space_pdf::${hit.sourceObjectId}::${page}`;
 }

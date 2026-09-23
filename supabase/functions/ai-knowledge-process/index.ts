@@ -484,7 +484,7 @@ Deno.serve(async (req: Request) => {
       const { data: source, error } = await admin
         .from('ai_knowledge_sources')
         .select(
-          'id, user_id, section_id, source_version, status, retrieval_source_version, source_kind, page_count',
+          'id, user_id, section_id, source_version, status, retrieval_source_version, source_kind, page_count, file_name',
         )
         .eq('id', sourceId)
         .maybeSingle();
@@ -509,6 +509,7 @@ Deno.serve(async (req: Request) => {
           indexDimensions: (vidx?.embedding_dimensions as number | null) ?? null,
           sourceKind: source.source_kind as string,
           pageCount: (source.page_count as number | null) ?? null,
+          fileName: (source.file_name as string | null) ?? null,
         },
       };
     }
