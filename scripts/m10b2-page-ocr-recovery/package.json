@@ -15,7 +15,7 @@
   "type": "module",
   "private": "true",
   "dependencies": {
-    "@napi-rs/canvas": "^1.0.9",
-    "pdfjs-dist": "^6.3.289"
+    "@napi-rs/canvas": "0.1.100",
+    "pdfjs-dist": "5.7.284"
   }
 }

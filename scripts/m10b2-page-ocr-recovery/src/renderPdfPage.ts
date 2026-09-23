@@ -46,9 +46,13 @@ export async function renderPdfPageToPng(input: {
     destroy?: () => Promise<void> | void;
   };
 
+  // pdf.js rejects Node Buffer even though Buffer extends Uint8Array.
+  // Always pass a plain Uint8Array copy so Storage downloads / Buffer uploads work.
+  const data = new Uint8Array(input.bytes);
+
   try {
     doc = await getDocument({
-      data: input.bytes.slice(),
+      data,
       disableWorker: true,
       isEvalSupported: false,
       useSystemFonts: true,
