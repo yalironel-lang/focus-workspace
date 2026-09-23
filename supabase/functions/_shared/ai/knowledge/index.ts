@@ -1,3 +1,4 @@
+export * from './assertRecoveryTerminalGate.ts';
 export * from './batchChunks.ts';
 export * from './bounds.ts';
 export * from './canonicalPageText.ts';
@@ -18,17 +19,21 @@ export * from './pageRecoveryPolicy.ts';
 export * from './pageSuspicionObserve.ts';
 export * from './path.ts';
 export * from './privacyLog.ts';
+export * from './privacyLogAssemble.ts';
 export * from './privacyLogIndex.ts';
 export * from './privacyLogNotebook.ts';
 export * from './privacyLogProcess.ts';
 export * from './privacyLogSuspicion.ts';
 export * from './providerEmbeddings.ts';
 export * from './routeEmbedding.ts';
+export * from './runAssembleRecoveredCorpus.ts';
 export * from './runKnowledgeIndex.ts';
+export * from './runKnowledgeIndexUnpublished.ts';
 export * from './runKnowledgeIngest.ts';
 export * from './runKnowledgeProcess.ts';
 export * from './runNotebookKnowledgeIngest.ts';
 export * from './runNotebookKnowledgeProcess.ts';
 export * from './types.ts';
+export * from './validateCanonicalPageSet.ts';
 
 
