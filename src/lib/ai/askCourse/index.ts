@@ -42,3 +42,14 @@ export {
   type OpenAskCourseSourceDeps,
   type OpenAskCourseSourceResult,
 } from './openAskCourseSource';
+export {
+  classifyKnowledgeSourceRow,
+  deriveCourseKnowledgeReadiness,
+  courseKnowledgeReadinessMessage,
+  type CourseKnowledgeReadiness,
+  type CourseKnowledgeReadinessKind,
+  type KnowledgeSourceReadinessRow,
+  type EligibleKnowledgeMaterialRef,
+} from './courseKnowledgeReadiness';
+export { collectEligibleKnowledgeMaterials } from './collectEligibleKnowledgeMaterials';
+export { useCourseKnowledgeReadiness } from './useCourseKnowledgeReadiness';

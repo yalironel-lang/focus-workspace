@@ -32,6 +32,7 @@ import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWo
 import {
   openAskCourseSource,
   userFacingOpenAskCourseSourceMessage,
+  collectEligibleKnowledgeMaterials,
 } from '../lib/ai/askCourse';
 import type { AskCourseSourceRef } from '../lib/ai/gatewayClient';
 import { InkPenTraceHud } from '../components/notebook/InkPenTraceHud';
@@ -3846,6 +3847,9 @@ export function SectionPage() {
                 sectionTitle: section.title,
                 userId: user?.id ?? null,
                 onOpenSource: handleAskZikukOpenSource,
+                eligibleKnowledgeMaterials: collectEligibleKnowledgeMaterials(
+                  sectionObjects.objects,
+                ),
               }
             : undefined
         }

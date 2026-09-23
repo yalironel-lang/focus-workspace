@@ -25,6 +25,7 @@ import {
   type KnowledgeNeedsProcessMarker,
 } from './needsProcessStore';
 import { isStructuredFsoSafeForKnowledgeProcess } from './pdfKnowledgeWiring';
+import { invalidateCourseKnowledgeReadiness } from '../askCourse/courseKnowledgeReadiness';
 
 /** Idle debounce after latest durable semantic save (product constant). */
 export const NOTEBOOK_KNOWLEDGE_IDLE_MS = 45_000;
@@ -161,6 +162,7 @@ export async function markNotebookPageNeedsProcess(input: {
       pageId: input.pageId,
       notBefore,
     });
+    invalidateCourseKnowledgeReadiness(input.sectionId);
     scheduleIdleTimer(marker);
     return marker;
   } catch (err) {
@@ -359,6 +361,15 @@ export async function drainNotebookKnowledgeProcessForPage(
   }
 
   settle(result);
+
+  if (
+    result.outcome === 'success' ||
+    result.outcome === 'cleared_permanent' ||
+    result.outcome === 'retained_retryable' ||
+    result.outcome === 'retained_stale'
+  ) {
+    invalidateCourseKnowledgeReadiness(input.sectionId);
+  }
 
   // Newer generation during flight must remain drainable (no tight loop on FSO/retry).
   if (result.outcome === 'stale_ignored') {

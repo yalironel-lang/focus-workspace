@@ -15,6 +15,7 @@ import { OrganizeWorkspaceMenuPanel } from './OrganizeWorkspaceMenuPanel';
 import { isMathZoneDestinationEnabled } from '../../lib/mathZoneDestinationConfig';
 import { AskZikukWorkspace } from '../ai/AskZikukWorkspace';
 import type { AskCourseSourceRef } from '../../lib/ai/gatewayClient';
+import type { EligibleKnowledgeMaterialRef } from '../../lib/ai/askCourse';
 
 const VIEW_MODES_ALL = [
   { id: 'free-space' as const, label: 'Workspace' },
@@ -92,6 +93,7 @@ interface Props {
     sectionTitle?: string;
     userId?: string | null;
     onOpenSource: (source: AskCourseSourceRef) => void;
+    eligibleKnowledgeMaterials?: readonly EligibleKnowledgeMaterialRef[];
   };
 }
 
@@ -475,6 +477,7 @@ export function FloatingWorkspaceShell({
                   tokens={tokens}
                   accent={accent}
                   onOpenSource={askZikuk.onOpenSource}
+                  eligibleKnowledgeMaterials={askZikuk.eligibleKnowledgeMaterials}
                   triggerRef={askTriggerRef}
                 />
               </div>

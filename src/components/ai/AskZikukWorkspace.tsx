@@ -19,13 +19,16 @@ import {
   useAskCourseSession,
   userFacingAskCourseErrorMessage,
   isAskCourseRetryAllowed,
+  type EligibleKnowledgeMaterialRef,
 } from '../../lib/ai/askCourse';
+import { useCourseKnowledgeReadiness } from '../../lib/ai/askCourse/useCourseKnowledgeReadiness';
 import { WORKSPACE_SHELL_TOP_INSET } from '../workspace-shell/shellGlass';
 import { Z_ASK_ZIKUK_WORKSPACE } from '../../lib/ui/zIndexLayers';
 import { AskZikukWorkspaceHeader } from './AskZikukWorkspaceHeader';
 import { AskZikukEmptyState } from './AskZikukEmptyState';
 import { AskZikukComposer } from './AskZikukComposer';
 import { AskZikukResult } from './AskZikukResult';
+import { AskZikukReadinessBanner } from './AskZikukReadinessBanner';
 
 export type AskZikukWorkspaceProps = {
   open: boolean;
@@ -38,6 +41,8 @@ export type AskZikukWorkspaceProps = {
   tokens: AtmosphereTokens;
   accent: string;
   onOpenSource: (source: AskCourseSourceRef) => void;
+  /** Free Space materials that can become Course Knowledge (unenrolled detection). */
+  eligibleKnowledgeMaterials?: readonly EligibleKnowledgeMaterialRef[];
   /** Restore focus to Ask ZIKUK trigger on close. */
   triggerRef?: RefObject<HTMLButtonElement | null>;
 };
@@ -56,6 +61,7 @@ export function AskZikukWorkspace({
   tokens,
   accent,
   onOpenSource,
+  eligibleKnowledgeMaterials = [],
   triggerRef,
 }: AskZikukWorkspaceProps) {
   const titleId = useId();
@@ -83,6 +89,12 @@ export function AskZikukWorkspace({
     sectionId,
     open,
     userId,
+  });
+
+  const { readiness } = useCourseKnowledgeReadiness({
+    sectionId,
+    open,
+    eligible: eligibleKnowledgeMaterials,
   });
 
   useEffect(() => {
@@ -214,6 +226,8 @@ export function AskZikukWorkspace({
           showNewConversation={turns.length > 0}
           onNewConversation={newConversation}
         />
+
+        <AskZikukReadinessBanner readiness={readiness} tokens={tokens} />
 
         <div
           id={statusId}

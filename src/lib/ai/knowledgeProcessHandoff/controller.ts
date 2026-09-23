@@ -21,6 +21,7 @@ import {
   markNeedsKnowledgeProcess,
   type KnowledgeNeedsProcessMarker,
 } from './needsProcessStore';
+import { invalidateCourseKnowledgeReadiness } from '../askCourse/courseKnowledgeReadiness';
 
 export type KnowledgeProcessRequestFn = typeof requestKnowledgeProcess;
 
@@ -77,7 +78,9 @@ export async function markNeedsProcess(
   sectionId: string,
   sourceObjectId: string,
 ): Promise<KnowledgeNeedsProcessMarker> {
-  return markNeedsKnowledgeProcess(sectionId, sourceObjectId);
+  const marker = await markNeedsKnowledgeProcess(sectionId, sourceObjectId);
+  invalidateCourseKnowledgeReadiness(sectionId);
+  return marker;
 }
 
 export async function cancelKnowledgeProcessForSource(
@@ -192,6 +195,14 @@ export async function drainKnowledgeProcessForSource(
       marker.generation,
       abort.signal,
     );
+    if (
+      result.outcome === 'success' ||
+      result.outcome === 'cleared_permanent' ||
+      result.outcome === 'retained_retryable' ||
+      result.outcome === 'retained_stale'
+    ) {
+      invalidateCourseKnowledgeReadiness(sectionId);
+    }
     settle(result);
     return result;
   } catch (e) {

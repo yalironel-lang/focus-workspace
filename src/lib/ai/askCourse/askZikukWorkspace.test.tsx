@@ -15,6 +15,23 @@ import { FloatingWorkspaceShell } from '../../../components/workspace-shell/Floa
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const zikukAiRequest = vi.hoisted(() => vi.fn());
+const mockUseCourseKnowledgeReadiness = vi.hoisted(() =>
+  vi.fn(() => ({
+    readiness: {
+      kind: 'empty' as const,
+      askUsable: false,
+      readyCount: 0,
+      preparingCount: 0,
+      attentionCount: 0,
+      unenrolledCount: 0,
+      partialPreparing: false,
+      partialAttention: false,
+      emptyReason: 'no_materials' as const,
+    },
+    refresh: () => {},
+    loading: false,
+  })),
+);
 
 vi.mock('../gatewayClient', async () => {
   const actual = await vi.importActual<typeof import('../gatewayClient')>('../gatewayClient');
@@ -23,6 +40,11 @@ vi.mock('../gatewayClient', async () => {
     zikukAiRequest: (...args: unknown[]) => zikukAiRequest(...args),
   };
 });
+
+vi.mock('./useCourseKnowledgeReadiness', () => ({
+  useCourseKnowledgeReadiness: (...args: unknown[]) => mockUseCourseKnowledgeReadiness(...args),
+  COURSE_KNOWLEDGE_READINESS_POLL_MS: 8_000,
+}));
 
 const { AskZikukWorkspace } = await import('../../../components/ai/AskZikukWorkspace');
 const { AskZikukSources } = await import('../../../components/ai/AskZikukSources');
@@ -91,6 +113,22 @@ async function typeQuestion(value: string) {
 
 beforeEach(() => {
   zikukAiRequest.mockReset();
+  mockUseCourseKnowledgeReadiness.mockReset();
+  mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+    readiness: {
+      kind: 'empty' as const,
+      askUsable: false,
+      readyCount: 0,
+      preparingCount: 0,
+      attentionCount: 0,
+      unenrolledCount: 0,
+      partialPreparing: false,
+      partialAttention: false,
+      emptyReason: 'no_materials' as const,
+    },
+    refresh: () => {},
+    loading: false,
+  }));
   localStorage.clear();
 });
 
@@ -924,6 +962,43 @@ describe('AskZikukWorkspace', () => {
     });
     expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
     expect(workspaceRoot().textContent).toContain('A1');
+  });
+
+  it('M1.1C shows preparing banner when no sources are Ask-usable yet', async () => {
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'preparing' as const,
+        askUsable: false,
+        readyCount: 0,
+        preparingCount: 1,
+        attentionCount: 0,
+        unenrolledCount: 0,
+        partialPreparing: false,
+        partialAttention: false,
+        emptyReason: null,
+      },
+      refresh: () => {},
+      loading: false,
+    }));
+    mount(
+      createElement(AskZikukWorkspace, {
+        open: true,
+        onClose: () => {},
+        sectionId: 'sec-ready-ui',
+        sectionTitle: 'Calculus II',
+        userId: 'user-ready-ui',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: () => {},
+        eligibleKnowledgeMaterials: [
+          { kind: 'free_space_pdf', sourceObjectId: 'p-prep' },
+        ],
+      }),
+    );
+    const banner = workspaceRoot().querySelector('[data-ask-zikuk-readiness]');
+    expect(banner).toBeTruthy();
+    expect(banner?.getAttribute('data-ask-zikuk-readiness-kind')).toBe('preparing');
+    expect(banner?.textContent).toContain('Preparing course materials');
   });
 
   it('M1.1B citation navigation closes Ask without clearing the session', async () => {
