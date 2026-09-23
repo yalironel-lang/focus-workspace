@@ -22,7 +22,8 @@ import type {
   TrustedSourceRecord,
 } from './trustedJobTypes.ts';
 
-const PDF_BUCKET = 'free-space-pdfs';
+/** Canonical private PDF bucket (migration 008). */
+const PDF_BUCKET = 'user-content';
 const PRODUCTION_REF = 'comxmviofnotfwzbupxg';
 const STAGING_REF = 'lmgrhmyurhjlwwdedojk';
 

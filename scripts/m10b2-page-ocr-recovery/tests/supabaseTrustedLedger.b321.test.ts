@@ -60,10 +60,11 @@ describe('createSupabaseTrustedLedger staging guards', () => {
 
   it('rejects URL/path injection on download', async () => {
     const download = vi.fn(async () => ({ data: null, error: null }));
+    const from = vi.fn(() => ({ download }));
     const ledger = createSupabaseTrustedLedger(
       {
         ...fakeClient(),
-        storage: { from: () => ({ download }) },
+        storage: { from },
       },
       { projectRef: 'lmgrhmyurhjlwwdedojk' },
     );
@@ -71,6 +72,26 @@ describe('createSupabaseTrustedLedger staging guards', () => {
     expect(await ledger.downloadPdfByStoragePath('../etc/passwd')).toBeNull();
     expect(await ledger.downloadPdfByStoragePath('/abs/path')).toBeNull();
     expect(download).not.toHaveBeenCalled();
+  });
+
+  it('defaults Storage bucket to user-content', async () => {
+    const download = vi.fn(async () => ({
+      data: new Blob([new Uint8Array([1, 2, 3])]),
+      error: null,
+    }));
+    const from = vi.fn(() => ({ download }));
+    const ledger = createSupabaseTrustedLedger(
+      {
+        ...fakeClient(),
+        storage: { from },
+      },
+      { projectRef: 'lmgrhmyurhjlwwdedojk' },
+    );
+    const bytes = await ledger.downloadPdfByStoragePath(
+      '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/obj/pdf/obj',
+    );
+    expect(from).toHaveBeenCalledWith('user-content');
+    expect(bytes?.byteLength).toBe(3);
   });
 
   it('maps claim job payload from RPC snake_case', async () => {

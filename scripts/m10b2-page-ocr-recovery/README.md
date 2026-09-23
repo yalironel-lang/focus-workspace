@@ -49,8 +49,15 @@ commit RPCs and downloads PDF bytes only from the authoritative
 
 - **Allowed project ref:** `lmgrhmyurhjlwwdedojk` (`focus-workspace-staging`)
 - **Refused:** Production `comxmviofnotfwzbupxg`
+- **Storage bucket:** `user-content` (migration 008)
 - Requires migrations **017** (+ **018** for early tip allocation) on that project
 - Staging must be **ACTIVE** before any remote apply or live OCR proof
+
+Live staging proof (metadata-only logs):
+
+```bash
+node --experimental-strip-types scripts/m10b2-page-ocr-recovery/runStagingRemoteProof.ts
+```
 
 OCR `>= 8` meaningful characters remains a **structural sanity floor only** —
 not academic usability or student readiness.
