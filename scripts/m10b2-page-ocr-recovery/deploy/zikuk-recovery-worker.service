@@ -1,0 +1,50 @@
+# M1.1E E2 — systemd unit for ONE Production OCR recovery worker (non-Docker).
+#
+# Install (as root):
+#   install -d -m 0755 /opt/zikuk
+#   # clone/pull repo to /opt/zikuk/focus-main-notebook-ff
+#   install -m 0644 zikuk-recovery-worker.service /etc/systemd/system/
+#   install -d -m 0700 /etc/zikuk
+#   install -m 0600 zikuk-recovery-worker.env /etc/zikuk/zikuk-recovery-worker.env
+#   systemctl daemon-reload
+#   systemctl enable --now zikuk-recovery-worker.service
+#
+# Never put secrets in this unit file. Use EnvironmentFile only.
+
+[Unit]
+Description=ZIKUK Production page-OCR recovery worker (M1.1E)
+Documentation=file:///opt/zikuk/focus-main-notebook-ff/scripts/m10b2-page-ocr-recovery/PRODUCTION_RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zikuk
+Group=zikuk
+WorkingDirectory=/opt/zikuk/focus-main-notebook-ff/scripts/m10b2-page-ocr-recovery
+
+# Secrets + non-secret config (mode 0600, root:zikuk or root:root)
+EnvironmentFile=/etc/zikuk/zikuk-recovery-worker.env
+
+# Prefer Node 22 from NodeSource / nodesource path; adjust if nvm/fnm used.
+ExecStart=/usr/bin/node --experimental-strip-types runRecoveryWorker.ts
+
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+# Hardening (keep writable tmp for OCR artifacts)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp /opt/zikuk/focus-main-notebook-ff/scripts/m10b2-page-ocr-recovery
+
+# Logging → journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zikuk-recovery-worker
+
+[Install]
+WantedBy=multi-user.target

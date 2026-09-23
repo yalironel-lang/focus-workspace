@@ -16,6 +16,9 @@ tmp/m10b2_*/
 .env
 .env.local
 .env.*.local
+*.prod.env
+**/zikuk-recovery-worker.env
+!**/zikuk-recovery-worker.env.example
 
 # Editor
 .vscode/*

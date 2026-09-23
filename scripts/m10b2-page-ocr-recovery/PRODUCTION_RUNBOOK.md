@@ -8,11 +8,23 @@ Continuously drain `ai_knowledge_page_recovery_jobs` using the trusted ledger:
 
 claim → trusted `storage_path` download → page render → Tesseract → commit
 
+## VPS + systemd (M1.1E E2 — authorized Production path)
+
+Non-Docker. See `deploy/README.md`, `deploy/zikuk-recovery-worker.service`,
+and `deploy/install-host.sh`.
+
+```bash
+# On host (after secrets file is filled):
+systemctl enable --now zikuk-recovery-worker.service
+journalctl -u zikuk-recovery-worker -f
+systemctl stop zikuk-recovery-worker.service   # kill switch
+```
+
+EnvironmentFile: `/etc/zikuk/zikuk-recovery-worker.env` (mode 0600).
+
 ## Recommended host (V1)
 
-Small supervised Node VM/container (1 vCPU, 1–2 GB RAM).
-
-Not Edge / Vercel / GitHub Actions as the primary engine.
+Small supervised Node VM (1 vCPU, 1–2 GB RAM) + systemd — **not** Edge / Vercel / GitHub Actions / Docker for this E2 path.
 
 ## Runtime requirements
 
