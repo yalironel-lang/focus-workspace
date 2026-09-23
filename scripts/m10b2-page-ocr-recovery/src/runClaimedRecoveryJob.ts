@@ -25,6 +25,8 @@ export type ProcessClaimedJobOptions = {
   timeoutMs?: number;
   tesseractBin?: string;
   log?: (line: string) => void;
+  leaseSeconds?: number;
+  maxAttempts?: number;
   /**
    * Test hook: invoked after resolve + before OCR so tests can mutate ledger
    * to simulate stale-during-OCR.
@@ -76,7 +78,10 @@ export async function claimAndProcessNextRecoveryJob(
     return { processed: false };
   }
 
-  const claimed = await opts.ledger.claimJob();
+  const claimed = await opts.ledger.claimJob({
+    leaseSeconds: opts.leaseSeconds,
+    maxAttempts: opts.maxAttempts,
+  });
   if (!claimed.ok) {
     emit(opts.log, {
       event: 'page_ocr_worker',

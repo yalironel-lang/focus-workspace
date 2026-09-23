@@ -1,15 +1,13 @@
 /**
- * M1.0B B3.2.1 — Supabase trusted recovery ledger adapter (staging-oriented).
+ * M1.0B B3.2.1 / M1.1E — Supabase trusted recovery ledger adapter.
  *
  * Authority path:
  *   claim RPC → load source row → download by source.storage_path only → commit RPC
  *
  * NEVER accepts client-supplied Storage paths, URLs, or PDF bytes as authority.
- * Must only be constructed with a service-role client against a NON-PRODUCTION
- * project that already has migrations 017 (+ 018 when applying lifecycle).
  *
- * Production (`comxmviofnotfwzbupxg`) must not host this worker path until an
- * explicit later release gate.
+ * Staging is the default authorized host. Production requires allowProduction
+ * AND an exact productionConfirm string (never inferred from URL alone).
  */
 
 import type {
@@ -21,11 +19,16 @@ import type {
   TrustedRecoveryLedger,
   TrustedSourceRecord,
 } from './trustedJobTypes.ts';
+import {
+  ZIKUK_PRODUCTION_PROJECT_REF,
+  ZIKUK_RECOVERY_PRODUCTION_CONFIRM_VALUE,
+  ZIKUK_STAGING_PROJECT_REF,
+} from './workerConfig.ts';
 
 /** Canonical private PDF bucket (migration 008). */
 const PDF_BUCKET = 'user-content';
-const PRODUCTION_REF = 'comxmviofnotfwzbupxg';
-const STAGING_REF = 'lmgrhmyurhjlwwdedojk';
+const PRODUCTION_REF = ZIKUK_PRODUCTION_PROJECT_REF;
+const STAGING_REF = ZIKUK_STAGING_PROJECT_REF;
 
 export type SupabaseRpcClient = {
   rpc(
@@ -51,16 +54,21 @@ type EqChain = {
 };
 
 export type CreateSupabaseTrustedLedgerOpts = {
-  /** Expected project ref; must equal staging for B3.2.1. */
+  /** Expected project ref (staging, or production with explicit opt-in). */
   projectRef: string;
-  /** When true, refuse Production even if projectRef mismatches. */
+  /**
+   * Explicit Production opt-in. Still requires productionConfirm to match
+   * ZIKUK_RECOVERY_PRODUCTION_CONFIRM_VALUE.
+   */
   allowProduction?: boolean;
+  /** Required when allowProduction targets Production. */
+  productionConfirm?: string;
   pdfBucket?: string;
 };
 
 /**
  * Build a TrustedRecoveryLedger over real Supabase RPCs + private Storage.
- * Throws if projectRef is Production (unless explicitly overridden — never for B3.2.1).
+ * Fail-closed for Production without allowProduction + productionConfirm.
  */
 export function createSupabaseTrustedLedger(
   client: SupabaseRpcClient,
@@ -69,13 +77,20 @@ export function createSupabaseTrustedLedger(
   if (!opts?.projectRef || typeof opts.projectRef !== 'string') {
     throw new Error('supabase_trusted_ledger_requires_project_ref');
   }
-  if (opts.projectRef === PRODUCTION_REF && opts.allowProduction !== true) {
-    throw new Error(
-      `supabase_trusted_ledger_refuses_production_ref:${PRODUCTION_REF}`,
-    );
-  }
-  if (opts.projectRef !== STAGING_REF && opts.allowProduction !== true) {
-    // Soft guard: B3.2.1 only authorizes staging; other non-prod refs need review.
+  if (opts.projectRef === PRODUCTION_REF) {
+    if (opts.allowProduction !== true) {
+      throw new Error(
+        `supabase_trusted_ledger_refuses_production_ref:${PRODUCTION_REF}`,
+      );
+    }
+    if (opts.productionConfirm !== ZIKUK_RECOVERY_PRODUCTION_CONFIRM_VALUE) {
+      throw new Error('supabase_trusted_ledger_requires_production_confirm');
+    }
+  } else if (opts.projectRef === STAGING_REF) {
+    if (opts.allowProduction === true) {
+      throw new Error('supabase_trusted_ledger_staging_must_not_set_allow_production');
+    }
+  } else {
     throw new Error(
       `supabase_trusted_ledger_requires_staging_ref:${STAGING_REF}_got:${opts.projectRef}`,
     );

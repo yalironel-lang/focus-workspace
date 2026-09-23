@@ -7,7 +7,9 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "worker": "node --experimental-strip-types runRecoveryWorker.ts",
+    "worker:staging-accept": "node --experimental-strip-types runStagingWorkerAcceptance.ts"
   },
   "keywords": [],
   "author": "",

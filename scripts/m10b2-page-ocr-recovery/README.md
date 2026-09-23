@@ -1,63 +1,46 @@
-# M1.0B B2 — Isolated page OCR recovery worker (prototype)
+# M1.0B / M1.1E — Page OCR recovery worker
 
-Local/private prototype only. **Not** wired to Edge, Storage, ingest, or Ask.
+Trusted claim → resolve → render → Tesseract → commit.
+
+## Continuous worker (M1.1E)
+
+```bash
+cd scripts/m10b2-page-ocr-recovery && npm install
+# Staging example (never Production without confirm):
+export ZIKUK_RECOVERY_ENV=staging
+export ZIKUK_RECOVERY_PROJECT_REF=lmgrhmyurhjlwwdedojk
+export SUPABASE_URL=https://lmgrhmyurhjlwwdedojk.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=...   # service role; never commit
+node --experimental-strip-types runRecoveryWorker.ts
+```
+
+Production requires `ZIKUK_RECOVERY_ENV=production`, Production project ref,
+and `ZIKUK_RECOVERY_PRODUCTION_CONFIRM=I_UNDERSTAND_THIS_TARGETS_ZIKUK_PRODUCTION`.
+
+See [PRODUCTION_RUNBOOK.md](./PRODUCTION_RUNBOOK.md).
 
 ## Flow
 
 ```
-PageOcrRecoveryRequest (sourceId, sourceVersion, pageNumber, …)
-  → TrustedSourceResolver (fixture registry in B2; Storage/auth in future B3)
-  → render ONLY requested page (pdf.js + @napi-rs/canvas @ 220 DPI)
-  → local Tesseract CLI (argv only, no shell)
-  → PageOcrRecoveryResult
-  → destroy temp PNG dir
+claimJob → resolveTrustedJobPdf → recoverPdfPage → commitRecoveryResult
 ```
 
-## Run unit tests (no OCR)
-
-From repo root:
+## Unit tests (no OCR)
 
 ```bash
 npx vitest run scripts/m10b2-page-ocr-recovery/tests
 ```
 
-## Run MVT evidence (requires local Tesseract + local PDF)
+## Staging continuous acceptance (real OCR)
 
 ```bash
-cd scripts/m10b2-page-ocr-recovery && npm install
-node --experimental-strip-types runMvtEvidence.ts
+node --experimental-strip-types scripts/m10b2-page-ocr-recovery/runStagingWorkerAcceptance.ts
 ```
 
-Writes `tmp/m10b2_validate/SANITIZED_B2_SUMMARY.json` (no raw page text).
+Staging ref only: `lmgrhmyurhjlwwdedojk`. Never Production.
 
-## B3.2 trusted claim loop (local)
+## Ledger guards
 
-```
-claimJob (ledger RPC / in-memory)
-  → resolveTrustedJobPdf (source row → storagePath → bytes)
-  → recoverPdfPage (render + Tesseract)
-  → commitRecoveryResult (re-validates claim + versions)
-```
-
-Feature gate: `recoveryEnabled: false` skips claim/OCR.
-
-## B3.2.1 staging ledger
-
-`createSupabaseTrustedLedger(client, { projectRef })` talks to real claim /
-commit RPCs and downloads PDF bytes only from the authoritative
-`ai_knowledge_sources.storage_path`.
-
-- **Allowed project ref:** `lmgrhmyurhjlwwdedojk` (`focus-workspace-staging`)
-- **Refused:** Production `comxmviofnotfwzbupxg`
-- **Storage bucket:** `user-content` (migration 008)
-- Requires migrations **017** (+ **018** for early tip allocation) on that project
-- Staging must be **ACTIVE** before any remote apply or live OCR proof
-
-Live staging proof (metadata-only logs):
-
-```bash
-node --experimental-strip-types scripts/m10b2-page-ocr-recovery/runStagingRemoteProof.ts
-```
-
-OCR `>= 8` meaningful characters remains a **structural sanity floor only** —
-not academic usability or student readiness.
+- Staging: `lmgrhmyurhjlwwdedojk`
+- Production: `comxmviofnotfwzbupxg` only with `allowProduction` + production confirm
+- Storage bucket: `user-content`
