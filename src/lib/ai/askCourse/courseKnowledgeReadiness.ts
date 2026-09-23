@@ -83,9 +83,11 @@ function markerKey(m: KnowledgeNeedsProcessMarkerRef): string {
 }
 
 /**
- * Option A: Ask uses published retrieval_source_version.
- * ready|stale + non-null retrieval ⇒ usable even while tip may lead.
- * ready|stale + null retrieval ⇒ tip/corpus not published yet ⇒ preparing.
+ * Ask search (016) requires status='ready' AND retrieval_source_version IS NOT NULL.
+ * Option A tip lag: source_version may lead retrieval while status stays ready after
+ * publish; begin_ingest may flip to 'stale' during reprocess — that is NOT Ask-eligible
+ * in current search SQL, so classify as preparing (not ready).
+ * ready + null retrieval ⇒ tip/corpus not published yet ⇒ preparing.
  * pending|processing ⇒ preparing.
  * failed ⇒ needs_attention.
  */
@@ -93,7 +95,7 @@ export function classifyKnowledgeSourceRow(
   row: KnowledgeSourceReadinessRow,
 ): {
   class: SourceReadinessClass;
-  /** Tip ahead of published retrieval (reprocess / recovery finalize lag). */
+  /** Tip ahead of published retrieval while still Ask-eligible (status ready). */
   tipPreparing: boolean;
 } {
   const retrieval = row.retrieval_source_version;
@@ -103,11 +105,7 @@ export function classifyKnowledgeSourceRow(
     return { class: 'needs_attention', tipPreparing: false };
   }
 
-  if (
-    (row.status === 'ready' || row.status === 'stale') &&
-    retrieval != null &&
-    Number.isFinite(retrieval)
-  ) {
+  if (row.status === 'ready' && retrieval != null && Number.isFinite(retrieval)) {
     return {
       class: 'ready',
       tipPreparing: Number.isFinite(tip) && tip > retrieval,
@@ -117,8 +115,8 @@ export function classifyKnowledgeSourceRow(
   if (
     row.status === 'pending' ||
     row.status === 'processing' ||
-    row.status === 'ready' ||
-    row.status === 'stale'
+    row.status === 'stale' ||
+    row.status === 'ready'
   ) {
     return { class: 'preparing', tipPreparing: false };
   }

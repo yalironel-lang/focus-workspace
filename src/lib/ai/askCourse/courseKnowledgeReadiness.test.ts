@@ -47,11 +47,24 @@ describe('classifyKnowledgeSourceRow', () => {
     );
   });
 
-  it('stale + retrieval ⇒ ready (Option A tip lag)', () => {
+  it('stale + retrieval ⇒ preparing (Ask search requires status=ready)', () => {
     const r = classifyKnowledgeSourceRow(
       pdfRow({
         source_object_id: 'a',
         status: 'stale',
+        source_version: 3,
+        retrieval_source_version: 2,
+      }),
+    );
+    expect(r.class).toBe('preparing');
+    expect(r.tipPreparing).toBe(false);
+  });
+
+  it('ready + tip ahead of retrieval ⇒ ready with tipPreparing', () => {
+    const r = classifyKnowledgeSourceRow(
+      pdfRow({
+        source_object_id: 'a',
+        status: 'ready',
         source_version: 3,
         retrieval_source_version: 2,
       }),
