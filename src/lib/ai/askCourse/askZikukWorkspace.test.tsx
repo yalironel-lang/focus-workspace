@@ -379,6 +379,7 @@ describe('AskZikukWorkspace', () => {
 
   it('shows submitted question, clears composer on success, sources beneath answer', async () => {
     const onOpen = vi.fn();
+    const onClose = vi.fn();
     zikukAiRequest.mockResolvedValue({
       version: 1,
       ok: true,
@@ -407,7 +408,7 @@ describe('AskZikukWorkspace', () => {
     mount(
       createElement(AskZikukWorkspace, {
         open: true,
-        onClose: () => {},
+        onClose,
         sectionId: 'sec-1',
         sectionTitle: 'Calculus II',
         tokens: TOKENS,
@@ -450,14 +451,33 @@ describe('AskZikukWorkspace', () => {
     act(() => {
       (ws.querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
     });
+    // M1.1B: close Ask before opening the Free Space source.
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceKind: 'free_space_pdf', pageNumber: 5 }),
+      expect.objectContaining({
+        sourceKind: 'free_space_pdf',
+        sourceObjectId: 'pdf-hidden',
+        pageNumber: 5,
+      }),
     );
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
+      onOpen.mock.invocationCallOrder[0],
+    );
+
     act(() => {
       (ws.querySelector('[data-ask-zikuk-source-index="2"]') as HTMLButtonElement).click();
     });
+    expect(onClose).toHaveBeenCalledTimes(2);
     expect(onOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceKind: 'notebook_page', pageTitle: 'Week 3' }),
+      expect.objectContaining({
+        sourceKind: 'notebook_page',
+        notebookObjectId: 'nb-hidden',
+        pageId: 'page-hidden',
+        pageTitle: 'Week 3',
+      }),
+    );
+    expect(onClose.mock.invocationCallOrder[1]).toBeLessThan(
+      onOpen.mock.invocationCallOrder[1],
     );
   });
 
@@ -904,6 +924,90 @@ describe('AskZikukWorkspace', () => {
     });
     expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
     expect(workspaceRoot().textContent).toContain('A1');
+  });
+
+  it('M1.1B citation navigation closes Ask without clearing the session', async () => {
+    const { readAskSession } = await import('./askSessionStorage');
+    const onOpen = vi.fn();
+    let askOpen = true;
+    const onClose = vi.fn(() => {
+      askOpen = false;
+    });
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: {
+        type: 'ask_course',
+        text: 'Cite me [1]',
+        sources: [
+          {
+            index: 1,
+            sourceKind: 'free_space_pdf',
+            sourceObjectId: 'pdf-cite',
+            fileName: 'Cite.pdf',
+            pageNumber: 3,
+          },
+        ],
+      },
+    });
+
+    function Wrap({ open }: { open: boolean }) {
+      return createElement(AskZikukWorkspace, {
+        open,
+        onClose,
+        sectionId: 'sec-cite-nav',
+        sectionTitle: 'Calculus II',
+        userId: 'user-cite-nav',
+        tokens: TOKENS,
+        accent: '#38bdf8',
+        onOpenSource: onOpen,
+      });
+    }
+
+    mount(createElement(Wrap, { open: true }));
+    await typeQuestion('Where is page 3?');
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+    await vi.waitFor(() => {
+      expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    });
+
+    act(() => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-citation="1"]') as HTMLButtonElement).click();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKind: 'free_space_pdf',
+        pageNumber: 3,
+        sourceObjectId: 'pdf-cite',
+      }),
+    );
+    expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
+      onOpen.mock.invocationCallOrder[0],
+    );
+
+    // Parent drives open=false from closeAsk (same as FloatingWorkspaceShell).
+    act(() => {
+      root!.render(createElement(Wrap, { open: askOpen }));
+    });
+    expect(document.body.querySelector('[data-ask-zikuk-workspace]')).toBeNull();
+
+    const stored = readAskSession('user-cite-nav', 'sec-cite-nav');
+    expect(stored?.turns).toHaveLength(1);
+    expect(stored?.turns[0]?.answer).toContain('Cite me');
+    expect(stored?.turns[0]?.sources[0]).toEqual(
+      expect.objectContaining({ pageNumber: 3, sourceObjectId: 'pdf-cite' }),
+    );
+
+    act(() => {
+      root!.render(createElement(Wrap, { open: true }));
+    });
+    expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
+    expect(workspaceRoot().textContent).toContain('Cite me');
+    expect(workspaceRoot().textContent).toContain('PDF · Cite.pdf · Page 3');
   });
 
   it('restored session keeps PDF/Notebook source navigation via onOpenSource', async () => {

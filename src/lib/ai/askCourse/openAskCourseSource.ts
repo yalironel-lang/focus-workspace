@@ -27,6 +27,23 @@ export type OpenAskCourseSourceResult =
   | 'not_pdf'
   | 'not_notebook';
 
+/** Short student-facing copy for open failures — never leak ids/paths/codes. */
+export function userFacingOpenAskCourseSourceMessage(
+  result: OpenAskCourseSourceResult,
+): string | null {
+  switch (result) {
+    case 'opened':
+      return null;
+    case 'not_pdf':
+      return 'PDF is no longer available.';
+    case 'not_notebook':
+      return 'Notebook page could not be found.';
+    case 'not_found':
+    default:
+      return 'Source could not be opened.';
+  }
+}
+
 function isNotebookPageSource(
   source: AskCourseSourceRef,
 ): source is Extract<AskCourseSourceRef, { sourceKind: 'notebook_page' }> {

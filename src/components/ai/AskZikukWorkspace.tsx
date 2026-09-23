@@ -140,6 +140,15 @@ export function AskZikukWorkspace({
     [setQuestion],
   );
 
+  /** M1.1B — close Ask so Free Space is visible, then open via parent helper. */
+  const handleOpenSource = useCallback(
+    (source: AskCourseSourceRef) => {
+      onClose();
+      onOpenSource(source);
+    },
+    [onClose, onOpenSource],
+  );
+
   if (!open) return null;
 
   const errorCopy = userFacingAskCourseErrorMessage(state.errorCode, state.errorMessage);
@@ -235,7 +244,7 @@ export function AskZikukWorkspace({
               sources={turn.sources}
               tokens={tokens}
               accent={accent}
-              onOpenSource={onOpenSource}
+              onOpenSource={handleOpenSource}
             />
           ))}
 

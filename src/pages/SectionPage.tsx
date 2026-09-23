@@ -29,7 +29,10 @@ import {
   isExploreFocusWorkspace,
 } from '../lib/exploreFocus';
 import { FloatingWorkspaceShell } from '../components/workspace-shell/FloatingWorkspaceShell';
-import { openAskCourseSource } from '../lib/ai/askCourse';
+import {
+  openAskCourseSource,
+  userFacingOpenAskCourseSourceMessage,
+} from '../lib/ai/askCourse';
 import type { AskCourseSourceRef } from '../lib/ai/gatewayClient';
 import { InkPenTraceHud } from '../components/notebook/InkPenTraceHud';
 import { installInkPenTraceGlobal, isInkPenTraceEnabled } from '../lib/inkPenTrace';
@@ -1188,13 +1191,17 @@ export function SectionPage() {
 
   const handleAskZikukOpenSource = useCallback(
     (source: AskCourseSourceRef) => {
-      openAskCourseSource(source, {
+      const result = openAskCourseSource(source, {
         getObject: id => sectionObjectsRef.current.getObject(id),
         focusObject: focusNotebookOnCanvas,
         updateObjectContent: (id, content) => {
           sectionObjectsRef.current.updateObjectContent(id, content);
         },
       });
+      const message = userFacingOpenAskCourseSourceMessage(result);
+      if (message) {
+        toast.error(message, { duration: 3500 });
+      }
     },
     [focusNotebookOnCanvas],
   );

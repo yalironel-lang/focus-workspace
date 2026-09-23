@@ -38,6 +38,7 @@ export {
 } from './userFacingAskCourseError';
 export {
   openAskCourseSource,
+  userFacingOpenAskCourseSourceMessage,
   type OpenAskCourseSourceDeps,
   type OpenAskCourseSourceResult,
 } from './openAskCourseSource';

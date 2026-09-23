@@ -6,7 +6,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectSpaceObject } from '../../../hooks/useSectionFreeSpaceObjects';
-import { openAskCourseSource } from './openAskCourseSource';
+import { openAskCourseSource, userFacingOpenAskCourseSourceMessage } from './openAskCourseSource';
 
 function pdfObject(id: string, page = 1): ProjectSpaceObject {
   return {
@@ -210,5 +210,30 @@ describe('openAskCourseSource', () => {
     expect(result).toBe('not_found');
     expect(focusObject).not.toHaveBeenCalled();
     expect(updateObjectContent).not.toHaveBeenCalled();
+  });
+});
+
+describe('userFacingOpenAskCourseSourceMessage', () => {
+  it('returns null for opened', () => {
+    expect(userFacingOpenAskCourseSourceMessage('opened')).toBeNull();
+  });
+
+  it('maps failures to short student copy without ids', () => {
+    expect(userFacingOpenAskCourseSourceMessage('not_found')).toBe(
+      'Source could not be opened.',
+    );
+    expect(userFacingOpenAskCourseSourceMessage('not_pdf')).toBe(
+      'PDF is no longer available.',
+    );
+    expect(userFacingOpenAskCourseSourceMessage('not_notebook')).toBe(
+      'Notebook page could not be found.',
+    );
+    for (const msg of [
+      userFacingOpenAskCourseSourceMessage('not_found'),
+      userFacingOpenAskCourseSourceMessage('not_pdf'),
+      userFacingOpenAskCourseSourceMessage('not_notebook'),
+    ]) {
+      expect(msg).not.toMatch(/storage|supabase|uuid|pdf-obj|error_code/i);
+    }
   });
 });
