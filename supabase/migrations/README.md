@@ -85,6 +85,15 @@ Apply migrations **in numeric order** on the Supabase project used by the app (`
 - **Does not:** publish retrieval, assemble recovered corpus, wire Production recovery
 - **Apply to STAGING only** after `lmgrhmyurhjlwwdedojk` is ACTIVE; never Production without a later gate
 
+## Migration 019 — Atomic recovered-corpus publication (M1.0B B3.3B)
+
+- **RPC (service_role only):** `ai_knowledge_publish_recovered_corpus(source_id, expected_source_version)`
+- **Scope:** `free_space_pdf` only — does **not** change `finalize_index_success` (Notebook continues on that path)
+- **In one transaction:** lock source → revalidate tip/authority, page ledger 1..P, recovery terminal, chunk/embedding completeness → set `version_index=indexed` → flip `retrieval_source_version`
+- **Idempotent** when already published to expected version
+- **Never** deletes prior N chunks/embeddings
+- **Apply to STAGING only**; never Production without an explicit later gate
+
 ## Migration 014 — Notebook page ingest RPCs (M0.8C)
 
 - **RPCs (service_role only):** `ai_knowledge_begin_notebook_page_ingest`, `ai_knowledge_invalidate_notebook_page_corpus`

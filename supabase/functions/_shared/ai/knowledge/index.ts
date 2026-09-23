@@ -24,6 +24,7 @@ export * from './privacyLogAssemble.ts';
 export * from './privacyLogIndex.ts';
 export * from './privacyLogNotebook.ts';
 export * from './privacyLogProcess.ts';
+export * from './privacyLogPublish.ts';
 export * from './privacyLogSuspicion.ts';
 export * from './providerEmbeddings.ts';
 export * from './routeEmbedding.ts';
@@ -34,6 +35,7 @@ export * from './runKnowledgeIngest.ts';
 export * from './runKnowledgeProcess.ts';
 export * from './runNotebookKnowledgeIngest.ts';
 export * from './runNotebookKnowledgeProcess.ts';
+export * from './runPublishRecoveredCorpus.ts';
 export * from './types.ts';
 export * from './validateCanonicalPageSet.ts';
 
