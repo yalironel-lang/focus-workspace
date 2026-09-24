@@ -51,12 +51,13 @@ export async function renderPdfPageToPng(input: {
   const data = new Uint8Array(input.bytes);
 
   try {
+    // pdfjs-dist >=6.2.108: Node auto-disables workers; isEvalSupported removed.
+    // enableXfa is opt-in (false by default) — keep explicit for CVE-2026-16633 surface.
     doc = await getDocument({
       data,
-      disableWorker: true,
-      isEvalSupported: false,
       useSystemFonts: true,
       useWorkerFetch: false,
+      enableXfa: false,
       verbosity: 0,
     }).promise;
   } catch (err) {

@@ -54,10 +54,9 @@ function findMvtPdf(): string {
 async function extractNativePages(bytes: Uint8Array): Promise<NativePage[]> {
   const doc = await getDocument({
     data: bytes.slice(),
-    disableWorker: true,
-    isEvalSupported: false,
     useSystemFonts: true,
     useWorkerFetch: false,
+    enableXfa: false,
     verbosity: 0,
   }).promise;
   const pages: NativePage[] = [];
