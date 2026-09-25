@@ -83,7 +83,7 @@ function push(entry: InkPenTraceEntry): void {
     (window as unknown as { __inkPenTrace?: InkPenTraceEntry[] }).__inkPenTrace = [...buf];
   }
   // #region agent log
-  if (typeof fetch !== 'undefined') {
+  if (import.meta.env.DEV && typeof fetch !== 'undefined') {
     fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7407da' },

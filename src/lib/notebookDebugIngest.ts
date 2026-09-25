@@ -1,31 +1,36 @@
-const REMOTE_INGEST =
-  'http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517';
+/**
+ * V1-H3 — notebook agent debug ingest.
+ * Production builds: fully inert (no network, no window globals, no LS enable path).
+ * DEV only: optional local ingest + window dump helpers.
+ */
+
 const SESSION_ID = '3f83e8';
 const LS_KEY = 'nb-debug-3f83e8';
 
-function ingestUrl(): string {
-  if (import.meta.env.DEV) return '/__debug_ingest';
-  return REMOTE_INGEST;
+/** Pure gate — Production always false (no localStorage override). */
+export function isNbAgentDebugIngestEnabled(
+  env: { DEV?: boolean } = import.meta.env,
+): boolean {
+  return env.DEV === true;
 }
 
-function nbAgentLogEnabled(): boolean {
-  if (import.meta.env.DEV) return true;
-  try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('NB_AGENT_DEBUG') === '1';
-  } catch {
-    return false;
-  }
-}
-
-/** Runtime debug ingest for notebook toolbar investigation (debug session 3f83e8). */
+/** Runtime debug ingest for notebook toolbar investigation (DEV only). */
 export function nbAgentLog(
   location: string,
   message: string,
   data: Record<string, unknown>,
   hypothesisId: string,
   runId = 'pre-fix',
+  /** Test seam — when provided, overrides import.meta.env.DEV gate. */
+  enabledOverride?: boolean,
 ): void {
-  if (!nbAgentLogEnabled()) return;
+  const enabled =
+    enabledOverride !== undefined
+      ? enabledOverride
+      : isNbAgentDebugIngestEnabled();
+  if (!enabled) return;
+  // DEV-only URL (kept inside guarded body for Production DCE).
+  const ingest = '/__debug_ingest';
   const entry = {
     sessionId: SESSION_ID,
     location,
@@ -47,20 +52,15 @@ export function nbAgentLog(
   } catch {
     /* quota / private mode */
   }
-  fetch(ingestUrl(), {
+  fetch(ingest, {
     method: 'POST',
-    headers: import.meta.env.DEV
-      ? { 'Content-Type': 'application/json' }
-      : {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': SESSION_ID,
-        },
+    headers: { 'Content-Type': 'application/json' },
     body: payload,
     keepalive: true,
   }).catch(() => {
     try {
       if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-        navigator.sendBeacon(ingestUrl(), payload);
+        navigator.sendBeacon(ingest, payload);
       }
     } catch {
       /* ignore */
@@ -77,6 +77,7 @@ export function nbAgentLog(
 }
 
 export function readNbAgentLogs(): unknown[] {
+  if (!isNbAgentDebugIngestEnabled()) return [];
   try {
     if (typeof localStorage === 'undefined') return [];
     return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]');
@@ -86,6 +87,7 @@ export function readNbAgentLogs(): unknown[] {
 }
 
 export function clearNbAgentLogs(): void {
+  if (!isNbAgentDebugIngestEnabled()) return;
   try {
     localStorage.removeItem(LS_KEY);
   } catch {
@@ -93,13 +95,15 @@ export function clearNbAgentLogs(): void {
   }
 }
 
-if (typeof window !== 'undefined') {
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as unknown as { __nbDebugDump?: () => unknown[] }).__nbDebugDump = readNbAgentLogs;
 }
 
-/** App-level traces — independent of React component mount/HMR state. */
+/** App-level traces — DEV only; independent of React component mount/HMR state. */
 function initNbGlobalDebugTraces(): void {
   if (!import.meta.env.DEV || typeof document === 'undefined') return;
+  // Avoid happy-dom fetch noise during unit tests.
+  if (import.meta.env.MODE === 'test') return;
   if ((window as unknown as { __nbGlobalTrace?: boolean }).__nbGlobalTrace) return;
   (window as unknown as { __nbGlobalTrace?: boolean }).__nbGlobalTrace = true;
 
@@ -107,7 +111,10 @@ function initNbGlobalDebugTraces(): void {
   nbAgentLog(
     'global:init',
     'debug-traces-ready',
-    { href: window.location.href, build: typeof __APP_BUILD_ID__ !== 'undefined' ? __APP_BUILD_ID__ : null },
+    {
+      href: window.location.href,
+      build: typeof __APP_BUILD_ID__ !== 'undefined' ? __APP_BUILD_ID__ : null,
+    },
     'init',
     'post-fix',
   );
@@ -125,7 +132,8 @@ function initNbGlobalDebugTraces(): void {
     const anchorEl =
       anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement ?? null;
     const rich = anchorEl?.closest?.('[data-rich-editable="1"]') ?? null;
-    const tiptap = anchorEl?.closest?.('[data-math-editor] .ProseMirror, [data-math-editor]') ?? null;
+    const tiptap =
+      anchorEl?.closest?.('[data-math-editor] .ProseMirror, [data-math-editor]') ?? null;
     // #region agent log
     nbAgentLog(
       'global:selectionchange',
@@ -144,7 +152,7 @@ function initNbGlobalDebugTraces(): void {
 
   document.addEventListener(
     'mousedown',
-    (e) => {
+    e => {
       const t = e.target;
       if (!(t instanceof Element)) return;
       const btn = t.closest('.nb-toolbar-btn');
@@ -173,7 +181,7 @@ function initNbGlobalDebugTraces(): void {
 
   document.addEventListener(
     'input',
-    (e) => {
+    e => {
       const t = e.target;
       if (!(t instanceof Element) || !t.closest('[data-rich-editable="1"]')) return;
       // #region agent log

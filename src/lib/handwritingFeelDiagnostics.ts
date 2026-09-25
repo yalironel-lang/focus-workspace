@@ -285,19 +285,21 @@ export function getHwFeelDiag(canvas: HTMLCanvasElement | null): HwFeelDiagSnaps
   };
 
   // #region agent log
-  fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
-    body: JSON.stringify({
-      sessionId: 'a618f3',
-      runId: 'feel-diag',
-      hypothesisId: 'A-E',
-      location: 'handwritingFeelDiagnostics.ts:getHwFeelDiag',
-      message: 'feel diag snapshot',
-      data: snap,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
+  if (import.meta.env.DEV) {
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
+      body: JSON.stringify({
+        sessionId: 'a618f3',
+        runId: 'feel-diag',
+        hypothesisId: 'A-E',
+        location: 'handwritingFeelDiagnostics.ts:getHwFeelDiag',
+        message: 'feel diag snapshot',
+        data: snap,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
   // #endregion
 
   return snap;

@@ -107,19 +107,21 @@ export function hwSpikeLog(
   buf.push(entry);
   writeLogBuffer(buf);
   // #region agent log
-  fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7fb648' },
-    body: JSON.stringify({
-      sessionId: '7fb648',
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: entry.t,
-      runId: 'ipad-spike',
-    }),
-  }).catch(() => {});
+  if (import.meta.env.DEV) {
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7fb648' },
+      body: JSON.stringify({
+        sessionId: '7fb648',
+        hypothesisId,
+        location,
+        message,
+        data,
+        timestamp: entry.t,
+        runId: 'ipad-spike',
+      }),
+    }).catch(() => {});
+  }
   // #endregion
   if (isDevBuild()) {
     console.debug(`[hw-spike ${hypothesisId}] ${message}`, data ?? '');
@@ -227,7 +229,7 @@ function prodSpikeDevOnly(): void {
 }
 
 if (typeof window !== 'undefined') {
-  if (isDevBuild()) {
+  if (import.meta.env.DEV && isDevBuild()) {
     window.__fwHwSpikeSet = setHwSpikeSettings;
     window.__fwHwSpikeGet = getHwSpikeSettings;
     window.__fwHwSpikeDump = hwSpikeDump;
@@ -248,7 +250,7 @@ if (typeof window !== 'undefined') {
       }),
     }).catch(() => {});
     // #endregion
-  } else {
+  } else if (!import.meta.env.DEV) {
     const prodDefaults = (): HwSpikeSettings => ({ ...DEFAULTS });
     window.__fwHwSpikeSet = () => {
       prodSpikeDevOnly();
@@ -261,20 +263,5 @@ if (typeof window !== 'undefined') {
     };
     window.__fwHwSpikeClear = prodSpikeDevOnly;
     window.__fwHwSpikeHelp = prodSpikeDevOnly;
-    // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7fb648' },
-      body: JSON.stringify({
-        sessionId: '7fb648',
-        hypothesisId: 'H-globals',
-        location: 'handwritingSpikeDebug.ts:init',
-        message: 'spike globals registered (prod noop)',
-        data: { dev: false },
-        timestamp: Date.now(),
-        runId: 'post-fix',
-      }),
-    }).catch(() => {});
-    // #endregion
   }
 }

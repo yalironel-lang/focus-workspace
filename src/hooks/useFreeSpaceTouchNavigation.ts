@@ -9,9 +9,6 @@ const PAN_VELOCITY_CLAMP = 2.8;
 const PAN_FRICTION = 8.0;
 const TOUCH_MOMENTUM_MIN_V = 0.35; // px/ms — ignore tiny release drift
 
-const DEBUG_INGEST =
-  'http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517';
-
 interface TouchPointer {
   id: number;
   x: number;
@@ -56,6 +53,9 @@ function touchNavDbg(
   data: Record<string, unknown>,
   hypothesisId?: string,
 ): void {
+  // V1-H3: never network-ingest touch diagnostics in Production.
+  if (!import.meta.env.DEV) return;
+
   const w = window as TouchNavDbgWindow;
   w.__fwTouchNavDbg ??= [];
   const entry = {
@@ -67,8 +67,12 @@ function touchNavDbg(
   w.__fwTouchNavDbg.push(entry);
   if (w.__fwTouchNavDbg.length > 300) w.__fwTouchNavDbg.shift();
 
+  // DEV-only ingest URL (inside guarded body for Production DCE).
+  const debugIngest =
+    'http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517';
+
   // #region agent log
-  fetch(DEBUG_INGEST, {
+  fetch(debugIngest, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -33,19 +33,21 @@ export function recordPageLayoutHandwritingMount(blockId: string, pageLayout: bo
   if (!pageLayout) return;
   pageLayoutMountCount += 1;
   // #region agent log
-  fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
-    body: JSON.stringify({
-      sessionId: 'a618f3',
-      runId: 'badge-diag',
-      hypothesisId: 'H2-H3',
-      location: 'handwritingDualLayerProofDebug.ts:recordPageLayoutHandwritingMount',
-      message: 'HandwritingBlock pageLayout mount',
-      data: { blockId, pageLayoutMountCount, gitCommit: getGitCommit() },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
+  if (import.meta.env.DEV) {
+    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
+      body: JSON.stringify({
+        sessionId: 'a618f3',
+        runId: 'badge-diag',
+        hypothesisId: 'H2-H3',
+        location: 'handwritingDualLayerProofDebug.ts:recordPageLayoutHandwritingMount',
+        message: 'HandwritingBlock pageLayout mount',
+        data: { blockId, pageLayoutMountCount, gitCommit: getGitCommit() },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
   // #endregion
 }
 
@@ -122,19 +124,21 @@ export function registerDualLayerProofDiag(badgeFlagEnabled: boolean): () => Dua
   const fn = () => {
     const diag = getDualLayerProofDiag(badgeFlagEnabled);
     // #region agent log
-    fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
-      body: JSON.stringify({
-        sessionId: 'a618f3',
-        runId: 'badge-diag',
-        hypothesisId: 'H1-H7',
-        location: 'handwritingDualLayerProofDebug.ts:registerDualLayerProofDiag',
-        message: 'dual layer proof diag dump',
-        data: diag,
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
+    if (import.meta.env.DEV) {
+      fetch('http://127.0.0.1:7714/ingest/e6af15d9-7b0a-4fc6-884e-236751805517', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'a618f3' },
+        body: JSON.stringify({
+          sessionId: 'a618f3',
+          runId: 'badge-diag',
+          hypothesisId: 'H1-H7',
+          location: 'handwritingDualLayerProofDebug.ts:registerDualLayerProofDiag',
+          message: 'dual layer proof diag dump',
+          data: diag,
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
     // #endregion
     return diag;
   };

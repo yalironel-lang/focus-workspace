@@ -202,22 +202,8 @@ export default defineConfig({
             purpose: 'any',
           },
         ],
-        shortcuts: [
-          {
-            name: 'Quick Capture',
-            short_name: 'Capture',
-            description: 'Capture a thought instantly',
-            url: '/dashboard?capture=1',
-            icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
-          },
-          {
-            name: 'Start Focus Session',
-            short_name: 'Focus',
-            description: 'Begin a timed work session',
-            url: '/dashboard?focus=1',
-            icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
-          },
-        ],
+        // V1-H3: no dead deep-links. Shortcuts must have real handlers before shipping.
+        shortcuts: [],
       },
 
       // ── Dev ───────────────────────────────────────────────────────────────

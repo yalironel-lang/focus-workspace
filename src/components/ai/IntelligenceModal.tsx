@@ -112,10 +112,10 @@ export function IntelligenceModal({ onClose, tokens }: IntelligenceModalProps) {
             </div>
             <div className="min-w-0">
               <h2 id="fw-intelligence-title" className="text-sm font-semibold tracking-tight" style={{ color: tokens.textPrimary }}>
-                Intelligence
+                Local intelligence
               </h2>
               <p className="text-[11px] leading-snug mt-1" style={{ color: tokens.textMuted }}>
-                Local insight is the default. Cloud model help is entirely optional.
+                Local study tools on this device. Optional BYOK cloud is legacy — not Ask ZIKUK.
               </p>
             </div>
           </div>
@@ -149,8 +149,17 @@ export function IntelligenceModal({ onClose, tokens }: IntelligenceModalProps) {
           <p
             className="text-[12px] leading-relaxed rounded-xl px-3 py-2.5"
             style={{ color: tokens.textMuted, backgroundColor: well, border: `1px solid ${border}` }}
+            data-fw-intelligence-ask-note="1"
           >
-            Cloud AI is optional. Focus works fully without it.
+            Ask ZIKUK uses Course Knowledge through ZIKUK’s secure gateway. It does not use this API key
+            and does not require BYOK setup.
+          </p>
+
+          <p
+            className="text-[12px] leading-relaxed rounded-xl px-3 py-2.5"
+            style={{ color: tokens.textMuted, backgroundColor: well, border: `1px solid ${border}` }}
+          >
+            Cloud AI below is optional legacy help. Focus works fully without it.
           </p>
 
           <section>
@@ -169,7 +178,7 @@ export function IntelligenceModal({ onClose, tokens }: IntelligenceModalProps) {
               aria-expanded={advancedOpen}
             >
               <span className="text-[12px] font-medium" style={{ color: tokens.textPrimary }}>
-                Advanced — optional cloud model
+                Legacy — optional BYOK cloud model
               </span>
               {advancedOpen ? (
                 <ChevronDown className="w-4 h-4 shrink-0" style={{ color: tokens.textGhost }} strokeWidth={2} />
@@ -180,8 +189,9 @@ export function IntelligenceModal({ onClose, tokens }: IntelligenceModalProps) {
             {advancedOpen && (
               <div className="px-3 pb-3 pt-1 space-y-3" style={{ borderTop: `1px solid ${border}` }}>
                 <p className="text-[11px] leading-snug pt-2" style={{ color: tokens.textMuted }}>
-                  Optional: connect your own AI provider (OpenAI-compatible). Keys stay in this browser only; nothing is sent
-                  until you run a cloud action from the command palette.
+                  Legacy: connect your own AI provider (OpenAI-compatible) for optional canvas cloud actions.
+                  This is separate from Ask ZIKUK. Keys stay in this browser only; nothing is sent until you
+                  run a legacy cloud action from the command palette.
                 </p>
 
                 <label className="flex items-center gap-3 cursor-pointer select-none">
