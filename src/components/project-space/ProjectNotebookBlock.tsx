@@ -144,6 +144,7 @@ import {
 } from '../../lib/inkPenTrace';
 import { InkPenTraceHud } from '../notebook/InkPenTraceHud';
 import { flushAllHandwritingForObject } from '../../lib/handwritingFlushRegistry';
+import { registerEditorPersistFlush } from '../../lib/freeSpacePersistFlush';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
 import {
   getMathTemplate,
@@ -2276,6 +2277,13 @@ export function ProjectNotebookBlock({
   useEffect(() => {
     return () => flushNotebookPersist();
   }, [objectId, freeSpaceSectionId, freeSpaceBoardId, flushNotebookPersist]);
+
+  // V1-H1: pending TipTap/debounce content must flush before Free Space localStorage
+  // writers on pagehide / beforeunload / visibility hidden.
+  useEffect(() => {
+    if (context !== 'free-space' || !objectId) return;
+    return registerEditorPersistFlush(flushNotebookPersist);
+  }, [context, objectId, flushNotebookPersist]);
 
   const candidateEditorRef = useRef<import('@tiptap/core').Editor | null>(null);
 

@@ -1758,15 +1758,19 @@ export function useSectionFreeSpaceObjects(
         content: nbSyncDiagSummarizeContent(content),
       });
     }
-    setObjects(prev => {
-      if (!shouldAcceptObjectContentUpdate(id, prev, pendingDeletedIdsRef.current)) {
-        return prev;
-      }
-      const next = prev.map(o => o.id === id ? { ...o, content, updatedAt: Date.now() } : o);
-      markObjectDirty(id);
-      schedulePersist(next);
-      return next;
-    });
+    // V1-H1: apply against objectsRef + schedulePersist synchronously so unload
+    // flush (editor → storage) can durable-write without waiting on React setState.
+    const prev = objectsRef.current;
+    if (!shouldAcceptObjectContentUpdate(id, prev, pendingDeletedIdsRef.current)) {
+      return;
+    }
+    const next = prev.map(o =>
+      o.id === id ? { ...o, content, updatedAt: Date.now() } : o,
+    );
+    objectsRef.current = next;
+    markObjectDirty(id);
+    schedulePersist(next);
+    setObjects(next);
   }, [schedulePersist, markObjectDirty, sectionId, boardId]);
 
   const updateObjectFields = useCallback(

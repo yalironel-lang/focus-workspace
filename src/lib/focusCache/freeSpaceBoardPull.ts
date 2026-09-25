@@ -1,5 +1,20 @@
 /**
- * Free Space board pull / catch-up — section-scoped board definition merge.
+ * Authoritative cloud merge for section board definitions.
+ *
+ * V1-H1 fail-closed invariant:
+ * Never silently purge a local board merely because CREATE enqueue failed,
+ * pending-list lookup failed, IndexedDB is unavailable, or cloud absence
+ * cannot be distinguished from a pending local creation.
+ *
+ * CONFIRMED SAFE TO PURGE (pull path only):
+ * - cloud fetch succeeded
+ * - pending queue lookup succeeded
+ * - board absent from cloud
+ * - no pending CREATE for board
+ * - no pending DELETE for board
+ * - this catch-up did not just fail a CREATE enqueue for the board
+ *
+ * Peer realtime DELETE remains a separate confirmed path.
  */
 
 import { resolveCacheNamespace } from '../focusCacheNamespace';
@@ -83,15 +98,28 @@ export function derivePendingBoardQueueIds(ops: PendingOperation[]): PendingBoar
   return { pendingCreateIds, pendingDeleteIds };
 }
 
+export type ListPendingBoardQueueIdsResult =
+  | ({ ok: true } & PendingBoardQueueIds)
+  | { ok: false; reason: string };
+
+/**
+ * Pending board CREATE/DELETE ids for this section.
+ * Fail-closed: callers must not prune when ok=false.
+ */
 export async function listPendingBoardQueueIds(
   userId: string,
   sectionId: string,
-): Promise<PendingBoardQueueIds> {
+): Promise<ListPendingBoardQueueIdsResult> {
   const ns = resolveCacheNamespace(userId, sectionId);
-  if (!ns.ok) return { pendingCreateIds: new Set(), pendingDeleteIds: new Set() };
+  if (!ns.ok) {
+    return { ok: false, reason: ns.reason };
+  }
   const listed = await listPendingOperations(ns.namespace);
-  if (!listed.ok) return { pendingCreateIds: new Set(), pendingDeleteIds: new Set() };
-  return derivePendingBoardQueueIds(listed.value);
+  if (!listed.ok) {
+    return { ok: false, reason: listed.reason ?? 'list_failed' };
+  }
+  const derived = derivePendingBoardQueueIds(listed.value);
+  return { ok: true, ...derived };
 }
 
 export type BoardPullCatchUpResult = {
@@ -99,12 +127,14 @@ export type BoardPullCatchUpResult = {
   boards: FreeSpaceBoard[];
   legacyUploaded: string[];
   prunedBoardIds: string[];
+  /** True when prune was skipped because pending-queue state was uncertain. */
+  pruneSkippedUncertain?: boolean;
 };
 
 /**
  * Authoritative cloud merge for section board definitions.
  * Local-only legacy boards (not pending delete) upload via enqueue CREATE.
- * Cloud-absent boards (not pending create) are pruned locally with silent object purge.
+ * Cloud-absent boards may be pruned only when pending state is known and safe.
  */
 export async function runFreeSpaceBoardSectionPullCatchUp(input: {
   userId: string;
@@ -112,9 +142,10 @@ export async function runFreeSpaceBoardSectionPullCatchUp(input: {
   localBoards: FreeSpaceBoard[];
 }): Promise<BoardPullCatchUpResult> {
   const { userId, sectionId } = input;
-  let localBoards = ensureMainBoard(input.localBoards);
+  const localBoards = ensureMainBoard(input.localBoards);
   const legacyUploaded: string[] = [];
   const prunedBoardIds: string[] = [];
+  const failedCreateIds = new Set<string>();
 
   const fetch = await fetchFreeSpaceBoardsForSection(sectionId);
   if (!fetch.ok) {
@@ -123,6 +154,14 @@ export async function runFreeSpaceBoardSectionPullCatchUp(input: {
   }
 
   const pending = await listPendingBoardQueueIds(userId, sectionId);
+  const pendingCreateIds = pending.ok ? pending.pendingCreateIds : new Set<string>();
+  const pendingDeleteIds = pending.ok ? pending.pendingDeleteIds : new Set<string>();
+  if (!pending.ok) {
+    fwPersistWarn(
+      `board pull pending lookup failed: ${pending.reason}; preserving local boards (fail-closed)`,
+    );
+  }
+
   const cloudById = new Map(fetch.rows.map(r => [r.id, r]));
   const localById = new Map(localBoards.map(b => [b.id, b]));
   const merged = new Map<string, FreeSpaceBoard>();
@@ -152,8 +191,8 @@ export async function runFreeSpaceBoardSectionPullCatchUp(input: {
   for (const board of localBoards) {
     if (board.id === 'main') continue;
     if (merged.has(board.id)) continue;
-    if (pending.pendingDeleteIds.has(board.id)) continue;
-    if (pending.pendingCreateIds.has(board.id)) {
+    if (pendingDeleteIds.has(board.id)) continue;
+    if (pendingCreateIds.has(board.id)) {
       merged.set(board.id, board);
       continue;
     }
@@ -166,16 +205,43 @@ export async function runFreeSpaceBoardSectionPullCatchUp(input: {
       createdAt: board.createdAt,
       updatedAt: board.updatedAt ?? board.createdAt,
     });
-    if (enq.ok) legacyUploaded.push(board.id);
+    if (enq.ok) {
+      legacyUploaded.push(board.id);
+    } else {
+      failedCreateIds.add(board.id);
+      fwPersistWarn(
+        `board pull CREATE enqueue failed for ${board.id}; preserving local board (fail-closed)`,
+      );
+    }
     merged.set(board.id, board);
+  }
+
+  // Preserve any local board we could not confidently classify when pending is unknown.
+  if (!pending.ok) {
+    for (const board of localBoards) {
+      if (board.id === 'main') continue;
+      if (!merged.has(board.id) && !pendingDeleteIds.has(board.id)) {
+        merged.set(board.id, board);
+      }
+    }
+    const next = ensureMainBoard([...merged.values()]);
+    return {
+      ok: true,
+      boards: next,
+      legacyUploaded,
+      prunedBoardIds,
+      pruneSkippedUncertain: true,
+    };
   }
 
   for (const board of localBoards) {
     if (board.id === 'main') continue;
     if (cloudById.has(board.id)) continue;
-    if (pending.pendingCreateIds.has(board.id)) continue;
-    if (pending.pendingDeleteIds.has(board.id)) continue;
+    if (pendingCreateIds.has(board.id)) continue;
+    if (pendingDeleteIds.has(board.id)) continue;
     if (legacyUploaded.includes(board.id)) continue;
+    // CREATE enqueue failed this round — uncertain; never purge.
+    if (failedCreateIds.has(board.id)) continue;
     prunedBoardIds.push(board.id);
     purgeFreeSpaceBoardLocallySilent({ sectionId, boardId: board.id });
     merged.delete(board.id);
