@@ -1,43 +1,39 @@
 /**
  * M1.1C — Ask-open course knowledge readiness (derived + bounded refresh).
  * M1.1D/F — bounded historical Free Space PDF enrollment (default ON; kill-switchable).
+ * V1-H2 — readiness fetch failure fail-closed (never enroll / never false empty).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listNeedsKnowledgeProcessForSection } from '../knowledgeProcessHandoff/needsProcessStore';
 import { supabase } from '../../supabase';
 import {
-  deriveCourseKnowledgeReadiness,
   COURSE_KNOWLEDGE_READINESS_INVALIDATE_EVENT,
+  unknownCourseKnowledgeReadiness,
   type CourseKnowledgeReadiness,
   type EligibleKnowledgeMaterialRef,
   type KnowledgeNeedsProcessMarkerRef,
   type KnowledgeSourceReadinessRow,
 } from './courseKnowledgeReadiness';
 import { fetchSectionKnowledgeSourceRows } from './fetchSectionKnowledgeSourceRows';
+import { resolveCourseKnowledgeReadinessLoad } from './resolveCourseKnowledgeReadinessLoad';
 import { enrollHistoricalFreeSpacePdfs } from './enrollHistoricalFreeSpacePdfs';
 import { isCourseKnowledgeHistoricalEnrollEnabled } from './historicalEnrollmentFlag';
 
-/** Low-frequency poll while Preparing / tip lag — stop when Ask closes. */
+/** Low-frequency poll while Preparing / tip lag / unknown — stop when Ask closes. */
 export const COURSE_KNOWLEDGE_READINESS_POLL_MS = 8_000;
 
 /** Bound IndexedDB / network so Ask open never stalls on readiness. */
 const READINESS_LOAD_BUDGET_MS = 2_500;
 
-const EMPTY_READINESS: CourseKnowledgeReadiness = {
-  kind: 'empty',
-  askUsable: false,
-  readyCount: 0,
-  preparingCount: 0,
-  attentionCount: 0,
-  unenrolledCount: 0,
-  partialPreparing: false,
-  partialAttention: false,
-  emptyReason: 'no_materials',
-};
+const INITIAL_READINESS: CourseKnowledgeReadiness = unknownCourseKnowledgeReadiness();
 
 function shouldPoll(r: CourseKnowledgeReadiness): boolean {
-  return r.kind === 'preparing' || r.partialPreparing;
+  return (
+    r.kind === 'preparing' ||
+    r.kind === 'unknown' ||
+    r.partialPreparing
+  );
 }
 
 function withBudget<T>(promise: Promise<T>, fallback: T, ms: number): Promise<T> {
@@ -65,15 +61,15 @@ function withBudget<T>(promise: Promise<T>, fallback: T, ms: number): Promise<T>
   });
 }
 
-function scheduleHistoricalEnrollmentSafe(input: {
+export function scheduleHistoricalEnrollmentSafe(input: {
   sectionId: string;
   eligible: readonly EligibleKnowledgeMaterialRef[];
   rows: readonly KnowledgeSourceReadinessRow[];
   markers: readonly KnowledgeNeedsProcessMarkerRef[];
-  unenrolledCount: number;
+  allowHistoricalEnrollment: boolean;
 }): void {
   if (!isCourseKnowledgeHistoricalEnrollEnabled()) return;
-  if (input.unenrolledCount <= 0) return;
+  if (!input.allowHistoricalEnrollment) return;
   const sid = input.sectionId.trim();
   if (!sid) return;
 
@@ -105,7 +101,7 @@ export function useCourseKnowledgeReadiness(input: {
   loading: boolean;
 } {
   const { sectionId, open, eligible } = input;
-  const [readiness, setReadiness] = useState<CourseKnowledgeReadiness>(EMPTY_READINESS);
+  const [readiness, setReadiness] = useState<CourseKnowledgeReadiness>(INITIAL_READINESS);
   const [loading, setLoading] = useState(false);
   const eligibleRef = useRef(eligible);
   eligibleRef.current = eligible;
@@ -114,7 +110,7 @@ export function useCourseKnowledgeReadiness(input: {
   const load = useCallback(async () => {
     const sid = sectionId.trim();
     if (!sid) {
-      setReadiness(EMPTY_READINESS);
+      setReadiness(unknownCourseKnowledgeReadiness());
       return;
     }
     const gen = ++genRef.current;
@@ -151,21 +147,20 @@ export function useCourseKnowledgeReadiness(input: {
         })
         .filter((m): m is KnowledgeNeedsProcessMarkerRef => m !== null);
 
-      const rows = fetched.ok ? fetched.rows : [];
-      const next = deriveCourseKnowledgeReadiness({
-        rows,
+      const resolved = resolveCourseKnowledgeReadinessLoad({
+        fetched,
         markers: markerRefs,
         eligible: eligibleRef.current,
       });
-      setReadiness(next);
 
-      // M1.1D: never block Ask; enrollment is fire-and-forget + cooldown-gated.
+      setReadiness(resolved.readiness);
+
       scheduleHistoricalEnrollmentSafe({
         sectionId: sid,
         eligible: eligibleRef.current,
-        rows,
+        rows: resolved.rows,
         markers: markerRefs,
-        unenrolledCount: next.unenrolledCount,
+        allowHistoricalEnrollment: resolved.allowHistoricalEnrollment,
       });
     } finally {
       if (gen === genRef.current) setLoading(false);

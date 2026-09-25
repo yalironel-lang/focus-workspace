@@ -46,6 +46,8 @@ export {
   classifyKnowledgeSourceRow,
   deriveCourseKnowledgeReadiness,
   courseKnowledgeReadinessMessage,
+  unknownCourseKnowledgeReadiness,
+  mayScheduleHistoricalEnrollment,
   type CourseKnowledgeReadiness,
   type CourseKnowledgeReadinessKind,
   type KnowledgeSourceReadinessRow,
@@ -53,6 +55,7 @@ export {
 } from './courseKnowledgeReadiness';
 export { collectEligibleKnowledgeMaterials } from './collectEligibleKnowledgeMaterials';
 export { useCourseKnowledgeReadiness } from './useCourseKnowledgeReadiness';
+export { resolveCourseKnowledgeReadinessLoad } from './resolveCourseKnowledgeReadinessLoad';
 export { isCourseKnowledgeHistoricalEnrollEnabled } from './historicalEnrollmentFlag';
 export {
   planHistoricalEnrollment,

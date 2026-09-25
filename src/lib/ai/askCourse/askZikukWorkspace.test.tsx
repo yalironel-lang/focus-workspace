@@ -15,19 +15,22 @@ import { FloatingWorkspaceShell } from '../../../components/workspace-shell/Floa
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const zikukAiRequest = vi.hoisted(() => vi.fn());
+
+const READY_READINESS = vi.hoisted(() => ({
+  kind: 'ready' as const,
+  askUsable: true,
+  readyCount: 1,
+  preparingCount: 0,
+  attentionCount: 0,
+  unenrolledCount: 0,
+  partialPreparing: false,
+  partialAttention: false,
+  emptyReason: null as null,
+}));
+
 const mockUseCourseKnowledgeReadiness = vi.hoisted(() =>
   vi.fn(() => ({
-    readiness: {
-      kind: 'empty' as const,
-      askUsable: false,
-      readyCount: 0,
-      preparingCount: 0,
-      attentionCount: 0,
-      unenrolledCount: 0,
-      partialPreparing: false,
-      partialAttention: false,
-      emptyReason: 'no_materials' as const,
-    },
+    readiness: { ...READY_READINESS },
     refresh: () => {},
     loading: false,
   })),
@@ -115,17 +118,7 @@ beforeEach(() => {
   zikukAiRequest.mockReset();
   mockUseCourseKnowledgeReadiness.mockReset();
   mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
-    readiness: {
-      kind: 'empty' as const,
-      askUsable: false,
-      readyCount: 0,
-      preparingCount: 0,
-      attentionCount: 0,
-      unenrolledCount: 0,
-      partialPreparing: false,
-      partialAttention: false,
-      emptyReason: 'no_materials' as const,
-    },
+    readiness: { ...READY_READINESS },
     refresh: () => {},
     loading: false,
   }));
@@ -136,6 +129,21 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
 });
+
+function mountWorkspace(extra?: Record<string, unknown>) {
+  mount(
+    createElement(AskZikukWorkspace, {
+      open: true,
+      onClose: () => {},
+      sectionId: 'sec-1',
+      sectionTitle: 'Calculus II',
+      tokens: TOKENS,
+      accent: '#38bdf8',
+      onOpenSource: () => {},
+      ...extra,
+    }),
+  );
+}
 
 describe('formatAskCourseSourceLabel', () => {
   it('formats PDF sources compactly', () => {
@@ -1519,5 +1527,189 @@ describe('M0.9C2.3.1 Ask visibility vs top-level navigation', () => {
     expect(workspaceRoot().getAttribute('data-ask-zikuk-turn-count')).toBe('1');
     const { readAskSession } = await import('./askSessionStorage');
     expect(readAskSession(USER, SEC)?.turns.map(t => t.answer)).toEqual(['Prior']);
+  });
+});
+
+describe('V1-H2 Ask usability soft gate', () => {
+  async function trySubmit(question: string) {
+    await typeQuestion(question);
+    await act(async () => {
+      (workspaceRoot().querySelector('[data-ask-zikuk-submit]') as HTMLButtonElement).click();
+    });
+    await flush();
+  }
+
+  it('7. preparing with zero usable sources → Ask submission gated + explained', async () => {
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'preparing' as const,
+        askUsable: false,
+        readyCount: 0,
+        preparingCount: 1,
+        attentionCount: 0,
+        unenrolledCount: 0,
+        partialPreparing: false,
+        partialAttention: false,
+        emptyReason: null,
+      },
+      refresh: () => {},
+      loading: false,
+    }));
+    mountWorkspace();
+    expect(
+      workspaceRoot()
+        .querySelector('[data-ask-zikuk-readiness]')
+        ?.getAttribute('data-ask-zikuk-readiness-kind'),
+    ).toBe('preparing');
+    expect(
+      workspaceRoot()
+        .querySelector('[data-ask-zikuk-thread]')
+        ?.getAttribute('data-ask-zikuk-knowledge-ready'),
+    ).toBe('0');
+    await trySubmit('What is the mean value theorem?');
+    expect(zikukAiRequest).not.toHaveBeenCalled();
+    const submit = workspaceRoot().querySelector(
+      '[data-ask-zikuk-submit]',
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+  });
+
+  it('8. unknown readiness → Ask does not proceed as ready; retry wired', async () => {
+    const refresh = vi.fn();
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'unknown' as const,
+        askUsable: false,
+        readyCount: 0,
+        preparingCount: 0,
+        attentionCount: 0,
+        unenrolledCount: 0,
+        partialPreparing: false,
+        partialAttention: false,
+        emptyReason: null,
+      },
+      refresh,
+      loading: false,
+    }));
+    mountWorkspace();
+    const banner = workspaceRoot().querySelector('[data-ask-zikuk-readiness]');
+    expect(banner?.getAttribute('data-ask-zikuk-readiness-kind')).toBe('unknown');
+    expect(banner?.textContent).toContain('couldn’t be checked');
+    expect(banner?.textContent).not.toMatch(/not available|Preparing/i);
+    const retry = workspaceRoot().querySelector(
+      '[data-ask-zikuk-readiness-retry]',
+    ) as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+    await act(async () => {
+      retry.click();
+    });
+    expect(refresh).toHaveBeenCalled();
+    await trySubmit('Should not send');
+    expect(zikukAiRequest).not.toHaveBeenCalled();
+  });
+
+  it('9. partialPreparing + askUsable=true → Ask remains usable', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: 'partial ok', sources: [] },
+    });
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'ready' as const,
+        askUsable: true,
+        readyCount: 1,
+        preparingCount: 1,
+        attentionCount: 0,
+        unenrolledCount: 0,
+        partialPreparing: true,
+        partialAttention: false,
+        emptyReason: null,
+      },
+      refresh: () => {},
+      loading: false,
+    }));
+    mountWorkspace({ userId: 'u-partial-prep' });
+    expect(
+      workspaceRoot().querySelector('[data-ask-zikuk-readiness]')?.textContent,
+    ).toContain('still preparing');
+    await trySubmit('Use ready sources');
+    await vi.waitFor(() => {
+      expect(zikukAiRequest).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('10. partialAttention + askUsable=true → Ask remains usable', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: 'attention ok', sources: [] },
+    });
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'ready' as const,
+        askUsable: true,
+        readyCount: 1,
+        preparingCount: 0,
+        attentionCount: 1,
+        unenrolledCount: 0,
+        partialPreparing: false,
+        partialAttention: true,
+        emptyReason: null,
+      },
+      refresh: () => {},
+      loading: false,
+    }));
+    mountWorkspace({ userId: 'u-partial-attn' });
+    expect(
+      workspaceRoot().querySelector('[data-ask-zikuk-readiness]')?.textContent,
+    ).toContain('need attention');
+    await trySubmit('Still ask');
+    await vi.waitFor(() => {
+      expect(zikukAiRequest).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('11. fully ready → existing Ask behavior unchanged', async () => {
+    zikukAiRequest.mockResolvedValue({
+      version: 1,
+      ok: true,
+      result: { type: 'ask_course', text: 'fully ready', sources: [] },
+    });
+    mountWorkspace({ userId: 'u-fully-ready' });
+    expect(workspaceRoot().querySelector('[data-ask-zikuk-readiness]')).toBeNull();
+    expect(
+      workspaceRoot()
+        .querySelector('[data-ask-zikuk-thread]')
+        ?.getAttribute('data-ask-zikuk-knowledge-ready'),
+    ).toBe('1');
+    await trySubmit('Normal ask');
+    await vi.waitFor(() => {
+      expect(zikukAiRequest).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('needs_attention with no usable source → gated + explained', async () => {
+    mockUseCourseKnowledgeReadiness.mockImplementation(() => ({
+      readiness: {
+        kind: 'needs_attention' as const,
+        askUsable: false,
+        readyCount: 0,
+        preparingCount: 0,
+        attentionCount: 1,
+        unenrolledCount: 0,
+        partialPreparing: false,
+        partialAttention: false,
+        emptyReason: null,
+      },
+      refresh: () => {},
+      loading: false,
+    }));
+    mountWorkspace();
+    expect(
+      workspaceRoot().querySelector('[data-ask-zikuk-readiness]')?.textContent,
+    ).toContain('need attention');
+    await trySubmit('No path');
+    expect(zikukAiRequest).not.toHaveBeenCalled();
   });
 });

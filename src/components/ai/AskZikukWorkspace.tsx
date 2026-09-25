@@ -91,11 +91,29 @@ export function AskZikukWorkspace({
     userId,
   });
 
-  const { readiness } = useCourseKnowledgeReadiness({
+  const { readiness, refresh: refreshReadiness } = useCourseKnowledgeReadiness({
     sectionId,
     open,
     eligible: eligibleKnowledgeMaterials,
   });
+
+  /** V1-H2: never treat Ask as ready when Course Knowledge is not ask-usable. */
+  const askKnowledgeReady = readiness.askUsable;
+  const composerCanSubmit = canSubmit && askKnowledgeReady;
+
+  const handleSubmit = useCallback(() => {
+    if (!askKnowledgeReady) return;
+    submit();
+  }, [askKnowledgeReady, submit]);
+
+  const handleSuggestion = useCallback(
+    (text: string) => {
+      if (!askKnowledgeReady) return;
+      setQuestion(text);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    },
+    [askKnowledgeReady, setQuestion],
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -143,14 +161,6 @@ export function AskZikukWorkspace({
       el.scrollIntoView(false);
     }
   }, [isLoading, activePendingQuestion]);
-
-  const handleSuggestion = useCallback(
-    (text: string) => {
-      setQuestion(text);
-      window.setTimeout(() => inputRef.current?.focus(), 0);
-    },
-    [setQuestion],
-  );
 
   /** M1.1B — close Ask so Free Space is visible, then open via parent helper. */
   const handleOpenSource = useCallback(
@@ -227,7 +237,11 @@ export function AskZikukWorkspace({
           onNewConversation={newConversation}
         />
 
-        <AskZikukReadinessBanner readiness={readiness} tokens={tokens} />
+        <AskZikukReadinessBanner
+          readiness={readiness}
+          tokens={tokens}
+          onRetry={refreshReadiness}
+        />
 
         <div
           id={statusId}
@@ -237,6 +251,7 @@ export function AskZikukWorkspace({
           aria-busy={isLoading}
           data-ask-zikuk-status="1"
           data-ask-zikuk-thread="1"
+          data-ask-zikuk-knowledge-ready={askKnowledgeReady ? '1' : '0'}
           style={main}
         >
           {showEmpty ? (
@@ -245,7 +260,7 @@ export function AskZikukWorkspace({
               tokens={tokens}
               accent={accent}
               onSuggestionSelect={handleSuggestion}
-              disabled={isLoading}
+              disabled={isLoading || !askKnowledgeReady}
             />
           ) : null}
 
@@ -324,11 +339,11 @@ export function AskZikukWorkspace({
           value={state.question}
           tokens={tokens}
           accent={accent}
-          canSubmit={canSubmit}
+          canSubmit={composerCanSubmit}
           isLoading={isLoading}
           inputRef={inputRef}
           onChange={setQuestion}
-          onSubmit={submit}
+          onSubmit={handleSubmit}
         />
       </div>
     </div>

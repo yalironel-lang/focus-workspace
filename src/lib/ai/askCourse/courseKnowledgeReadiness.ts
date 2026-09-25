@@ -43,7 +43,9 @@ export type CourseKnowledgeReadinessKind =
   | 'ready'
   | 'preparing'
   | 'needs_attention'
-  | 'empty';
+  | 'empty'
+  /** Readiness fetch failed/timed out — never treat as empty or unenrolled. */
+  | 'unknown';
 
 export type CourseKnowledgeReadiness = {
   kind: CourseKnowledgeReadinessKind;
@@ -63,6 +65,28 @@ export type CourseKnowledgeReadiness = {
   /** empty: no materials vs materials present but not enrolled/indexed yet. */
   emptyReason: 'no_materials' | 'not_indexed' | null;
 };
+
+/** Fail-closed readiness when source rows could not be loaded. */
+export function unknownCourseKnowledgeReadiness(): CourseKnowledgeReadiness {
+  return {
+    kind: 'unknown',
+    askUsable: false,
+    readyCount: 0,
+    preparingCount: 0,
+    attentionCount: 0,
+    unenrolledCount: 0,
+    partialPreparing: false,
+    partialAttention: false,
+    emptyReason: null,
+  };
+}
+
+/** Historical enrollment may run only on a successfully derived known state. */
+export function mayScheduleHistoricalEnrollment(
+  readiness: CourseKnowledgeReadiness,
+): boolean {
+  return readiness.kind !== 'unknown' && readiness.unenrolledCount > 0;
+}
 
 function materialKey(m: EligibleKnowledgeMaterialRef): string {
   if (m.kind === 'free_space_pdf') return `pdf:${m.sourceObjectId}`;
@@ -249,6 +273,9 @@ export function deriveCourseKnowledgeReadiness(input: {
 export function courseKnowledgeReadinessMessage(
   readiness: CourseKnowledgeReadiness,
 ): string | null {
+  if (readiness.kind === 'unknown') {
+    return 'Course materials couldn’t be checked right now. Try again.';
+  }
   if (readiness.kind === 'ready') {
     if (readiness.partialPreparing) {
       return 'Some course materials are still preparing.';

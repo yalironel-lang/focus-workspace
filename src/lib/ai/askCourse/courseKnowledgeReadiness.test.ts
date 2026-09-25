@@ -7,6 +7,8 @@ import {
   classifyKnowledgeSourceRow,
   courseKnowledgeReadinessMessage,
   deriveCourseKnowledgeReadiness,
+  mayScheduleHistoricalEnrollment,
+  unknownCourseKnowledgeReadiness,
   type KnowledgeSourceReadinessRow,
 } from './courseKnowledgeReadiness';
 
@@ -300,5 +302,16 @@ describe('deriveCourseKnowledgeReadiness', () => {
       const msg = courseKnowledgeReadinessMessage(r) ?? '';
       expect(msg).not.toContain(code);
     }
+  });
+
+  it('V1-H2 unknown readiness copy is retryable and not empty', () => {
+    const r = unknownCourseKnowledgeReadiness();
+    expect(r.kind).toBe('unknown');
+    expect(r.askUsable).toBe(false);
+    expect(r.emptyReason).toBeNull();
+    expect(mayScheduleHistoricalEnrollment(r)).toBe(false);
+    const msg = courseKnowledgeReadinessMessage(r);
+    expect(msg).toContain('couldn’t be checked');
+    expect(msg).not.toMatch(/not available|Preparing|need attention/i);
   });
 });
