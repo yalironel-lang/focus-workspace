@@ -53,3 +53,13 @@ export {
 } from './courseKnowledgeReadiness';
 export { collectEligibleKnowledgeMaterials } from './collectEligibleKnowledgeMaterials';
 export { useCourseKnowledgeReadiness } from './useCourseKnowledgeReadiness';
+export { isCourseKnowledgeHistoricalEnrollEnabled } from './historicalEnrollmentFlag';
+export {
+  planHistoricalEnrollment,
+  HISTORICAL_ENROLL_MAX_MARKS_PER_WAVE,
+  HISTORICAL_ENROLL_COOLDOWN_MS,
+} from './planHistoricalEnrollment';
+export {
+  enrollHistoricalFreeSpacePdfs,
+  resetHistoricalEnrollmentCooldownForTests,
+} from './enrollHistoricalFreeSpacePdfs';
