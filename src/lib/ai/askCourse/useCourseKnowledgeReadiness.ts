@@ -1,6 +1,6 @@
 /**
  * M1.1C — Ask-open course knowledge readiness (derived + bounded refresh).
- * M1.1D — optional bounded historical Free Space PDF enrollment (flagged).
+ * M1.1D/F — bounded historical Free Space PDF enrollment (default ON; kill-switchable).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
