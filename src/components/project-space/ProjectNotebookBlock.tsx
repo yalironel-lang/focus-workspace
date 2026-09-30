@@ -1476,6 +1476,10 @@ export function ProjectNotebookBlock({
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
   const effectiveEditorMode = isVersionedPage && !tipTapCandidateActive ? 'preview' : editorMode;
   const [blocks, setBlocks] = useState<Block[]>(() => parseBodyToBlocks(content.body ?? ''));
+  // `blocks` can briefly belong to the page that was active before the latest
+  // content prop. Keep its codec alongside it while the page-switch effect
+  // reconciles that transition.
+  const blocksCodecVersionRef = useRef<number | undefined>(content.bodyCodecVersion);
   const [, bumpNotebookImageCache] = useState(0);
   const [slashMenu, setSlashMenu] = useState<{
     blockId: string;
@@ -2836,12 +2840,13 @@ export function ProjectNotebookBlock({
   useEffect(() => {
     const body = effectiveContent.body ?? '';
     setBlocks((prev) => {
-      if (serializeBlocks(prev) === body) return prev;
+      if (serializeNotebookBlocks(prev as NotebookDialectBlock[], blocksCodecVersionRef.current) === body) return prev;
       if (isNotebookEditorFocused()) return prev;
       if (isDomTextCommitLocked()) return prev;
       // Free Space toolbar session: never reparse from host while a format session is open.
       if (selectionToolbarRef.current != null) return prev;
       if (toolbarActiveBlockIdRef.current != null) return prev;
+      blocksCodecVersionRef.current = effectiveContent.bodyCodecVersion;
       return parseBodyToBlocks(body, prev);
     });
   }, [effectiveContent.body, effectiveContent.bodyCodecVersion, isNotebookEditorFocused, isDomTextCommitLocked]);

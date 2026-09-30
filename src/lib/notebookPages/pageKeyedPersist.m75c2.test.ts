@@ -15,6 +15,7 @@ import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects'
 import type { NotebookContentWithPages, NotebookPage } from './types';
 import { addNotebookPage, switchNotebookPage } from './operations';
 import { applyNotebookPersist, migrateLegacyNotebook } from './hydrate';
+import { serializeNotebookBlocks, type NotebookDialectBlock } from '../notebookDialect';
 import {
   applyActivePageTargetedUserEdit,
   applyPageKeyedUserEdit,
@@ -130,6 +131,39 @@ describe('1–3 shell bridge — wrong-page write proof + fix', () => {
 });
 
 describe('4–5 rapid switch + image isolation', () => {
+  it('4a. switching from a V1 table page to an unversioned empty page is lossless', () => {
+    const table: NotebookDialectBlock = {
+      id: 'table-1',
+      kind: 'table',
+      text: '',
+      rows: [[{ t: 'A' }], [{ t: 'B' }]],
+    };
+    const pageOneBody = serializeNotebookBlocks([
+      { id: 'title-1', kind: 'title', text: 'Page 1' },
+      table,
+    ], 1);
+    let content = notebook(
+      [docPage('a', pageOneBody), { ...docPage('b', ''), documentBodyCodecVersion: undefined }],
+      'a',
+    );
+    const before = pageBody(content, 'a');
+    content = switchNotebookPageWithSafeFlush(
+      content,
+      'b',
+      { pageKey: 'a', body: before, codecVersion: 1 },
+      switchNotebookPage,
+    );
+    expect(pageBody(content, 'a')).toBe(before);
+    content = switchNotebookPageWithSafeFlush(
+      content,
+      'a',
+      { pageKey: 'b', body: '', codecVersion: undefined },
+      switchNotebookPage,
+    );
+    expect(pageBody(content, 'a')).toBe(before);
+    expect(pageBody(content, 'a')).toContain('"table"');
+  });
+
   it('4. A→B→A rapid switch with safe flush preserves distinct bodies', () => {
     let content = notebook(
       [docPage('a', 'AAA PAGE A'), docPage('b', 'BBB PAGE B')],
