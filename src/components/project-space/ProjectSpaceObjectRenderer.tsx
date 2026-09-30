@@ -551,7 +551,16 @@ function ProjectSpaceObjectRendererInner({
   switch (content.type) {
     case 'notebook':
       return (
-        <WorkspaceSurfaceErrorBoundary tokens={tokens} label="Notebook">
+        <WorkspaceSurfaceErrorBoundary
+          tokens={tokens}
+          label="Notebook"
+          diagnostics={{
+            objectId: object.id,
+            sectionId: freeSpaceSectionId,
+            activePageId: content.activePageId,
+            bodyCodecVersion: content.bodyCodecVersion,
+          }}
+        >
           <FreeSpaceMathNotebookRenderer
             content={content}
             tokens={tokens}

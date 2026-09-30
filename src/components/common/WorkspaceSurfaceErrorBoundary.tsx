@@ -7,6 +7,7 @@ interface Props {
   tokens: AtmosphereTokens;
   /** Short label for the surface (e.g. "Notebook", "Minimap"). */
   label: string;
+  diagnostics?: Record<string, string | number | null | undefined>;
 }
 
 interface State {
@@ -27,6 +28,18 @@ export class WorkspaceSurfaceErrorBoundary extends Component<Props, State> {
     fwPersistWarn(
       `${this.props.label} render error (isolated): ${error.message}${info.componentStack ? ` — ${info.componentStack.slice(0, 280)}` : ''}`,
     );
+    if (this.props.label === 'Notebook') {
+      try {
+        console.error('[NotebookRenderError]', {
+          name: error?.name ?? 'Error',
+          message: error?.message ?? String(error),
+          stack: error?.stack,
+          ...this.props.diagnostics,
+        });
+      } catch {
+        // Diagnostics must never interfere with the isolated fallback.
+      }
+    }
   }
 
   render(): ReactNode {
