@@ -673,6 +673,107 @@ function acceptSourceOnlyClaim(
   return { text: stripMarkers(claim), quoted: false, interpretive: true, rejected: false };
 }
 
+const ANSWER_LABEL_PATTERNS = [
+  /^(?:so\s+)?the\s+correct\s+answer\s+is\s+\(?([a-d])\)?$/i,
+  /^(?:so\s+)?the\s+answer\s+is\s+\(?([a-d])\)?$/i,
+  /^option\s+\(?([a-d])\)?\s+is\s+correct$/i,
+];
+
+/** A sentence that only names a multiple-choice letter. It is not judged by word overlap. */
+export function standaloneAnswerLabel(claim: string): string | null {
+  const normalized = claim
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?]+$/g, '')
+    .trim();
+  if (!normalized || normalized.length > 80) return null;
+  for (const pattern of ANSWER_LABEL_PATTERNS) {
+    const letter = normalized.match(pattern)?.[1];
+    if (letter) return letter.toLowerCase();
+  }
+  return null;
+}
+
+type ParsedOption = { letter: string; body: string };
+
+function questionRegions(corpus: string): string[] {
+  const parts = corpus.split(
+    /(?=(?:^|\n)\s*(?:question|problem|exercise)\s+\d+\b|(?:^|\n)\s*\d+\.\s+[A-Z])/i,
+  );
+  const regions = parts.map((part) => part.trim()).filter((part) => part.length > 0);
+  return regions.length > 0 ? regions : [corpus.trim()].filter((part) => part.length > 0);
+}
+
+function parseOptions(region: string): ParsedOption[] {
+  const pattern = /\(([a-d])\)|(?:^|\n)\s*([a-d])\)\s+|(?:^|\n)\s*([a-d])\.\s+/gi;
+  const marks: { letter: string; bodyStart: number; markerStart: number }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(region))) {
+    const letter = (match[1] ?? match[2] ?? match[3] ?? '').toLowerCase();
+    if (!letter) continue;
+    marks.push({
+      letter,
+      markerStart: match.index,
+      bodyStart: match.index + match[0].length,
+    });
+  }
+  return marks.map((mark, index) => {
+    const end = marks[index + 1]?.markerStart ?? region.length;
+    const lineStart = region.lastIndexOf('\n', Math.max(0, mark.markerStart - 1)) + 1;
+    const inline = region.slice(lineStart, mark.markerStart).trim().length > 0;
+    const raw = region.slice(mark.bodyStart, end);
+    const bounded = inline ? (raw.split(/(?<=[.!?])\s/)[0] ?? raw) : (raw.split(/\n\s*\n/)[0] ?? raw);
+    const cut = bounded.split(/\n\s*(?:question|problem|exercise)\s+\d+\b/i)[0] ?? bounded;
+    return {
+      letter: mark.letter,
+      body: cut.replace(/\s+/g, ' ').trim().slice(0, 180),
+    };
+  });
+}
+
+function optionBodySupportsAnswer(body: string, answer: string): boolean {
+  if (!body || !answer) return false;
+  return (
+    answerQuotesSource(answer, body) ||
+    answerQuotesSource(body, answer) ||
+    isFaithfulParaphrase(answer, body) ||
+    isFaithfulParaphrase(body, answer)
+  );
+}
+
+function regionContainsSupportedAnswer(region: string, answer: string): boolean {
+  return (
+    answerQuotesSource(answer, region) ||
+    answerQuotesSource(region, answer) ||
+    isFaithfulParaphrase(answer, region) ||
+    isFaithfulParaphrase(region, answer)
+  );
+}
+
+/**
+ * Verified only when this letter's option text, inside a question that contains
+ * the supported answer, matches that answer. A letter elsewhere is not evidence.
+ * Contradicted when a different letter in that question carries the answer.
+ */
+function judgeOptionLabel(
+  letter: string,
+  substantive: string,
+  corpus: string,
+): 'verified' | 'contradicted' | 'unverified' {
+  if (!substantive.trim()) return 'unverified';
+  const relevant = questionRegions(corpus).filter((region) => regionContainsSupportedAnswer(region, substantive));
+  const options = relevant.flatMap((region) => parseOptions(region));
+  if (options.length === 0) return 'unverified';
+  const sameLetter = options.filter((option) => option.letter === letter);
+  const matching = sameLetter.filter((option) => optionBodySupportsAnswer(option.body, substantive));
+  if (sameLetter.length > 0 && matching.length === sameLetter.length) return 'verified';
+  const otherMatches = options.some(
+    (option) => option.letter !== letter && optionBodySupportsAnswer(option.body, substantive),
+  );
+  if (otherMatches) return 'contradicted';
+  return 'unverified';
+}
+
 /**
  * Source-only answers are kept claim by claim.
  * Direct quotations can keep a real citation and a specific tier.
@@ -730,19 +831,40 @@ export function applyClaimLevelGrounding(input: {
   let quotedKept = 0;
   let interpretiveKept = 0;
   let rejected = 0;
-  const kept: string[] = [];
-  for (const claim of splitClaims(answerText)) {
+  const claims = splitClaims(answerText);
+  const academic: Array<ReturnType<typeof acceptSourceOnlyClaim> | null> = [];
+  const substantive: string[] = [];
+  for (const claim of claims) {
+    if (standaloneAnswerLabel(claim)) {
+      academic.push(null);
+      continue;
+    }
     const decision = acceptSourceOnlyClaim(claim, {
       question: input.question,
       chunks: input.chunks,
       captureText,
       corpus,
     });
-    if (decision.text) kept.push(decision.text);
+    academic.push(decision);
+    if (decision.text && !decision.interpretive && !decision.rejected) substantive.push(decision.text);
     if (decision.quoted) quotedKept += 1;
     if (decision.interpretive) interpretiveKept += 1;
     if (decision.rejected) rejected += 1;
   }
+
+  const substantiveText = substantive.join('\n');
+  const kept: string[] = [];
+  claims.forEach((claim, index) => {
+    const letter = standaloneAnswerLabel(claim);
+    if (letter) {
+      const verdict = judgeOptionLabel(letter, substantiveText, corpus);
+      if (verdict === 'verified') kept.push(claim);
+      else if (verdict === 'contradicted') rejected += 1;
+      return;
+    }
+    const decision = academic[index];
+    if (decision?.text) kept.push(decision.text);
+  });
 
   if (kept.length === 0) {
     return {

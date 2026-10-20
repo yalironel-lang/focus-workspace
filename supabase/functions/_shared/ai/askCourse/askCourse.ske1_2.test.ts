@@ -1098,6 +1098,120 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(missing.knowledgeTier).toBe('mixed');
   });
 
+  it('keeps a multiple-choice label only when that option states the supported answer', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const explanation =
+      'The cyclical part of real GDP is: Real GDP − Trend real GDP.';
+    const contextAvailable = { hasIndexedChunks: true, hasPdfCapture: false } as const;
+    const matched = [
+      'Question 1. What is the cyclical part of real GDP?',
+      'The cyclical part of real GDP is real GDP less trend real GDP.',
+      '(a) government spending',
+      '(b) real GDP less trend real GDP',
+      '(c) nominal GDP',
+      'Question 2. What is fiscal policy?',
+      '(a) taxes',
+      '(b) government spending',
+      '(c) interest rates',
+    ].join('\n');
+    const base = {
+      question,
+      chunks: [{ citationIndex: 1, text: matched }],
+      captureText: '',
+      contextAvailable,
+    };
+
+    const correct = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${explanation} So the correct answer is (b).`,
+    });
+    expect(correct.text).toContain(explanation);
+    expect(correct.text).toContain('So the correct answer is (b).');
+    expect(correct.text).not.toContain('unsupported part');
+    expect(correct.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(correct.knowledgeTier).toBe('course_material');
+
+    const worded = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${explanation} The answer is B.`,
+    });
+    expect(worded.text).toContain('The answer is B.');
+    expect(worded.knowledgeTier).toBe('course_material');
+
+    const optionPhrase = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${explanation} Option (b) is correct.`,
+    });
+    expect(optionPhrase.text).toContain('Option (b) is correct.');
+    expect(optionPhrase.knowledgeTier).toBe('course_material');
+
+    const wrongLetter = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${explanation} So the correct answer is (c).`,
+    });
+    expect(wrongLetter.text).toContain(explanation);
+    expect(wrongLetter.text).not.toContain('(c)');
+    expect(wrongLetter.text).toContain(
+      'The unsupported part cannot be established from the available source.',
+    );
+    expect(wrongLetter.knowledgeTier).toBe('mixed');
+
+    const elsewhere = [
+      'Question 1. What is the cyclical part of real GDP?',
+      'The cyclical part of real GDP is real GDP less trend real GDP.',
+      'Question 2. Which reading mentions part (b)?',
+      '(a) the introduction',
+      '(b) the appendix',
+    ].join('\n');
+    const otherQuestion = applyClaimLevelGrounding({
+      ...base,
+      chunks: [{ citationIndex: 1, text: elsewhere }],
+      answerText: `${explanation} So the correct answer is (b).`,
+    });
+    expect(otherQuestion.text).toBe(explanation);
+    expect(otherQuestion.text).not.toContain('(b)');
+    expect(otherQuestion.text).not.toContain('unsupported part');
+    expect(otherQuestion.knowledgeTier).toBe('course_material');
+
+    const missingContext = applyClaimLevelGrounding({
+      ...base,
+      chunks: [{
+        citationIndex: 1,
+        text: 'The cyclical part of real GDP is real GDP less trend real GDP.',
+      }],
+      answerText: `${explanation} So the correct answer is (b).`,
+    });
+    expect(missingContext.text).toBe(explanation);
+    expect(missingContext.knowledgeTier).toBe('course_material');
+    expect(missingContext.text).not.toContain('unsupported');
+
+    const unlabeled = applyClaimLevelGrounding({
+      ...base,
+      answerText: explanation,
+    });
+    expect(unlabeled.text).toBe(explanation);
+    expect(unlabeled.knowledgeTier).toBe('course_material');
+
+    const unrelated = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${explanation} Hydrogen bonds stabilize the alpha helix.`,
+    });
+    expect(unrelated.text).toContain(explanation);
+    expect(unrelated.text).not.toContain('Hydrogen bonds');
+    expect(unrelated.text).toContain(
+      'The unsupported part cannot be established from the available source.',
+    );
+    expect(unrelated.knowledgeTier).toBe('mixed');
+
+    const letterOnly = applyClaimLevelGrounding({
+      ...base,
+      chunks: [{ citationIndex: 1, text: 'See part (b) of another document. The cyclical part of real GDP is real GDP less trend real GDP.' }],
+      answerText: `${explanation} The answer is B.`,
+    });
+    expect(letterOnly.text).toBe(explanation);
+    expect(letterOnly.knowledgeTier).toBe('course_material');
+  });
+
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {
     const quoted = 'Saving adds to the capital stock.';
     let calls = 0;
