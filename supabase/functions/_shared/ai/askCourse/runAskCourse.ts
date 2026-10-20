@@ -8,7 +8,8 @@
  *   → filter → knowledge_not_found OR generate → recordUsage
  *
  * A window route reads indexed pages of the owned PDF and skips section search.
- * A topical question still uses section-wide retrieval.
+ * A topical question about the open PDF searches that PDF only.
+ * A general question still uses section-wide retrieval.
  */
 
 import { resolveServerMaxOutputTokens } from '../chatCompletionsRequestPolicy.ts';
@@ -59,11 +60,23 @@ import type { ActiveDocumentBrief } from './promptAskCourse.ts';
 import {
   applyClaimLevelGrounding,
   contextAvailableForGrounding,
+  sourceOnlyLimitationMessage,
 } from './evaluateGroundingProvenance.ts';
 
 export type AskCourseSearchFn = (input: {
   userId: string;
   sectionId: string;
+  queryEmbedding: number[];
+  limit: number;
+  embeddingModel: string;
+  embeddingDimensions: number;
+}) => Promise<{ ok: true; raw: unknown } | { ok: false }>;
+
+/** Similarity search restricted to one PDF before ranking. Not section search. */
+export type SearchPdfSource = (input: {
+  userId: string;
+  sectionId: string;
+  sourceObjectId: string;
   queryEmbedding: number[];
   limit: number;
   embeddingModel: string;
@@ -87,6 +100,8 @@ export type AskCourseDeps = {
   embeddingProvider: AiEmbeddingProvider;
   embeddingRouterConfig?: EmbeddingRouterConfig;
   searchKnowledge: AskCourseSearchFn;
+  /** Required for topical questions about one open PDF. Absent means that route cannot search. */
+  searchPdfSource?: SearchPdfSource;
   /** Required for notebook_page citation title resolution (fail-closed). */
   loadNotebookFsoForCitation: LoadNotebookFsoForCitation;
   generationProvider: AiProvider;
@@ -302,7 +317,7 @@ export async function runAskCoursePipeline(input: {
     };
   }
 
-  const retrieve = async () => {
+  const retrieve = async (scope?: { sourceObjectId: string }) => {
     // 3) Embed retrieval text (v1 = question; v2 = contextual query; v3 = capture + instruction)
     const routeEmb = routeEmbeddingModel(deps.embeddingRouterConfig ?? {});
     const embedded = await deps.embeddingProvider.embed({
@@ -361,14 +376,26 @@ export async function runAskCoursePipeline(input: {
     const embeddingInputTokens = embedded.usage?.inputTokens;
 
     // 4) Search
-    const search = await deps.searchKnowledge({
-      userId: authUserId,
-      sectionId,
-      queryEmbedding: embedded.embeddings[0]!,
-      limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
-      embeddingModel: routeEmb.model || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
-      embeddingDimensions: routeEmb.dimensions,
-    });
+    const search = scope
+      ? deps.searchPdfSource
+        ? await deps.searchPdfSource({
+            userId: authUserId,
+            sectionId,
+            sourceObjectId: scope.sourceObjectId,
+            queryEmbedding: embedded.embeddings[0]!,
+            limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
+            embeddingModel: routeEmb.model || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
+            embeddingDimensions: routeEmb.dimensions,
+          })
+        : { ok: false as const }
+      : await deps.searchKnowledge({
+          userId: authUserId,
+          sectionId,
+          queryEmbedding: embedded.embeddings[0]!,
+          limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
+          embeddingModel: routeEmb.model || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
+          embeddingDimensions: routeEmb.dimensions,
+        });
     if (!search.ok) {
       return {
         response: {
@@ -408,24 +435,31 @@ export async function runAskCoursePipeline(input: {
 
     // Defense: drop any hit that somehow isn't for this section's search contract
     // (RPC already scopes; this is belt-and-suspenders on object shape only.)
-    const parsedHits: KnowledgeSearchHit[] = parsed.hits;
+    const parsedHits: KnowledgeSearchHit[] = scope
+      ? parsed.hits.filter(
+          (hit) => hit.sourceKind === 'free_space_pdf' && hit.sourceObjectId === scope.sourceObjectId,
+        )
+      : parsed.hits;
 
     // Resolve live Notebook titles; drop unresolvable notebook evidence.
-    const hits = await resolveAskCourseHitMetadata({
+    const scopedHits = await resolveAskCourseHitMetadata({
       userId: authUserId,
       sectionId,
       hits: parsedHits,
       loadNotebookFso: deps.loadNotebookFsoForCitation,
     });
-
-    const { chunks, diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
+    const { chunks, diagnostics } = filterAskCourseHitsWithDiagnostics(scopedHits);
     console.log(formatAskCourseRetrievalLogLine(diagnostics));
+    const pageCount = scopedHits.find((hit) => typeof hit.pageCount === 'number')?.pageCount ?? null;
 
-    return { chunks, diagnostics, embeddingInputTokens };
+    return { chunks, diagnostics, embeddingInputTokens, pageCount };
   };
 
   const documentRoute = activeDocument ? classifyActiveDocumentQuestion(question) : null;
-  const useWindow = Boolean(activeDocument && documentRoute && documentRoute !== 'topical');
+  const usePdfSource = Boolean(activeDocument && documentRoute === 'pdf_source');
+  const useWindow = Boolean(
+    activeDocument && documentRoute && documentRoute !== 'topical' && documentRoute !== 'pdf_source',
+  );
 
   let chunks: PromptCourseChunk[] = [];
   let embeddingInputTokens: number | undefined;
@@ -523,6 +557,25 @@ export async function runAskCoursePipeline(input: {
       reason: loaded.ok ? 'document_window' : 'document_window_unavailable',
       candidateCount: rows.length,
     };
+  } else if (usePdfSource && activeDocument) {
+    const retrieval = await retrieve({ sourceObjectId: activeDocument.sourceObjectId });
+    deps.signal?.throwIfAborted();
+    if ('response' in retrieval) return retrieval;
+    chunks = retrieval.chunks;
+    embeddingInputTokens = retrieval.embeddingInputTokens;
+    diagnostics = retrieval.diagnostics;
+    const matchedPages = [...new Set(chunks.map((chunk) => chunk.pageNumber))].sort((a, b) => a - b);
+    activeBrief = {
+      fileName: chunks.find((chunk) => chunk.fileName)?.fileName ?? null,
+      pageCount: retrieval.pageCount,
+      visiblePage: activeDocument.pageNumber,
+      route: 'pdf_source',
+      fromPage: null,
+      toPage: null,
+      partial: false,
+      empty: chunks.length === 0,
+      matchedPages,
+    };
   } else {
     const retrieval = await retrieve();
     deps.signal?.throwIfAborted();
@@ -564,6 +617,41 @@ export async function runAskCoursePipeline(input: {
   }
 
   // A window route does not fall through to section search when the PDF has no text.
+  // A source-scoped search does not fall through to another PDF, a notebook, or the model.
+  if (usePdfSource && chunks.length === 0 && !capture) {
+    const contextAvailable = { hasIndexedChunks: false, hasPdfCapture: false } as const;
+    const text = sourceOnlyLimitationMessage(contextAvailable);
+    return {
+      response: {
+        version: 1,
+        ok: true,
+        result: {
+          type: 'ask_course',
+          text,
+          sources: [],
+          knowledgeTier: 'mixed',
+          contextAvailable,
+        },
+        meta: {
+          capability: 'ask_course',
+          latencyMs: Date.now() - started,
+          retrievalHitCount: 0,
+          knowledgeTier: 'mixed',
+          contextAvailable,
+        },
+      },
+      meta: {
+        ...baseMeta,
+        plan: begin.plan,
+        ok: true,
+        knowledgeTier: 'mixed',
+        contextAvailable,
+        retrievalHitCount: 0,
+        embeddingInputTokens,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
 
   if (chunks.length === 0 && !capture) {
     const isExpansionEligible = Boolean(request.version !== 1 && request.teachingMode);

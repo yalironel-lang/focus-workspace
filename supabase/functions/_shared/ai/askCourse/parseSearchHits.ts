@@ -82,6 +82,10 @@ export function parseKnowledgeSearchRows(
       return { ok: false, reason: `row_${i}_pdf_unexpected_notebook_object_id` };
     }
 
+    const pageCount =
+      typeof row.page_count === 'number' && Number.isInteger(row.page_count) && row.page_count > 0
+        ? row.page_count
+        : null;
     hits.push({
       sourceKind,
       sourceObjectId: sourceObjectId.trim(),
@@ -91,6 +95,7 @@ export function parseKnowledgeSearchRows(
       chunkIndex,
       text,
       similarity,
+      ...(pageCount !== null ? { pageCount } : {}),
     });
   }
   return { ok: true, hits };

@@ -252,6 +252,27 @@ Deno.serve(async (req: Request) => {
               if (error) return { ok: false as const };
               return { ok: true as const, raw: data ?? [] };
             },
+            searchPdfSource: async (input: {
+              userId: string;
+              sectionId: string;
+              sourceObjectId: string;
+              queryEmbedding: number[];
+              limit: number;
+              embeddingModel: string;
+              embeddingDimensions: number;
+            }) => {
+              const { data, error } = await admin.rpc('ai_knowledge_search_pdf_source', {
+                p_user_id: input.userId,
+                p_section_id: input.sectionId,
+                p_source_object_id: input.sourceObjectId,
+                p_query_embedding: input.queryEmbedding,
+                p_limit: input.limit,
+                p_embedding_model: input.embeddingModel,
+                p_embedding_dimensions: input.embeddingDimensions ?? KNOWLEDGE_EMBEDDING_DIMENSIONS,
+              });
+              if (error) return { ok: false as const };
+              return { ok: true as const, raw: data ?? [] };
+            },
             loadDocumentWindow: async (input: {
               userId: string;
               sectionId: string;

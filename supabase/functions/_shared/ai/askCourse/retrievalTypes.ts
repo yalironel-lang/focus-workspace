@@ -15,6 +15,8 @@ export type KnowledgeSearchHit = {
   chunkIndex: number;
   text: string;
   similarity: number;
+  /** Present when the source-scoped search returns the indexed page count. */
+  pageCount?: number | null;
   /** Live titles resolved after search (notebook only). */
   notebookTitle?: string | null;
   pageTitle?: string | null;

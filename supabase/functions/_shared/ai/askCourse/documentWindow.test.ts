@@ -86,11 +86,12 @@ describe('active PDF question routing', () => {
 
   it('routes an open PDF question to that document, and a named page to that page', () => {
     expect(classifyActiveDocumentQuestion('According to the PDF, what is the cyclical part of real GDP?')).toBe(
-      'document_walk',
+      'pdf_source',
     );
     expect(classifyActiveDocumentQuestion('According to this PDF, what is the cyclical part of real GDP?')).toBe(
-      'document_walk',
+      'pdf_source',
     );
+    expect(classifyActiveDocumentQuestion('Summarize this PDF')).toBe('document_walk');
     expect(
       documentWindowRange({
         route: 'document_walk',
@@ -98,6 +99,13 @@ describe('active PDF question routing', () => {
         sourceObjectId: 'pdf-1',
       }),
     ).toEqual({ pageFrom: 1, pageTo: 6 });
+    expect(
+      documentWindowRange({
+        route: 'pdf_source',
+        visiblePage: 6,
+        sourceObjectId: 'pdf-1',
+      }),
+    ).toEqual({ pageFrom: 6, pageTo: 6 });
 
     expect(classifyActiveDocumentQuestion('On this page, what is the cyclical part of real GDP?')).toBe('current_page');
     expect(classifyActiveDocumentQuestion('According to page 2, what is the cyclical part of real GDP?')).toBe(
@@ -177,6 +185,44 @@ describe('document window budget', () => {
       4,
     );
     expect(scoped.map((item) => item.pageNumber)).toEqual([4]);
+  });
+});
+
+describe('pdf source search SQL contract', () => {
+  const sql = readFileSync(
+    new URL('../../../../migrations/021_ai_knowledge_pdf_source_search.sql', import.meta.url),
+    'utf8',
+  );
+  const body = sql.replace(/--[^\n]*/g, '');
+
+  it('restricts ranking to one owned PDF version and does not replace section search', () => {
+    const sourceAt = body.toLowerCase().indexOf('s.source_object_id = v_object_id');
+    const orderAt = body.toLowerCase().indexOf('order by e.embedding');
+    const limitAt = body.toLowerCase().indexOf('limit v_limit');
+    expect(sourceAt).toBeGreaterThan(0);
+    expect(orderAt).toBeGreaterThan(sourceAt);
+    expect(limitAt).toBeGreaterThan(orderAt);
+    expect(body).toContain('s.user_id = p_user_id');
+    expect(body).toContain('s.section_id = p_section_id');
+    expect(body).toContain('c.user_id = p_user_id');
+    expect(body).toContain('c.section_id = p_section_id');
+    expect(body).toContain('e.user_id = p_user_id');
+    expect(body).toContain('e.section_id = p_section_id');
+    expect(body).toContain("s.source_kind = 'free_space_pdf'");
+    expect(body).toContain('vi.source_version = s.retrieval_source_version');
+    expect(body).toContain('c.source_version = s.retrieval_source_version');
+    expect(body).toContain('e.source_version = s.retrieval_source_version');
+    expect(body).toContain("vi.status = 'indexed'");
+    expect(body).toContain('s.page_count');
+    expect(body).toContain('least(greatest(coalesce(p_limit, 8), 1), 12)');
+    expect(body.toLowerCase()).not.toMatch(/\b(insert|update|delete|truncate)\b/);
+    expect(body).not.toContain('notebook_page');
+    expect(sql).not.toMatch(/drop\s+function[\s\S]*ai_knowledge_search\s*\(/i);
+    expect(sql).not.toMatch(/drop\s+function[\s\S]*ai_knowledge_document_window/i);
+    expect(sql).toContain('from public');
+    expect(sql).toContain('from anon');
+    expect(sql).toContain('from authenticated');
+    expect(sql).toContain('to service_role');
   });
 });
 

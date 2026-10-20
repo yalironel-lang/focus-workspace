@@ -21,6 +21,8 @@ export type ActiveDocumentBrief = {
   toPage: number | null;
   partial: boolean;
   empty: boolean;
+  /** Pages actually selected from a source-scoped search. Not a contiguous window. */
+  matchedPages?: number[];
 };
 
 function activePdfRule(brief: ActiveDocumentBrief): string {
@@ -28,6 +30,12 @@ function activePdfRule(brief: ActiveDocumentBrief): string {
     'ACTIVE PDF: An authorized course PDF is already open. Never ask the student to upload or re-upload it.';
   if (brief.route === 'topical') {
     return `${shared} Page content was not requested because this turn uses section-wide course retrieval. Do not say that the visible page is missing or unindexed. Do not claim that this PDF page was read.`;
+  }
+  if (brief.route === 'pdf_source') {
+    if (brief.empty) {
+      return `${shared} No relevant indexed passage was found in this PDF. Do not answer from another PDF, a notebook, or general knowledge as if it were this file. Say that this PDF does not contain a matching passage.`;
+    }
+    return `${shared} Relevant indexed passages from this PDF were retrieved. They are not the whole file, and they are not limited to the visible page. Do not report page numbers. Do not use another document. Do not invent questions, solutions, equations, or figures that are not in the retrieved text.`;
   }
   if (brief.empty || brief.fromPage === null || brief.toPage === null) {
     return `${shared} Page content was requested, but the page window returned no readable indexed text. Say that the indexed text for the requested pages is missing. Do not invent questions, solutions, equations, or figures.`;
@@ -45,6 +53,19 @@ function formatActiveDocumentBrief(brief: ActiveDocumentBrief): string {
       `pages in file: ${count}`,
       `visible page: ${brief.visiblePage}`,
       'Page content was not requested. This question uses section-wide course retrieval. Do not say the visible page is missing or unindexed. Do not claim this PDF was read.',
+    ].join('\n');
+  }
+  if (brief.route === 'pdf_source') {
+    const matched = brief.matchedPages && brief.matchedPages.length > 0 ? brief.matchedPages.join(', ') : 'none';
+    return [
+      'ACTIVE DOCUMENT:',
+      `file: ${title}`,
+      `pages in file: ${count}`,
+      `visible page: ${brief.visiblePage}`,
+      `matched pages: ${matched}`,
+      brief.empty
+        ? 'No relevant indexed passage was found in this PDF. Do not substitute another document.'
+        : 'These passages were selected from anywhere in this PDF. This is not a reading of the entire PDF.',
     ].join('\n');
   }
   if (brief.empty || brief.fromPage === null || brief.toPage === null) {
