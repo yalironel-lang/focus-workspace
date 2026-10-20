@@ -156,7 +156,9 @@ describe('ask_course document window', () => {
     expect(prompt).toContain('retrieved pages: 3 of 30');
     expect(prompt).toContain('Page content was retrieved');
     expect(prompt).toContain('Do not report the retrieved page numbers');
+    expect(prompt).toContain('Do not say whether the requested question is inside that span');
     expect(prompt).not.toContain('Say which pages were retrieved');
+    expect(prompt).not.toContain('If the requested question is not in that span, say so');
     expect(prompt).not.toContain('Say that the indexed text for the requested pages is missing');
   });
 

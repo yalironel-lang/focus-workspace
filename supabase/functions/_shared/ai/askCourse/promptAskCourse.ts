@@ -32,7 +32,7 @@ function activePdfRule(brief: ActiveDocumentBrief): string {
   if (brief.empty || brief.fromPage === null || brief.toPage === null) {
     return `${shared} Page content was requested, but the page window returned no readable indexed text. Say that the indexed text for the requested pages is missing. Do not invent questions, solutions, equations, or figures.`;
   }
-  return `${shared} Page content was retrieved for the page span in this turn. That span is not the whole file. Do not report the retrieved page numbers in the answer. If the requested question is not in that span, say so. Do not invent questions, solutions, equations, or figures that are not in the retrieved text.`;
+  return `${shared} Page content was retrieved for the page span in this turn. That span is not the whole file. Do not report the retrieved page numbers in the answer. Do not say whether the requested question is inside that span. Do not invent questions, solutions, equations, or figures that are not in the retrieved text.`;
 }
 
 function formatActiveDocumentBrief(brief: ActiveDocumentBrief): string {

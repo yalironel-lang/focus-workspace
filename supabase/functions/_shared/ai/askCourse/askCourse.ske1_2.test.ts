@@ -1212,6 +1212,154 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(letterOnly.knowledgeTier).toBe('course_material');
   });
 
+  it('drops span-status sentences and an echoed unsupported notice when the academic claims are supported', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const definition = 'The cyclical part of real GDP is: Real GDP − Trend real GDP.';
+    const option = 'So the correct answer is (b) real GDP less trend real GDP.';
+    const answer = `${definition} ${option}`;
+    const notice = 'The unsupported part cannot be established from the available source.';
+    const corpus = [
+      'Question 1. What is the cyclical part of real GDP?',
+      'The cyclical part of real GDP is real GDP less trend real GDP.',
+      '(a) government spending',
+      '(b) real GDP less trend real GDP',
+      '(c) nominal GDP',
+      'Question 2. What is fiscal policy?',
+      '(b) government spending',
+    ].join('\n');
+    const base = {
+      question,
+      chunks: [{ citationIndex: 1, text: corpus }],
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false } as const,
+    };
+
+    const supported = applyClaimLevelGrounding({ ...base, answerText: answer });
+    expect(supported.text).toContain(definition);
+    expect(supported.text).toContain(option);
+    expect(supported.text).not.toContain('unsupported part');
+    expect(supported.knowledgeTier).toBe('course_material');
+
+    const inSpan = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The requested question is in the retrieved span.`,
+    });
+    expect(inSpan.text).toContain(definition);
+    expect(inSpan.text).toContain(option);
+    expect(inSpan.text).not.toContain('retrieved span');
+    expect(inSpan.text).not.toContain('unsupported part');
+    expect(inSpan.knowledgeTier).toBe('course_material');
+
+    const appears = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The question appears in the retrieved pages.`,
+    });
+    expect(appears.text).toContain(option);
+    expect(appears.text).not.toContain('retrieved pages');
+    expect(appears.knowledgeTier).toBe('course_material');
+
+    const echoed = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} ${notice}`,
+    });
+    expect(echoed.text).toContain(definition);
+    expect(echoed.text).toContain(option);
+    expect(echoed.text).not.toContain('unsupported part');
+    expect(echoed.knowledgeTier).toBe('course_material');
+
+    const spanAndUnsupported = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The requested question is in the retrieved span. Hydrogen bonds stabilize the alpha helix.`,
+    });
+    expect(spanAndUnsupported.text).toContain(definition);
+    expect(spanAndUnsupported.text).not.toContain('retrieved span');
+    expect(spanAndUnsupported.text).not.toContain('Hydrogen bonds');
+    expect(spanAndUnsupported.text).toContain(notice);
+    expect(spanAndUnsupported.knowledgeTier).toBe('mixed');
+
+    const echoedWithRejection = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} Hydrogen bonds stabilize the alpha helix. ${notice}`,
+    });
+    expect(echoedWithRejection.text).toContain(option);
+    expect(echoedWithRejection.text).not.toContain('Hydrogen bonds');
+    expect(echoedWithRejection.text.match(/unsupported part cannot be established/g)).toEqual([
+      'unsupported part cannot be established',
+    ]);
+    expect(echoedWithRejection.knowledgeTier).toBe('mixed');
+
+    const wrongLetter = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} So the correct answer is (c). ${notice}`,
+    });
+    expect(wrongLetter.text).toContain(definition);
+    expect(wrongLetter.text).not.toContain('(c)');
+    expect(wrongLetter.text).toContain(notice);
+    expect(wrongLetter.knowledgeTier).toBe('mixed');
+
+    const changedNumber = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The penalty is 50 marks.`,
+    });
+    expect(changedNumber.text).toContain(definition);
+    expect(changedNumber.text).not.toContain('50');
+    expect(changedNumber.text).toContain(notice);
+    expect(changedNumber.knowledgeTier).toBe('mixed');
+
+    const uncertainty = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The source does not state a numerical value.`,
+    });
+    expect(uncertainty.text).toContain(definition);
+    expect(uncertainty.text).toContain('does not state a numerical value');
+    expect(uncertainty.text).not.toContain('unsupported part');
+    expect(uncertainty.knowledgeTier).toBe('mixed');
+
+    const absent = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} The requested question is not in the retrieved span.`,
+    });
+    expect(absent.text).toContain(definition);
+    expect(absent.text.toLowerCase()).toContain('not in the retrieved span');
+    expect(absent.knowledgeTier).toBe('mixed');
+
+    const embedded = applyClaimLevelGrounding({
+      ...base,
+      answerText:
+        'The requested question is in the retrieved span and the cyclical part of real GDP is real GDP less trend real GDP.',
+    });
+    expect(embedded.text.toLowerCase()).toContain('retrieved span');
+
+    const otherDocument = applyClaimLevelGrounding({
+      ...base,
+      chunks: [{
+        citationIndex: 1,
+        text: [
+          'Question 1. What is the cyclical part of real GDP?',
+          'The cyclical part of real GDP is real GDP less trend real GDP.',
+          'Question 2. Which reading mentions part (b)?',
+          '(b) the appendix',
+        ].join('\n'),
+      }],
+      answerText: `${definition} So the correct answer is (b). The requested question is in the retrieved span.`,
+    });
+    expect(otherDocument.text).toBe(definition);
+    expect(otherDocument.text).not.toContain('(b)');
+    expect(otherDocument.text).not.toContain('unsupported part');
+    expect(otherDocument.knowledgeTier).toBe('course_material');
+
+    const missing = applyClaimLevelGrounding({
+      question,
+      answerText: `${answer} ${notice}`,
+      chunks: [],
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: false, hasPdfCapture: false },
+    });
+    expect(missing.text).toContain('No PDF selection or course material was available');
+    expect(missing.text).not.toContain('Real GDP');
+    expect(missing.knowledgeTier).toBe('mixed');
+  });
+
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {
     const quoted = 'Saving adds to the capital stock.';
     let calls = 0;

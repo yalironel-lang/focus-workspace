@@ -549,11 +549,16 @@ function academicClaimSegments(text: string): AcademicClaimSegment[] {
 }
 
 /**
- * A sentence that only names the retrieved page span. It is not an academic
- * claim. Anything longer, or any sentence that also states a fact, stays.
+ * A sentence that only names the retrieved page span, or only says that the
+ * requested question is inside it. It is not an academic claim. Anything
+ * longer, a sentence that also states a fact, or a statement that the
+ * question is absent stays.
  */
 const RETRIEVAL_STATUS_SENTENCE =
   /^(?:retrieved\s+pages?\s*:\s*\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})?(?:\s+of\s+\d{1,4})?|pages?\s+\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})?\s+(?:was|were)\s+retrieved)$/i;
+
+const QUESTION_SPAN_STATUS_SENTENCE =
+  /^(?:the\s+)?(?:requested\s+)?question\s+(?:is\s+in|appears\s+in)\s+the\s+retrieved\s+(?:span|pages?)$/i;
 
 export function isStandaloneRetrievalStatusSentence(claim: string): boolean {
   const normalized = claim
@@ -563,7 +568,20 @@ export function isStandaloneRetrievalStatusSentence(claim: string): boolean {
     .replace(/[.!?]+$/g, '')
     .trim();
   if (!normalized || normalized.length > 80) return false;
-  return RETRIEVAL_STATUS_SENTENCE.test(normalized);
+  return RETRIEVAL_STATUS_SENTENCE.test(normalized) || QUESTION_SPAN_STATUS_SENTENCE.test(normalized);
+}
+
+/** The exact checker notice, not a model-written caveat. */
+function isEchoedUnsupportedPartNotice(claim: string): boolean {
+  const normalized = claim
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/(?:\s*\[\s*(?:\d+|pdf selection)\s*\])+\s*$/i, '')
+    .replace(/[.!?]+$/g, '')
+    .trim()
+    .toLowerCase();
+  const expected = REJECTED_PART_NOTICE.replace(/[.!?]+$/g, '').trim().toLowerCase();
+  return normalized === expected;
 }
 
 function omitRetrievalStatusSentences(text: string): string {
@@ -835,7 +853,7 @@ export function applyClaimLevelGrounding(input: {
   const academic: Array<ReturnType<typeof acceptSourceOnlyClaim> | null> = [];
   const substantive: string[] = [];
   for (const claim of claims) {
-    if (standaloneAnswerLabel(claim)) {
+    if (standaloneAnswerLabel(claim) || isEchoedUnsupportedPartNotice(claim)) {
       academic.push(null);
       continue;
     }
