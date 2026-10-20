@@ -4,7 +4,7 @@ export const DOCUMENT_WINDOW_PAGE_SPAN = 6;
 export const DOCUMENT_WINDOW_FETCH_LIMIT = 24;
 export const VISIBLE_PAGE_SUFFICIENT_CHARS = 800;
 
-export type ActiveDocumentRoute = 'current_page' | 'document_walk' | 'continue' | 'topical';
+export type ActiveDocumentRoute = 'current_page' | 'named_page' | 'document_walk' | 'continue' | 'topical';
 
 export type DocumentWindowChunk = {
   sourceObjectId: string;
@@ -32,11 +32,27 @@ export type FittedDocumentWindow = {
 
 /**
  * "Next question" is not the last citation. Continuation uses only an explicit
- * window cursor. A deictic PDF request starts at page 1. A page request stays
- * on the visible page.
+ * window cursor. A question about the open PDF walks that file from page 1.
+ * "On this page" stays on the visible page. "According to page N" uses N.
  */
 const VISIBLE_PAGE_PATTERN =
   /\b(?:on this page|this page|current page|this pdf page|the open page|(?:currently\s+)?visible(?:\s+pdf)?\s+page|the page (?:i'm|i am) (?:looking at|viewing)|the page on my screen)\b/;
+
+const NAMED_PAGE_PATTERN =
+  /\b(?:according to|based on|on|from|in)\s+page\s+(\d{1,4})\b|\bpage\s+(\d{1,4})\s+of\s+(?:the\s+|this\s+)?(?:pdf|document|problem set|file)\b/i;
+
+const ACTIVE_PDF_PATTERN =
+  /\b(?:this pdf|this document|this problem set|the pdf|question by question|entire pdf|entire document|whole pdf|whole document)\b|\bsummarize (?:this|the) (?:pdf|document|problem set)\b|\b(?:according to|based on|based only on|based strictly on)\s+(?:the\s+|this\s+)?(?:pdf|document|problem set|file)\b/;
+
+/** Explicit page named in the question, when an active PDF is open. */
+export function namedDocumentPage(question: string): number | null {
+  const match = question.match(NAMED_PAGE_PATTERN);
+  const raw = match?.[1] ?? match?.[2];
+  if (!raw) return null;
+  const page = Number(raw);
+  if (!Number.isInteger(page) || page < 1 || page > 10000) return null;
+  return page;
+}
 
 export function classifyActiveDocumentQuestion(question: string): ActiveDocumentRoute {
   const q = question.trim().toLowerCase();
@@ -48,21 +64,22 @@ export function classifyActiveDocumentQuestion(question: string): ActiveDocument
   ) {
     return 'continue';
   }
-  if (
-    /\b(this pdf|this document|this problem set|question by question|entire pdf|entire document|whole pdf|whole document)\b/.test(q) ||
-    /\bsummarize this (?:pdf|document|problem set)\b/.test(q)
-  ) {
-    return 'document_walk';
-  }
+  if (namedDocumentPage(q) !== null) return 'named_page';
+  if (ACTIVE_PDF_PATTERN.test(q)) return 'document_walk';
   return 'topical';
 }
 
 export function documentWindowRange(input: {
   route: ActiveDocumentRoute;
   visiblePage: number;
+  namedPage?: number | null;
   cursor?: DocumentWindowCursor | null;
   sourceObjectId: string;
 }): { pageFrom: number; pageTo: number } {
+  if (input.route === 'named_page') {
+    const page = input.namedPage && input.namedPage >= 1 ? input.namedPage : input.visiblePage;
+    return { pageFrom: page, pageTo: page };
+  }
   if (input.route === 'current_page') {
     return { pageFrom: input.visiblePage, pageTo: input.visiblePage + 1 };
   }

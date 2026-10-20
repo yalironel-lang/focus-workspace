@@ -7,6 +7,7 @@ import {
   classifyActiveDocumentQuestion,
   documentWindowRange,
   fitDocumentWindow,
+  namedDocumentPage,
   scopeCurrentPageChunks,
   type DocumentWindowChunk,
 } from './documentWindow.ts';
@@ -81,6 +82,37 @@ describe('active PDF question routing', () => {
         cursor: { sourceObjectId: 'pdf-other', resumeFromPage: 4 },
       }),
     ).toEqual({ pageFrom: 1, pageTo: 6 });
+  });
+
+  it('routes an open PDF question to that document, and a named page to that page', () => {
+    expect(classifyActiveDocumentQuestion('According to the PDF, what is the cyclical part of real GDP?')).toBe(
+      'document_walk',
+    );
+    expect(classifyActiveDocumentQuestion('According to this PDF, what is the cyclical part of real GDP?')).toBe(
+      'document_walk',
+    );
+    expect(
+      documentWindowRange({
+        route: 'document_walk',
+        visiblePage: 6,
+        sourceObjectId: 'pdf-1',
+      }),
+    ).toEqual({ pageFrom: 1, pageTo: 6 });
+
+    expect(classifyActiveDocumentQuestion('On this page, what is the cyclical part of real GDP?')).toBe('current_page');
+    expect(classifyActiveDocumentQuestion('According to page 2, what is the cyclical part of real GDP?')).toBe(
+      'named_page',
+    );
+    expect(namedDocumentPage('According to page 2 of the PDF')).toBe(2);
+    expect(
+      documentWindowRange({
+        route: 'named_page',
+        visiblePage: 6,
+        namedPage: 2,
+        sourceObjectId: 'pdf-1',
+      }),
+    ).toEqual({ pageFrom: 2, pageTo: 2 });
+    expect(classifyActiveDocumentQuestion('What is monetary policy according to the lecture?')).toBe('topical');
   });
 
   it('leaves a general course question on section retrieval', () => {

@@ -298,6 +298,141 @@ describe('ask_course document window', () => {
     expect(prompt).toContain('Indexed question 2 on the visible page.');
   });
 
+  it('grounds "according to the PDF" in the open document, including pages other than the visible one', async () => {
+    const { deps, searchCalls, windowCalls, messages } = harness(async (input) => ({
+      ok: true,
+      rows: [
+        row(2, 'The cyclical component of real GDP is (b) real GDP less trend real GDP.'),
+        row(8, 'A later chapter discusses a different identity.'),
+      ].filter((item) => item.pageNumber >= input.pageFrom && item.pageNumber <= input.pageTo),
+    }));
+    const result = await runAskCoursePipeline({
+      authUserId: USER,
+      request: {
+        version: 2,
+        capability: 'ask_course',
+        sectionId: SECTION,
+        question: 'According to the PDF, what is the cyclical part of real GDP?',
+        teachingMode: 'explain',
+        activeDocument: active,
+      },
+      deps,
+    });
+    expect(searchCalls).toHaveLength(0);
+    expect(windowCalls[0]).toMatchObject({
+      userId: USER,
+      sectionId: SECTION,
+      sourceObjectId: PDF,
+      pageFrom: 1,
+      pageTo: 6,
+    });
+    if (!result.response.ok || result.response.result.type !== 'ask_course') throw new Error('expected answer');
+    expect(result.response.result.sources.map((source) => source.pageNumber)).toEqual([2]);
+    const prompt = messages[0]?.map((message) => message.content).join('\n') ?? '';
+    expect(prompt).toContain('real GDP less trend real GDP');
+    expect(prompt).toContain('visible page: 6');
+    expect(prompt).not.toContain('Page content was not requested');
+    expect(prompt).not.toContain('A later chapter');
+    expect(prompt).not.toContain('Monetary policy changes the interest rate.');
+  });
+
+  it('reads the named page rather than the visible page', async () => {
+    const { deps, searchCalls, windowCalls, messages } = harness(async (input) => ({
+      ok: true,
+      rows: [row(2, 'Page 2 states option (b).'), row(6, 'Page 6 is only the visible page.')].filter(
+        (item) => item.pageNumber >= input.pageFrom && item.pageNumber <= input.pageTo,
+      ),
+    }));
+    await runAskCoursePipeline({
+      authUserId: USER,
+      request: {
+        version: 2,
+        capability: 'ask_course',
+        sectionId: SECTION,
+        question: 'According to page 2, what is the cyclical part of real GDP?',
+        teachingMode: 'explain',
+        activeDocument: active,
+      },
+      deps,
+    });
+    expect(searchCalls).toHaveLength(0);
+    expect(windowCalls[0]).toMatchObject({ pageFrom: 2, pageTo: 2, sourceObjectId: PDF });
+    const prompt = messages[0]?.map((message) => message.content).join('\n') ?? '';
+    expect(prompt).toContain('Page 2 states option (b).');
+    expect(prompt).not.toContain('Page 6 is only the visible page.');
+    expect(prompt).toContain('retrieved pages: 2 of 30');
+  });
+
+  it('reads the visible page for "on this page"', async () => {
+    const { deps, searchCalls, windowCalls } = harness(async () => ({
+      ok: true,
+      rows: [row(2, 'x'.repeat(900)), row(3, 'The next page is not this page.')],
+    }));
+    const result = await runAskCoursePipeline({
+      authUserId: USER,
+      request: {
+        version: 2,
+        capability: 'ask_course',
+        sectionId: SECTION,
+        question: 'On this page, what is the cyclical part of real GDP?',
+        teachingMode: 'explain',
+        activeDocument: { ...active, pageNumber: 2 },
+      },
+      deps,
+    });
+    expect(searchCalls).toHaveLength(0);
+    expect(windowCalls[0]).toMatchObject({ pageFrom: 2, pageTo: 3 });
+    if (!result.response.ok || result.response.result.type !== 'ask_course') throw new Error('expected answer');
+    expect(result.response.result.sources.map((source) => source.pageNumber)).toEqual([2]);
+  });
+
+  it('says when the open PDF has no readable text instead of searching the section', async () => {
+    const { deps, searchCalls, messages } = harness(async () => ({ ok: true, rows: [] }));
+    const result = await runAskCoursePipeline({
+      authUserId: USER,
+      request: {
+        version: 2,
+        capability: 'ask_course',
+        sectionId: SECTION,
+        question: 'According to the PDF, what is the cyclical part of real GDP?',
+        teachingMode: 'explain',
+        activeDocument: active,
+      },
+      deps,
+    });
+    expect(searchCalls).toHaveLength(0);
+    expect(result.response.ok).toBe(true);
+    const prompt = messages[0]?.map((message) => message.content).join('\n') ?? '';
+    expect(prompt).toContain('no readable indexed text');
+    expect(prompt).toContain('Do not invent');
+    expect(prompt).not.toContain('Monetary policy changes the interest rate.');
+  });
+
+  it('does not read another user PDF for an according-to-the-PDF question', async () => {
+    const calls: unknown[] = [];
+    const { deps } = harness(async (input) => {
+      calls.push(input);
+      return { ok: true, rows: [row(1, 'secret')] };
+    });
+    deps.loadPdfCaptureSource = async () => ({ ...ownedPdf(), user_id: 'someone-else' });
+    const result = await runAskCoursePipeline({
+      authUserId: USER,
+      request: {
+        version: 2,
+        capability: 'ask_course',
+        sectionId: SECTION,
+        question: 'According to this PDF, what is the cyclical part of real GDP?',
+        teachingMode: 'explain',
+        activeDocument: active,
+      },
+      deps,
+    });
+    expect(result.response.ok).toBe(false);
+    if (result.response.ok) throw new Error('expected rejection');
+    expect(result.response.error.code).toBe('not_found');
+    expect(calls).toHaveLength(0);
+  });
+
   it('keeps section-wide retrieval for a general question', async () => {
     const { deps, searchCalls, windowCalls, messages } = harness(async () => ({
       ok: true,

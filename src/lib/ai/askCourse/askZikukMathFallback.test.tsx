@@ -113,6 +113,22 @@ describe('student answer math rendering', () => {
     expect(host!.querySelector('[data-math-fallback]')).toBeNull();
   });
 
+  it('renders a bare LaTeX command and leaves currency and broken commands as text', () => {
+    const text = [
+      'The cyclical part is Y_t - \\bar{Y}_t.',
+      'Trend output is \\frac{Y}{\\bar{Y}}.',
+      'Cost is \\$20 today.',
+      'Broken \\frac{a{b stays in the sentence.',
+    ].join(' ');
+    mount(createElement(AskZikukAnswer, { text, sources: [] }));
+    expect(host!.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(2);
+    expect(host!.textContent).not.toContain('\\bar');
+    expect(host!.textContent).not.toContain('\\frac{Y}');
+    expect(host!.textContent).toContain('$20');
+    expect(host!.textContent).toContain('\\frac{a{b');
+    expect(host!.textContent).not.toContain('Could not render this expression');
+  });
+
   it('degrades malformed explicit LaTeX to source text', () => {
     const text = 'Broken \\(\\frac{a{b\\) and **still** readable.';
     mount(createElement(AskZikukAnswer, { text, sources: [] }));

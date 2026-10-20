@@ -7,6 +7,7 @@
  */
 
 import { parseAiExplanationSegments } from '../explainSelection/parseAiExplanationSegments';
+import { wrapBareLatex } from './presentBareLatex';
 
 export type AskProtectedSlot =
   | { kind: 'inline_math'; latex: string }
@@ -468,7 +469,7 @@ export function prepareAskAcademicMarkdown(input: string): {
   if (!input) return { markdown: '', slots: [] };
 
   const { text: afterCode, slots } = extractFencedCode(input);
-  const segments = parseAiExplanationSegments(afterCode);
+  const segments = parseAiExplanationSegments(wrapBareLatex(afterCode));
   let markdown = '';
 
   for (const seg of segments) {

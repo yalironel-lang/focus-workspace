@@ -9,6 +9,7 @@ import {
   applyClaimLevelGrounding,
   contextAvailableForGrounding,
   evaluateGroundingProvenance,
+  SOURCE_ONLY_INTERPRETATION_NOTICE,
 } from './evaluateGroundingProvenance.ts';
 
 const QUESTION =
@@ -189,4 +190,49 @@ describe('grounding CPU benchmark', () => {
     );
     expect(scans).toBeGreaterThan(0);
   }, 12_000);
+});
+
+describe('faithful paraphrase versus unsupported source claims', () => {
+  const question = 'According to the PDF, what is the cyclical part of real GDP?';
+  const page = 'The cyclical component of real GDP is (b) real GDP less trend real GDP.';
+
+  function ground(answer: string, chunk = page) {
+    return applyClaimLevelGrounding({
+      question,
+      answerText: answer,
+      chunks: chunk ? [{ citationIndex: 1, text: chunk }] : [],
+      contextAvailable: { hasIndexedChunks: Boolean(chunk), hasPdfCapture: false },
+    });
+  }
+
+  it('keeps a close paraphrase without calling the source unsupported', () => {
+    const result = ground('It is option (b): real GDP minus trend real GDP.');
+    expect(result.knowledgeTier).toBe('mixed');
+    expect(result.text).toContain('real GDP minus trend real GDP');
+    expect(result.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(result.text).not.toContain('cannot be established');
+  });
+
+  it('keeps a verbatim option as course material', () => {
+    const result = ground('The cyclical component of real GDP is (b) real GDP less trend real GDP.');
+    expect(result.knowledgeTier).toBe('course_material');
+    expect(result.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+  });
+
+  it('does not treat a different claim as supported', () => {
+    const loose = ground('The cyclical part is government spending.');
+    expect(loose.knowledgeTier).toBe('mixed');
+    expect(loose.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(loose.knowledgeTier).not.toBe('course_material');
+
+    const unrelated = ground('Nominal wages determine the contract.');
+    expect(unrelated.text).not.toContain('Nominal wages');
+    expect(unrelated.text).toContain('cannot be established from the available source');
+  });
+
+  it('does not invent support when no document text was retrieved', () => {
+    const result = ground('It is option (b): real GDP minus trend real GDP.', '');
+    expect(result.text).toContain('No PDF selection or course material was available');
+    expect(result.text).not.toContain('real GDP minus');
+  });
 });

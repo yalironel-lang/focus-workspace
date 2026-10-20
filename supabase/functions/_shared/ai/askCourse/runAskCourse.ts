@@ -49,6 +49,7 @@ import { isOwnedPdfCaptureSource, isOwnedPdfSource, type LoadPdfCaptureSource } 
 import {
   classifyActiveDocumentQuestion,
   documentWindowRange,
+  namedDocumentPage,
   DOCUMENT_WINDOW_FETCH_LIMIT,
   fitDocumentWindow,
   scopeCurrentPageChunks,
@@ -438,9 +439,11 @@ export async function runAskCoursePipeline(input: {
   if (useWindow && activeDocument && documentRoute) {
     const cursor: DocumentWindowCursor | undefined =
       request.version !== 1 ? request.documentCursor : undefined;
+    const namedPage = documentRoute === 'named_page' ? namedDocumentPage(question) : null;
     const range = documentWindowRange({
       route: documentRoute,
       visiblePage: activeDocument.pageNumber,
+      namedPage,
       cursor,
       sourceObjectId: activeDocument.sourceObjectId,
     });
@@ -459,7 +462,9 @@ export async function runAskCoursePipeline(input: {
     const scoped =
       documentRoute === 'current_page'
         ? scopeCurrentPageChunks(rows, activeDocument.pageNumber)
-        : rows;
+        : documentRoute === 'named_page' && namedPage
+          ? rows.filter((row) => row.pageNumber === namedPage)
+          : rows;
     const fitted = fitDocumentWindow(
       scoped,
       undefined,

@@ -558,6 +558,20 @@ function dropUnsupportedCourseFacts(text: string, corpus: string): string {
   return cleanupCitationGaps(kept.map((seg) => seg.body + seg.trailing).join(''));
 }
 
+/**
+ * The claim restates one retrieved sentence closely enough that calling it
+ * unsupported would be false. A shared word is not enough, and a new number,
+ * reversal, or course-logistics fact never reaches this check.
+ */
+function isFaithfulParaphrase(claim: string, corpus: string): boolean {
+  const fragment = bestSourceFragment(claim, corpus);
+  const claimStems = contentStems(claim);
+  if (claimStems.size === 0) return false;
+  const overlap = stemOverlapCount(claim, fragment);
+  if (overlap >= 3) return true;
+  return overlap >= 2 && overlap * 2 >= claimStems.size;
+}
+
 function claimIsRejected(
   claim: string,
   corpus: string,
@@ -623,14 +637,19 @@ function acceptSourceOnlyClaim(
   if (claimIsRejected(claim, input.corpus, input.question)) {
     return { text: null, quoted: false, interpretive: false, rejected: true };
   }
+  if (isFaithfulParaphrase(claim, input.corpus)) {
+    return { text: stripMarkers(claim), quoted: false, interpretive: false, rejected: false };
+  }
   return { text: stripMarkers(claim), quoted: false, interpretive: true, rejected: false };
 }
 
 /**
  * Source-only answers are kept claim by claim.
  * Direct quotations can keep a real citation and a specific tier.
- * Paraphrase, simplification, translation, and mathematical restatement stay
- * mixed and carry an explicit uncertainty sentence.
+ * A faithful paraphrase of one retrieved sentence is kept without an
+ * unsupported-source notice. It is still not treated as a verbatim quotation.
+ * Loose paraphrase, translation, and mathematical restatement stay mixed and
+ * carry an explicit uncertainty sentence.
  * Unsupported claims are removed instead of discarding the rest of the answer.
  * Ordinary questions keep their text, with unsupported course-logistics
  * sentences removed and citations limited to supported quotations.

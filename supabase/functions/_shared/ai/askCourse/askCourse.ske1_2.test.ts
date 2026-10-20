@@ -802,7 +802,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(paraphrase.knowledgeTier).toBe('mixed');
     expect(paraphrase.text).toContain('total flux leaving a closed surface');
-    expect(paraphrase.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(paraphrase.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
     expect(paraphrase.text).not.toMatch(/\[\d+\]/);
     expect(paraphrase.contextAvailable).toEqual({ hasIndexedChunks: false, hasPdfCapture: true });
 
@@ -832,7 +832,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(translation.knowledgeTier).toBe('mixed');
     expect(translation.text).toContain('relates outward flux');
-    expect(translation.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(translation.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
     expect(translation.knowledgeTier).not.toBe('general_academic');
 
     const translatedScript = await ask({
@@ -938,7 +938,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
       });
       expect(modeResult.knowledgeTier).toBe('mixed');
       expect(modeResult.text).toContain('total flux leaving a closed surface');
-      expect(modeResult.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+      expect(modeResult.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
     }
   });
 
