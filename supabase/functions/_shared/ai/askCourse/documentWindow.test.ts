@@ -152,6 +152,25 @@ describe('document window budget', () => {
     expect(fitted.resumeFromPage).toBe(2);
   });
 
+  it('keeps a short page 2 inside the prompt budget', () => {
+    const fitted = fitDocumentWindow(
+      [
+        chunk(1, 0, 'p'.repeat(223)),
+        chunk(2, 0, 'p'.repeat(914)),
+        chunk(3, 0, 'p'.repeat(832)),
+        chunk(3, 1, 'p'.repeat(1108)),
+        chunk(4, 0, 'p'.repeat(826)),
+        chunk(4, 1, 'p'.repeat(1161)),
+        chunk(5, 0, 'p'.repeat(897)),
+      ],
+      ASK_COURSE_MAX_RETRIEVED_CHARS,
+    );
+    const pageTwo = fitted.chunks.find((item) => item.pageNumber === 2);
+    expect(pageTwo?.text.length).toBe(914);
+    expect(fitted.chars).toBeLessThanOrEqual(ASK_COURSE_MAX_RETRIEVED_CHARS);
+    expect(fitted.chunks.some((item) => item.pageNumber === 5)).toBe(false);
+  });
+
   it('drops the following page when the visible page already has enough text', () => {
     const scoped = scopeCurrentPageChunks(
       [chunk(4, 0, 'x'.repeat(900)), chunk(5, 0, 'later question')],

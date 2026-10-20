@@ -265,9 +265,14 @@ function extractNumbers(text: string): string[] {
   );
 }
 
+/** A page label is not a changed quantity. Other numbers in the same sentence still count. */
+function withoutPageLabels(text: string): string {
+  return text.replace(/\bpages?\s+\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})?\b/gi, ' ');
+}
+
 export function hasNumericOrMagnitudeConflict(claim: string, source: string, question: string): boolean {
   const allowed = new Set([...extractNumbers(source), ...extractNumbers(question)]);
-  const novel = extractNumbers(claim).filter((value) => !allowed.has(value));
+  const novel = extractNumbers(withoutPageLabels(claim)).filter((value) => !allowed.has(value));
   if (novel.length > 0) return true;
   const magnitude = claim.match(MAGNITUDE_RE);
   if (!magnitude) return false;
@@ -543,6 +548,31 @@ function academicClaimSegments(text: string): AcademicClaimSegment[] {
   return segs;
 }
 
+/**
+ * A sentence that only names the retrieved page span. It is not an academic
+ * claim. Anything longer, or any sentence that also states a fact, stays.
+ */
+const RETRIEVAL_STATUS_SENTENCE =
+  /^(?:retrieved\s+pages?\s*:\s*\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})?(?:\s+of\s+\d{1,4})?|pages?\s+\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})?\s+(?:was|were)\s+retrieved)$/i;
+
+export function isStandaloneRetrievalStatusSentence(claim: string): boolean {
+  const normalized = claim
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/(?:\s*\[\s*(?:\d+|pdf selection)\s*\])+\s*$/i, '')
+    .replace(/[.!?]+$/g, '')
+    .trim();
+  if (!normalized || normalized.length > 80) return false;
+  return RETRIEVAL_STATUS_SENTENCE.test(normalized);
+}
+
+function omitRetrievalStatusSentences(text: string): string {
+  const segs = academicClaimSegments(text);
+  const kept = segs.filter((seg) => !seg.claim || !isStandaloneRetrievalStatusSentence(seg.claim));
+  if (kept.length === segs.length) return text;
+  return cleanupCitationGaps(kept.map((seg) => seg.body + seg.trailing).join(''));
+}
+
 function dropUnsupportedCourseFacts(text: string, corpus: string): string {
   const segs = academicClaimSegments(text);
   const kept: AcademicClaimSegment[] = [];
@@ -665,10 +695,11 @@ export function applyClaimLevelGrounding(input: {
   const chunkTexts = input.chunks.map((chunk) => chunk.text.trim()).filter((text) => text.length > 0);
   const corpus = [captureText, ...chunkTexts].filter((text) => text.length > 0).join('\n');
   const sourceOnly = isExplicitSourceOnlyQuestion(input.question);
+  const answerText = omitRetrievalStatusSentences(input.answerText);
 
   if (!sourceOnly) {
     const cited = enforceServerCitationIntegrity({
-      text: input.answerText,
+      text: answerText,
       chunks: input.chunks,
       captureText,
       question: input.question,
@@ -700,7 +731,7 @@ export function applyClaimLevelGrounding(input: {
   let interpretiveKept = 0;
   let rejected = 0;
   const kept: string[] = [];
-  for (const claim of splitClaims(input.answerText)) {
+  for (const claim of splitClaims(answerText)) {
     const decision = acceptSourceOnlyClaim(claim, {
       question: input.question,
       chunks: input.chunks,
@@ -721,13 +752,14 @@ export function applyClaimLevelGrounding(input: {
   }
 
   const pieces = [...kept];
-  if (interpretiveKept > 0 && rejected > 0) {
+  const alreadyLimited = kept.some((claim) => isSelfLimitation(claim));
+  if (!alreadyLimited && interpretiveKept > 0 && rejected > 0) {
     pieces.push(
       'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
     );
-  } else if (interpretiveKept > 0) {
+  } else if (!alreadyLimited && interpretiveKept > 0) {
     pieces.push(SOURCE_ONLY_INTERPRETATION_NOTICE);
-  } else if (rejected > 0) {
+  } else if (!alreadyLimited && rejected > 0) {
     pieces.push(REJECTED_PART_NOTICE);
   }
   const text = cleanupCitationGaps(pieces.join(' '));

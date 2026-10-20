@@ -999,6 +999,105 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(removed.knowledgeTier).toBe('course_material');
   });
 
+  it('omits standalone retrieval-status sentences without weakening academic checks', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const answer =
+      'According to the PDF, the cyclical part of real GDP is: Real GDP − trend real GDP.';
+    const corpus = 'The cyclical part of real GDP is real GDP less trend real GDP.';
+    const contextAvailable = { hasIndexedChunks: true, hasPdfCapture: false } as const;
+    const base = {
+      question,
+      chunks: [{ citationIndex: 1, text: corpus }],
+      captureText: '',
+      contextAvailable,
+    };
+
+    const withStatus = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} Retrieved pages: 1–6.`,
+    });
+    expect(withStatus.text).toBe(answer);
+    expect(withStatus.text).not.toContain('unsupported part');
+    expect(withStatus.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(withStatus.knowledgeTier).toBe('course_material');
+
+    const withStatusWords = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} Pages 1-6 were retrieved.`,
+    });
+    expect(withStatusWords.text).toBe(answer);
+    expect(withStatusWords.knowledgeTier).toBe('course_material');
+
+    const withClaim = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} Nominal wages determine the contract.`,
+    });
+    expect(withClaim.text).toContain(answer);
+    expect(withClaim.text).not.toContain('Nominal wages');
+    expect(withClaim.text).toContain(
+      'The unsupported part cannot be established from the available source.',
+    );
+    expect(withClaim.knowledgeTier).toBe('mixed');
+
+    const limitation = SOURCE_ONLY_INTERPRETATION_NOTICE;
+    const withLimitation = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} ${limitation}`,
+    });
+    expect(withLimitation.text).toContain(answer);
+    expect(withLimitation.text.match(/not established as a direct statement/g)).toEqual([
+      'not established as a direct statement',
+    ]);
+    expect(withLimitation.text).not.toContain('unsupported part');
+
+    const pageSentence = applyClaimLevelGrounding({
+      ...base,
+      answerText:
+        'Page 2 states that the cyclical part of real GDP is real GDP less trend real GDP.',
+    });
+    expect(pageSentence.text).toContain('Page 2 states that');
+    expect(pageSentence.knowledgeTier).toBe('course_material');
+
+    const changedOnPage = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${answer} Page 2 states that the penalty is 50 marks.`,
+    });
+    expect(changedOnPage.text).toContain(answer);
+    expect(changedOnPage.text).not.toContain('50');
+    expect(changedOnPage.text).toContain(
+      'The unsupported part cannot be established from the available source.',
+    );
+
+    const embedded = applyClaimLevelGrounding({
+      ...base,
+      answerText:
+        'Retrieved pages include the definition of the cyclical part of real GDP as real GDP less trend real GDP.',
+    });
+    expect(embedded.text.toLowerCase()).toContain('retrieved pages include');
+
+    const ordinary = applyClaimLevelGrounding({
+      question: 'What is monetary policy?',
+      answerText: 'Saving adds to the capital stock. Retrieved pages: 1–6.',
+      chunks: [{ citationIndex: 1, text: 'Saving adds to the capital stock.' }],
+      captureText: '',
+      contextAvailable,
+    });
+    expect(ordinary.text).toBe('Saving adds to the capital stock.');
+    expect(ordinary.knowledgeTier).toBe('course_material');
+    expect(ordinary.text).not.toContain('unsupported');
+
+    const missing = applyClaimLevelGrounding({
+      question,
+      answerText: answer,
+      chunks: [],
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: false, hasPdfCapture: false },
+    });
+    expect(missing.text).toContain('No PDF selection or course material was available');
+    expect(missing.text).not.toContain('Real GDP');
+    expect(missing.knowledgeTier).toBe('mixed');
+  });
+
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {
     const quoted = 'Saving adds to the capital stock.';
     let calls = 0;

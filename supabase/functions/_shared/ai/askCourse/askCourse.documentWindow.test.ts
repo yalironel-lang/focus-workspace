@@ -155,6 +155,8 @@ describe('ask_course document window', () => {
     const prompt = messages[0]?.map((message) => message.content).join('\n') ?? '';
     expect(prompt).toContain('retrieved pages: 3 of 30');
     expect(prompt).toContain('Page content was retrieved');
+    expect(prompt).toContain('Do not report the retrieved page numbers');
+    expect(prompt).not.toContain('Say which pages were retrieved');
     expect(prompt).not.toContain('Say that the indexed text for the requested pages is missing');
   });
 
