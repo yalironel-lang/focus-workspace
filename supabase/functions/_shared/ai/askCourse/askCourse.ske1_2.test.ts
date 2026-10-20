@@ -20,6 +20,7 @@ import { runAskCoursePipeline, type AskCourseDeps } from './runAskCourse.ts';
 import { buildAskCourseRetrievalQuery } from './buildAskCourseRetrievalQuery.ts';
 import {
   applyClaimLevelGrounding,
+  CONTRADICTED_OPTION_NOTICE,
   SOURCE_ONLY_INTERPRETATION_NOTICE,
 } from './evaluateGroundingProvenance.ts';
 import { createFakeEmbeddingProvider } from '../knowledge/fakeEmbeddingProvider.ts';
@@ -1151,9 +1152,8 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(wrongLetter.text).toContain(explanation);
     expect(wrongLetter.text).not.toContain('(c)');
-    expect(wrongLetter.text).toContain(
-      'The unsupported part cannot be established from the available source.',
-    );
+    expect(wrongLetter.text).not.toContain('unsupported part');
+    expect(wrongLetter.text).toContain(CONTRADICTED_OPTION_NOTICE);
     expect(wrongLetter.knowledgeTier).toBe('mixed');
 
     const elsewhere = [
@@ -1294,7 +1294,8 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(wrongLetter.text).toContain(definition);
     expect(wrongLetter.text).not.toContain('(c)');
-    expect(wrongLetter.text).toContain(notice);
+    expect(wrongLetter.text).not.toContain(notice);
+    expect(wrongLetter.text).toContain(CONTRADICTED_OPTION_NOTICE);
     expect(wrongLetter.knowledgeTier).toBe('mixed');
 
     const changedNumber = applyClaimLevelGrounding({
@@ -1441,7 +1442,8 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(wrongLetter.text).toContain(definition);
     expect(wrongLetter.text).not.toContain('(c)');
-    expect(wrongLetter.text).toContain(notice);
+    expect(wrongLetter.text).not.toContain(notice);
+    expect(wrongLetter.text).toContain(CONTRADICTED_OPTION_NOTICE);
     expect(wrongLetter.knowledgeTier).toBe('mixed');
 
     const wrongNumber = applyClaimLevelGrounding({
@@ -1491,6 +1493,137 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(empty.text).toContain('No PDF selection or course material was available');
     expect(empty.text).not.toContain('real GDP less trend');
     expect(empty.knowledgeTier).toBe('mixed');
+  });
+
+  it('keeps provenance accurate across the four retrieved chunks', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const definition = 'The cyclical part of real GDP is: Real GDP − trend real GDP.';
+    const unsupportedNotice = 'The unsupported part cannot be established from the available source.';
+    const chunks = [
+      {
+        citationIndex: 1,
+        text: [
+          'The cyclical part of real GDP is real GDP less trend real GDP.',
+          '(a) trend real GDP less measured output',
+          '(b) real GDP less trend real GDP',
+          '(c) nominal GDP plus trend real GDP',
+          '(d) trend real GDP without a residual',
+          'A later question on the same page asks about fiscal policy.',
+          '(a) taxes on wages',
+          '(b) government spending',
+          '(c) the interest rate',
+          '(d) the exchange rate',
+        ].join('\n'),
+      },
+      {
+        citationIndex: 2,
+        text: 'Another retrieved page discusses inventories.\n(a) planned investment\n(b) unplanned inventories',
+      },
+      {
+        citationIndex: 3,
+        text: 'A third retrieved page discusses employment.\n(a) hours worked',
+      },
+      {
+        citationIndex: 4,
+        text: 'A fourth retrieved page discusses prices.\n(a) the price level',
+      },
+    ];
+    const base = {
+      question,
+      chunks,
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false } as const,
+    };
+
+    const exact = applyClaimLevelGrounding({ ...base, answerText: definition });
+    expect(exact.text).toContain(definition);
+    expect(exact.text).not.toContain(unsupportedNotice);
+    expect(exact.text).not.toContain(CONTRADICTED_OPTION_NOTICE);
+    expect(exact.knowledgeTier).toBe('course_material');
+
+    const correctLetter = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The correct option is (b).`,
+    });
+    expect(correctLetter.text).toContain('The correct option is (b).');
+    expect(correctLetter.text).not.toContain(unsupportedNotice);
+    expect(correctLetter.text).not.toContain(CONTRADICTED_OPTION_NOTICE);
+    expect(correctLetter.knowledgeTier).toBe('course_material');
+
+    for (const letter of ['a', 'c']) {
+      const wrong = applyClaimLevelGrounding({
+        ...base,
+        answerText: `${definition} The correct option is (${letter}).`,
+      });
+      expect(wrong.text).toContain(definition);
+      expect(wrong.text).not.toContain(`(${letter})`);
+      expect(wrong.text).not.toContain(unsupportedNotice);
+      expect(wrong.text).toContain(CONTRADICTED_OPTION_NOTICE);
+      expect(wrong.knowledgeTier).toBe('mixed');
+    }
+
+    const narrated = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} Relevant passages were retrieved from this PDF. This is not limited to the visible page.`,
+    });
+    expect(narrated.text).toBe(definition);
+    expect(narrated.knowledgeTier).toBe('course_material');
+
+    const extra = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} Hydrogen bonds stabilize the alpha helix.`,
+    });
+    expect(extra.text).toContain(definition);
+    expect(extra.text).not.toContain('Hydrogen bonds');
+    expect(extra.text).toContain(unsupportedNotice);
+    expect(extra.text).not.toContain(CONTRADICTED_OPTION_NOTICE);
+    expect(extra.knowledgeTier).toBe('mixed');
+
+    const wrongNumber = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The penalty is 50 marks.`,
+    });
+    expect(wrongNumber.text).not.toContain('50');
+    expect(wrongNumber.text).toContain(unsupportedNotice);
+    expect(wrongNumber.knowledgeTier).toBe('mixed');
+
+    const wrongSymbol = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} \\( y = 99 \\).`,
+    });
+    expect(wrongSymbol.text).not.toContain('99');
+    expect(wrongSymbol.text).toContain(unsupportedNotice);
+    expect(wrongSymbol.knowledgeTier).toBe('mixed');
+
+    const mixedClaims = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The correct option is (b). Hydrogen bonds stabilize the alpha helix. The penalty is 50 marks.`,
+    });
+    expect(mixedClaims.text).toContain(definition);
+    expect(mixedClaims.text).toContain('The correct option is (b).');
+    expect(mixedClaims.text).not.toContain('Hydrogen bonds');
+    expect(mixedClaims.text).not.toContain('50');
+    expect(mixedClaims.text).toContain(unsupportedNotice);
+    expect(mixedClaims.knowledgeTier).toBe('mixed');
+
+    const wrongLetterAndClaim = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The correct option is (a). Hydrogen bonds stabilize the alpha helix.`,
+    });
+    expect(wrongLetterAndClaim.text).toContain(definition);
+    expect(wrongLetterAndClaim.text).not.toContain('(a)');
+    expect(wrongLetterAndClaim.text).not.toContain('Hydrogen bonds');
+    expect(wrongLetterAndClaim.text).toContain(unsupportedNotice);
+    expect(wrongLetterAndClaim.knowledgeTier).toBe('mixed');
+
+    const causal = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} This holds because wages are sticky.`,
+    });
+    expect(causal.text).toContain(definition);
+    expect(causal.text).not.toContain('sticky');
+    expect(causal.text).toContain(unsupportedNotice);
+    expect(causal.knowledgeTier).toBe('mixed');
   });
 
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {

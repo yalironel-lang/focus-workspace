@@ -151,6 +151,13 @@ export const SOURCE_ONLY_INTERPRETATION_NOTICE =
 const REJECTED_PART_NOTICE =
   'The unsupported part cannot be established from the available source.';
 
+/**
+ * A contradicted choice is a real selection error, so the remaining text is
+ * not fully grounded. It is not an unsupported academic statement.
+ */
+export const CONTRADICTED_OPTION_NOTICE =
+  'The named option does not match the available source.';
+
 const CAUSAL_RE =
   /\b(because|therefore|thus|hence|caused by|causes|leads to|results in|due to)\b/i;
 
@@ -657,6 +664,7 @@ function isSymbolicNotation(claim: string, corpus: string, question: string): bo
 /** The exact checker notice, not a model-written caveat. */
 const PRIOR_CHECKER_NOTICES = [
   REJECTED_PART_NOTICE,
+  CONTRADICTED_OPTION_NOTICE,
   SOURCE_ONLY_INTERPRETATION_NOTICE,
   'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
 ];
@@ -669,28 +677,31 @@ export function stripPriorCheckerNotices(text: string): string {
   const segs = academicClaimSegments(text);
   const kept = segs.filter((seg) => {
     if (!seg.claim) return true;
-    const normalized = seg.claim
-      .trim()
-      .replace(/\s+/g, ' ')
-      .replace(/[.!?]+$/g, '')
-      .trim()
-      .toLowerCase();
-    return !notices.has(normalized);
+    return !notices.has(normalizedClaim(seg.claim));
   });
   if (kept.length === segs.length) return text;
   return cleanupCitationGaps(kept.map((seg) => seg.body + seg.trailing).join(''));
 }
 
-function isEchoedUnsupportedPartNotice(claim: string): boolean {
-  const normalized = claim
+function normalizedClaim(claim: string): string {
+  return claim
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/(?:\s*\[\s*(?:\d+|pdf selection)\s*\])+\s*$/i, '')
     .replace(/[.!?]+$/g, '')
     .trim()
     .toLowerCase();
-  const expected = REJECTED_PART_NOTICE.replace(/[.!?]+$/g, '').trim().toLowerCase();
-  return normalized === expected;
+}
+
+/**
+ * Disclosures this checker may append again. A model caveat that matches
+ * the interpretation notice is kept as uncertainty instead.
+ */
+function isEchoedCheckerNotice(claim: string): boolean {
+  const normalized = normalizedClaim(claim);
+  return [REJECTED_PART_NOTICE, CONTRADICTED_OPTION_NOTICE].some(
+    (notice) => notice.replace(/[.!?]+$/g, '').trim().toLowerCase() === normalized,
+  );
 }
 
 function omitRetrievalStatusSentences(text: string): string {
@@ -975,14 +986,15 @@ export function applyClaimLevelGrounding(input: {
 
   let quotedKept = 0;
   let interpretiveKept = 0;
-  let rejected = 0;
+  let academicRejections = 0;
+  let contradictedLabels = 0;
   const claims = splitClaims(answerText);
   const academic: Array<ReturnType<typeof acceptSourceOnlyClaim> | null> = [];
   const substantive: string[] = [];
   for (const claim of claims) {
     if (
       claimLabelLetter(claim) ||
-      isEchoedUnsupportedPartNotice(claim) ||
+      isEchoedCheckerNotice(claim) ||
       isHarmlessRetrievalNarration(claim) ||
       isSymbolicNotation(claim, corpus, input.question)
     ) {
@@ -999,7 +1011,7 @@ export function applyClaimLevelGrounding(input: {
     if (decision.text && !decision.interpretive && !decision.rejected) substantive.push(decision.text);
     if (decision.quoted) quotedKept += 1;
     if (decision.interpretive) interpretiveKept += 1;
-    if (decision.rejected) rejected += 1;
+    if (decision.rejected) academicRejections += 1;
   }
 
   const substantiveText = substantive.join('\n');
@@ -1009,7 +1021,7 @@ export function applyClaimLevelGrounding(input: {
     if (letter) {
       const verdict = judgeOptionLabel(letter, substantiveText, corpus);
       if (verdict === 'verified') kept.push(claim);
-      else if (verdict === 'contradicted') rejected += 1;
+      else if (verdict === 'contradicted') contradictedLabels += 1;
       return;
     }
     const decision = academic[index];
@@ -1025,18 +1037,24 @@ export function applyClaimLevelGrounding(input: {
 
   const pieces = [...kept];
   const alreadyLimited = kept.some((claim) => isSelfLimitation(claim));
-  if (!alreadyLimited && interpretiveKept > 0 && rejected > 0) {
+  if (!alreadyLimited && interpretiveKept > 0 && academicRejections > 0) {
     pieces.push(
       'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
     );
   } else if (!alreadyLimited && interpretiveKept > 0) {
     pieces.push(SOURCE_ONLY_INTERPRETATION_NOTICE);
-  } else if (!alreadyLimited && rejected > 0) {
+  } else if (!alreadyLimited && academicRejections > 0) {
     pieces.push(REJECTED_PART_NOTICE);
+  }
+  // A wrong letter is disclosed on its own. An academic rejection already
+  // says the answer is not fully grounded, so the letter stays removed
+  // without a second notice.
+  if (!alreadyLimited && contradictedLabels > 0 && academicRejections === 0) {
+    pieces.push(CONTRADICTED_OPTION_NOTICE);
   }
   const text = cleanupCitationGaps(pieces.join(' '));
 
-  if (interpretiveKept === 0 && rejected === 0) {
+  if (interpretiveKept === 0 && academicRejections === 0 && contradictedLabels === 0) {
     const tier = evaluateGroundingProvenance({
       question: input.question,
       answerText: text,
