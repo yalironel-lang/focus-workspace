@@ -4,6 +4,7 @@
  */
 
 import type { AskCourseRecentTurn } from '../requestTypes.ts';
+import { stripPriorCheckerNotices } from './evaluateGroundingProvenance.ts';
 import {
   ASK_COURSE_MAX_PRIOR_ASSISTANT_TURN_CHARS,
   ASK_COURSE_MAX_PRIOR_ASSISTANT_TURNS,
@@ -60,7 +61,7 @@ export function normalizeAskCourseRecentTurns(raw: unknown): AskCourseRecentTurn
     let content = contentRaw.trim();
     if (!content) continue;
     if (role === 'assistant') {
-      content = sanitizeAskCourseAssistantTurnContent(content);
+      content = stripPriorCheckerNotices(sanitizeAskCourseAssistantTurnContent(content));
       if (!content) continue;
       content = truncate(content, ASK_COURSE_MAX_PRIOR_ASSISTANT_TURN_CHARS);
     } else {

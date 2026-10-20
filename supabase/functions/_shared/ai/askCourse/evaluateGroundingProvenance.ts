@@ -571,7 +571,116 @@ export function isStandaloneRetrievalStatusSentence(claim: string): boolean {
   return RETRIEVAL_STATUS_SENTENCE.test(normalized) || QUESTION_SPAN_STATUS_SENTENCE.test(normalized);
 }
 
+const OPTION_LABEL_STEMS = new Set([
+  'corre',
+  'optio',
+  'choic',
+  'lette',
+  'right',
+  'selec',
+  'choos',
+  'match',
+  'follo',
+]);
+
+const RETRIEVAL_NARRATION_STEMS = new Set([
+  'relev',
+  'passa',
+  'retri',
+  'visib',
+  'page',
+  'pages',
+  'limit',
+  'index',
+  'match',
+  'selec',
+  'docum',
+  'sourc',
+  'mater',
+  'file',
+  'entir',
+  'whole',
+  'anywh',
+  'cover',
+  'reque',
+  'span',
+  'readi',
+  'anoth',
+]);
+
+/**
+ * A sentence that only points at one choice, whatever the surrounding label
+ * words are. Academic wording keeps it on the normal claim path.
+ */
+export function optionReferenceLetter(claim: string): string | null {
+  const normalized = claim.trim().replace(/\s+/g, ' ').replace(/[.!?]+$/g, '').trim();
+  if (!normalized || normalized.length > 160) return null;
+  if (extractNumbers(normalized).length > 0) return null;
+  const letters = new Set<string>();
+  for (const match of normalized.matchAll(/\(([a-d])\)|\b([a-d])\)/gi)) {
+    const letter = (match[1] ?? match[2] ?? '').toLowerCase();
+    if (letter) letters.add(letter);
+  }
+  if (letters.size !== 1) return null;
+  for (const stem of contentStems(normalized)) {
+    if (!OPTION_LABEL_STEMS.has(stem)) return null;
+  }
+  return [...letters][0] ?? null;
+}
+
+function claimLabelLetter(claim: string): string | null {
+  return standaloneAnswerLabel(claim) ?? optionReferenceLetter(claim);
+}
+
+/**
+ * Retrieval talk with no academic stem and no new number. A self-limitation
+ * stays, because absence is a real uncertainty rather than a page label.
+ */
+function isHarmlessRetrievalNarration(claim: string): boolean {
+  if (isSelfLimitation(claim) || CAUSAL_RE.test(claim)) return false;
+  if (extractNumbers(withoutPageLabels(claim)).length > 0) return false;
+  const stems = contentStems(claim);
+  if (stems.size === 0) return false;
+  for (const stem of stems) {
+    if (!RETRIEVAL_NARRATION_STEMS.has(stem)) return false;
+  }
+  return true;
+}
+
+/** A symbol-only restatement. A new number is still an academic claim. */
+function isSymbolicNotation(claim: string, corpus: string, question: string): boolean {
+  if (contentStems(claim).size > 0) return false;
+  if (hasNumericOrMagnitudeConflict(claim, corpus, question)) return false;
+  return /[=<>≤≥∫∑√^]|\\frac|\\int|−|[-+*/]/.test(claim);
+}
+
 /** The exact checker notice, not a model-written caveat. */
+const PRIOR_CHECKER_NOTICES = [
+  REJECTED_PART_NOTICE,
+  SOURCE_ONLY_INTERPRETATION_NOTICE,
+  'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
+];
+
+/** Remove an earlier checker notice from conversation history so it is not copied forward. */
+export function stripPriorCheckerNotices(text: string): string {
+  const notices = new Set(
+    PRIOR_CHECKER_NOTICES.map((notice) => notice.replace(/[.!?]+$/g, '').trim().toLowerCase()),
+  );
+  const segs = academicClaimSegments(text);
+  const kept = segs.filter((seg) => {
+    if (!seg.claim) return true;
+    const normalized = seg.claim
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[.!?]+$/g, '')
+      .trim()
+      .toLowerCase();
+    return !notices.has(normalized);
+  });
+  if (kept.length === segs.length) return text;
+  return cleanupCitationGaps(kept.map((seg) => seg.body + seg.trailing).join(''));
+}
+
 function isEchoedUnsupportedPartNotice(claim: string): boolean {
   const normalized = claim
     .trim()
@@ -749,29 +858,46 @@ function parseOptions(region: string): ParsedOption[] {
   });
 }
 
+/** Treat a subtraction sign and the word "minus" as the same relation. */
+function normalizeComparableWording(text: string): string {
+  return text
+    .replace(/\u2212/g, ' less ')
+    .replace(/\bminus\b/gi, ' less ')
+    .replace(/(\p{L}|\p{N})\s+-\s+(\p{L}|\p{N})/gu, '$1 less $2');
+}
+
 function optionBodySupportsAnswer(body: string, answer: string): boolean {
   if (!body || !answer) return false;
+  const comparableBody = normalizeComparableWording(body);
+  const comparableAnswer = normalizeComparableWording(answer);
+  // Shared stems are not enough. A neighboring choice can reuse the same
+  // words in another order. The choice has to repeat the answer's wording.
   return (
-    answerQuotesSource(answer, body) ||
-    answerQuotesSource(body, answer) ||
-    isFaithfulParaphrase(answer, body) ||
-    isFaithfulParaphrase(body, answer)
+    answerQuotesSource(comparableAnswer, comparableBody) ||
+    answerQuotesSource(comparableBody, comparableAnswer)
   );
 }
 
-function regionContainsSupportedAnswer(region: string, answer: string): boolean {
-  return (
-    answerQuotesSource(answer, region) ||
-    answerQuotesSource(region, answer) ||
-    isFaithfulParaphrase(answer, region) ||
-    isFaithfulParaphrase(region, answer)
-  );
+/** A new (a) starts another question when one page lists several choice sets. */
+function optionBlocks(options: ParsedOption[]): ParsedOption[][] {
+  const blocks: ParsedOption[][] = [];
+  let current: ParsedOption[] = [];
+  for (const option of options) {
+    if (option.letter === 'a' && current.some((item) => item.letter === 'a')) {
+      blocks.push(current);
+      current = [];
+    }
+    current.push(option);
+  }
+  if (current.length > 0) blocks.push(current);
+  return blocks;
 }
 
 /**
- * Verified only when this letter's option text, inside a question that contains
- * the supported answer, matches that answer. A letter elsewhere is not evidence.
- * Contradicted when a different letter in that question carries the answer.
+ * Verified only when this letter's choice, inside a question whose choice
+ * repeats the supported answer, matches that answer. Other questions on the
+ * same page are not evidence. Contradicted when a different letter in that
+ * question is the one that repeats the answer.
  */
 function judgeOptionLabel(
   letter: string,
@@ -779,16 +905,17 @@ function judgeOptionLabel(
   corpus: string,
 ): 'verified' | 'contradicted' | 'unverified' {
   if (!substantive.trim()) return 'unverified';
-  const relevant = questionRegions(corpus).filter((region) => regionContainsSupportedAnswer(region, substantive));
-  const options = relevant.flatMap((region) => parseOptions(region));
-  if (options.length === 0) return 'unverified';
-  const sameLetter = options.filter((option) => option.letter === letter);
-  const matching = sameLetter.filter((option) => optionBodySupportsAnswer(option.body, substantive));
-  if (sameLetter.length > 0 && matching.length === sameLetter.length) return 'verified';
-  const otherMatches = options.some(
-    (option) => option.letter !== letter && optionBodySupportsAnswer(option.body, substantive),
+  const blocks = questionRegions(corpus).flatMap((region) => optionBlocks(parseOptions(region)));
+  const relevant = blocks.filter((block) =>
+    block.some((option) => optionBodySupportsAnswer(option.body, substantive)),
   );
-  if (otherMatches) return 'contradicted';
+  if (relevant.length === 0) return 'unverified';
+  const letterSupports = (block: ParsedOption[]) =>
+    block.some((option) => option.letter === letter && optionBodySupportsAnswer(option.body, substantive));
+  const otherSupports = (block: ParsedOption[]) =>
+    block.some((option) => option.letter !== letter && optionBodySupportsAnswer(option.body, substantive));
+  if (relevant.every(letterSupports)) return 'verified';
+  if (relevant.some((block) => otherSupports(block) && !letterSupports(block))) return 'contradicted';
   return 'unverified';
 }
 
@@ -853,7 +980,12 @@ export function applyClaimLevelGrounding(input: {
   const academic: Array<ReturnType<typeof acceptSourceOnlyClaim> | null> = [];
   const substantive: string[] = [];
   for (const claim of claims) {
-    if (standaloneAnswerLabel(claim) || isEchoedUnsupportedPartNotice(claim)) {
+    if (
+      claimLabelLetter(claim) ||
+      isEchoedUnsupportedPartNotice(claim) ||
+      isHarmlessRetrievalNarration(claim) ||
+      isSymbolicNotation(claim, corpus, input.question)
+    ) {
       academic.push(null);
       continue;
     }
@@ -873,7 +1005,7 @@ export function applyClaimLevelGrounding(input: {
   const substantiveText = substantive.join('\n');
   const kept: string[] = [];
   claims.forEach((claim, index) => {
-    const letter = standaloneAnswerLabel(claim);
+    const letter = claimLabelLetter(claim);
     if (letter) {
       const verdict = judgeOptionLabel(letter, substantiveText, corpus);
       if (verdict === 'verified') kept.push(claim);

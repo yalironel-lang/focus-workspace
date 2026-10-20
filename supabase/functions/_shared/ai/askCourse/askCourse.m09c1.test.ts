@@ -193,6 +193,22 @@ describe('M0.9C1 validation / bounds', () => {
     }
   });
 
+  it('removes a prior checker notice from assistant history without dropping the answer', () => {
+    const turns = normalizeAskCourseRecentTurns([
+      { role: 'user', content: 'According to the PDF, what is the cyclical part of real GDP?' },
+      {
+        role: 'assistant',
+        content:
+          'The cyclical part of real GDP is real GDP less trend real GDP. The unsupported part cannot be established from the available source.',
+      },
+      { role: 'user', content: 'And which option is that?' },
+    ]);
+    const assistant = turns.find((turn) => turn.role === 'assistant');
+    expect(assistant?.content).toContain('real GDP less trend real GDP');
+    expect(assistant?.content).not.toContain('unsupported part');
+    expect(turns.filter((turn) => turn.role === 'user')).toHaveLength(2);
+  });
+
   it('sanitized-empty history still yields valid v2 standalone', () => {
     const r = validateZikukAiRequest(
       validAskV2({

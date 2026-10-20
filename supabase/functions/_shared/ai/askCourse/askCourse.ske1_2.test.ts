@@ -1360,6 +1360,139 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(missing.knowledgeTier).toBe('mixed');
   });
 
+  it('keeps a supported answer when one page contains several choice sets', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const definition = 'The cyclical part of real GDP is real GDP less trend real GDP.';
+    const notice = 'The unsupported part cannot be established from the available source.';
+    const corpus = [
+      'The cyclical part of real GDP is real GDP less trend real GDP.',
+      '(a) trend real GDP less measured output',
+      '(b) real GDP less trend real GDP',
+      '(c) nominal GDP plus trend real GDP',
+      '(d) trend real GDP without a residual',
+      'A later question asks about fiscal policy.',
+      '(a) taxes on wages',
+      '(b) government spending',
+      '(c) the interest rate',
+      '(d) the exchange rate',
+    ].join('\n');
+    const base = {
+      question,
+      chunks: [{ citationIndex: 1, text: corpus }],
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false } as const,
+    };
+
+    const exact = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The correct option is (b).`,
+    });
+    expect(exact.text).toContain(definition);
+    expect(exact.text).toContain('The correct option is (b).');
+    expect(exact.text).not.toContain(notice);
+    expect(exact.knowledgeTier).toBe('course_material');
+
+    const equivalent = applyClaimLevelGrounding({
+      ...base,
+      answerText: 'The cyclical part of real GDP is real GDP minus trend real GDP.',
+    });
+    expect(equivalent.text).toContain('minus trend real GDP');
+    expect(equivalent.text).not.toContain(notice);
+    expect(equivalent.knowledgeTier).toBe('course_material');
+
+    const symbolic = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} \\( y - \\bar{y} \\).`,
+    });
+    expect(symbolic.text).toContain(definition);
+    expect(symbolic.text).not.toContain(notice);
+    expect(symbolic.knowledgeTier).toBe('course_material');
+
+    const labeled = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} So the correct answer is (b).`,
+    });
+    expect(labeled.text).toContain('So the correct answer is (b).');
+    expect(labeled.text).not.toContain(notice);
+    expect(labeled.knowledgeTier).toBe('course_material');
+
+    const narrated = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} Relevant passages were retrieved from this PDF. This is not limited to the visible page.`,
+    });
+    expect(narrated.text).toContain(definition);
+    expect(narrated.text).not.toContain('Relevant passages');
+    expect(narrated.text).not.toContain('visible page');
+    expect(narrated.text).not.toContain(notice);
+    expect(narrated.knowledgeTier).toBe('course_material');
+
+    const afterNotice = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} ${notice} The correct option is (b).`,
+    });
+    expect(afterNotice.text).toContain(definition);
+    expect(afterNotice.text).toContain('The correct option is (b).');
+    expect(afterNotice.text).not.toContain(notice);
+    expect(afterNotice.knowledgeTier).toBe('course_material');
+
+    const wrongLetter = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The correct option is (c).`,
+    });
+    expect(wrongLetter.text).toContain(definition);
+    expect(wrongLetter.text).not.toContain('(c)');
+    expect(wrongLetter.text).toContain(notice);
+    expect(wrongLetter.knowledgeTier).toBe('mixed');
+
+    const wrongNumber = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} The penalty is 50 marks.`,
+    });
+    expect(wrongNumber.text).toContain(definition);
+    expect(wrongNumber.text).not.toContain('50');
+    expect(wrongNumber.text).toContain(notice);
+    expect(wrongNumber.knowledgeTier).toBe('mixed');
+
+    const extra = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} Hydrogen bonds stabilize the alpha helix.`,
+    });
+    expect(extra.text).toContain(definition);
+    expect(extra.text).not.toContain('Hydrogen bonds');
+    expect(extra.text).toContain(notice);
+    expect(extra.knowledgeTier).toBe('mixed');
+
+    const wrongSymbol = applyClaimLevelGrounding({
+      ...base,
+      answerText: `${definition} \\( y = 99 \\).`,
+    });
+    expect(wrongSymbol.text).toContain(definition);
+    expect(wrongSymbol.text).not.toContain('99');
+    expect(wrongSymbol.text).toContain(notice);
+
+    const ordinary = applyClaimLevelGrounding({
+      question: 'What is the cyclical part of real GDP?',
+      answerText: definition,
+      chunks: base.chunks,
+      captureText: '',
+      contextAvailable: base.contextAvailable,
+    });
+    expect(ordinary.text).toBe(definition);
+    expect(ordinary.text).not.toContain(notice);
+    expect(ordinary.knowledgeTier).toBe('course_material');
+
+    const empty = applyClaimLevelGrounding({
+      question,
+      answerText: `${definition} The correct option is (b).`,
+      chunks: [],
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: false, hasPdfCapture: false },
+    });
+    expect(empty.text).toContain('No PDF selection or course material was available');
+    expect(empty.text).not.toContain('real GDP less trend');
+    expect(empty.knowledgeTier).toBe('mixed');
+  });
+
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {
     const quoted = 'Saving adds to the capital stock.';
     let calls = 0;
