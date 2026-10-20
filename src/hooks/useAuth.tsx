@@ -2,12 +2,21 @@ import { useState, useEffect, useCallback, createContext, useContext, ReactNode 
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { getOAuthRedirectTo } from '../lib/authRedirect';
 import { hasAuthCallbackInUrl } from '../lib/authCallback';
+import {
+  classifyCallbackFailure,
+  classifyMagicLinkError,
+  isPlausibleEmail,
+  type MagicLinkNotice,
+  type MagicLinkStatus,
+} from '../lib/auth/stagingMagicLink';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithMagicLink: (email: string) => Promise<MagicLinkStatus>;
+  magicLinkNotice: MagicLinkNotice | null;
   signOut: () => Promise<void>;
 }
 
@@ -51,6 +60,7 @@ function stripAuthCallbackFromUrl(): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [magicLinkNotice, setMagicLinkNotice] = useState<MagicLinkNotice | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -77,8 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // login is reachable and the next attempt starts clean — never hang,
         // never loop the user back onto a poisoned redirect URL.
         if (!session?.user && hasAuthCallbackInUrl()) {
+          const failure = classifyCallbackFailure(window.location.href);
+          if (failure) setMagicLinkNotice(failure);
           console.warn(
-            `[Focus Workspace] OAuth callback present but no session was established (event: ${event}). ` +
+            `[Focus Workspace] Auth callback present but no session was established (event: ${event}). ` +
               'Clearing stale callback params so sign-in can be retried.',
           );
           stripAuthCallbackFromUrl();
@@ -125,13 +137,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
+  const signInWithMagicLink = useCallback(async (email: string): Promise<MagicLinkStatus> => {
+    const trimmed = email.trim();
+    if (!isPlausibleEmail(trimmed)) return 'invalid_email';
+    if (!isSupabaseConfigured) return 'failed';
+
+    setMagicLinkNotice(null);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: {
+        emailRedirectTo: getOAuthRedirectTo(),
+        shouldCreateUser: false,
+      },
+    });
+    if (!error) return 'sent';
+    return classifyMagicLinkError(error);
+  }, []);
+
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider
+      value={{ user, loading, signInWithGoogle, signInWithMagicLink, magicLinkNotice, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   );

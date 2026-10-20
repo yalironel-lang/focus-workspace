@@ -5,7 +5,7 @@ import {
   gateIndicator,
   strokeDiagGates,
 } from '../../lib/qaInkPanelMetrics';
-import { isQaModeEnabled, qaBuildEnvLabel } from '../../lib/qaMode';
+import { isQaOverlayEnabled, qaBuildEnvLabel } from '../../lib/qaMode';
 import {
   getLastHandwritingStrokeDiag,
   getRecentHandwritingStrokeDiags,
@@ -70,9 +70,8 @@ const copyBtnStyle: CSSProperties = {
 };
 
 function readQaEnabled(): boolean {
-  if (typeof window === 'undefined') return import.meta.env.DEV;
-  return isQaModeEnabled({
-    dev: import.meta.env.DEV,
+  if (typeof window === 'undefined') return false;
+  return isQaOverlayEnabled({
     search: window.location.search,
     storage: localStorage,
   });

@@ -1,5 +1,5 @@
 import { memo, useMemo, type CSSProperties } from 'react';
-import { renderKatexHtml } from '../../lib/notebookMath';
+import { readableMathFallback, renderKatexHtml } from '../../lib/notebookMath';
 
 /** Keep KaTeX visually LTR inside RTL/BiDi paragraphs (source latex unchanged). */
 const MATH_ISOLATE: CSSProperties = {
@@ -18,6 +18,11 @@ interface Props {
   className?: string;
   style?: CSSProperties;
   emptyHint?: string;
+  /**
+   * Student answers hide parser errors and show the source as readable text.
+   * Notebook editors keep the error chrome so a person can fix their expression.
+   */
+  answerFallback?: boolean;
 }
 
 export const KatexPreview = memo(function KatexPreview({
@@ -29,6 +34,7 @@ export const KatexPreview = memo(function KatexPreview({
   className,
   style,
   emptyHint = 'Type an expression…',
+  answerFallback = false,
 }: Props) {
   const { html, error } = useMemo(
     () => renderKatexHtml(latex, displayMode),
@@ -45,6 +51,20 @@ export const KatexPreview = memo(function KatexPreview({
       >
         {emptyHint}
       </div>
+    );
+  }
+
+  if (error && answerFallback) {
+    return (
+      <span
+        className={className}
+        dir="ltr"
+        data-nb-math-isolate="1"
+        data-math-fallback="1"
+        style={{ ...MATH_ISOLATE, ...style, color: textColor }}
+      >
+        {readableMathFallback(latex)}
+      </span>
     );
   }
 

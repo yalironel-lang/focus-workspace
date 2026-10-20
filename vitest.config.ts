@@ -1,16 +1,31 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  server: {
+    fs: {
+      allow: ['/Users/ylyrwnl/focus-dev'],
+    },
+  },
   test: {
     environment: 'happy-dom',
     setupFiles: ['fake-indexeddb/auto', 'src/test/localStorageSetup.ts'],
     include: [
+      'src/lib/studySession/**/*.test.ts',
+      'src/lib/studySession/**/*.test.tsx',
+      'src/lib/studyContinuity/**/*.test.ts',
+      'src/lib/studyContinuity/**/*.test.tsx',
+      'src/lib/auth/**/*.test.ts',
+      'src/lib/auth/**/*.test.tsx',
+      'src/hooks/useAuth.magicLink.test.tsx',
+      'src/components/Auth.stagingEmail.test.tsx',
       'src/lib/ai/context/**/*.test.ts',
       'src/lib/ai/gatewayClient/**/*.test.ts',
       'src/lib/ai/explainSelection/**/*.test.ts',
       'src/lib/ai/explainSelection/**/*.test.tsx',
       'src/lib/ai/askCourse/**/*.test.ts',
       'src/lib/ai/askCourse/**/*.test.tsx',
+      'src/lib/ai/tutor/**/*.test.ts',
+      'src/lib/ai/tutor/**/*.test.tsx',
       'src/lib/ai/intelligenceByok.v1h3.test.tsx',
       'src/lib/courseTrap/**/*.test.ts',
       'src/lib/notebookDebugIngest.v1h3.test.ts',
@@ -62,6 +77,7 @@ export default defineConfig({
       'src/lib/freeSpaceImageObject.persistence.test.ts',
       'src/lib/freeSpacePdfObject.persistence.test.ts',
       'src/lib/pdfPageVisibility.test.ts',
+      'src/lib/pdfRenderGeometry.test.ts',
       'src/lib/pdfViewerPagePropagate.test.ts',
       'src/lib/spatialAssetCloud.crossDevice.delete.integration.test.ts',
       'src/lib/spatialAssetCloud.crossDevice.pdfDelete.integration.test.ts',
@@ -86,6 +102,9 @@ export default defineConfig({
       'src/lib/notebookPages/notebookWorkspaceChrome.test.ts',
       'src/lib/notebookCopySelection.test.ts',
       'src/lib/notebookToolbarCapture.test.ts',
+      'src/lib/notebookToolbarOverflow.test.tsx',
+      'src/components/qa/QaBuildOverlay.test.tsx',
+      'src/lib/pdfStudyMarks/pdfStudyMarks.persistence.test.ts',
       'src/lib/notebookCaret.test.ts',
       'src/lib/notebookInlineMarks.sequential.test.ts',
       'src/lib/notebookFormatHistory.test.ts',

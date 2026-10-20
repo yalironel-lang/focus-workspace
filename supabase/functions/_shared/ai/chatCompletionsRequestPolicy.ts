@@ -19,6 +19,11 @@ export type ChatCompletionsRequestPolicy = {
 /** Historical ZIKUK OpenAI-compatible defaults. */
 export const LEGACY_CHAT_COMPLETIONS_TEMPERATURE = 0.4;
 
+import {
+  SERVER_MAX_OUTPUT_TOKENS,
+  SERVER_REASONING_MAX_OUTPUT_TOKENS,
+} from './bounds.ts';
+
 /**
  * True for OpenAI reasoning / GPT-5+ families that require
  * `max_completion_tokens` and should omit sampling `temperature`.
@@ -34,6 +39,18 @@ export function isReasoningCompatibleChatModel(model: string): boolean {
   // GPT-5 / GPT-6 families (incl. gpt-5.6-luna, gpt-5-mini, gpt-6-astra, …)
   if (/^gpt-[56](?:$|[^0-9])/.test(id)) return true;
   return false;
+}
+
+/**
+ * Return bounded server token budget: allocates expanded completion headroom
+ * for reasoning models (where reasoning tokens count against the budget), while
+ * strictly preserving legacy 1200-token limit for non-reasoning models.
+ */
+export function resolveServerMaxOutputTokens(model: string): number {
+  if (isReasoningCompatibleChatModel(model)) {
+    return SERVER_REASONING_MAX_OUTPUT_TOKENS;
+  }
+  return SERVER_MAX_OUTPUT_TOKENS;
 }
 
 export function resolveChatCompletionsPolicy(model: string): ChatCompletionsRequestPolicy {

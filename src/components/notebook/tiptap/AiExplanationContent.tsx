@@ -53,6 +53,7 @@ export const AiExplanationContent = memo(function AiExplanationContent({
                 displayMode={false}
                 textColor={textColor}
                 mutedColor={mutedColor}
+                answerFallback
               />
             </span>
           );
@@ -77,6 +78,7 @@ export const AiExplanationContent = memo(function AiExplanationContent({
               displayMode
               textColor={textColor}
               mutedColor={mutedColor}
+              answerFallback
             />
           </span>
         );

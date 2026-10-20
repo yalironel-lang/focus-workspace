@@ -1,10 +1,14 @@
 /**
- * M0.9C2.3 — local active Ask session persistence (client-only).
+ * M0.9C2.3 / TQ1.2.3 — local active Ask session persistence (client-only).
  * Survives refresh / Ask close / remount for the same user + section.
  * Not chat history, not cross-device sync.
+ *
+ * TQ1.2.3: Upgraded to storage version 2 with backward-compatible migration.
+ * Persists course-specific active teaching mode ('explain' | 'teach_me' | 'just_answer' | 'exam_prep')
+ * and turn-level mode for each completed assistant answer.
  */
 
-import type { AskCourseSourceRef } from '../gatewayClient';
+import type { AskCourseSourceRef, ContextAvailable, KnowledgeTier, TeachingMode } from '../gatewayClient';
 
 export type AskSessionTurn = {
   id: string;
@@ -12,9 +16,13 @@ export type AskSessionTurn = {
   answer: string;
   sources: AskCourseSourceRef[];
   status: 'success';
+  mode?: TeachingMode;
+  knowledgeTier?: KnowledgeTier;
+  contextAvailable?: ContextAvailable;
+  generationIncomplete?: boolean;
 };
 
-export const ASK_SESSION_STORAGE_VERSION = 1 as const;
+export const ASK_SESSION_STORAGE_VERSION = 2 as const;
 export const ASK_SESSION_MAX_TURNS = 20 as const;
 export const ASK_SESSION_MAX_QUESTION_CHARS = 2000 as const;
 export const ASK_SESSION_MAX_ANSWER_CHARS = 8000 as const;
@@ -23,13 +31,17 @@ export const ASK_SESSION_MAX_DRAFT_CHARS = 2000 as const;
 /** Soft cap on serialized JSON size (chars). */
 export const ASK_SESSION_MAX_SERIALIZED_CHARS = 150_000 as const;
 
-export type PersistedAskSessionV1 = {
-  version: typeof ASK_SESSION_STORAGE_VERSION;
+export type PersistedAskSession = {
+  version: 1 | 2;
   sectionId: string;
   turns: AskSessionTurn[];
   draft: string;
+  mode?: TeachingMode;
   updatedAt: number;
 };
+
+/** Backward-compatible type alias. */
+export type PersistedAskSessionV1 = PersistedAskSession;
 
 export function askSessionStorageKey(userId: string, sectionId: string): string {
   return `fw_ask_session_v1:${userId}:${sectionId}`;
@@ -37,6 +49,15 @@ export function askSessionStorageKey(userId: string, sectionId: string): string 
 
 function isNonEmptyId(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0 && v === v.trim();
+}
+
+function isTeachingModeValue(v: unknown): v is TeachingMode {
+  return (
+    v === 'explain' ||
+    v === 'teach_me' ||
+    v === 'just_answer' ||
+    v === 'exam_prep'
+  );
 }
 
 function parseSource(raw: unknown): AskCourseSourceRef | null {
@@ -90,12 +111,37 @@ function parseTurn(raw: unknown): AskSessionTurn | null {
     if (!parsed) return null;
     sources.push(parsed);
   }
+  const mode = isTeachingModeValue(o.mode) ? o.mode : undefined;
+  const knowledgeTier =
+    o.knowledgeTier === 'course_material' ||
+    o.knowledgeTier === 'pdf_selection' ||
+    o.knowledgeTier === 'general_academic' ||
+    o.knowledgeTier === 'mixed'
+      ? o.knowledgeTier
+      : undefined;
+  const contextRaw = o.contextAvailable;
+  const contextAvailable =
+    contextRaw &&
+    typeof contextRaw === 'object' &&
+    !Array.isArray(contextRaw) &&
+    typeof (contextRaw as { hasIndexedChunks?: unknown }).hasIndexedChunks === 'boolean' &&
+    typeof (contextRaw as { hasPdfCapture?: unknown }).hasPdfCapture === 'boolean'
+      ? {
+          hasIndexedChunks: (contextRaw as { hasIndexedChunks: boolean }).hasIndexedChunks,
+          hasPdfCapture: (contextRaw as { hasPdfCapture: boolean }).hasPdfCapture,
+        }
+      : undefined;
+  const generationIncomplete = o.generationIncomplete === true ? true : undefined;
   return {
     id: o.id.trim(),
     question: o.question,
     answer: o.answer,
     sources,
     status: 'success',
+    ...(mode ? { mode } : {}),
+    ...(knowledgeTier ? { knowledgeTier } : {}),
+    ...(contextAvailable ? { contextAvailable } : {}),
+    ...(generationIncomplete ? { generationIncomplete: true } : {}),
   };
 }
 
@@ -103,10 +149,11 @@ function parseTurn(raw: unknown): AskSessionTurn | null {
 export function parsePersistedAskSession(
   raw: unknown,
   expectedSectionId: string,
-): PersistedAskSessionV1 | null {
+): PersistedAskSession | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (o.version !== ASK_SESSION_STORAGE_VERSION) return null;
+  // Support both version 1 (automatic migration) and version 2
+  if (o.version !== 1 && o.version !== 2) return null;
   if (typeof o.sectionId !== 'string' || o.sectionId !== expectedSectionId) return null;
   if (!isNonEmptyId(o.sectionId)) return null;
   if (typeof o.updatedAt !== 'number' || !Number.isFinite(o.updatedAt)) return null;
@@ -120,11 +167,16 @@ export function parsePersistedAskSession(
     if (!parsed) return null;
     turns.push(parsed);
   }
+
+  // Version 1 migrates to 'explain' mode; Version 2 parses existing mode or defaults to 'explain'
+  const mode: TeachingMode = isTeachingModeValue(o.mode) ? o.mode : 'explain';
+
   return {
-    version: ASK_SESSION_STORAGE_VERSION,
+    version: 2,
     sectionId: o.sectionId,
     turns,
     draft: o.draft,
+    mode,
     updatedAt: o.updatedAt,
   };
 }
@@ -133,7 +185,8 @@ function clampForWrite(input: {
   sectionId: string;
   turns: readonly AskSessionTurn[];
   draft: string;
-}): PersistedAskSessionV1 | null {
+  mode?: TeachingMode;
+}): PersistedAskSession | null {
   if (!isNonEmptyId(input.sectionId)) return null;
   const turns = input.turns
     .filter(t => t.status === 'success')
@@ -144,13 +197,19 @@ function clampForWrite(input: {
       answer: t.answer.slice(0, ASK_SESSION_MAX_ANSWER_CHARS),
       sources: t.sources.slice(0, ASK_SESSION_MAX_SOURCES_PER_TURN),
       status: 'success' as const,
+      ...(t.mode ? { mode: t.mode } : {}),
+      ...(t.knowledgeTier ? { knowledgeTier: t.knowledgeTier } : {}),
+      ...(t.contextAvailable ? { contextAvailable: t.contextAvailable } : {}),
+      ...(t.generationIncomplete ? { generationIncomplete: true } : {}),
     }));
   const draft = input.draft.slice(0, ASK_SESSION_MAX_DRAFT_CHARS);
+  const mode: TeachingMode = isTeachingModeValue(input.mode) ? input.mode : 'explain';
   return {
-    version: ASK_SESSION_STORAGE_VERSION,
+    version: 2,
     sectionId: input.sectionId,
     turns,
     draft,
+    mode,
     updatedAt: Date.now(),
   };
 }
@@ -158,7 +217,7 @@ function clampForWrite(input: {
 export function readAskSession(
   userId: string | null | undefined,
   sectionId: string,
-): PersistedAskSessionV1 | null {
+): PersistedAskSession | null {
   if (typeof localStorage === 'undefined') return null;
   if (!isNonEmptyId(userId) || !isNonEmptyId(sectionId)) return null;
   try {
@@ -189,11 +248,16 @@ export function readAskSession(
 export function writeAskSession(
   userId: string | null | undefined,
   sectionId: string,
-  input: { turns: readonly AskSessionTurn[]; draft: string },
+  input: { turns: readonly AskSessionTurn[]; draft: string; mode?: TeachingMode },
 ): boolean {
   if (typeof localStorage === 'undefined') return false;
   if (!isNonEmptyId(userId) || !isNonEmptyId(sectionId)) return false;
-  const payload = clampForWrite({ sectionId, turns: input.turns, draft: input.draft });
+  const payload = clampForWrite({
+    sectionId,
+    turns: input.turns,
+    draft: input.draft,
+    mode: input.mode,
+  });
   if (!payload) return false;
   try {
     const json = JSON.stringify(payload);

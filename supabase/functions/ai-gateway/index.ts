@@ -58,6 +58,8 @@ function httpStatusFor(code: string): number {
       return 429;
     case 'provider_timeout':
       return 504;
+    case 'output_budget_exhausted':
+      return 422;
     case 'provider_unavailable':
       return 502;
     default:
@@ -80,6 +82,8 @@ Deno.serve(async (req: Request) => {
       405,
     );
   }
+
+  const requestStartedAt = Date.now();
 
   try {
     const contentLength = Number(req.headers.get('content-length') ?? '0');
@@ -204,6 +208,17 @@ Deno.serve(async (req: Request) => {
     const askCourseDeps =
       preflight.request.capability === 'ask_course'
         ? {
+            loadPdfCaptureSource: async (input: { userId: string; sectionId: string; sourceObjectId: string }) => {
+              const { data, error } = await admin
+                .from('free_space_objects')
+                .select('id, user_id, section_id, object')
+                .eq('id', input.sourceObjectId)
+                .eq('user_id', input.userId)
+                .eq('section_id', input.sectionId)
+                .maybeSingle();
+              if (error || !data) return null;
+              return data;
+            },
             loadSectionOwner: async (sectionId: string) => {
               const { data, error } = await admin
                 .from('sections')
@@ -237,6 +252,46 @@ Deno.serve(async (req: Request) => {
               if (error) return { ok: false as const };
               return { ok: true as const, raw: data ?? [] };
             },
+            loadDocumentWindow: async (input: {
+              userId: string;
+              sectionId: string;
+              sourceObjectId: string;
+              pageFrom: number;
+              pageTo: number;
+              limit: number;
+            }) => {
+              const { data, error } = await admin.rpc('ai_knowledge_document_window', {
+                p_user_id: input.userId,
+                p_section_id: input.sectionId,
+                p_source_object_id: input.sourceObjectId,
+                p_page_from: input.pageFrom,
+                p_page_to: input.pageTo,
+                p_limit: input.limit,
+              });
+              if (error) return { ok: false as const };
+              const rows = Array.isArray(data) ? data : [];
+              return {
+                ok: true as const,
+                rows: rows.flatMap((row) => {
+                  if (!row || typeof row !== 'object') return [];
+                  const value = row as Record<string, unknown>;
+                  if (typeof value.text !== 'string' || typeof value.page_number !== 'number') return [];
+                  return [
+                    {
+                      sourceObjectId:
+                        typeof value.source_object_id === 'string'
+                          ? value.source_object_id
+                          : input.sourceObjectId,
+                      fileName: typeof value.file_name === 'string' ? value.file_name : null,
+                      pageCount: typeof value.page_count === 'number' ? value.page_count : null,
+                      pageNumber: value.page_number,
+                      chunkIndex: typeof value.chunk_index === 'number' ? value.chunk_index : 0,
+                      text: value.text,
+                    },
+                  ];
+                }),
+              };
+            },
             loadNotebookFsoForCitation: async (input: {
               userId: string;
               sectionId: string;
@@ -265,6 +320,8 @@ Deno.serve(async (req: Request) => {
       routerConfig: { model },
       enforcement,
       askCourseDeps,
+      signal: req.signal,
+      requestStartedAt,
     });
 
     if (usageLog) {

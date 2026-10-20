@@ -11,6 +11,8 @@ const SAFE_COPY: Partial<Record<ZikukAiErrorCode, string>> = {
   ai_disabled: 'AI is disabled for this account.',
   provider_unavailable: 'The AI service is temporarily unavailable. Try again shortly.',
   provider_timeout: 'The AI service timed out. Try again.',
+  output_budget_exhausted:
+    "The AI couldn't complete this explanation. Try asking for a shorter section.",
   internal_error: 'AI is temporarily unavailable. Try again later.',
 };
 

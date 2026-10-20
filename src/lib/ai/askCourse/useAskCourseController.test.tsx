@@ -126,6 +126,10 @@ describe('userFacingAskCourseError', () => {
   it('maps auth and transient codes safely', () => {
     expect(userFacingAskCourseErrorMessage('unauthenticated', null)).toMatch(/Sign in/i);
     expect(userFacingAskCourseErrorMessage('quota_exceeded', null)).toMatch(/Daily AI limit/i);
+    expect(userFacingAskCourseErrorMessage('output_budget_exhausted', 'raw')).toBe(
+      "The AI couldn't complete this explanation. Try asking for a shorter section.",
+    );
+    expect(isAskCourseRetryAllowed('output_budget_exhausted')).toBe(false);
     expect(isAskCourseRetryAllowed('provider_timeout')).toBe(true);
     expect(isAskCourseRetryAllowed('ai_disabled')).toBe(false);
   });
@@ -152,9 +156,10 @@ describe('useAskCourseController', () => {
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'What is natural law?',
+      teachingMode: 'explain',
     });
     expect(opts).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(Object.keys(body).sort()).toEqual(['capability', 'question', 'sectionId', 'version']);
+    expect(Object.keys(body).sort()).toEqual(['capability', 'question', 'sectionId', 'teachingMode', 'version']);
     expect(api!.state.phase).toBe('success');
     expect(api!.state.resultText).toBe('Grounded answer.');
     expect(api!.state.sources).toHaveLength(1);
@@ -203,6 +208,7 @@ describe('useAskCourseController', () => {
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'Follow up?',
+      teachingMode: 'explain',
       recentTurns: [
         { role: 'user', content: 'Prior Q' },
         { role: 'assistant', content: 'Prior A' },
@@ -249,6 +255,7 @@ describe('useAskCourseController', () => {
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'First',
+      teachingMode: 'explain',
     });
     expect(zikukAiRequest.mock.calls[0][0]).not.toHaveProperty('recentTurns');
   });

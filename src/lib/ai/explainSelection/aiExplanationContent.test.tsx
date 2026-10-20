@@ -177,5 +177,55 @@ describe('Explain panel success rendering', () => {
     expect(document.querySelector('[data-nb-candidate-explain-success]')).toBeTruthy();
     expect(document.querySelector('[data-ai-explanation-content]')).toBeTruthy();
     expect(document.querySelector('[data-ai-explanation-math="inline"]')).toBeTruthy();
+    expect(document.querySelector('[data-answer-incomplete]')).toBeNull();
+  });
+
+  it('shows the incomplete-answer note only when generation stopped early', () => {
+    const onClose = vi.fn();
+    const onRetry = vi.fn();
+    const answer = 'Capital grows until';
+    mount(
+      createElement(NotebookExplainSelectionPanel, {
+        state: {
+          phase: 'success',
+          frozenContext: null,
+          resultText: answer,
+          generationIncomplete: true,
+          errorMessage: null,
+          errorCode: null,
+          localUnavailable: null,
+        },
+        anchor: { top: 10, left: 10, width: 320 },
+        onClose,
+        onRetry,
+      }),
+    );
+    expect(document.querySelector('[data-ai-explanation-content]')?.textContent).toContain(answer);
+    expect(document.querySelector('[data-answer-incomplete="1"]')?.textContent).toBe(
+      'This answer stopped before it was finished.',
+    );
+    expect(document.querySelector('[data-nb-candidate-explain-error]')).toBeNull();
+
+    cleanup();
+
+    mount(
+      createElement(NotebookExplainSelectionPanel, {
+        state: {
+          phase: 'success',
+          frozenContext: null,
+          resultText: 'Capital reaches a steady state.',
+          errorMessage: null,
+          errorCode: null,
+          localUnavailable: null,
+        },
+        anchor: { top: 10, left: 10, width: 320 },
+        onClose,
+        onRetry,
+      }),
+    );
+    expect(document.querySelector('[data-ai-explanation-content]')?.textContent).toContain(
+      'steady state',
+    );
+    expect(document.querySelector('[data-answer-incomplete]')).toBeNull();
   });
 });

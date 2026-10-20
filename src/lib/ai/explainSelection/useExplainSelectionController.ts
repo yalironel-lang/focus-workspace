@@ -22,6 +22,8 @@ export type ExplainSelectionState = {
   phase: ExplainPhase;
   frozenContext: ZikukAiContext | null;
   resultText: string | null;
+  /** True when the provider returned visible text and stopped for length. */
+  generationIncomplete?: boolean;
   errorMessage: string | null;
   errorCode: ZikukAiErrorCode | null;
   localUnavailable: 'missing_host' | 'capture_failed' | 'not_explainable' | null;
@@ -101,7 +103,7 @@ export function useExplainSelectionController(input: {
           capability: 'explain_selection',
           context: frozen,
         },
-        { signal: ac.signal },
+        { signal: ac.signal, surface: 'explain' },
       ).catch((e: unknown) => {
         if (ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
           return {
@@ -124,6 +126,7 @@ export function useExplainSelectionController(input: {
           phase: 'success',
           frozenContext: frozen,
           resultText: response.result.text,
+          ...(response.result.generationIncomplete === true ? { generationIncomplete: true } : {}),
           errorMessage: null,
           errorCode: null,
           localUnavailable: null,

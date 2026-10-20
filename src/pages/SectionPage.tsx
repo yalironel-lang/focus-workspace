@@ -141,9 +141,24 @@ import {
 import { FreeSpaceCanvasErrorBoundary } from '../components/canvas/FreeSpaceCanvasErrorBoundary';
 import { ProjectSpaceObjectRenderer } from '../components/project-space/ProjectSpaceObjectRenderer';
 import { StudyLayoutDockPortal } from '../components/project-space/StudyLayoutDockPortal';
-import { StudySessionShell } from '../components/project-space/StudySessionShell';
-import { RvStudySurface } from '../components/project-space/RvStudySurface';
-import { isRvStudySurfaceEnabled } from '../lib/rvStudySurface';
+import { AcademicCompositionShell } from '../components/project-space/AcademicCompositionShell';
+import type { TutorCaptureIntent, TutorCaptureChrome } from '../lib/ai/tutor/tutorCaptureTypes';
+import {
+  type AcademicCompositionSession,
+  resolveAcademicNotebookPair,
+  resolveAcademicSecondaryObjectId,
+  isAcademicObjectSuppressedFromWorkspace,
+} from '../lib/studySession/academicComposition';
+import {
+  loadAcademicCompositionRecovery,
+  saveAcademicCompositionRecovery,
+  clearAcademicCompositionRecovery,
+  validateAcademicRecoveryAgainstObjects,
+} from '../lib/studySession/academicCompositionStorage';
+import {
+  type DerivedQuestionSection,
+  parseNotebookQuestionSections,
+} from '../lib/academicComposition/questionSections';
 import { StudySessionPickWork } from '../components/project-space/StudySessionPickWork';
 import { UniversalObjectViewPortal } from '../components/project-space/UniversalObjectViewPortal';
 import { StudyContinueBanner } from '../components/workspace-guidance/StudyContinueBanner';
@@ -151,35 +166,16 @@ import { CourseEntryStrip } from '../components/course-entry/CourseEntryStrip';
 import { isCourseEntryBehaviorV1Enabled } from '../lib/courseEntry/featureFlag';
 import { resolveCourseEntry } from '../lib/courseEntry/resolveCourseEntry';
 import {
+  saveStudyContinuityRecord,
+  getMostRecentStudyContinuity,
+} from '../lib/studyContinuity/persistence';
+import { validateStudyContinuityAgainstObjects } from '../lib/studyContinuity/validation';
+import {
   isStudyLayoutDocked,
   sanitizeStudyLayout,
   type StudyLayoutMode,
 } from '../lib/mathDesk/studyLayout';
-import { useStudySessionPrimary } from '../lib/studySession/featureFlags';
-import {
-  getMostRecentSession,
-  loadStudySession,
-  saveStudySession,
-  touchStudySession,
-} from '../lib/studySession/persistence';
-import { resolveStudyPair } from '../lib/studySession/resolveStudyPair';
-import {
-  applyPdfPageRestore,
-  buildRestorePayload,
-} from '../lib/studySession/sessionRestore';
-import type { StudySessionRecord } from '../lib/studySession/types';
-import type { StudyPaneFocus } from '../lib/studySession/computeSessionChrome';
-import {
-  formatLastStudied,
-  formatPageLabel,
-} from '../lib/studySession/formatStudySessionStatus';
-import { STUDY_SESSION_PDF_FIT_WIDTH_ZOOM } from '../components/project-space/FreeSpacePdfCard';
-import type { StudyExamPdfControls } from '../lib/studySession/examPdfControls';
-import type { PdfStudyMarksChrome } from '../lib/pdfStudyMarks/usePdfStudyMarks';
-import {
-  EXAM_QUESTION_SEED_BODY,
-  parseExamQuestionsFromBody,
-} from '../lib/studySession/parseExamQuestions';
+import { formatPageLabel } from '../lib/studySession/formatStudySessionStatus';
 import type { ProjectSpaceObject } from '../hooks/useSectionFreeSpaceObjects';
 import { CompanionComposerModal } from '../components/project-space/CompanionComposerModal';
 import { QuickCaptureOverlay } from '../components/quick-capture/QuickCaptureOverlay';
@@ -224,7 +220,7 @@ import {
   scheduleDropRenderCheck,
 } from '../lib/dropPlacementDebug';
 import { extractPdfSpatialData } from '../lib/pdfIngestion';
-import { mergePdfIngestionReadyContent, bumpPdfPage, pdfToolbarDisplayPage } from '../lib/pdfViewerState';
+import { mergePdfIngestionReadyContent } from '../lib/pdfViewerState';
 import { aiComplete } from '../lib/ai/client';
 import type { ChatMessage } from '../lib/ai/types';
 import {
@@ -611,6 +607,11 @@ export function SectionPage() {
   const [showCustomize,   setShowCustomize]    = useState(false);
   const [sectionViewMode, setSectionViewModeState] = useState<'work-surface' | 'free-space' | 'math-zone'>(() => {
     if (navState?.firstArrival) return 'free-space';
+    // If active academic composition recovery exists in this tab, keep free-space active
+    if (typeof window !== 'undefined' && user?.id && sectionId && sectionBoards.activeBoardId) {
+      const rec = loadAcademicCompositionRecovery(user.id, sectionId, sectionBoards.activeBoardId);
+      if (rec) return 'free-space';
+    }
     return sectionId
       ? resolveSectionViewModeOnOpen(sectionId, { forceFreeSpace: isCourseEntryBehaviorV1Enabled() })
       : 'free-space';
@@ -623,40 +624,92 @@ export function SectionPage() {
     refreshMissionControl();
   }, [sectionViewMode, refreshMissionControl]);
   const [resumeDismissed, setResumeDismissed] = useState(false);
-  const studySessionPrimary = useStudySessionPrimary();
-  const [activeStudySession, setActiveStudySession] = useState<StudySessionRecord | null>(null);
-  const [studyPickWork, setStudyPickWork] = useState<{
-    sourceId: string;
+  const [academicPickWork, setAcademicPickWork] = useState<{
+    pdfObjectId: string;
     candidates: ProjectSpaceObject[];
+    connectedIds: string[];
   } | null>(null);
   const [studyContinueDismissed, setStudyContinueDismissed] = useState(false);
   const [courseEntryDismissed, setCourseEntryDismissed] = useState(false);
-  const [courseEntryWarmFallback, setCourseEntryWarmFallback] = useState(false);
-  const [studyRestoreBlockId, setStudyRestoreBlockId] = useState<string | null>(null);
   const [activeQuestionNumber, setActiveQuestionNumber] = useState<number | null>(null);
   const [studyFocusQuestionNumber, setStudyFocusQuestionNumber] = useState<number | null>(null);
   const [studyFocusQuestionToken, setStudyFocusQuestionToken] = useState(0);
-  const [studyPaneFocus, setStudyPaneFocus] = useState<StudyPaneFocus>('exam');
-  const [studyPdfMarksChrome, setStudyPdfMarksChrome] = useState<PdfStudyMarksChrome | null>(null);
-  const [studyPdfLivePage, setStudyPdfLivePage] = useState<number | null>(null);
-  const [studySplitRatio, setStudySplitRatio] = useState<number>(() => {
-    if (typeof window === 'undefined') return 0.75;
-    const raw = window.localStorage.getItem('focus.studySession.splitRatio.v1');
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) ? Math.max(0.12, Math.min(0.88, n)) : 0.75;
+  const [academicComposition, setAcademicComposition] = useState<AcademicCompositionSession | null>(() => {
+    if (!sectionId || !sectionBoards.activeBoardId || !user?.id) return null;
+    const rec = loadAcademicCompositionRecovery(user.id, sectionId, sectionBoards.activeBoardId);
+    if (!rec) return null;
+    const validated = validateAcademicRecoveryAgainstObjects(rec, {
+      userId: user.id,
+      sectionId,
+      boardId: sectionBoards.activeBoardId,
+      objects: sectionObjects.objects,
+    });
+    return validated ? validated.session : null;
   });
-  const [rvStudyPdfId, setRvStudyPdfId] = useState<string | null>(null);
-  const [binderStudy, setBinderStudy] = useState<{
-    pdfObjectId: string;
-    inkObjectId: string;
-    inkBlockKey: string;
-    surfaceTitle: string;
-  } | null>(null);
-  const studySessionWorkPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const studySessionPagePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [academicSplitRatio, setAcademicSplitRatio] = useState<number>(() => {
+    if (!sectionId || !sectionBoards.activeBoardId || !user?.id) return 0.5;
+    const rec = loadAcademicCompositionRecovery(user.id, sectionId, sectionBoards.activeBoardId);
+    if (!rec) return 0.5;
+    const validated = validateAcademicRecoveryAgainstObjects(rec, {
+      userId: user.id,
+      sectionId,
+      boardId: sectionBoards.activeBoardId,
+      objects: sectionObjects.objects,
+    });
+    return validated?.splitRatio ?? 0.5;
+  });
+  // Presence is explicit. A stored capture must not mount the floating card on refresh.
+  const [tutorOpen, setTutorOpen] = useState(false);
+  const [activeTutorIntent, setActiveTutorIntent] = useState<TutorCaptureIntent | null>(null);
+  const [livePdfPage, setLivePdfPage] = useState<{ objectId: string; page: number } | null>(null);
+  const handleCompositionPdfPage = useCallback((objectId: string, page: number) => {
+    setLivePdfPage({ objectId, page });
+  }, []);
+  const tutorBoundPdfRef = useRef<string | null>(academicComposition?.pdfObjectId ?? null);
+  const [tutorCaptureChrome, setTutorCaptureChrome] = useState<TutorCaptureChrome | null>(null);
+  const handleTutorCaptureIntent = useCallback((intent: TutorCaptureIntent) => {
+    setActiveTutorIntent(intent);
+    setTutorOpen(true);
+  }, []);
+
+  // Re-evaluate recovery when objects load or when switching boards/users
+  const prevCompositionScopeRef = useRef(`${user?.id ?? ''}:${sectionId}:${sectionBoards.activeBoardId}:${sectionObjects.objects.length}`);
+  useEffect(() => {
+    const currentScope = `${user?.id ?? ''}:${sectionId}:${sectionBoards.activeBoardId}:${sectionObjects.objects.length}`;
+    if (prevCompositionScopeRef.current !== currentScope) {
+      prevCompositionScopeRef.current = currentScope;
+      if (!sectionId || !sectionBoards.activeBoardId || !user?.id) {
+        setAcademicComposition(null);
+        setActiveTutorIntent(null);
+        setTutorOpen(false);
+        tutorBoundPdfRef.current = null;
+        return;
+      }
+      const rec = loadAcademicCompositionRecovery(user.id, sectionId, sectionBoards.activeBoardId);
+      if (!rec) {
+        return;
+      }
+      const validated = validateAcademicRecoveryAgainstObjects(rec, {
+        userId: user.id,
+        sectionId,
+        boardId: sectionBoards.activeBoardId,
+        objects: sectionObjects.objects,
+      });
+      if (validated) {
+        setAcademicComposition(validated.session);
+        if (validated.splitRatio != null) {
+          setAcademicSplitRatio(validated.splitRatio);
+        }
+        const nextPdfId = validated.session.pdfObjectId;
+        if (tutorBoundPdfRef.current !== nextPdfId) {
+          // Drop a live capture from the previous PDF. Do not open Tutor from storage.
+          if (tutorBoundPdfRef.current) setActiveTutorIntent(null);
+          tutorBoundPdfRef.current = nextPdfId;
+        }
+      }
+    }
+  }, [user?.id, sectionId, sectionBoards.activeBoardId, sectionObjects.objects]);
   const reEntryRestoreAppliedRef = useRef<string | null>(null);
-  const courseEntryWarmAppliedRef = useRef<string | null>(null);
-  const courseEntryWarmWasPickRef = useRef(false);
   const courseEntryEnabled = isCourseEntryBehaviorV1Enabled();
   const setSectionViewMode = useCallback(
     (mode: 'work-surface' | 'free-space' | 'math-zone') => {
@@ -855,12 +908,6 @@ export function SectionPage() {
         : 'work-surface',
     );
     setCourseEntryDismissed(false);
-    setCourseEntryWarmFallback(false);
-    courseEntryWarmAppliedRef.current = null;
-    courseEntryWarmWasPickRef.current = false;
-    setActiveStudySession(null);
-    setStudyPickWork(null);
-    setStudyRestoreBlockId(null);
     setShowSpaceAdd(false);
     setCompanionComposerOpen(false);
     setSpaceSelectedId(null);
@@ -1236,14 +1283,6 @@ export function SectionPage() {
 
   const openLearningAttemptForObject = useCallback(
     (objectId: string) => {
-      if (activeStudySession && sectionId) {
-        touchStudySession(sectionId, sectionBoards.activeBoardId, {
-          sourceObjectId: activeStudySession.sourceObjectId,
-          lastExitedAt: Date.now(),
-        });
-        setActiveStudySession(null);
-        setStudyRestoreBlockId(null);
-      }
       const obj = sectionObjectsRef.current.getObject(objectId);
       if (!obj) return;
       const target = learningTargetFromObject(obj);
@@ -1254,9 +1293,6 @@ export function SectionPage() {
       setLearningAttemptOpen(true);
     },
     [
-      activeStudySession,
-      sectionId,
-      sectionBoards.activeBoardId,
       sectionViewMode,
       setSectionViewMode,
       closeLearningAttempt,
@@ -1311,6 +1347,7 @@ export function SectionPage() {
     applyStudyLinksForObject(obj.id, type);
     setSpaceSelectedId(obj.id);
     setShowSpaceAdd(false);
+    return obj;
   }, [addSpaceObject, initPos, viewportCenterWorld, applyStudyLinksForObject]);
 
   /**
@@ -2628,369 +2665,148 @@ export function SectionPage() {
     });
   }, [spaceSelectedId]);
 
-  const createWorkNotebookForStudy = useCallback(
-    (sourceId: string) => {
-      const obj = addSpaceObject('notebook');
-      const base = viewportCenterWorld(40, 0);
-      initPos(obj.id, { x: base.x, y: base.y, w: 1040, h: 680 });
-      updateSpaceObjectContent(obj.id, {
-        type: 'notebook',
-        body: '# Work\n\n',
-        paperStyle: 'grid',
-        notebookSurface: 'spatial',
-        notebookMode: 'math',
-        icon: '∑',
+
+
+  const exitAcademicComposition = useCallback(() => {
+    if (academicComposition?.notebookObjectId) {
+      void flushAllHandwritingForObject(academicComposition.notebookObjectId);
+    }
+    // Update longitudinal continuity timestamp immediately before exiting
+    if (academicComposition?.pdfObjectId && academicComposition?.notebookObjectId) {
+      saveStudyContinuityRecord(user?.id, sectionId, sectionBoards.activeBoardId, {
+        sourceObjectId: academicComposition.pdfObjectId,
+        workObjectId: academicComposition.notebookObjectId,
+        lastActiveAt: Date.now(),
       });
-      addSpaceConnection(sourceId, obj.id);
-      return obj.id;
-    },
-    [addSpaceObject, initPos, viewportCenterWorld, updateSpaceObjectContent, addSpaceConnection],
-  );
-
-  const commitStudySession = useCallback(
-    (sourceId: string, workId: string, restoreFromRecord: StudySessionRecord | null) => {
-      if (!sectionId) return;
-      closeLearningAttempt();
-      const boardId = sectionBoards.activeBoardId;
-      const source = getSpaceObject(sourceId);
-      const work = getSpaceObject(workId);
-      if (!source || source.type !== 'pdf' || !work) return;
-
-      const restore = buildRestorePayload(restoreFromRecord);
-      const workContent = ensureProjectObjectContent('notebook', work.content);
-      if (workContent.type === 'notebook') {
-        let workBody = workContent.body ?? '';
-        const trimmed = workBody.trim();
-        const canSeedStudyQuestions =
-          trimmed.length === 0 ||
-          /^#\s*(Work|Math)?\s*$/i.test(trimmed) ||
-          /^#\s*(Work|Math)?\s*\n\s*$/i.test(trimmed);
-        if (canSeedStudyQuestions && parseExamQuestionsFromBody(workBody).length === 0) {
-          workBody = EXAM_QUESTION_SEED_BODY;
-        }
-        sectionObjectsRef.current.updateObjectContent(workId, {
-          ...workContent,
-          body: workBody,
-          deskLayout: {
-            collapsed: { formula: true, graph: true, compute: true, scratch: true },
-          },
-        });
-      }
-      const pdfContent = ensureProjectObjectContent('pdf', source.content);
-      const page =
-        restore.pdfPage ??
-        (pdfContent.type === 'pdf' ? pdfContent.page : 1);
-
-      let pagePatch = applyPdfPageRestore(source, page);
-      if (pagePatch) {
-        const pc = ensureProjectObjectContent('pdf', pagePatch);
-        if (pc.type === 'pdf' && pc.zoom <= 1) {
-          pagePatch = { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM };
-        }
-        sectionObjectsRef.current.updateObjectContent(sourceId, pagePatch);
-      } else if (pdfContent.type === 'pdf' && pdfContent.zoom <= 1) {
-        sectionObjectsRef.current.updateObjectContent(sourceId, {
-          ...pdfContent,
-          zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM,
-        });
-      }
-
-      const now = Date.now();
-      const record: StudySessionRecord = {
-        sourceObjectId: sourceId,
-        workObjectId: workId,
-        source: { page },
-        work: {
-          lastBlockId: restore.workBlockId,
-          lastCaretOffset: restoreFromRecord?.work.lastCaretOffset ?? null,
-        },
-        enteredAt: restoreFromRecord?.enteredAt ?? now,
-        lastActiveAt: now,
-        lastExitedAt: null,
-      };
-      saveStudySession(sectionId, boardId, record);
-      setActiveStudySession(record);
-      setStudyRestoreBlockId(restore.workBlockId);
-      if (restore.workBlockId) {
-        setActiveQuestionNumber(null);
-        setStudyFocusQuestionNumber(null);
-      } else {
-        setActiveQuestionNumber(1);
-        setStudyFocusQuestionNumber(1);
-        setStudyFocusQuestionToken(t => t + 1);
-      }
-      setStudyPaneFocus('exam');
-      setStudyContinueDismissed(true);
-      setSectionViewMode('free-space');
-      setSpaceSelectedId(workId);
-    },
-    [
-      sectionId,
-      sectionBoards.activeBoardId,
-      getSpaceObject,
-      setSectionViewMode,
-      closeLearningAttempt,
-    ],
-  );
-
-  const enterStudySession = useCallback(
-    (sourceId: string, opts?: { restore?: boolean }): 'entered' | 'pick' | 'failed' => {
-      if (!studySessionPrimary || !sectionId) return 'failed';
-      closeLearningAttempt();
-      const objects = sectionObjectsRef.current.objects;
-      const source = objects.find(o => o.id === sourceId);
-      if (!source || source.type !== 'pdf') return 'failed';
-
-      const boardId = sectionBoards.activeBoardId;
-      const saved = opts?.restore ? loadStudySession(sectionId, boardId, sourceId) : null;
-      const resolution = resolveStudyPair(source, objects, sectionId, boardId);
-
-      if (resolution.kind === 'pick') {
-        setStudyPickWork({ sourceId, candidates: resolution.candidates });
-        return 'pick';
-      }
-
-      let workId = resolution.kind === 'ready' ? resolution.workObjectId : '';
-      if (resolution.kind === 'create') {
-        workId = createWorkNotebookForStudy(sourceId);
-      }
-      if (!workId) return 'failed';
-
-      if (resolution.kind === 'ready' && !saved) {
-        const linked = objects.find(o => o.id === workId);
-        const hasLink = coerceFreeSpaceConnectionIds(source.connections).includes(workId)
-          || (linked && coerceFreeSpaceConnectionIds(linked.connections).includes(sourceId));
-        if (!hasLink) addSpaceConnection(sourceId, workId);
-      }
-
-      commitStudySession(sourceId, workId, saved);
-      return 'entered';
-    },
-    [
-      studySessionPrimary,
-      sectionId,
-      sectionBoards.activeBoardId,
-      createWorkNotebookForStudy,
-      commitStudySession,
-      addSpaceConnection,
-      closeLearningAttempt,
-    ],
-  );
-
-  const exitStudySession = useCallback(() => {
-    if (!activeStudySession || !sectionId) return;
-    const boardId = sectionBoards.activeBoardId;
-    touchStudySession(sectionId, boardId, {
-      sourceObjectId: activeStudySession.sourceObjectId,
-      lastExitedAt: Date.now(),
-    });
-    setActiveStudySession(null);
-    setStudyRestoreBlockId(null);
-    setActiveQuestionNumber(null);
-    setStudyFocusQuestionNumber(null);
-    setStudyPaneFocus('exam');
-    setStudyPdfMarksChrome(null);
-    if (studySessionWorkPersistTimerRef.current) {
-      clearTimeout(studySessionWorkPersistTimerRef.current);
-      studySessionWorkPersistTimerRef.current = null;
     }
-    if (studySessionPagePersistTimerRef.current) {
-      clearTimeout(studySessionPagePersistTimerRef.current);
-      studySessionPagePersistTimerRef.current = null;
-    }
-    toast.success('Study session saved — you can continue anytime.');
-  }, [activeStudySession, sectionId, sectionBoards.activeBoardId]);
+    clearAcademicCompositionRecovery(user?.id, sectionId, sectionBoards.activeBoardId);
+    setAcademicComposition(null);
+  }, [academicComposition, user?.id, sectionId, sectionBoards.activeBoardId]);
 
-  const openRvStudy = useCallback((pdfObjectId: string) => {
+  const enterAcademicComposition = useCallback((pdfObjectId: string, notebookObjectId?: string) => {
     closeLearningAttempt();
-    setBinderStudy(null);
-    setRvStudyPdfId(pdfObjectId);
-  }, [closeLearningAttempt]);
+    const objects = sectionObjectsRef.current.objects;
+    const pdfObj = objects.find(o => o.id === pdfObjectId);
+    if (!pdfObj || pdfObj.type !== 'pdf') return;
 
-  const closeRvStudy = useCallback(() => {
-    if (rvStudyPdfId) {
-      void flushAllHandwritingForObject(rvStudyPdfId);
-    }
-    setRvStudyPdfId(null);
-  }, [rvStudyPdfId]);
-
-  const openBinderStudy = useCallback(
-    (payload: {
-      pdfObjectId: string;
-      inkObjectId: string;
-      inkBlockKey: string;
-      surfaceTitle: string;
-    }) => {
-      closeLearningAttempt();
-      setRvStudyPdfId(null);
-      setBinderStudy(payload);
-    },
-    [closeLearningAttempt],
-  );
-
-  const closeBinderStudy = useCallback(() => {
-    if (binderStudy) {
-      void flushAllHandwritingForObject(binderStudy.inkObjectId);
-    }
-    setBinderStudy(null);
-  }, [binderStudy]);
-
-  const handleSelectStudyQuestion = useCallback((questionNumber: number) => {
-    setActiveQuestionNumber(questionNumber);
-    setStudyFocusQuestionNumber(questionNumber);
-    setStudyFocusQuestionToken(t => t + 1);
-  }, []);
-
-  const handleStudyPaneFocusChange = useCallback((focus: StudyPaneFocus) => {
-    setStudyPaneFocus(focus);
-    const preset = focus === 'exam' ? 0.75 : focus === 'work' ? 0.28 : 0.5;
-    setStudySplitRatio(preset);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('focus.studySession.splitRatio.v1', String(preset));
-    }
-  }, []);
-
-  const handleStudySplitRatioChange = useCallback((ratio: number) => {
-    setStudySplitRatio(Math.max(0.12, Math.min(0.88, ratio)));
-  }, []);
-
-  const handleStudySplitRatioCommit = useCallback((ratio: number) => {
-    const next = Math.max(0.12, Math.min(0.88, ratio));
-    setStudySplitRatio(next);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('focus.studySession.splitRatio.v1', String(next));
-    }
-  }, []);
-
-  const studyExamQuestions = useMemo(() => {
-    if (!activeStudySession) return [];
-    const work = sectionObjects.objects.find(o => o.id === activeStudySession.workObjectId);
-    if (!work || work.type !== 'notebook') return [];
-    const c = ensureProjectObjectContent('notebook', work.content);
-    if (c.type !== 'notebook') return [];
-    return parseExamQuestionsFromBody(c.body ?? '');
-  }, [activeStudySession, sectionObjects.objects]);
-
-  useEffect(() => {
-    setStudyPdfLivePage(null);
-  }, [activeStudySession?.sourceObjectId ?? null]);
-
-  const studyExamPdfControls = useMemo((): StudyExamPdfControls | null => {
-    if (!activeStudySession) return null;
-    const src = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
-    if (!src || src.type !== 'pdf') return null;
-    const c = ensureProjectObjectContent('pdf', src.content);
-    if (c.type !== 'pdf' || !c.fileName) return null;
-    const sourceId = activeStudySession.sourceObjectId;
-    const displayPage = pdfToolbarDisplayPage(studyPdfLivePage ?? c.page, c.pageCount);
-    return {
-      page: displayPage,
-      pageCount: c.pageCount,
-      zoom: c.zoom,
-      ready: true,
-      marks: studyPdfMarksChrome,
-      onPageDelta: (delta: number) => {
-        const store = sectionObjectsRef.current;
-        const o = store.getObject(sourceId);
-        if (!o || o.type !== 'pdf') return;
-        const pc = ensureProjectObjectContent('pdf', o.content);
-        if (pc.type !== 'pdf') return;
-        const basePage = pdfToolbarDisplayPage(studyPdfLivePage ?? pc.page, pc.pageCount);
-        store.updateObjectContent(sourceId, {
-          ...pc,
-          page: bumpPdfPage(basePage, delta, pc.pageCount),
-        });
-      },
-      onZoomDelta: (delta: number) => {
-        const store = sectionObjectsRef.current;
-        const o = store.getObject(sourceId);
-        if (!o || o.type !== 'pdf') return;
-        const pc = ensureProjectObjectContent('pdf', o.content);
-        if (pc.type !== 'pdf') return;
-        const z = Math.min(2.5, Math.max(0.55, Math.round((pc.zoom + delta) * 100) / 100));
-        store.updateObjectContent(sourceId, { ...pc, zoom: z });
-      },
-      onFitWidth: () => {
-        const store = sectionObjectsRef.current;
-        const o = store.getObject(sourceId);
-        if (!o || o.type !== 'pdf') return;
-        const pc = ensureProjectObjectContent('pdf', o.content);
-        if (pc.type !== 'pdf') return;
-        store.updateObjectContent(sourceId, { ...pc, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
-      },
-    };
-  }, [activeStudySession, sectionObjects.objects, studyPdfMarksChrome, studyPdfLivePage]);
-
-  const handleStudySessionWorkFocus = useCallback(
-    (blockId: string | null) => {
-      if (!activeStudySession || !sectionId || !blockId) return;
-      if (studySessionWorkPersistTimerRef.current) {
-        clearTimeout(studySessionWorkPersistTimerRef.current);
-      }
-      studySessionWorkPersistTimerRef.current = setTimeout(() => {
-        const next = touchStudySession(sectionId, sectionBoards.activeBoardId, {
-          sourceObjectId: activeStudySession.sourceObjectId,
-          work: { lastBlockId: blockId, lastCaretOffset: null },
-        });
-        if (next) setActiveStudySession(next);
-        studySessionWorkPersistTimerRef.current = null;
-      }, 400);
-    },
-    [activeStudySession, sectionId, sectionBoards.activeBoardId],
-  );
-
-  useEffect(() => {
-    if (!activeStudySession || !sectionId || !studySessionPrimary) return;
-    const source = sectionObjects.objects.find(o => o.id === activeStudySession.sourceObjectId);
-    if (!source || source.type !== 'pdf') return;
-    const c = ensureProjectObjectContent('pdf', source.content);
-    if (c.type !== 'pdf' || c.page === activeStudySession.source.page) return;
-    if (studySessionPagePersistTimerRef.current) clearTimeout(studySessionPagePersistTimerRef.current);
-    studySessionPagePersistTimerRef.current = setTimeout(() => {
-      const next = touchStudySession(sectionId, sectionBoards.activeBoardId, {
-        sourceObjectId: activeStudySession.sourceObjectId,
-        source: { page: c.page },
+    // 1. Direct explicit notebook ID provided (e.g. from picker or caller)
+    if (notebookObjectId) {
+      addSpaceConnection(pdfObjectId, notebookObjectId);
+      setAcademicPickWork(null);
+      const session: AcademicCompositionSession = {
+        pdfObjectId,
+        notebookObjectId,
+      };
+      saveAcademicCompositionRecovery(
+        user?.id,
+        sectionId,
+        sectionBoards.activeBoardId,
+        session,
+        academicSplitRatio,
+      );
+      saveStudyContinuityRecord(user?.id, sectionId, sectionBoards.activeBoardId, {
+        sourceObjectId: pdfObjectId,
+        workObjectId: notebookObjectId,
+        lastActiveAt: Date.now(),
       });
-      if (next) setActiveStudySession(next);
-      studySessionPagePersistTimerRef.current = null;
-    }, 400);
-    return () => {
-      if (studySessionPagePersistTimerRef.current) {
-        clearTimeout(studySessionPagePersistTimerRef.current);
-        studySessionPagePersistTimerRef.current = null;
-      }
-    };
-  }, [activeStudySession, sectionId, sectionBoards.activeBoardId, sectionObjects.objects, studySessionPrimary]);
+      setAcademicComposition(session);
+      setSectionViewMode('free-space');
+      return;
+    }
 
-  const studyContinueCandidate = useMemo(() => {
-    if (!studySessionPrimary || !sectionId || activeStudySession || studyContinueDismissed) {
+    // 2. Resolve via pure academic resolver
+    const resolution = resolveAcademicNotebookPair(pdfObj, objects);
+
+    if (resolution.kind === 'pick') {
+      const pdfConnections = coerceFreeSpaceConnectionIds(pdfObj.connections);
+      setAcademicPickWork({
+        pdfObjectId,
+        candidates: resolution.candidates,
+        connectedIds: pdfConnections,
+      });
+      return;
+    }
+
+    if (resolution.kind === 'create') {
+      const newNb = handleAddToSpace('notebook');
+      if (newNb) {
+        addSpaceConnection(pdfObjectId, newNb.id);
+        const session: AcademicCompositionSession = {
+          pdfObjectId,
+          notebookObjectId: newNb.id,
+        };
+        saveAcademicCompositionRecovery(
+          user?.id,
+          sectionId,
+          sectionBoards.activeBoardId,
+          session,
+          academicSplitRatio,
+        );
+        saveStudyContinuityRecord(user?.id, sectionId, sectionBoards.activeBoardId, {
+          sourceObjectId: pdfObjectId,
+          workObjectId: newNb.id,
+          lastActiveAt: Date.now(),
+        });
+        setAcademicComposition(session);
+      }
+      return;
+    }
+
+    if (resolution.kind === 'ready') {
+      addSpaceConnection(pdfObjectId, resolution.notebookObjectId);
+      const session: AcademicCompositionSession = {
+        pdfObjectId,
+        notebookObjectId: resolution.notebookObjectId,
+      };
+      saveAcademicCompositionRecovery(
+        user?.id,
+        sectionId,
+        sectionBoards.activeBoardId,
+        session,
+        academicSplitRatio,
+      );
+      saveStudyContinuityRecord(user?.id, sectionId, sectionBoards.activeBoardId, {
+        sourceObjectId: pdfObjectId,
+        workObjectId: resolution.notebookObjectId,
+        lastActiveAt: Date.now(),
+      });
+      setAcademicComposition(session);
+    }
+  }, [closeLearningAttempt, handleAddToSpace, addSpaceConnection, user?.id, sectionId, sectionBoards.activeBoardId, academicSplitRatio]);
+
+
+
+  const academicStudyContinueCandidate = useMemo(() => {
+    if (!sectionId || academicComposition || studyContinueDismissed || !user?.id) {
       return null;
     }
-    return getMostRecentSession(sectionId, sectionBoards.activeBoardId);
+    const raw = getMostRecentStudyContinuity(user.id, sectionId, sectionBoards.activeBoardId);
+    if (!raw) return null;
+    return validateStudyContinuityAgainstObjects(raw, {
+      userId: user.id,
+      sectionId,
+      boardId: sectionBoards.activeBoardId,
+      objects: sectionObjects.objects,
+    });
   }, [
-    studySessionPrimary,
+    user?.id,
     sectionId,
     sectionBoards.activeBoardId,
-    activeStudySession,
+    academicComposition,
     studyContinueDismissed,
+    sectionObjects.objects,
   ]);
 
   const workspaceResumeSuggestions = useMemo(() => {
-    if (!studySessionPrimary || !studyContinueCandidate) return continuitySuggestions;
     return continuitySuggestions.filter(s => !s.learningAttempt);
-  }, [continuitySuggestions, studySessionPrimary, studyContinueCandidate]);
+  }, [continuitySuggestions]);
 
   const courseEntryExamDays = useMemo(
     () => (section?.exam_date ? daysUntil(section.exam_date) : null),
     [section?.exam_date],
   );
 
-  const courseEntryMostRecentSession = useMemo(() => {
-    if (!studySessionPrimary || !sectionId) return null;
-    return getMostRecentSession(sectionId, sectionBoards.activeBoardId);
-  }, [studySessionPrimary, sectionId, sectionBoards.activeBoardId]);
-
-  const courseEntryRestorableSourceId = courseEntryMostRecentSession?.sourceObjectId ?? null;
+  const courseEntryRestorableSourceId = academicStudyContinueCandidate?.record.sourceObjectId ?? null;
 
   const courseEntryDecision = useMemo(() => {
     if (!courseEntryEnabled || !sectionId) return { kind: 'none' as const };
@@ -2998,9 +2814,9 @@ export function SectionPage() {
       now: Date.now(),
       firstArrival: navState?.firstArrival ?? false,
       objects: sectionObjects.objects,
-      studySessionPrimary,
-      mostRecentSession: courseEntryMostRecentSession,
-      hasActiveStudySession: !!activeStudySession,
+      studySessionPrimary: false,
+      mostRecentSession: null,
+      hasActiveStudySession: Boolean(academicComposition),
       examDays: courseEntryExamDays,
       restorableNextSourceId: courseEntryRestorableSourceId,
     });
@@ -3009,109 +2825,34 @@ export function SectionPage() {
     sectionId,
     navState?.firstArrival,
     sectionObjects.objects,
-    studySessionPrimary,
-    courseEntryMostRecentSession,
-    activeStudySession,
+    academicComposition,
     courseEntryExamDays,
     courseEntryRestorableSourceId,
   ]);
 
-  const courseEntryWarmFallbackStripVisible =
-    courseEntryEnabled &&
-    courseEntryDecision.kind === 'warm_restore' &&
-    courseEntryWarmFallback &&
-    !courseEntryDismissed &&
-    !activeStudySession &&
-    !studyPickWork;
-
   const courseEntryActive =
     courseEntryEnabled &&
-    ((courseEntryDecision.kind === 'strip' && !courseEntryDismissed) ||
-      courseEntryWarmFallbackStripVisible ||
-      (courseEntryDecision.kind === 'warm_restore' && !!activeStudySession));
+    courseEntryDecision.kind === 'strip' &&
+    !courseEntryDismissed;
 
   const courseEntryStripVisible =
     courseEntryEnabled &&
     courseEntryDecision.kind === 'strip' &&
     !courseEntryDismissed &&
-    !activeStudySession;
-
-  const courseEntryWarmFallbackCopy = useMemo(() => {
-    if (courseEntryDecision.kind !== 'warm_restore') return null;
-    const session = courseEntryMostRecentSession;
-    const src = sectionObjects.objects.find(o => o.id === courseEntryDecision.sourceId);
-    let examLabel = src?.title ?? 'Your exam';
-    let pageLabel: string | undefined;
-    if (src?.type === 'pdf') {
-      const c = ensureProjectObjectContent('pdf', src.content);
-      if (c.type === 'pdf') {
-        examLabel = c.fileName || src.title;
-        if (session) {
-          pageLabel = formatPageLabel(session.source.page, c.pageCount);
-        }
-      }
-    } else if (session) {
-      pageLabel = formatPageLabel(session.source.page);
-    }
-    const subtitle = [examLabel, pageLabel].filter(Boolean).join(' · ');
-    return { subtitle };
-  }, [
-    courseEntryDecision,
-    courseEntryMostRecentSession,
-    sectionObjects.objects,
-  ]);
-
-  useEffect(() => {
-    if (!courseEntryEnabled || !sectionId) return;
-    if (courseEntryDecision.kind !== 'warm_restore') {
-      setCourseEntryWarmFallback(false);
-      courseEntryWarmWasPickRef.current = false;
-      return;
-    }
-    if (activeStudySession) {
-      setCourseEntryWarmFallback(false);
-      courseEntryWarmWasPickRef.current = false;
-      return;
-    }
-    if (courseEntryWarmAppliedRef.current === sectionId) return;
-    courseEntryWarmAppliedRef.current = sectionId;
-    const result = enterStudySession(courseEntryDecision.sourceId, { restore: true });
-    if (result === 'failed') {
-      setCourseEntryWarmFallback(true);
-    } else if (result === 'pick') {
-      courseEntryWarmWasPickRef.current = true;
-    }
-  }, [
-    courseEntryEnabled,
-    sectionId,
-    courseEntryDecision,
-    activeStudySession,
-    enterStudySession,
-  ]);
-
-  useEffect(() => {
-    if (!courseEntryEnabled || !sectionId) return;
-    if (!courseEntryWarmWasPickRef.current) return;
-    if (courseEntryDecision.kind !== 'warm_restore') return;
-    if (activeStudySession || studyPickWork || courseEntryDismissed) return;
-    if (courseEntryWarmAppliedRef.current !== sectionId) return;
-    setCourseEntryWarmFallback(true);
-  }, [
-    courseEntryEnabled,
-    sectionId,
-    courseEntryDecision,
-    activeStudySession,
-    studyPickWork,
-    courseEntryDismissed,
-  ]);
+    !academicComposition;
 
   const handleCourseEntryPrimary = useCallback(() => {
     if (courseEntryDecision.kind !== 'strip') return;
     setCourseEntryDismissed(true);
     switch (courseEntryDecision.action) {
       case 'restore_session':
-        if (courseEntryDecision.sessionSourceId) {
-          enterStudySession(courseEntryDecision.sessionSourceId, { restore: true });
+        if (academicStudyContinueCandidate && academicStudyContinueCandidate.record.sourceObjectId === courseEntryDecision.sessionSourceId) {
+          enterAcademicComposition(
+            academicStudyContinueCandidate.record.sourceObjectId,
+            academicStudyContinueCandidate.record.workObjectId,
+          );
+        } else if (courseEntryDecision.sessionSourceId) {
+          enterAcademicComposition(courseEntryDecision.sessionSourceId);
         }
         break;
       case 'focus':
@@ -3125,14 +2866,7 @@ export function SectionPage() {
       case 'enter':
         break;
     }
-  }, [courseEntryDecision, enterStudySession, focusNotebookOnCanvas, handleAddToSpace]);
-
-  const handleCourseEntryWarmFallback = useCallback(() => {
-    if (courseEntryDecision.kind !== 'warm_restore') return;
-    setCourseEntryDismissed(true);
-    setCourseEntryWarmFallback(false);
-    enterStudySession(courseEntryDecision.sourceId, { restore: true });
-  }, [courseEntryDecision, enterStudySession]);
+  }, [courseEntryDecision, academicStudyContinueCandidate, enterAcademicComposition, focusNotebookOnCanvas, handleAddToSpace]);
 
   const supportsUniversalPresentation = useCallback((o: ProjectSpaceObject): boolean => (
     o.type === 'notebook'
@@ -3143,13 +2877,13 @@ export function SectionPage() {
     || o.type === 'sheet'
   ), []);
 
-  const isStudySessionObject = useCallback(
+  const isAcademicCompositionObject = useCallback(
     (objectId: string): boolean =>
       Boolean(
-        activeStudySession &&
-        (objectId === activeStudySession.sourceObjectId || objectId === activeStudySession.workObjectId),
+        academicComposition &&
+        (objectId === academicComposition.pdfObjectId || objectId === academicComposition.notebookObjectId),
       ),
-    [activeStudySession],
+    [academicComposition],
   );
 
   const getObjectPresentation = useCallback((objectId: string): {
@@ -3157,14 +2891,14 @@ export function SectionPage() {
     splitSide: UniversalObjectSplitSide;
   } => {
     const obj = sectionObjectsRef.current.getObject(objectId);
-    if (!obj || !supportsUniversalPresentation(obj) || isStudySessionObject(objectId)) {
+    if (!obj || !supportsUniversalPresentation(obj) || isAcademicCompositionObject(objectId)) {
       return { mode: 'floating', splitSide: 'right' };
     }
     return {
       mode: obj.viewMode ?? 'floating',
       splitSide: obj.splitSide ?? 'right',
     };
-  }, [supportsUniversalPresentation, isStudySessionObject]);
+  }, [supportsUniversalPresentation, isAcademicCompositionObject]);
 
   const setObjectPresentationMode = useCallback((
     objectId: string,
@@ -3174,7 +2908,7 @@ export function SectionPage() {
     void (async () => {
     const store = sectionObjectsRef.current;
     const target = store.getObject(objectId);
-    if (!target || !supportsUniversalPresentation(target) || isStudySessionObject(objectId)) return;
+    if (!target || !supportsUniversalPresentation(target) || isAcademicCompositionObject(objectId)) return;
 
     if (target.type === 'notebook') {
       await flushAllHandwritingForObject(objectId);
@@ -3188,7 +2922,6 @@ export function SectionPage() {
       const side = splitSide ?? target.splitSide ?? 'right';
       for (const o of store.objects) {
         if (o.id === objectId || !supportsUniversalPresentation(o)) continue;
-        if (isStudySessionObject(o.id)) continue;
         if ((o.viewMode ?? 'floating') === 'split' && (o.splitSide ?? 'right') === side) {
           if (o.type === 'sheet') flushSheetForObject(o.id);
           store.updateObjectFields(o.id, { viewMode: 'floating' });
@@ -3209,7 +2942,7 @@ export function SectionPage() {
     }
     setSpaceSelectedId(objectId);
     })();
-  }, [supportsUniversalPresentation, isStudySessionObject]);
+  }, [supportsUniversalPresentation, isAcademicCompositionObject]);
 
   /** Mission Control Open — board switch + visual frame (never restore UOV). */
   const focusNotebookForMissionControl = useCallback(
@@ -3493,40 +3226,11 @@ export function SectionPage() {
       const obj = store.getObject(objectId);
       if (!obj || !isObjectActive(obj)) return null;
 
-      const inStudySession =
-        studySessionPrimary &&
-        activeStudySession &&
-        (activeStudySession.sourceObjectId === objectId ||
-          activeStudySession.workObjectId === objectId);
-
-      const studySessionChip =
-        inStudySession && contentHost === 'canvas'
-          ? {
-              subtitle:
-                activeStudySession!.sourceObjectId === objectId
-                  ? 'Exam is open in your study session'
-                  : 'Work is open in your study session',
-              onOpen: () => enterStudySession(activeStudySession!.sourceObjectId, { restore: true }),
-            }
-          : null;
-
-      const isStudyWorkNotebook =
-        inStudySession && activeStudySession?.workObjectId === objectId;
-
-      const studyExamReaderChrome = Boolean(
-        contentHost === 'study-session' &&
-          studyPaneFocus === 'exam' &&
-          activeStudySession?.sourceObjectId === objectId,
+      const isAcademicWorkNotebook = Boolean(
+        academicComposition &&
+        academicComposition.secondarySurface !== 'ask' &&
+        academicComposition.notebookObjectId === objectId,
       );
-
-      const studyDeskQuiet = Boolean(
-        contentHost === 'study-session' &&
-          studyPaneFocus === 'exam' &&
-          isStudyWorkNotebook,
-      );
-
-      const restoreBlockId =
-        contentHost === 'study-session' && isStudyWorkNotebook ? studyRestoreBlockId : null;
 
       return (
         <ProjectSpaceObjectRenderer
@@ -3550,51 +3254,27 @@ export function SectionPage() {
           onStartLearningAttempt={openLearningAttemptForObject}
           onPdfViewerReady={handlePdfViewerReady}
           onStudyLayoutChange={
-            studySessionPrimary || obj.type !== 'notebook'
+            obj.type !== 'notebook'
               ? undefined
               : mode => handleStudyLayoutChange(objectId, mode)
           }
-          onStartStudySession={
-            studySessionPrimary && obj.type === 'pdf' && contentHost === 'canvas'
-              ? () => enterStudySession(objectId)
+          onStartAcademicComposition={
+            obj.type === 'pdf' && contentHost === 'canvas' && !academicComposition
+              ? () => enterAcademicComposition(objectId)
               : undefined
           }
-          onStartRvStudy={
-            isRvStudySurfaceEnabled() && obj.type === 'pdf' && contentHost === 'canvas'
-              ? () => openRvStudy(objectId)
-              : undefined
-          }
-          onOpenBinderStudy={
-            obj.type === 'notebook' && contentHost === 'canvas' ? openBinderStudy : undefined
-          }
-          studySessionChip={studySessionChip}
-          sessionRestoreBlockId={restoreBlockId}
-          onStudySessionWorkFocus={
-            isStudyWorkNotebook ? handleStudySessionWorkFocus : undefined
-          }
-          studyFocusQuestionNumber={isStudyWorkNotebook ? studyFocusQuestionNumber : undefined}
-          studyFocusQuestionToken={isStudyWorkNotebook ? studyFocusQuestionToken : undefined}
+          studyFocusQuestionNumber={isAcademicWorkNotebook ? studyFocusQuestionNumber : undefined}
+          studyFocusQuestionToken={isAcademicWorkNotebook ? studyFocusQuestionToken : undefined}
           onStudySessionActiveQuestionNumber={
-            isStudyWorkNotebook ? setActiveQuestionNumber : undefined
+            isAcademicWorkNotebook ? setActiveQuestionNumber : undefined
           }
-          suppressStudyToolbar={studyExamReaderChrome}
-          studyDeskQuiet={studyDeskQuiet}
-          onStudyMarksChromeChange={
-            contentHost === 'study-session' && obj.type === 'pdf'
-              ? setStudyPdfMarksChrome
-              : undefined
-          }
+          onTutorCaptureIntent={contentHost === 'study-session' ? handleTutorCaptureIntent : undefined}
           onPdfLivePageChange={
-            contentHost === 'study-session' &&
-            obj.type === 'pdf' &&
-            activeStudySession?.sourceObjectId === objectId
-              ? setStudyPdfLivePage
+            contentHost === 'study-session' && academicComposition?.pdfObjectId === objectId
+              ? (page) => handleCompositionPdfPage(objectId, page)
               : undefined
           }
-          suppressLearningAttemptChip={
-            studySessionPrimary &&
-            (contentHost === 'study-session' || obj.type === 'pdf')
-          }
+          onTutorCaptureChromeChange={contentHost === 'study-session' ? setTutorCaptureChrome : undefined}
           objectPresentationMode={getObjectPresentation(objectId).mode}
           onSetObjectPresentationMode={setObjectPresentationMode}
         />
@@ -3608,19 +3288,14 @@ export function SectionPage() {
       openLearningAttemptForObject,
       handlePdfViewerReady,
       handleStudyLayoutChange,
-      studySessionPrimary,
-      activeStudySession,
-      studyRestoreBlockId,
       studyFocusQuestionNumber,
       studyFocusQuestionToken,
-      studyPaneFocus,
-      enterStudySession,
-      openRvStudy,
-      openBinderStudy,
-      handleStudySessionWorkFocus,
       getObjectPresentation,
       setObjectPresentationMode,
-      activeStudySession?.sourceObjectId,
+      academicComposition,
+      enterAcademicComposition,
+      handleTutorCaptureIntent,
+      handleCompositionPdfPage,
     ],
   );
 
@@ -3811,7 +3486,7 @@ export function SectionPage() {
         tokens={tokens}
         isCustomizing={designMode}
         isExploreFocus={isExploreFocus}
-        dimmed={studySessionPrimary && !!activeStudySession}
+        dimmed={Boolean(academicComposition)}
         backLabel={workspaceBackLabel}
         onBack={handleWorkspaceBack}
         onOpenSearch={openPalette}
@@ -3942,7 +3617,7 @@ export function SectionPage() {
               modules={[]}
               blocks={sectionObjects.objects.filter(o => {
                 if (!isObjectActive(o)) return false;
-                if (activeStudySession) return true;
+                if (academicComposition) return true;
                 if (!supportsUniversalPresentation(o)) return true;
                 return (o.viewMode ?? 'floating') === 'floating';
               })}
@@ -4009,7 +3684,7 @@ export function SectionPage() {
               onImageDroppedOnCanvas={handleImageDroppedOnCanvas}
               focusMode={freeSpaceSurfaceVisible ? focusMode : null}
               pulseObjectId={notebookSearchPulseId}
-              surfaceActive={freeSpaceSurfaceVisible}
+              surfaceActive={freeSpaceSurfaceVisible && !academicComposition}
               calmEffects={performanceCalm}
               workspaceClarity={freeSpaceClarity}
               focusStrength={global.focusStrength ?? 'soft'}
@@ -4021,8 +3696,12 @@ export function SectionPage() {
             />
           </FreeSpaceCanvasErrorBoundary>
 
-          {freeSpaceSurfaceVisible && !activeStudySession && (() => {
-            const eligible = sectionObjects.objects.filter(o => isObjectActive(o) && supportsUniversalPresentation(o));
+          {freeSpaceSurfaceVisible && !academicComposition && (() => {
+            const eligible = sectionObjects.objects.filter(o =>
+              isObjectActive(o) &&
+              supportsUniversalPresentation(o) &&
+              !isAcademicObjectSuppressedFromWorkspace(o.id, academicComposition),
+            );
             const fullscreen = eligible
               .filter(o => (o.viewMode ?? 'floating') === 'fullscreen')
               .sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -4077,7 +3756,6 @@ export function SectionPage() {
           })()}
 
           {freeSpaceSurfaceVisible &&
-            !studySessionPrimary &&
             studyDockedNotebooks.map(o => {
               const c = ensureProjectObjectContent('notebook', o.content);
               if (c.type !== 'notebook') return null;
@@ -4097,133 +3775,118 @@ export function SectionPage() {
             })}
 
           {freeSpaceSurfaceVisible &&
-            studySessionPrimary &&
-            activeStudySession &&
+            academicComposition &&
             (() => {
-              const source = sectionObjects.objects.find(
-                o => o.id === activeStudySession.sourceObjectId,
-              );
-              let sourceTitle = source?.title ?? 'Exam';
-              if (source?.type === 'pdf') {
-                const sc = ensureProjectObjectContent('pdf', source.content);
-                if (sc.type === 'pdf' && sc.fileName) sourceTitle = sc.fileName;
+              const pdfObj = sectionObjects.objects.find(o => o.id === academicComposition.pdfObjectId);
+              const notebookObj = sectionObjects.objects.find(o => o.id === academicComposition.notebookObjectId);
+              if (!pdfObj || !notebookObj) return null;
+
+              let pdfTitle = pdfObj.title || 'PDF Document';
+              if (pdfObj.type === 'pdf') {
+                const sc = ensureProjectObjectContent('pdf', pdfObj.content);
+                if (sc.type === 'pdf' && sc.fileName) pdfTitle = sc.fileName;
               }
-              const srcContent =
-                source?.type === 'pdf'
-                  ? ensureProjectObjectContent('pdf', source.content)
-                  : null;
-              const pageCount =
-                srcContent?.type === 'pdf' ? srcContent.pageCount : undefined;
-              const statusLine = [
-                formatPageLabel(activeStudySession.source.page, pageCount),
-                formatLastStudied(activeStudySession.lastActiveAt),
-              ].join(' · ');
+              const secondaryObjectId = resolveAcademicSecondaryObjectId(academicComposition);
+              const secondarySurface = academicComposition.secondarySurface ?? 'notebook';
+              const notebookDisplayName = notebookObj.title || 'Notebook';
+
+              let academicQuestionSections: DerivedQuestionSection[] = [];
+              if (secondarySurface === 'notebook' && notebookObj.type === 'notebook') {
+                const c = ensureProjectObjectContent('notebook', notebookObj.content);
+                if (c.type === 'notebook' && c.body) {
+                  academicQuestionSections = parseNotebookQuestionSections(c.body);
+                }
+              }
 
               return (
-                <StudySessionShell
+                <AcademicCompositionShell
                   tokens={freeSpaceTokens}
-                  examTitle={sourceTitle || 'Exam'}
-                  statusLine={statusLine}
-                  shellTopInset={0}
-                  paneFocus={studyPaneFocus}
-                  onPaneFocusChange={handleStudyPaneFocusChange}
-                  splitRatio={studySplitRatio}
-                  onSplitRatioChange={handleStudySplitRatioChange}
-                  onSplitRatioCommit={handleStudySplitRatioCommit}
-                  onDoneStudying={exitStudySession}
-                  questions={studyExamQuestions}
+                  pdfTitle={pdfTitle}
+                  notebookTitle={notebookDisplayName}
+                  splitRatio={academicSplitRatio}
+                  onSplitRatioChange={setAcademicSplitRatio}
+                  onSplitRatioCommit={ratio => {
+                    setAcademicSplitRatio(ratio);
+                    if (academicComposition) {
+                      saveAcademicCompositionRecovery(
+                        user?.id,
+                        sectionId,
+                        sectionBoards.activeBoardId,
+                        academicComposition,
+                        ratio,
+                      );
+                    }
+                  }}
+                  onClose={exitAcademicComposition}
+                  secondarySurface={secondarySurface}
+                  questions={academicQuestionSections}
                   activeQuestionNumber={activeQuestionNumber}
-                  onSelectQuestion={handleSelectStudyQuestion}
-                  examPdfControls={studyExamPdfControls}
-                  sourcePanel={renderSpaceObject(activeStudySession.sourceObjectId, 'study-session')}
-                  workPanel={renderSpaceObject(activeStudySession.workObjectId, 'study-session')}
-                />
-              );
-            })()}
-
-          {freeSpaceSurfaceVisible &&
-            rvStudyPdfId &&
-            sectionId &&
-            (() => {
-              const rvPdf = sectionObjects.objects.find(o => o.id === rvStudyPdfId);
-              if (!rvPdf || rvPdf.type !== 'pdf') return null;
-              const rvContent = ensureProjectObjectContent('pdf', rvPdf.content);
-              if (rvContent.type !== 'pdf') return null;
-              return (
-                <RvStudySurface
-                  tokens={freeSpaceTokens}
+                  onSelectQuestion={qNum => {
+                    setActiveQuestionNumber(qNum);
+                    setStudyFocusQuestionNumber(qNum);
+                    setStudyFocusQuestionToken(t => t + 1);
+                  }}
                   sectionId={sectionId}
-                  pdfObjectId={rvStudyPdfId}
-                  pdfContent={rvContent}
-                  pdfTitle={rvPdf.title}
-                  onPdfContentChange={content =>
-                    sectionObjects.updateObjectContent(rvStudyPdfId, content)
+                  sourceObjectId={academicComposition.pdfObjectId}
+                  visiblePage={
+                    livePdfPage?.objectId === academicComposition.pdfObjectId ? livePdfPage.page : null
                   }
-                  onClose={closeRvStudy}
+                  userId={user?.id}
+                  tutorOpen={tutorOpen}
+                  onOpenTutor={() => setTutorOpen(true)}
+                  tutorIntent={activeTutorIntent}
+                  onCloseTutor={() => {
+                    setTutorOpen(false);
+                    setActiveTutorIntent(null);
+                  }}
+                  onNavigateToSource={pageNumber => {
+                    const obj = sectionObjectsRef.current.getObject(academicComposition.pdfObjectId);
+                    if (obj) {
+                      const content = ensureProjectObjectContent(obj.type, obj.content);
+                      if (content.type === 'pdf') {
+                        sectionObjectsRef.current.updateObjectContent(academicComposition.pdfObjectId, {
+                          ...content,
+                          page: pageNumber,
+                        });
+                      }
+                    }
+                  }}
+                  tutorChrome={tutorCaptureChrome}
+                  pdfSurface={renderSpaceObject(academicComposition.pdfObjectId, 'study-session')}
+                  notebookSurface={renderSpaceObject(secondaryObjectId, 'study-session')}
                 />
               );
             })()}
 
           {freeSpaceSurfaceVisible &&
-            binderStudy &&
-            sectionId &&
-            (() => {
-              const binderPdf = sectionObjects.objects.find(o => o.id === binderStudy.pdfObjectId);
-              if (!binderPdf || binderPdf.type !== 'pdf') return null;
-              const binderPdfContent = ensureProjectObjectContent('pdf', binderPdf.content);
-              if (binderPdfContent.type !== 'pdf') return null;
-              return (
-                <RvStudySurface
-                  tokens={freeSpaceTokens}
-                  sectionId={sectionId}
-                  pdfObjectId={binderStudy.pdfObjectId}
-                  pdfContent={binderPdfContent}
-                  pdfTitle={binderPdf.title}
-                  onPdfContentChange={content =>
-                    sectionObjects.updateObjectContent(binderStudy.pdfObjectId, content)
-                  }
-                  inkObjectId={binderStudy.inkObjectId}
-                  inkBlockKey={binderStudy.inkBlockKey}
-                  headerTitle={binderStudy.surfaceTitle}
-                  onClose={closeBinderStudy}
-                />
-              );
-            })()}
-
-          {freeSpaceSurfaceVisible &&
-            studySessionPrimary &&
-            studyContinueCandidate &&
-            !activeStudySession &&
+            academicStudyContinueCandidate &&
+            !academicComposition &&
             !courseEntryEnabled && (
               <StudyContinueBanner
                 tokens={freeSpaceTokens}
                 examLabel={(() => {
-                  const src = sectionObjects.objects.find(
-                    o => o.id === studyContinueCandidate.sourceObjectId,
-                  );
-                  if (src?.type === 'pdf') {
+                  const src = academicStudyContinueCandidate.sourceObject;
+                  if (src.type === 'pdf') {
                     const c = ensureProjectObjectContent('pdf', src.content);
                     if (c.type === 'pdf') return c.fileName || src.title;
                   }
-                  return src?.title ?? 'Your exam';
+                  return src.title ?? 'Your document';
                 })()}
                 pageLabel={(() => {
-                  const src = sectionObjects.objects.find(
-                    o => o.id === studyContinueCandidate.sourceObjectId,
-                  );
-                  if (src?.type === 'pdf') {
+                  const src = academicStudyContinueCandidate.sourceObject;
+                  if (src.type === 'pdf') {
                     const c = ensureProjectObjectContent('pdf', src.content);
                     if (c.type === 'pdf') {
-                      return formatPageLabel(
-                        studyContinueCandidate.source.page,
-                        c.pageCount,
-                      );
+                      return formatPageLabel(c.page, c.pageCount);
                     }
                   }
-                  return formatPageLabel(studyContinueCandidate.source.page);
+                  return null;
                 })()}
                 onContinue={() =>
-                  enterStudySession(studyContinueCandidate.sourceObjectId, { restore: true })
+                  enterAcademicComposition(
+                    academicStudyContinueCandidate.record.sourceObjectId,
+                    academicStudyContinueCandidate.record.workObjectId,
+                  )
                 }
                 onDismiss={() => setStudyContinueDismissed(true)}
               />
@@ -4240,26 +3903,11 @@ export function SectionPage() {
             />
           )}
 
-          {freeSpaceSurfaceVisible && courseEntryWarmFallbackStripVisible && courseEntryWarmFallbackCopy && (
-            <CourseEntryStrip
-              tokens={freeSpaceTokens}
-              title="Continue studying"
-              subtitle={courseEntryWarmFallbackCopy.subtitle}
-              buttonLabel="Continue studying"
-              onPrimary={handleCourseEntryWarmFallback}
-              onDismiss={() => {
-                setCourseEntryDismissed(true);
-                setCourseEntryWarmFallback(false);
-              }}
-            />
-          )}
-
           {freeSpaceSurfaceVisible &&
             continuity &&
             resumeCopy &&
             !resumeDismissed &&
-            !studyContinueCandidate &&
-            !activeStudySession &&
+            !academicComposition &&
             !courseEntryActive &&
             !isStabilityFeatureDisabled('disableWorkspaceResumeLayer') && (
             <WorkspaceResumeLayer
@@ -4303,28 +3951,35 @@ export function SectionPage() {
             />
           )}
 
-          {studyPickWork && studySessionPrimary && (
+          {academicPickWork && !academicComposition && (
             <StudySessionPickWork
               tokens={freeSpaceTokens}
+              title="Open with Notebook"
+              subtitle="Choose a notebook to use alongside this PDF."
               sourceTitle={(() => {
-                const src = sectionObjects.objects.find(o => o.id === studyPickWork.sourceId);
+                const src = sectionObjects.objects.find(o => o.id === academicPickWork.pdfObjectId);
                 if (src?.type === 'pdf') {
                   const c = ensureProjectObjectContent('pdf', src.content);
                   if (c.type === 'pdf') return c.fileName || src.title;
                 }
-                return src?.title ?? 'this exam';
+                return src?.title ?? 'this document';
               })()}
-              candidates={studyPickWork.candidates}
-              onPick={workId => {
-                const sourceId = studyPickWork.sourceId;
-                addSpaceConnection(sourceId, workId);
-                const saved = sectionId
-                  ? loadStudySession(sectionId, sectionBoards.activeBoardId, sourceId)
-                  : null;
-                commitStudySession(sourceId, workId, saved);
-                setStudyPickWork(null);
+              candidates={academicPickWork.candidates}
+              connectedIds={academicPickWork.connectedIds}
+              onPick={chosenNotebookId => {
+                const pdfId = academicPickWork.pdfObjectId;
+                setAcademicPickWork(null);
+                enterAcademicComposition(pdfId, chosenNotebookId);
               }}
-              onCancel={() => setStudyPickWork(null)}
+              onCreateNew={() => {
+                const pdfId = academicPickWork.pdfObjectId;
+                setAcademicPickWork(null);
+                const newNb = handleAddToSpace('notebook');
+                if (newNb) {
+                  enterAcademicComposition(pdfId, newNb.id);
+                }
+              }}
+              onCancel={() => setAcademicPickWork(null)}
             />
           )}
 

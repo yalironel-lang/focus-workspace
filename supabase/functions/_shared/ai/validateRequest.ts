@@ -10,13 +10,21 @@ import {
 } from './bounds.ts';
 import { MAX_ASK_COURSE_QUESTION_CHARS } from './askCourse/bounds.ts';
 import { normalizeAskCourseRecentTurns } from './askCourse/normalizeRecentTurns.ts';
+import { parseActivePdfDocument, parseDocumentCursor } from './askCourse/activeDocument.ts';
+import { parsePdfCapture } from './askCourse/pdfCapture.ts';
 import {
   ASK_COURSE_ALLOWED_KEYS_V1,
   ASK_COURSE_ALLOWED_KEYS_V2,
+  ASK_COURSE_ALLOWED_KEYS_V3,
   FORBIDDEN_CLIENT_CONTROL_KEYS,
+  isTeachingMode,
+  type ActivePdfDocument,
+  type DocumentWindowCursor,
   type GatewayAiContext,
+  type TeachingMode,
   type ZikukAiAskCourseRequestV1,
   type ZikukAiAskCourseRequestV2,
+  type ZikukAiAskCourseRequestV3,
   type ZikukAiRequest,
 } from './requestTypes.ts';
 import type { ZikukAiErrorCode } from './requestTypes.ts';
@@ -176,12 +184,16 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
   }
 
   const version = body.version;
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     return { ok: false, code: 'invalid_request', message: 'Unsupported request version.' };
   }
 
   const allowed =
-    version === 1 ? ASK_COURSE_ALLOWED_KEYS_V1 : ASK_COURSE_ALLOWED_KEYS_V2;
+    version === 1
+      ? ASK_COURSE_ALLOWED_KEYS_V1
+      : version === 2
+        ? ASK_COURSE_ALLOWED_KEYS_V2
+        : ASK_COURSE_ALLOWED_KEYS_V3;
   const keys = Object.keys(body);
   for (const k of keys) {
     if (!(allowed as readonly string[]).includes(k)) {
@@ -225,7 +237,7 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
     return { ok: true, request };
   }
 
-  // v2 — recentTurns optional; wrong type fails; malformed entries degrade to [].
+  // v2 / v3 — recentTurns optional; wrong type fails; malformed entries degrade to [].
   if ('recentTurns' in body && body.recentTurns !== undefined) {
     if (!Array.isArray(body.recentTurns)) {
       return {
@@ -237,12 +249,74 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
   }
 
   const recentTurns = normalizeAskCourseRecentTurns(body.recentTurns);
+
+  let teachingMode: TeachingMode | undefined;
+  if ('teachingMode' in body && body.teachingMode !== undefined) {
+    if (!isTeachingMode(body.teachingMode)) {
+      return {
+        ok: false,
+        code: 'invalid_request',
+        message: 'Invalid teachingMode.',
+      };
+    }
+    teachingMode = body.teachingMode;
+  }
+
+  let activeDocument: ActivePdfDocument | undefined;
+  if ('activeDocument' in body && body.activeDocument !== undefined) {
+    const parsed = parseActivePdfDocument(body.activeDocument);
+    if (!parsed) {
+      return {
+        ok: false,
+        code: 'invalid_request',
+        message: 'Active document is invalid.',
+      };
+    }
+    activeDocument = parsed;
+  }
+
+  let documentCursor: DocumentWindowCursor | undefined;
+  if ('documentCursor' in body && body.documentCursor !== undefined) {
+    const parsed = parseDocumentCursor(body.documentCursor);
+    if (!parsed) {
+      return { ok: false, code: 'invalid_request', message: 'Document cursor is invalid.' };
+    }
+    documentCursor = parsed;
+  }
+
+  if (version === 3) {
+    const capture = parsePdfCapture(body.capture, sectionId);
+    if (!capture) {
+      return {
+        ok: false,
+        code: 'invalid_request',
+        message:
+          'PDF selection is invalid or exceeds 4,000 characters. Capture a smaller readable selection.',
+      };
+    }
+    const request: ZikukAiAskCourseRequestV3 = {
+      version: 3,
+      capability: 'ask_course',
+      sectionId,
+      question,
+      capture,
+      ...(recentTurns.length > 0 ? { recentTurns } : {}),
+      ...(teachingMode ? { teachingMode } : {}),
+      ...(activeDocument ? { activeDocument } : {}),
+      ...(documentCursor ? { documentCursor } : {}),
+    };
+    return { ok: true, request };
+  }
+
   const request: ZikukAiAskCourseRequestV2 = {
     version: 2,
     capability: 'ask_course',
     sectionId,
     question,
     ...(recentTurns.length > 0 ? { recentTurns } : {}),
+    ...(teachingMode ? { teachingMode } : {}),
+    ...(activeDocument ? { activeDocument } : {}),
+    ...(documentCursor ? { documentCursor } : {}),
   };
   return { ok: true, request };
 }

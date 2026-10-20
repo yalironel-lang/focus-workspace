@@ -103,6 +103,10 @@ export function nbProductToolbarShellStyle(): CSSProperties {
     paddingBottom: 10,
     paddingLeft: 4,
     paddingRight: 4,
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
     borderRadius: '0 0 8px 8px',
     // Opaque recipe fade only — never backdrop-filter on sticky.
     // Sticky + blur over TipTap/HW content caused Chrome "Page Unresponsive"

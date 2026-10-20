@@ -1,3 +1,5 @@
+import type { NormalizedPageRegion } from "../../lib/pdfGeometry/normalizedPageRegion";
+import { extractPdfTextFromRegion, type PdfTextContent } from "../../lib/ai/tutor/pdfTutorTextExtraction";
 import {
   useCallback,
   useEffect,
@@ -15,6 +17,17 @@ import {
   scrollTopForPage,
 } from '../../lib/pdfPageVisibility';
 import {
+  capturePdfScrollAnchor,
+  fitPageZoom,
+  pdfFitScale,
+  pdfOutputScale,
+  pdfPageCssBox,
+  PDF_RESIZE_DEBOUNCE_MS,
+  scrollLeftForAnchor,
+  scrollTopForAnchor,
+  type PdfScrollAnchor,
+} from '../../lib/pdfRenderGeometry';
+import {
   normalizePageForPersist,
   shouldEmitPagePersist,
 } from '../../lib/pdfViewerController';
@@ -29,6 +42,11 @@ export interface PdfJsScrollViewerProps {
   onPagePersist: (page: number) => void;
   onError?: () => void;
   renderPageOverlay?: (page: number) => ReactNode;
+  onExtractTextReady?: (extractor: (page: number, region: NormalizedPageRegion) => Promise<string | undefined>) => void;
+  /** Increment to fit the visible page to the scrollport height. */
+  fitPageToken?: number;
+  /** Writes a zoom chosen by Fit page. Does not run for stored zoom values. */
+  onCommitZoom?: (zoom: number) => void;
 }
 
 function clampPage(page: number, numPages: number, pageCount?: number): number {
@@ -46,6 +64,9 @@ export function PdfJsScrollViewer({
   onPagePersist,
   onError,
   renderPageOverlay,
+  onExtractTextReady,
+  fitPageToken = 0,
+  onCommitZoom,
 }: PdfJsScrollViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -63,12 +84,18 @@ export function PdfJsScrollViewer({
   const zoomRef = useRef(zoom);
   const prevZoomRef = useRef(zoom);
   const scrollDetectRafRef = useRef<number | null>(null);
+  const textContentCacheRef = useRef<Map<number, { content: PdfTextContent; width: number; height: number }>>(new Map());
+  const pageSizeRef = useRef<Map<number, { width: number; height: number }>>(new Map());
+  const layoutGenRef = useRef(0);
+  const resizeTimerRef = useRef<number | null>(null);
+  const fitPageTokenRef = useRef(0);
 
   pageRef.current = page;
   zoomRef.current = zoom;
 
   const [numPages, setNumPages] = useState(0);
   const [pageHeights, setPageHeights] = useState<number[]>([]);
+  const [pageWidths, setPageWidths] = useState<number[]>([]);
   const [renderScale, setRenderScale] = useState(1);
   const [renderWindow, setRenderWindow] = useState({ start: 0, end: -1 });
   const [restored, setRestored] = useState(false);
@@ -77,6 +104,24 @@ export function PdfJsScrollViewer({
 
   pageHeightsRef.current = pageHeights;
   visiblePageRef.current = visiblePage;
+
+  const extractText = useCallback(async (pageNum: number, region: NormalizedPageRegion) => {
+    const pdf = pdfRef.current;
+    if (!pdf) return undefined;
+    let cached = textContentCacheRef.current.get(pageNum);
+    if (!cached) {
+      const pdfPage = await pdf.getPage(pageNum);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      cached = { content: (await pdfPage.getTextContent()) as unknown as PdfTextContent, width: viewport.width, height: viewport.height };
+      textContentCacheRef.current.set(pageNum, cached);
+    }
+    const resolved = cached;
+    return resolved ? extractPdfTextFromRegion(resolved.content, resolved.width, resolved.height, region) : undefined;
+  }, []);
+
+  useEffect(() => {
+    onExtractTextReady?.(extractText);
+  }, [extractText, onExtractTextReady]);
 
   const cancelAllRenderTasks = useCallback(() => {
     for (const task of renderTasksRef.current.values()) {
@@ -100,6 +145,8 @@ export function PdfJsScrollViewer({
       }
       pdfRef.current = null;
     }
+    textContentCacheRef.current.clear();
+    pageSizeRef.current.clear();
   }, [cancelAllRenderTasks]);
 
   const scrollToPageIndex = useCallback((targetPage: number, heights: number[]) => {
@@ -176,69 +223,106 @@ export function PdfJsScrollViewer({
     });
   }, [detectPageFromScroll]);
 
-  const computeLayout = useCallback(
-    async (pdf: PDFDocumentProxy, width: number, zoomLevel: number) => {
-      const firstPage = await pdf.getPage(1);
-      const baseViewport = firstPage.getViewport({ scale: 1 });
-      const fitScale = width > 0 ? width / baseViewport.width : 1;
-      const scale = fitScale * zoomLevel;
-      const heights: number[] = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const p = i === 1 ? firstPage : await pdf.getPage(i);
-        heights.push(p.getViewport({ scale }).height);
-      }
-      return { scale, heights };
-    },
-    [],
-  );
+  const ensurePageSizes = useCallback(async (pdf: PDFDocumentProxy) => {
+    if (pageSizeRef.current.size === pdf.numPages) return;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      if (pageSizeRef.current.has(i)) continue;
+      const pdfPage = await pdf.getPage(i);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      pageSizeRef.current.set(i, { width: viewport.width, height: viewport.height });
+    }
+  }, []);
+
+  const layoutFromCache = useCallback((width: number, zoomLevel: number, totalPages: number) => {
+    const first = pageSizeRef.current.get(1);
+    const fitScale = pdfFitScale(width, first?.width ?? 1);
+    const scale = fitScale * zoomLevel;
+    const heights: number[] = [];
+    const widths: number[] = [];
+    for (let i = 1; i <= totalPages; i++) {
+      const size = pageSizeRef.current.get(i) ?? first ?? { width: 1, height: 1 };
+      const box = pdfPageCssBox(size.width, size.height, fitScale, zoomLevel);
+      widths.push(box.cssWidth);
+      heights.push(box.cssHeight);
+    }
+    return { scale, heights, widths };
+  }, []);
 
   const applyLayoutAndRestore = useCallback(
-    async (anchorPage?: number) => {
+    async (anchor?: PdfScrollAnchor) => {
       const pdf = pdfRef.current;
       const el = scrollRef.current;
       if (!pdf || !el || containerWidthRef.current <= 0) return;
-      const { scale, heights } = await computeLayout(
-        pdf,
+      const gen = ++layoutGenRef.current;
+      await ensurePageSizes(pdf);
+      if (gen !== layoutGenRef.current || !pdfRef.current) return;
+      const { scale, heights, widths } = layoutFromCache(
         containerWidthRef.current,
         zoomRef.current,
+        pdf.numPages,
       );
-      const target = clampPage(anchorPage ?? pageRef.current, pdf.numPages, pageCount);
+      const fallbackPage = clampPage(anchor?.page ?? pageRef.current, pdf.numPages, pageCount);
+      const scrollAnchor: PdfScrollAnchor = anchor ?? {
+        page: fallbackPage,
+        offsetRatio: 0,
+        horizontalRatio: 0,
+      };
       cancelAllRenderTasks();
       setRenderScale(scale);
       setPageHeights(heights);
+      setPageWidths(widths);
       pageHeightsRef.current = heights;
       isRestoringRef.current = true;
       isProgrammaticScrollRef.current = true;
       requestAnimationFrame(() => {
-        scrollToPageIndex(target, heights);
-        updateRenderWindowFromScroll();
-        visiblePageRef.current = target;
-        setVisiblePage(target);
-        onVisiblePageChange(target);
-        lastExternalPageRef.current = target;
-        setRestored(true);
-        layoutReadyRef.current = true;
-        window.setTimeout(() => {
-          isRestoringRef.current = false;
-          isProgrammaticScrollRef.current = false;
-        }, 150);
+        requestAnimationFrame(() => {
+          if (gen !== layoutGenRef.current) return;
+          const scroller = scrollRef.current;
+          if (!scroller) return;
+          scroller.scrollTop = scrollTopForAnchor(scrollAnchor, heights, PDF_PAGE_GAP_PX);
+          scroller.scrollLeft = scrollLeftForAnchor(
+            scrollAnchor,
+            scroller.scrollWidth,
+            scroller.clientWidth,
+          );
+          updateRenderWindowFromScroll();
+          visiblePageRef.current = scrollAnchor.page;
+          setVisiblePage(scrollAnchor.page);
+          onVisiblePageChange(scrollAnchor.page);
+          lastExternalPageRef.current = scrollAnchor.page;
+          setRestored(true);
+          layoutReadyRef.current = true;
+          window.setTimeout(() => {
+            if (gen !== layoutGenRef.current) return;
+            isRestoringRef.current = false;
+            isProgrammaticScrollRef.current = false;
+          }, 150);
+        });
       });
     },
-    [
-      pageCount,
-      computeLayout,
-      cancelAllRenderTasks,
-      scrollToPageIndex,
-      updateRenderWindowFromScroll,
-      onVisiblePageChange,
-    ],
+    [pageCount, ensurePageSizes, layoutFromCache, cancelAllRenderTasks, updateRenderWindowFromScroll, onVisiblePageChange],
   );
 
+  const captureAnchor = useCallback((): PdfScrollAnchor | undefined => {
+    const el = scrollRef.current;
+    const heights = pageHeightsRef.current;
+    if (!el || heights.length === 0) return undefined;
+    return capturePdfScrollAnchor({
+      scrollTop: el.scrollTop,
+      scrollLeft: el.scrollLeft,
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      pageHeights: heights,
+      gap: PDF_PAGE_GAP_PX,
+      page: visiblePageRef.current,
+    });
+  }, []);
+
   const renderPage = useCallback(
-    async (pageNum: number, scale: number, slotHeight: number, gen: number) => {
+    async (pageNum: number, scale: number, cssWidth: number, cssHeight: number, gen: number) => {
       const pdf = pdfRef.current;
       const canvas = canvasRefs.current.get(pageNum);
-      if (!pdf || !canvas) return;
+      if (!pdf || !canvas || cssWidth <= 0 || cssHeight <= 0) return;
 
       const existing = renderTasksRef.current.get(pageNum);
       if (existing) {
@@ -254,15 +338,26 @@ export function PdfJsScrollViewer({
         const pdfPage = await pdf.getPage(pageNum);
         if (gen !== renderGenRef.current) return;
         const viewport = pdfPage.getViewport({ scale });
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        canvas.style.width = '100%';
-        canvas.style.height = `${slotHeight}px`;
+        const dpr = typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+        const outputScale = pdfOutputScale(cssWidth, cssHeight, dpr);
+        const backingWidth = Math.max(1, Math.floor(cssWidth * outputScale));
+        const backingHeight = Math.max(1, Math.floor(cssHeight * outputScale));
+        canvas.width = backingWidth;
+        canvas.height = backingHeight;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
         canvas.style.display = 'block';
         const ctx = canvas.getContext('2d');
         if (!ctx || gen !== renderGenRef.current) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const task = pdfPage.render({ canvas, canvasContext: ctx, viewport });
+        const outputScaleX = backingWidth / cssWidth;
+        const outputScaleY = backingHeight / cssHeight;
+        const task = pdfPage.render({
+          canvas,
+          canvasContext: ctx,
+          viewport,
+          transform: [outputScaleX, 0, 0, outputScaleY, 0, 0],
+        });
         renderTasksRef.current.set(pageNum, task);
         await task.promise;
         if (gen === renderGenRef.current) {
@@ -276,11 +371,16 @@ export function PdfJsScrollViewer({
   );
 
   const scheduleRendersForWindow = useCallback(
-    (window: { start: number; end: number }, scale: number, heights: number[]) => {
+    (
+      window: { start: number; end: number },
+      scale: number,
+      heights: number[],
+      widths: number[],
+    ) => {
       const gen = renderGenRef.current;
       for (let i = window.start; i <= window.end; i++) {
         const pageNum = i + 1;
-        void renderPage(pageNum, scale, heights[i] ?? 0, gen);
+        void renderPage(pageNum, scale, widths[i] ?? 0, heights[i] ?? 0, gen);
       }
     },
     [renderPage],
@@ -350,19 +450,43 @@ export function PdfJsScrollViewer({
 
       if (!widthChanged) return;
 
-      void applyLayoutAndRestore(visiblePageRef.current);
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = window.setTimeout(() => {
+        resizeTimerRef.current = null;
+        void applyLayoutAndRestore(captureAnchor());
+      }, PDF_RESIZE_DEBOUNCE_MS);
     });
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [numPages, applyLayoutAndRestore]);
+    return () => {
+      ro.disconnect();
+      if (resizeTimerRef.current !== null) {
+        window.clearTimeout(resizeTimerRef.current);
+        resizeTimerRef.current = null;
+      }
+    };
+  }, [numPages, restored, applyLayoutAndRestore, captureAnchor]);
 
   useEffect(() => {
     if (!layoutReadyRef.current || numPages === 0) return;
     if (zoom === prevZoomRef.current) return;
     prevZoomRef.current = zoom;
     if (!pdfRef.current || containerWidthRef.current <= 0) return;
-    void applyLayoutAndRestore(visiblePageRef.current);
-  }, [zoom, numPages, applyLayoutAndRestore]);
+    if (resizeTimerRef.current !== null) {
+      window.clearTimeout(resizeTimerRef.current);
+      resizeTimerRef.current = null;
+    }
+    void applyLayoutAndRestore(captureAnchor());
+  }, [zoom, numPages, applyLayoutAndRestore, captureAnchor]);
+
+  useEffect(() => {
+    if (!fitPageToken || fitPageToken === fitPageTokenRef.current) return;
+    fitPageTokenRef.current = fitPageToken;
+    const el = scrollRef.current;
+    const first = pageSizeRef.current.get(1);
+    const current = pageSizeRef.current.get(visiblePageRef.current) ?? first;
+    if (!el || !first || !current || !onCommitZoom) return;
+    onCommitZoom(fitPageZoom(el.clientWidth, el.clientHeight, first.width, current.height));
+  }, [fitPageToken, onCommitZoom]);
 
   useEffect(() => {
     if (!layoutReadyRef.current || pageHeightsRef.current.length === 0) return;
@@ -389,7 +513,7 @@ export function PdfJsScrollViewer({
 
   useEffect(() => {
     if (!restored || renderWindow.end < renderWindow.start || renderScale <= 0) return;
-    scheduleRendersForWindow(renderWindow, renderScale, pageHeights);
+    scheduleRendersForWindow(renderWindow, renderScale, pageHeights, pageWidths);
     for (const [pageNum, task] of renderTasksRef.current.entries()) {
       const idx = pageNum - 1;
       if (idx < renderWindow.start || idx > renderWindow.end) {
@@ -401,7 +525,7 @@ export function PdfJsScrollViewer({
         renderTasksRef.current.delete(pageNum);
       }
     }
-  }, [restored, renderWindow, renderScale, pageHeights, scheduleRendersForWindow]);
+  }, [restored, renderWindow, renderScale, pageHeights, pageWidths, scheduleRendersForWindow]);
 
   const onScroll = useCallback(() => {
     updateRenderWindowFromScroll();
@@ -419,7 +543,7 @@ export function PdfJsScrollViewer({
     );
   }
 
-  if (numPages === 0 || pageHeights.length === 0) {
+  if (numPages === 0 || pageHeights.length === 0 || pageWidths.length === 0) {
     return (
       <div
         ref={scrollRef}
@@ -435,25 +559,28 @@ export function PdfJsScrollViewer({
       className="absolute inset-0 overflow-auto"
       style={{
         backgroundColor,
-        touchAction: 'pan-y',
+        touchAction: 'pan-x pan-y',
         visibility: restored ? 'visible' : 'hidden',
       }}
       onScroll={onScroll}
     >
-      <div className="flex flex-col items-center py-1" style={{ width: '100%' }}>
+      <div className="flex flex-col items-center py-1" style={{ minWidth: '100%', width: 'max-content' }}>
         {pageHeights.map((height, index) => {
           const pageNum = index + 1;
+          const width = pageWidths[index] ?? 0;
           const inWindow = index >= renderWindow.start && index <= renderWindow.end;
           return (
             <div
               key={pageNum}
               data-page={pageNum}
+              data-testid="pdf-page-slot"
               className="relative shrink-0"
               style={{
-                width: '100%',
+                width,
                 height,
                 marginBottom: index < pageHeights.length - 1 ? PDF_PAGE_GAP_PX : 0,
-                overflow: 'hidden',
+                overflow: renderPageOverlay && visiblePage === pageNum ? 'visible' : 'hidden',
+                zIndex: visiblePage === pageNum ? 10 : 1,
               }}
             >
               {inWindow ? (

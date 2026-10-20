@@ -157,6 +157,7 @@ describe('useAskCourseSession', () => {
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'Q1',
+      teachingMode: 'explain',
     });
     expect(api!.turns).toHaveLength(1);
     expect(api!.turns[0]).toMatchObject({
@@ -259,6 +260,7 @@ describe('useAskCourseSession', () => {
       capability: 'ask_course',
       sectionId: 'sec-1',
       question: 'Fresh',
+      teachingMode: 'explain',
     });
   });
 
@@ -343,6 +345,7 @@ describe('useAskCourseSession', () => {
       capability: 'ask_course',
       sectionId: 'sec-b',
       question: 'About B',
+      teachingMode: 'explain',
     });
     expect(api!.turns).toHaveLength(1);
     expect(api!.turns[0]!.answer).toBe('From B');

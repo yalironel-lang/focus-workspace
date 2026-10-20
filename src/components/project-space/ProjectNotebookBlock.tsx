@@ -64,9 +64,9 @@ import {
   nbSyncDiagSummarizeContent,
 } from '../../lib/notebookPages/nbSyncDiag';
 import { NotebookWorkspaceLayout } from '../notebook/NotebookWorkspaceLayout';
+import { NotebookResponsiveToolbar, type NotebookToolbarItem } from '../notebook/NotebookResponsiveToolbar';
 import { NotebookWorkspaceNavigator } from '../notebook/NotebookWorkspaceNavigator';
-import { NotebookPanelRailToggle, NOTEBOOK_PANEL_RAIL_WIDTH_PX } from '../notebook/NotebookPanelRailToggle';
-import { NotebookContextSidebar, deriveNotebookContextData } from './NotebookContextSidebar';
+import { deriveNotebookContextData } from './NotebookContextSidebar';
 import { EquationBlockEditor } from '../notebook/EquationBlockEditor';
 import { HandwritingBlock } from '../notebook/HandwritingBlock';
 import { useAuth } from '../../hooks/useAuth';
@@ -1017,11 +1017,7 @@ function NotebookBodyScroll({
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
-          overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
-        }}
-        onWheelCapture={(e) => {
-          e.stopPropagation();
         }}
       >
         {children}
@@ -1127,14 +1123,14 @@ function NotebookModeSelect({
         });
       }}
       style={{
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(255,255,255,0.08)',
+        border: '1px solid rgba(255,255,255,0.20)',
         borderRadius: 6,
-        color: mode === 'math' || mode === 'math-workspace' ? '#a5b4fc' : 'rgba(255,248,235,0.55)',
+        color: mode === 'math' || mode === 'math-workspace' ? '#a5b4fc' : 'rgba(255,248,235,0.92)',
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: '0.04em',
-        padding: '3px 6px',
+        padding: '2px 6px',
         cursor: 'pointer',
         maxWidth: 108,
       }}
@@ -1165,15 +1161,15 @@ function NotebookWritingModeToggle({
         if (mode !== value) onChange(value);
       }}
       style={{
-        padding: '4px 10px',
+        padding: '2px 8px',
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: '0.04em',
         border: 'none',
         cursor: 'pointer',
         borderRadius: 5,
-        background: mode === value ? `${tokens.accent}24` : 'transparent',
-        color: mode === value ? tokens.accent : 'rgba(255,248,235,0.45)',
+        background: mode === value ? `${tokens.accent}28` : 'transparent',
+        color: mode === value ? tokens.accent : 'rgba(255,248,235,0.90)',
         transition: 'background 0.15s ease, color 0.15s ease',
       }}
     >
@@ -1191,8 +1187,8 @@ function NotebookWritingModeToggle({
         gap: 2,
         padding: 2,
         borderRadius: 7,
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        background: 'rgba(255,255,255,0.05)',
       }}
     >
       {segment('text', 'Text')}
@@ -1243,6 +1239,8 @@ interface Props {
     inkBlockKey: string;
     surfaceTitle: string;
   }) => void;
+  /** Force-enable canonical Pages & Topics layout/navigator (e.g. in Academic Composition). */
+  enablePagesLayout?: boolean;
 }
 
 /**
@@ -1263,7 +1261,8 @@ function isTipTapEditingChrome(target: EventTarget | null): boolean {
     target.closest('[data-nb-candidate-fontsize-menu]') ||
     target.closest('[data-nb-product-toolbar]') ||
     target.closest('[data-nb-product-block-menu]') ||
-    target.closest('[data-nb-product-more-menu]')
+    target.closest('[data-nb-product-more-menu]') ||
+    target.closest('[data-nb-toolbar-overflow-menu]')
   );
 }
 
@@ -1279,7 +1278,8 @@ function isTipTapEditingChromeOpen(): boolean {
     document.querySelector('[data-nb-candidate-block-menu="1"]') ||
     document.querySelector('[data-nb-candidate-fontsize-menu="1"]') ||
     document.querySelector('[data-nb-product-block-menu="1"]') ||
-    document.querySelector('[data-nb-product-more-menu="1"]')
+    document.querySelector('[data-nb-product-more-menu="1"]') ||
+    document.querySelector('[data-nb-toolbar-overflow-menu="1"]')
   );
 }
 
@@ -1309,7 +1309,7 @@ export function ProjectNotebookBlock({
   objectTitle,
   objectUpdatedAt,
   allObjects,
-  onRequestSelectObject,
+  onRequestSelectObject: _onRequestSelectObject,
   onCreateRecallItem,
   context = 'inline',
   onEditingChange,
@@ -1324,6 +1324,7 @@ export function ProjectNotebookBlock({
   onActiveQuestionNumber,
   compositionChromeSuppressed = false,
   onOpenBinderStudy,
+  enablePagesLayout = false,
 }: Props) {
   nbP0Bump('projectNotebookBlockRenders');
   const { user } = useAuth();
@@ -1752,7 +1753,7 @@ export function ProjectNotebookBlock({
   }, [sessionRestoreBlockId, isDeskPresentation, blocks]);
 
   useEffect(() => {
-    if (!isDeskPresentation || studyFocusQuestionNumber == null) return;
+    if (studyFocusQuestionNumber == null) return;
     const refs = blocksToExamRefs(blocks);
     const sectionId = findSectionBlockIdForQuestionNumber(refs, studyFocusQuestionNumber);
     if (!sectionId) return;
@@ -1765,7 +1766,7 @@ export function ProjectNotebookBlock({
       el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [studyFocusQuestionNumber, studyFocusQuestionToken, isDeskPresentation, blocks]);
+  }, [studyFocusQuestionNumber, studyFocusQuestionToken, blocks]);
 
   useEffect(() => {
     if (!onActiveQuestionNumber) return;
@@ -1807,7 +1808,6 @@ export function ProjectNotebookBlock({
   }, [flushHandwritingBeforeTransition]);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [focusAnnouncement, setFocusAnnouncement] = useState(false);
-  const [headerHovered, setHeaderHovered] = useState(false);
   const [focusToolbarHovered, setFocusToolbarHovered] = useState(false);
   const [deskChecks, setDeskChecks] = useState<Record<string, DeskCheckRowState>>({});
   const deskChecksRef = useRef(deskChecks);
@@ -2653,39 +2653,11 @@ export function ProjectNotebookBlock({
     return normalizeRecallPromptText(source.text);
   }, [activeNotebookBlock, blocks]);
   const hasNotebookContext = contextData.totalCount > 0;
-  const canDockContext = surfaceWidth >= 640;
   const workspaceFocusActive = isWorkspacePresentation && workspaceChrome.focusMode;
-  const contextPanelVisible = isWorkspacePresentation
-    ? workspaceChrome.contextOpen
-    : contextPanelOpen;
-  // Designer panel temporarily occupies the right rail; do not mutate persisted Context chrome.
-  const showWorkspaceContextDock =
-    isWorkspacePresentation &&
-    hasNotebookContext &&
-    canDockContext &&
-    !workspaceFocusActive &&
-    !showDesignerPanel;
-  const showNotebookContext =
-    !isDeskPresentation &&
-    !isEmbeddedPresentation &&
-    context === 'free-space' &&
-    hasNotebookContext &&
-    contextPanelVisible &&
-    !workspaceFocusActive &&
-    (!isWorkspacePresentation || !canDockContext) &&
-    !showDesignerPanel;
 
   const setTopicsOpen = useCallback((open: boolean) => {
     setWorkspaceChrome(s => ({ ...s, topicsOpen: open }));
   }, []);
-
-  const toggleContextPanel = useCallback(() => {
-    if (isWorkspacePresentation) {
-      setWorkspaceChrome(s => ({ ...s, contextOpen: !s.contextOpen }));
-    } else {
-      setContextPanelOpen(v => !v);
-    }
-  }, [isWorkspacePresentation]);
 
   const toggleWorkspaceFocus = useCallback(async () => {
     await flushHandwritingBeforeTransition();
@@ -4404,24 +4376,24 @@ export function ProjectNotebookBlock({
         : isMathNotebook
           ? 'min(760px, 100%)'
           : isPaperSurface
-            ? 'min(640px, 100%)'
-            : 'min(700px, 100%)',
+            ? 'min(760px, 100%)'
+            : 'min(760px, 100%)',
       margin: isDeskPresentation ? 0 : '0 auto',
       width: '100%',
       paddingLeft: isDeskPresentation
         ? 4
         : isPaperSurface
-          ? 'clamp(32px, 6vw, 56px)'
+          ? 'clamp(24px, 4vw, 44px)'
           : isMathWorkspaceMode
             ? 'clamp(8px, 1.5vw, 16px)'
-            : 'clamp(20px, 4vw, 44px)',
+            : 'clamp(16px, 3vw, 36px)',
       paddingRight: isDeskPresentation
         ? 4
         : isPaperSurface
-          ? 'clamp(32px, 6vw, 56px)'
+          ? 'clamp(24px, 4vw, 44px)'
           : isMathWorkspaceMode
             ? 'clamp(8px, 1.5vw, 16px)'
-            : 'clamp(20px, 4vw, 44px)',
+            : 'clamp(16px, 3vw, 36px)',
     }),
     [isDeskPresentation, isMathNotebook, isPaperSurface, isMathWorkspaceMode],
   );
@@ -4477,7 +4449,7 @@ export function ProjectNotebookBlock({
         borderRadius: context === 'free-space' ? 12 : 16,
         boxShadow:
           '0 1px 2px rgba(28,25,23,0.04), 0 8px 28px rgba(28,25,23,0.08), inset 0 1px 0 rgba(255,255,255,0.65)',
-        paddingTop: '28px',
+        paddingTop: '12px',
         paddingBottom: '96px',
         outline: 'none',
         WebkitFontSmoothing: 'antialiased',
@@ -4510,7 +4482,7 @@ export function ProjectNotebookBlock({
       boxShadow: isScratch
         ? 'inset 0 1px 0 rgba(255,255,255,0.02), 0 12px 32px rgba(0,0,0,0.10)'
         : 'inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 54px rgba(0,0,0,0.18)',
-      paddingTop: '24px',
+      paddingTop: '12px',
       paddingBottom: '88px',
       outline: 'none',
       WebkitFontSmoothing: 'antialiased',
@@ -4530,16 +4502,6 @@ export function ProjectNotebookBlock({
     isPaperSurface,
     isDeskPresentation,
   ]);
-
-  const contextSummaryChips = useMemo(
-    () =>
-      [
-        contextData.linkedNotes.length ? `${contextData.linkedNotes.length} notes` : null,
-        contextData.connectedMistakes.length ? `${contextData.connectedMistakes.length} mistakes` : null,
-        contextData.references.length ? `${contextData.references.length} refs` : null,
-      ].filter(Boolean) as string[],
-    [contextData],
-  );
 
   const updateBlockText = useCallback(
     (id: string, rawText: string, marksOverride?: InlineMark[]) => {
@@ -6208,15 +6170,15 @@ export function ProjectNotebookBlock({
         data-nb-page-surface={designerVisualTokens.pageSurface}
         onPaste={handleNotebookPaste}
         style={{
-          padding: isDeskPresentation || isWorkspacePresentation
+          padding: isDeskPresentation || isWorkspacePresentation || enablePagesLayout
             ? 0
             : context === 'free-space'
               ? isEmbeddedPresentation
                 ? '6px 8px 4px'
                 : isMathWorkspaceMode
-                  ? '12px 10px 10px'
-                  : '18px 18px 18px'
-              : '18px 24px 28px',
+                  ? '8px 10px 10px'
+                  : '8px 12px 12px'
+              : '12px 16px 20px',
           ...(context === 'free-space'
             ? {
                 display: 'flex',
@@ -6224,7 +6186,7 @@ export function ProjectNotebookBlock({
                 height: '100%',
                 minHeight: 0,
                 boxSizing: 'border-box',
-                ...((isDeskPresentation || isWorkspacePresentation) ? { flex: 1 } : {}),
+                flex: 1,
               }
             : { minHeight: '420px' }),
           position: 'relative',
@@ -6249,43 +6211,54 @@ export function ProjectNotebookBlock({
         : null}
       {showCardChrome ? (
       <div
-        onMouseEnter={() => setHeaderHovered(true)}
-        onMouseLeave={() => setHeaderHovered(false)}
+        data-testid="notebook-card-toolbar"
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: '18px',
-          flexWrap: 'wrap',
-          padding: '10px 10px 14px',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'nowrap',
+          padding: '3px 8px',
+          minHeight: 34,
           marginBottom: 0,
+          width: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box',
+          overflow: 'hidden',
           borderRadius: Math.max(0, designerVisualTokens.frameRadiusPx - 4),
           ...notebookAppearanceChromeStyle(designerVisualTokens),
           ...(context === 'free-space' ? { flexShrink: 0 } : {}),
-          ...(notebookMode === 'scratch' ? {
-            opacity: headerHovered ? 0.85 : 0.28,
-            transition: 'opacity 0.3s ease',
-          } : {}),
         }}
       >
-        <div style={{ minWidth: 0, flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div
-            style={{
-              fontSize: '13px',
-              lineHeight: 1.55,
-              maxWidth: '420px',
-              ...notebookAppearanceTitleStyle(designerVisualTokens),
-            }}
-          >
-            {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}{hasNotebookContext
-              ? ` · ${contextData.totalCount} connected`
-              : ''}
-          </div>
-
-          {/* Identity row: icon · subtitle · timestamp */}
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:4, opacity: headerHovered ? 1 : 0.65, transition: 'opacity 0.4s ease' }}>
+        <div
+          style={{
+            flex: '0 1 160px',
+            minWidth: 48,
+            maxWidth: 220,
+            fontSize: '12px',
+            fontWeight: 600,
+            lineHeight: 1.35,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            ...notebookAppearanceTitleStyle(designerVisualTokens),
+          }}
+        >
+          {objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
+        </div>
+        <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+        <NotebookResponsiveToolbar
+          ariaLabel="Notebook actions"
+          justify="flex-end"
+          items={([
+            {
+              id: 'icon',
+              priority: 'secondary',
+              label: 'Icon',
+              fallbackWidth: 28,
+              inline: (
             <button
               type="button"
+              aria-label="Change icon"
               onClick={() => {
                 const icons = ['◈','∑','✕','→','∂','∫','⊞','◎'];
                 const curr = content.icon ?? '◈';
@@ -6295,13 +6268,19 @@ export function ProjectNotebookBlock({
               title="Change icon"
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
-                fontSize: 13, padding: '0 2px',
-                opacity: content.icon ? 1 : 0.28, transition: 'opacity 0.15s',
+                fontSize: 12, padding: '0 2px',
                 color: tokens.textSecondary,
               }}
             >{content.icon ?? '◈'}</button>
-
-            {context === 'free-space' && mathDiscoverabilityLabel ? (
+              ),
+            },
+            context === 'free-space' && mathDiscoverabilityLabel
+              ? {
+                  id: 'math-badge',
+                  priority: 'secondary' as const,
+                  label: 'Math notebook',
+                  fallbackWidth: 88,
+                  inline: (
               <span
                 title="This notebook supports formulas, steps, and derivations"
                 style={{
@@ -6309,22 +6288,30 @@ export function ProjectNotebookBlock({
                   fontWeight: 650,
                   letterSpacing: '0.1em',
                   textTransform: 'uppercase',
-                  color: 'rgba(129,140,248,0.55)',
+                  color: 'rgba(129,140,248,0.75)',
                   padding: '2px 7px',
                   borderRadius: 999,
-                  border: '1px solid rgba(129,140,248,0.2)',
-                  background: 'rgba(129,140,248,0.06)',
+                  border: '1px solid rgba(129,140,248,0.3)',
+                  background: 'rgba(129,140,248,0.1)',
                   flexShrink: 0,
                   userSelect: 'none',
                 }}
               >
                 {mathDiscoverabilityLabel}
               </span>
-            ) : null}
-
+                  ),
+                }
+              : null,
+            {
+              id: 'subtitle',
+              priority: 'secondary',
+              label: 'Subtitle',
+              fallbackWidth: 88,
+              inline: (
             <div
               contentEditable
               suppressContentEditableWarning
+              aria-label="Notebook subtitle"
               onPointerDownCapture={e => {
                 if (e.pointerType === 'pen') {
                   e.preventDefault();
@@ -6340,191 +6327,178 @@ export function ProjectNotebookBlock({
                 if (text !== (content.subtitle ?? '')) persistNotebookContent({ ...content, subtitle: text || undefined });
               }}
               style={{
-                fontSize: 11, color: tokens.textGhost, outline: 'none',
-                fontStyle: 'italic', minWidth: 40, maxWidth: 180,
-                whiteSpace: 'nowrap', overflow: 'hidden',
+                fontSize: 11, color: tokens.textMuted, outline: 'none',
+                fontStyle: 'italic', minWidth: 30, maxWidth: 100,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}
               data-placeholder="add a subtitle…"
             >{content.subtitle ?? ''}</div>
-
-            <div style={{ flex: 1 }} />
-
-            {objectUpdatedAt && (
+              ),
+            },
+            objectUpdatedAt
+              ? {
+                  id: 'updated',
+                  priority: 'secondary' as const,
+                  label: 'Updated',
+                  fallbackWidth: 52,
+                  inline: (
               <span style={{ fontSize: 10, color: tokens.textGhost }}>
                 {formatRelativeTime(objectUpdatedAt)}
               </span>
-            )}
-          </div>
-
-          {contextSummaryChips.length ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {contextSummaryChips.map(chip => (
-                <div
-                  key={chip}
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    letterSpacing: '0.02em',
-                    color: ink.secondary,
-                    padding: '6px 9px',
-                    borderRadius: 999,
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    background: 'rgba(255,255,255,0.035)',
-                  }}
-                >
-                  {chip}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            gap: '8px',
-            flexShrink: 0,
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end',
-          }}
-        >
-          <span style={{ opacity: headerHovered ? 1 : 0.55, transition: 'opacity 0.4s ease' }}>
-            <button
-              type="button"
-              title={workspaceFocusActive || isFocusModeOpen ? 'Exit focus mode' : 'Focus mode'}
-              onClick={() => {
-                if (isWorkspacePresentation) {
-                  void toggleWorkspaceFocus();
-                  return;
+                  ),
                 }
-                void (async () => {
-                  await flushHandwritingBeforeTransition();
-                  setIsFocusModeOpen(true);
-                })();
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.65)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.28)'; }}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
-                borderRadius: '4px', color: 'rgba(255,248,235,0.28)',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </span>
-          <div style={{ display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end', opacity: headerHovered ? (notebookMode === 'math-workspace' ? 0.75 : 1) : (notebookMode === 'math-workspace' ? 0.08 : 0.32), transition: 'opacity 0.4s ease' }}>
-          {context === 'free-space' ? (
+              : null,
+            {
+              id: 'focus',
+              priority: 'secondary',
+              label: 'Focus',
+              fallbackWidth: 28,
+              inline: (
+          <button
+            type="button"
+            aria-label={workspaceFocusActive || isFocusModeOpen ? 'Exit focus mode' : 'Focus mode'}
+            title={workspaceFocusActive || isFocusModeOpen ? 'Exit focus mode' : 'Focus mode'}
+            onClick={() => {
+              if (isWorkspacePresentation) {
+                void toggleWorkspaceFocus();
+                return;
+              }
+              void (async () => {
+                await flushHandwritingBeforeTransition();
+                setIsFocusModeOpen(true);
+              })();
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ffffff'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,248,235,0.92)'; }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 4px',
+              borderRadius: '4px', color: 'rgba(255,248,235,0.92)',
+              display: 'flex', alignItems: 'center',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden>
+              <path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+              ),
+            },
+            context === 'free-space' && onCreateRecallItem && activeRecallPrompt
+              ? {
+                  id: 'recall',
+                  priority: 'secondary' as const,
+                  label: 'Create recall',
+                  fallbackWidth: 96,
+                  inline: (
             <button
               type="button"
-              disabled={!onCreateRecallItem || !activeRecallPrompt}
-              onClick={() => {
-                if (!onCreateRecallItem || !activeRecallPrompt) return;
-                onCreateRecallItem(activeRecallPrompt);
-              }}
+              aria-label="Create a connected recall item from the active block"
+              onClick={() => onCreateRecallItem(activeRecallPrompt)}
               style={{
-                border: '1px solid rgba(255,255,255,0.06)',
-                background: onCreateRecallItem && activeRecallPrompt
-                  ? `${tokens.accent}16`
-                  : 'rgba(255,255,255,0.02)',
-                color: onCreateRecallItem && activeRecallPrompt ? tokens.accent : ink.ghost,
-                borderRadius: '10px',
+                border: '1px solid rgba(255,255,255,0.18)',
+                background: `${tokens.accent}16`,
+                color: tokens.accent,
+                borderRadius: '6px',
                 fontSize: '10px',
                 fontWeight: 700,
-                letterSpacing: '0.08em',
+                letterSpacing: '0.04em',
                 textTransform: 'uppercase',
-                padding: '7px 10px',
-                cursor: onCreateRecallItem && activeRecallPrompt ? 'pointer' : 'default',
-                opacity: onCreateRecallItem && activeRecallPrompt ? 1 : 0.62,
-                transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease',
+                padding: '3px 6px',
+                cursor: 'pointer',
               }}
               title="Create a connected recall item from the active block"
             >
               Create recall
             </button>
-          ) : null}
-          {context === 'free-space' ? (
-            <button
-              type="button"
-              disabled={!hasNotebookContext}
-              onClick={toggleContextPanel}
-              title={
-                !hasNotebookContext
-                  ? 'No context yet'
-                  : contextPanelVisible
-                    ? 'Hide sources'
-                    : 'Show sources'
-              }
-              style={{
-                border: '1px solid rgba(255,255,255,0.06)',
-                background: !hasNotebookContext
-                  ? 'rgba(255,255,255,0.02)'
-                  : contextPanelVisible
-                    ? 'rgba(255,255,255,0.08)'
-                    : 'rgba(255,255,255,0.03)',
-                color: !hasNotebookContext
-                  ? ink.ghost
-                  : contextPanelVisible
-                    ? ink.primary
-                    : ink.secondary,
-                borderRadius: '10px',
-                padding: '7px 10px',
-                cursor: !hasNotebookContext ? 'default' : 'pointer',
-                opacity: !hasNotebookContext ? 0.62 : 1,
-                transition: 'background 0.18s ease, color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.2"/>
-                <line x1="9.5" y1="1" x2="9.5" y2="13" stroke="currentColor" strokeWidth="1.2"/>
-              </svg>
-            </button>
-          ) : null}
+                  ),
+                }
+              : null,
+            {
+              id: 'copy',
+              priority: 'secondary',
+              label: 'Copy',
+              fallbackWidth: 48,
+              inline: (
           <button
             type="button"
+            aria-label="Copy entire notebook (Markdown)"
             onClick={() => void copyNotebook('markdown')}
             title="Copy entire notebook (Markdown)"
             style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 8px',
-              borderRadius: 4, color: 'rgba(255,248,235,0.42)',
-              fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', transition: 'color 0.15s',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+              borderRadius: 4, color: 'rgba(255,248,235,0.92)',
+              fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
           >Copy</button>
+              ),
+            },
+            {
+              id: 'plain',
+              priority: 'secondary',
+              label: 'Plain text',
+              fallbackWidth: 48,
+              inline: (
           <button
             type="button"
+            aria-label="Copy entire notebook (plain text)"
             onClick={() => void copyNotebook('plain')}
             title="Copy entire notebook (plain text)"
             style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 8px',
-              borderRadius: 4, color: 'rgba(255,248,235,0.32)',
-              fontSize: 10, fontWeight: 500, letterSpacing: '0.04em', transition: 'color 0.15s',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+              borderRadius: 4, color: 'rgba(255,248,235,0.85)',
+              fontSize: 11, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
           >Plain</button>
+              ),
+            },
+            {
+              id: 'pdf',
+              priority: 'secondary',
+              label: 'Export PDF',
+              fallbackWidth: 40,
+              inline: (
           <button
             type="button"
+            aria-label="Export notebook as PDF"
             onClick={() => void exportNotebookAsPdf()}
             title="Export notebook as PDF"
             style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 8px',
-              borderRadius: 4, color: 'rgba(255,248,235,0.42)',
-              fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', transition: 'color 0.15s',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+              borderRadius: 4, color: 'rgba(255,248,235,0.92)',
+              fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', transition: 'color 0.15s',
             }}
           >PDF</button>
-          {effectiveEditorMode === 'edit' && !isFocusModeOpen ? (
+              ),
+            },
+            effectiveEditorMode === 'edit' && !isFocusModeOpen
+              ? {
+                  id: 'writing',
+                  priority: 'primary' as const,
+                  label: 'Writing mode',
+                  fallbackWidth: 92,
+                  inline: (
             <NotebookWritingModeToggle
               mode={writingMode}
               onChange={handleWritingModeChange}
               tokens={tokens}
             />
-          ) : null}
-          {notebookMode !== 'math-workspace' && (
+                  ),
+                }
+              : null,
+            notebookMode !== 'math-workspace'
+              ? {
+                  id: 'preview',
+                  priority: 'primary' as const,
+                  label: effectiveEditorMode === 'edit' ? 'Preview' : 'Edit',
+                  fallbackWidth: 68,
+                  inline: (
             <button
               type="button"
               disabled={isVersionedPage && !tipTapCandidateActive}
+              aria-label={
+                isVersionedPage && !tipTapCandidateActive
+                  ? 'Versioned notebook page (read-only in legacy view)'
+                  : effectiveEditorMode === 'edit' ? 'Switch to preview' : 'Switch to edit'
+              }
               onClick={() => {
                 if (isVersionedPage && !tipTapCandidateActive) return;
                 void (async () => {
@@ -6541,24 +6515,41 @@ export function ProjectNotebookBlock({
               }
               style={{
                 background: 'none', border: 'none',
-                cursor: isVersionedPage && !tipTapCandidateActive ? 'default' : 'pointer',
-                padding: '3px 5px',
+                cursor: isVersionedPage && !tipTapCandidateActive ? 'not-allowed' : 'pointer',
+                padding: '2px 6px',
                 borderRadius: 4,
-                color: effectiveEditorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.30)',
-                opacity: isVersionedPage && !tipTapCandidateActive ? 0.6 : 1,
-                fontSize: 12, fontWeight: 500, letterSpacing: '0.02em', transition: 'color 0.15s',
+                color: effectiveEditorMode === 'edit' ? tokens.accent : 'rgba(255,248,235,0.92)',
+                opacity: isVersionedPage && !tipTapCandidateActive ? 0.35 : 1,
+                fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', transition: 'color 0.15s',
               }}
             >{effectiveEditorMode === 'edit' ? 'Preview' : 'Edit'}</button>
-          )}
+                  ),
+                }
+              : null,
+            {
+              id: 'mode',
+              priority: 'secondary',
+              label: 'Notebook mode',
+              fallbackWidth: 108,
+              inline: (
           <NotebookModeSelect
             mode={notebookMode}
             paperStyle={paperStyle}
             body={content.body ?? ''}
             onChange={patch => persistNotebookContent({ ...content, ...patch })}
           />
-          {notebookMode !== 'math-workspace' && (
+              ),
+            },
+            notebookMode !== 'math-workspace'
+              ? {
+                  id: 'surface',
+                  priority: 'secondary' as const,
+                  label: 'Surface',
+                  fallbackWidth: 68,
+                  inline: (
             <button
               type="button"
+              aria-label={notebookSurface === 'paper' ? 'Switch to spatial notebook' : 'Switch to paper page'}
               onClick={() => {
                 const next: 'spatial' | 'paper' = notebookSurface === 'paper' ? 'spatial' : 'paper';
                 persistNotebookContent({ ...content, notebookSurface: next });
@@ -6574,26 +6565,35 @@ export function ProjectNotebookBlock({
                   ? '1px solid rgba(28,25,23,0.1)'
                   : isPaperSurface
                     ? 'none'
-                    : '1px solid rgba(255,255,255,0.06)',
+                    : '1px solid rgba(255,255,255,0.08)',
                 cursor: 'pointer',
-                padding: '3px 8px',
+                padding: '2px 6px',
                 borderRadius: 4,
-                color: notebookSurface === 'paper' ? ink.secondary : isPaperSurface ? ink.ghost : 'rgba(255,248,235,0.42)',
-                fontSize: 10,
-                fontWeight: notebookSurface === 'paper' ? 600 : 500,
-                letterSpacing: '0.04em',
+                color: notebookSurface === 'paper' ? ink.secondary : isPaperSurface ? ink.ghost : 'rgba(255,248,235,0.88)',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.02em',
                 transition: 'color 0.15s, background 0.15s',
               }}
             >{notebookSurface === 'paper' ? 'Paper' : 'Spatial'}</button>
-          )}
+                  ),
+                }
+              : null,
+            {
+              id: 'paper',
+              priority: 'secondary',
+              label: 'Line pattern',
+              fallbackWidth: 28,
+              inline: (
           <div style={{ position: 'relative' }}>
             <button
               type="button"
+              aria-label="Line pattern (blank, ruled, grid)"
               onClick={() => setPaperPopoverOpen(p => !p)}
               title="Line pattern (blank, ruled, grid)"
               style={{
-                background: 'none', border: 'none', cursor: 'pointer', padding: '3px 5px',
-                borderRadius: 4, color: 'rgba(255,248,235,0.28)', fontSize: 10, transition: 'color 0.15s',
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                borderRadius: 4, color: 'rgba(255,248,235,0.85)', fontSize: 11, transition: 'color 0.15s',
               }}
             >≡</button>
             {paperPopoverOpen && (
@@ -6615,7 +6615,33 @@ export function ProjectNotebookBlock({
               </div>
             )}
           </div>
-          </div>
+              ),
+              menu: (
+                <div role="group" aria-label="Line pattern" style={{ display: 'flex', gap: 4, padding: '0 8px 6px' }}>
+                  {(['blank', 'ruled', 'grid'] as const).map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => persistNotebookContent({ ...content, paperStyle: s })}
+                      style={{
+                        background: paperStyle === s ? 'rgba(245,158,11,0.12)' : 'none',
+                        border: 'none',
+                        borderRadius: 5,
+                        cursor: 'pointer',
+                        padding: '8px 10px',
+                        color: paperStyle === s ? tokens.accent : 'rgba(255,248,235,0.82)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              ),
+            },
+          ] as Array<NotebookToolbarItem | null>).filter((item): item is NotebookToolbarItem => item !== null)}
+        />
         </div>
       </div>
       ) : null}
@@ -6691,7 +6717,7 @@ export function ProjectNotebookBlock({
       ) : null}
 
       <NotebookWorkspaceLayout
-        enabled={v1PagesShell && isWorkspacePresentation}
+        enabled={v1PagesShell && (isWorkspacePresentation || enablePagesLayout)}
         tokens={tokens}
         breadcrumb={getNotebookWorkspaceBreadcrumb(effectiveContent)}
         topicsOpen={workspaceChrome.topicsOpen}
@@ -7015,23 +7041,14 @@ export function ProjectNotebookBlock({
         onDragOver={e => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
         style={{
           position: 'relative',
-          display:
-            (showNotebookContext && canDockContext) || showWorkspaceContextDock || showDesignerPanel
-              ? 'grid'
-              : 'flex',
+          display: showDesignerPanel ? 'grid' : 'flex',
           flexDirection: 'column',
           flex: isDeskPresentation && context === 'free-space' ? 1 : undefined,
           minHeight: context === 'free-space' ? '100%' : undefined,
-          gridTemplateColumns:
-            showDesignerPanel
-              ? `minmax(0, 1fr) ${NOTEBOOK_DESIGNER_PANEL_WIDTH_PX}px`
-              : (showNotebookContext && canDockContext) || showWorkspaceContextDock
-                ? `minmax(0, 1fr) ${workspaceChrome.contextOpen || !showWorkspaceContextDock ? '232px' : `${NOTEBOOK_PANEL_RAIL_WIDTH_PX}px`}`
-                : undefined,
-          gap:
-            (showNotebookContext && canDockContext) || showWorkspaceContextDock || showDesignerPanel
-              ? '16px'
-              : undefined,
+          gridTemplateColumns: showDesignerPanel
+            ? `minmax(0, 1fr) ${NOTEBOOK_DESIGNER_PANEL_WIDTH_PX}px`
+            : undefined,
+          gap: showDesignerPanel ? '16px' : undefined,
           alignItems: undefined,
         }}
       >
@@ -7075,9 +7092,6 @@ export function ProjectNotebookBlock({
                       : editorSurfaceStyle.color,
                 }
               : {}),
-            ...(showWorkspaceContextDock && !workspaceChrome.contextOpen
-              ? { flex: 1, minWidth: 0 }
-              : {}),
             ...(isDeskPresentation
               ? {
                   flex: 1,
@@ -7104,8 +7118,6 @@ export function ProjectNotebookBlock({
                 flexDirection: 'column',
                 width: '100%',
                 minHeight: isDeskPresentation ? 480 : PAGE_INK_INITIAL_HEIGHT,
-                overflowY: 'auto',
-                WebkitOverflowScrolling: 'touch',
               }}
             >
               {objectId && activeInkBlockKey ? (
@@ -8075,7 +8087,9 @@ export function ProjectNotebookBlock({
           })}
           {isDeskPresentation ? (
             <div aria-hidden style={{ flex: 1, minHeight: 'min(48vh, 420px)' }} />
-          ) : null}
+          ) : (
+            <div aria-hidden style={{ minHeight: 'min(35vh, 280px)', flexShrink: 0 }} />
+          )}
           </>
           )}
           </div>
@@ -8656,96 +8670,11 @@ export function ProjectNotebookBlock({
             }
             return null;
           })}
+          <div aria-hidden style={{ minHeight: 'min(35vh, 280px)', flexShrink: 0 }} />
           </div>
         </div>
       )}
-      {showWorkspaceContextDock ? (
-        <div
-          style={{
-            position: 'relative',
-            minHeight: 0,
-            minWidth: 0,
-            width: workspaceChrome.contextOpen ? '100%' : NOTEBOOK_PANEL_RAIL_WIDTH_PX,
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              width: 232,
-              height: '100%',
-              overflow: 'hidden',
-              flexShrink: 0,
-              marginLeft: workspaceChrome.contextOpen
-                ? 0
-                : -(232 - NOTEBOOK_PANEL_RAIL_WIDTH_PX),
-            }}
-          >
-            <NotebookContextSidebar
-              tokens={tokens}
-              title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
-              data={contextData}
-              onSelectObject={onRequestSelectObject}
-            />
-          </div>
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: workspaceChrome.contextOpen
-                ? -Math.floor(NOTEBOOK_PANEL_RAIL_WIDTH_PX / 2)
-                : 0,
-              transform: 'translateY(-50%)',
-              zIndex: 12,
-              width: NOTEBOOK_PANEL_RAIL_WIDTH_PX,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'auto',
-            }}
-          >
-            <NotebookPanelRailToggle
-              tokens={tokens}
-              edge="right"
-              panelOpen={workspaceChrome.contextOpen}
-              variant={workspaceChrome.contextOpen ? 'seam' : 'rail'}
-              collapseLabel="Collapse Context"
-              expandLabel="Show Context"
-              onToggle={() =>
-                setWorkspaceChrome(s => ({ ...s, contextOpen: !s.contextOpen }))
-              }
-            />
-          </div>
-        </div>
-      ) : null}
-      {showNotebookContext ? (
-        canDockContext ? (
-          <NotebookContextSidebar
-            tokens={tokens}
-            title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
-            data={contextData}
-            onSelectObject={onRequestSelectObject}
-          />
-        ) : (
-          <div
-            style={{
-              position: 'absolute',
-              top: 14,
-              right: 12,
-              zIndex: 4,
-              maxWidth: 'calc(100% - 24px)',
-            }}
-          >
-            <NotebookContextSidebar
-              tokens={tokens}
-              title={objectTitle && objectTitle !== 'Notebook' ? objectTitle : 'Notebook'}
-              data={contextData}
-              floating
-              onClose={toggleContextPanel}
-              onSelectObject={onRequestSelectObject}
-            />
-          </div>
-        )
-      ) : null}
+
       {showDesignerPanel ? (
         <NotebookDesignerHost
           open

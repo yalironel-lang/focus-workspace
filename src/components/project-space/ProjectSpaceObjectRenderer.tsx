@@ -47,6 +47,7 @@ import {
   type StudyLayoutMode,
 } from '../../lib/mathDesk/studyLayout';
 import type { PdfStudyMarksChrome } from '../../lib/pdfStudyMarks/usePdfStudyMarks';
+import type { TutorCaptureIntent, TutorCaptureChrome } from '../../lib/ai/tutor/tutorCaptureTypes';
 
 export type NotebookContentHost = 'canvas' | 'study-dock' | 'study-session';
 
@@ -78,6 +79,8 @@ interface Props {
   onStartStudySession?: () => void;
   /** Opens RV validation surface from PDF card. */
   onStartRvStudy?: () => void;
+  /** Opens PDF + Notebook two-surface academic composition. */
+  onStartAcademicComposition?: () => void;
   /** Opens PDF + ink split for a binder write page (past exam practice). */
   onOpenBinderStudy?: (payload: {
     pdfObjectId: string;
@@ -99,6 +102,8 @@ interface Props {
   studyDeskQuiet?: boolean;
   onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
   onPdfLivePageChange?: (page: number) => void;
+  onTutorCaptureIntent?: (intent: TutorCaptureIntent) => void;
+  onTutorCaptureChromeChange?: (chrome: TutorCaptureChrome | null) => void;
   /** Canvas object presentation (floating / split / fullscreen). */
   objectPresentationMode?: UniversalObjectViewMode;
   onSetObjectPresentationMode?: (
@@ -341,7 +346,7 @@ function FreeSpaceMathNotebookRenderer({
           ← Math desk
         </button>
       ) : null}
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ProjectNotebookBlock
           content={content}
           tokens={tokens}
@@ -372,7 +377,11 @@ function FreeSpaceMathNotebookRenderer({
               ? 'workspace'
               : 'notebook'
           }
+          studyFocusQuestionNumber={studyFocusQuestionNumber}
+          studyFocusQuestionToken={studyFocusQuestionToken}
+          onActiveQuestionNumber={onStudySessionActiveQuestionNumber}
           onOpenBinderStudy={onOpenBinderStudy}
+          enablePagesLayout={contentHost === 'study-session'}
         />
       </div>
     </div>
@@ -396,6 +405,7 @@ function ProjectSpaceObjectRendererInner({
   onStudyLayoutChange,
   onStartStudySession,
   onStartRvStudy,
+  onStartAcademicComposition,
   onOpenBinderStudy,
   studySessionChip = null,
   sessionRestoreBlockId = null,
@@ -403,11 +413,13 @@ function ProjectSpaceObjectRendererInner({
   studyFocusQuestionNumber = null,
   studyFocusQuestionToken = 0,
   onStudySessionActiveQuestionNumber,
-  suppressLearningAttemptChip = false,
+  suppressLearningAttemptChip: _suppressLearningAttemptChip = false,
   suppressStudyToolbar = false,
   studyDeskQuiet = false,
   onStudyMarksChromeChange,
   onPdfLivePageChange,
+  onTutorCaptureIntent,
+  onTutorCaptureChromeChange,
   objectPresentationMode = 'floating',
   onSetObjectPresentationMode,
 }: Props) {
@@ -441,26 +453,8 @@ function ProjectSpaceObjectRendererInner({
     } catch {}
   }, [copyPayload]);
 
-  const attemptBtn =
-    !suppressLearningAttemptChip &&
-    onStartLearningAttempt &&
-    (object.type === 'mistake' || object.type === 'note' || object.type === 'notebook' || object.type === 'pdf' || object.type === 'studyfile') ? (
-      <button
-        type="button"
-        onClick={e => {
-          e.stopPropagation();
-          onStartLearningAttempt(object.id);
-        }}
-        className="absolute top-2 right-2 z-[2] px-2 py-1 rounded-lg text-[10px] font-semibold"
-        style={{
-          backgroundColor: `${tokens.accent}22`,
-          color: tokens.accent,
-          border: `1px solid ${tokens.accent}44`,
-        }}
-      >
-        Attempt
-      </button>
-    ) : null;
+  // B3: Remove visible Attempt entry points from current Workspace cards to eliminate overlap with "Study with Notebook"
+  const attemptBtn = null;
 
   const wrapWithCopy = useCallback((node: ReactNode) => {
     if (!copyPayload) return node;
@@ -747,10 +741,13 @@ function ProjectSpaceObjectRendererInner({
             onPdfViewerReady={onPdfViewerReady}
             onStartStudySession={onStartStudySession}
             onStartRvStudy={onStartRvStudy}
+            onStartAcademicComposition={onStartAcademicComposition}
             presentation={contentHost === 'study-session' ? 'study-session' : 'canvas'}
             suppressStudyToolbar={suppressStudyToolbar}
             onStudyMarksChromeChange={onStudyMarksChromeChange}
             onPdfLivePageChange={onPdfLivePageChange}
+            onTutorCaptureIntent={onTutorCaptureIntent}
+            onTutorCaptureChromeChange={onTutorCaptureChromeChange}
           />
           </div>
         </WorkspaceSurfaceErrorBoundary>

@@ -19,6 +19,8 @@ export type ProviderSuccess = {
   latencyMs: number;
   /** Provider x-request-id when present (metadata only). */
   providerRequestId?: string;
+  /** Visible text was cut off because the completion budget was spent. */
+  generationIncomplete?: boolean;
 };
 
 /**
@@ -32,15 +34,23 @@ export type ProviderFailureDiagnostics = {
   providerErrorCode?: string;
   model: string;
   endpoint: 'chat_completions';
+  finishReason?: string;
+  emptyText?: boolean;
   requestId?: string;
 };
 
 export type ProviderFailure = {
   ok: false;
-  code: 'provider_unavailable' | 'provider_timeout' | 'rate_limited' | 'bad_response';
+  code:
+    | 'provider_unavailable'
+    | 'provider_timeout'
+    | 'rate_limited'
+    | 'bad_response'
+    | 'output_budget_exhausted';
   message: string;
   status?: number;
   latencyMs: number;
+  usage?: ProviderUsage;
   /** Server-only; must not be forwarded to the client response. */
   diagnostics?: ProviderFailureDiagnostics;
   providerRequestId?: string;

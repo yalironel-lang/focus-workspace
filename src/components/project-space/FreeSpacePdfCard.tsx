@@ -1,3 +1,7 @@
+import type { NormalizedPageRegion } from "../../lib/pdfGeometry/normalizedPageRegion";
+import type { TutorCaptureIntent, TutorCaptureChrome } from "../../lib/ai/tutor/tutorCaptureTypes";
+import { useTutorPdfCapture } from "../../lib/ai/tutor/useTutorPdfCapture";
+import { PdfTutorCaptureOverlay } from "./PdfTutorCaptureOverlay";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -74,6 +78,8 @@ interface FreeSpacePdfCardProps {
   onStartStudySession?: () => void;
   /** Opens RV validation surface (single-question split). */
   onStartRvStudy?: () => void;
+  /** Opens PDF + Notebook two-surface academic composition. */
+  onStartAcademicComposition?: () => void;
   presentation?: 'canvas' | 'study-session' | 'rv-study';
   /** Hide “open in new tab” on coarse pointers (RV surface). */
   suppressExternalTabLink?: boolean;
@@ -83,9 +89,16 @@ interface FreeSpacePdfCardProps {
   onStudyMarksChromeChange?: (chrome: PdfStudyMarksChrome | null) => void;
   /** Lifts live viewer page into StudySessionShell toolbar (persisted content.page can lag). */
   onPdfLivePageChange?: (page: number) => void;
+  onTutorCaptureIntent?: (intent: TutorCaptureIntent) => void;
+  onTutorCaptureChromeChange?: (chrome: TutorCaptureChrome | null) => void;
 }
 
-export const STUDY_SESSION_PDF_FIT_WIDTH_ZOOM = 1.8;
+/**
+ * 100% is fit-width. Older sessions may still have zoom 1.8 stored from the
+ * previous Fit width button. That value is a real magnification now and is
+ * not rewritten on load.
+ */
+export const STUDY_SESSION_PDF_FIT_WIDTH_ZOOM = 1;
 
 export function FreeSpacePdfCard({
   objectId,
@@ -101,11 +114,14 @@ export function FreeSpacePdfCard({
   pdfTitle = '',
   onStartStudySession,
   onStartRvStudy,
+  onStartAcademicComposition,
   presentation = 'canvas',
   suppressStudyToolbar = false,
   suppressExternalTabLink = false,
   onStudyMarksChromeChange,
   onPdfLivePageChange,
+  onTutorCaptureIntent,
+  onTutorCaptureChromeChange,
 }: FreeSpacePdfCardProps) {
   const { user } = useAuth();
   const content = ensureProjectObjectContent('pdf', rawContent);
@@ -332,10 +348,6 @@ export function FreeSpacePdfCard({
     [sectionId, objectId, onChange, onTitleChange, revokeIf, user?.id],
   );
 
-  useEffect(() => {
-    setVisiblePage(content.page);
-  }, [content.page]);
-
   useEffect(() => () => flushAllFreeSpacePersistence(), []);
 
   const handleViewerError = useCallback(() => {
@@ -344,18 +356,23 @@ export function FreeSpacePdfCard({
   }, [objectId, sectionId, content.fileName]);
 
   const toolbarPage = pdfToolbarDisplayPage(visiblePage, content.pageCount);
-
-  const handleVisiblePageChange = useCallback(
-    (page: number) => {
-      const live = pdfToolbarDisplayPage(page, content.pageCount);
-      setVisiblePage(live);
-      onPdfLivePageChange?.(live);
-    },
-    [content.pageCount, onPdfLivePageChange],
-  );
-
   const contentRef = useRef(content);
   contentRef.current = content;
+  const publishedPageRef = useRef<number | null>(null);
+  const onPdfLivePageChangeRef = useRef(onPdfLivePageChange);
+  onPdfLivePageChangeRef.current = onPdfLivePageChange;
+
+  const publishLivePage = useCallback((page: number) => {
+    const live = pdfToolbarDisplayPage(page, contentRef.current.pageCount);
+    setVisiblePage(live);
+    if (publishedPageRef.current === live) return;
+    publishedPageRef.current = live;
+    onPdfLivePageChangeRef.current?.(live);
+  }, []);
+
+  useEffect(() => {
+    publishLivePage(content.page);
+  }, [content.page, publishLivePage]);
 
   const handlePagePersist = useCallback(
     (page: number) => {
@@ -380,9 +397,24 @@ export function FreeSpacePdfCard({
     onChange({ ...content, zoom: z });
   };
 
+  const [fitPageToken, setFitPageToken] = useState(0);
+
   const fitWidth = useCallback(() => {
-    onChange({ ...content, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
-  }, [content, onChange]);
+    const current = contentRef.current;
+    if (current.zoom === STUDY_SESSION_PDF_FIT_WIDTH_ZOOM) return;
+    onChange({ ...current, zoom: STUDY_SESSION_PDF_FIT_WIDTH_ZOOM });
+  }, [onChange]);
+
+  const requestFitPage = useCallback(() => {
+    setFitPageToken(token => token + 1);
+  }, []);
+
+  const commitViewerZoom = useCallback((zoom: number) => {
+    const current = contentRef.current;
+    const next = Math.min(2.5, Math.max(0.5, Math.round(zoom * 100) / 100));
+    if (next === current.zoom) return;
+    onChange({ ...current, zoom: next });
+  }, [onChange]);
 
   const jumpToPage = useCallback(
     (page: number) => {
@@ -391,6 +423,17 @@ export function FreeSpacePdfCard({
     },
     [content, onChange],
   );
+
+  const extractTextRef = useRef<((page: number, region: NormalizedPageRegion) => Promise<string | undefined>) | null>(null);
+  const tutorCapture = useTutorPdfCapture({
+    enabled: loadState === "ready" && !suspendViewer,
+    sectionId,
+    sourceObjectId: objectId,
+    pageNumber: visiblePage,
+    onIntent: onTutorCaptureIntent,
+    onChromeChange: onTutorCaptureChromeChange,
+    extractText: region => extractTextRef.current?.(visiblePage, region) ?? Promise.resolve(undefined),
+  });
 
   const studyMarks = usePdfStudyMarks({
     sectionId,
@@ -447,9 +490,19 @@ export function FreeSpacePdfCard({
         type="button"
         className="text-[10px] font-semibold px-2 py-0.5 rounded-md ml-1"
         style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+        data-testid="pdf-zoom-fit-width"
         onClick={fitWidth}
       >
         Fit width
+      </button>
+      <button
+        type="button"
+        data-testid="pdf-zoom-fit-page"
+        className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+        style={{ color: tokens.accent, border: `1px solid ${tokens.accent}44` }}
+        onClick={requestFitPage}
+      >
+        Fit page
       </button>
       {inStudySession && studyMarks.loaded && !onStudyMarksChromeChange ? (
         <>
@@ -570,6 +623,21 @@ export function FreeSpacePdfCard({
               Study this exam
             </button>
           ) : null}
+          {onStartAcademicComposition && loadState === 'ready' && content.fileName ? (
+            <button
+              type="button"
+              data-testid="study-with-notebook-btn"
+              className="text-[10px] font-semibold px-2 py-1 rounded-lg shrink-0"
+              style={{
+                color: tokens.accent,
+                background: `${tokens.accent}18`,
+                border: `1px solid ${tokens.accent}66`,
+              }}
+              onClick={onStartAcademicComposition}
+            >
+              Study with Notebook
+            </button>
+          ) : null}
           {onStartRvStudy && loadState === 'ready' && content.fileName ? (
             <button
               type="button"
@@ -608,39 +676,7 @@ export function FreeSpacePdfCard({
         </div>
       ) : null}
 
-      {!inStudySession ? (
-        <div
-          className="flex items-center gap-1 px-2 py-1.5 shrink-0 flex-wrap"
-          style={{ borderBottom: `1px solid ${border}`, backgroundColor: `${tokens.wellBg}dd` }}
-        >
-          <button
-            type="button"
-            title="Previous page"
-            className="p-1 rounded-md"
-            style={{ color: tokens.textMuted }}
-            disabled={toolbarPage <= 1 || loadState !== 'ready'}
-            onClick={() => bumpPage(-1)}
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-            {formatPdfToolbarPageLabel(toolbarPage, content.pageCount)}
-          </span>
-          <button type="button" title="Next page" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpPage(1)}>
-            <ChevronRight className="w-4 h-4" />
-          </button>
-          <span className="w-px h-3 mx-1" style={{ backgroundColor: border }} />
-          <button type="button" title="Zoom out" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(-0.1)}>
-            <Minus className="w-3.5 h-3.5" />
-          </button>
-          <span className="text-[10px] tabular-nums px-1" style={{ color: tokens.textMuted }}>
-            {Math.round(content.zoom * 100)}%
-          </span>
-          <button type="button" title="Zoom in" className="p-1 rounded-md" style={{ color: tokens.textMuted }} onClick={() => bumpZoom(0.1)}>
-            <Plus className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ) : null}
+      {!inStudySession ? compactToolbar : null}
 
       <div
         className={`flex-1 min-h-0 relative${inStudySession ? ' overflow-hidden' : ''}`}
@@ -788,19 +824,35 @@ export function FreeSpacePdfCard({
             zoom={content.zoom}
             pageCount={content.pageCount}
             backgroundColor={tokens.wellBg}
-            onVisiblePageChange={handleVisiblePageChange}
+            onVisiblePageChange={publishLivePage}
             onPagePersist={handlePagePersist}
             onError={handleViewerError}
+            onExtractTextReady={extractor => { extractTextRef.current = extractor; }}
+            fitPageToken={fitPageToken}
+            onCommitZoom={commitViewerZoom}
             renderPageOverlay={
-              inStudySession && studyMarks.loaded
+              (studyMarks.loaded || tutorCapture.captureMode || !!tutorCapture.selection)
                 ? () => (
-                    <PdfStudyMarksOverlay
-                      tokens={tokens}
-                      regions={studyMarks.currentRegions}
-                      tool={studyMarks.tool}
-                      onAddRegion={studyMarks.addRegion}
-                      onRemoveRegion={studyMarks.removeRegion}
-                    />
+                    <>
+                      {studyMarks.loaded ? (
+                        <PdfStudyMarksOverlay
+                          tokens={tokens}
+                          regions={studyMarks.currentRegions}
+                          tool={tutorCapture.captureMode ? "view" : studyMarks.tool}
+                          onAddRegion={studyMarks.addRegion}
+                          onRemoveRegion={studyMarks.removeRegion}
+                        />
+                      ) : null}
+                      <PdfTutorCaptureOverlay
+                        tokens={tokens}
+                        active={tutorCapture.captureMode}
+                        selection={tutorCapture.selection}
+                        onCommitSelection={tutorCapture.commitSelection}
+                        onChooseAction={tutorCapture.chooseAction}
+                        onClearSelection={tutorCapture.clearSelection}
+                        onCancelCapture={tutorCapture.cancel}
+                      />
+                    </>
                   )
                 : undefined
             }

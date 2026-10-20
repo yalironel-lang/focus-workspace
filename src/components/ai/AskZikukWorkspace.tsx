@@ -70,6 +70,8 @@ export function AskZikukWorkspace({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadScrollRef = useRef<HTMLDivElement>(null);
   const activeAnchorRef = useRef<HTMLDivElement>(null);
+  const latestTurnRef = useRef<HTMLDivElement>(null);
+  const prevTurnsLenRef = useRef(0);
   const wasOpenRef = useRef(false);
   const [narrow, setNarrow] = useState(false);
 
@@ -79,6 +81,8 @@ export function AskZikukWorkspace({
     turns,
     activePendingQuestion,
     state,
+    mode,
+    setMode,
     setQuestion,
     submit,
     retry,
@@ -161,6 +165,20 @@ export function AskZikukWorkspace({
       el.scrollIntoView(false);
     }
   }, [isLoading, activePendingQuestion]);
+
+  // Ensure the beginning of newly completed answers is readable without bottom jumping.
+  useEffect(() => {
+    if (turns.length > prevTurnsLenRef.current) {
+      prevTurnsLenRef.current = turns.length;
+      const el = latestTurnRef.current;
+      if (!el) return;
+      try {
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      } catch {
+        el.scrollIntoView(true);
+      }
+    }
+  }, [turns]);
 
   /** M1.1B — close Ask so Free Space is visible, then open via parent helper. */
   const handleOpenSource = useCallback(
@@ -264,17 +282,25 @@ export function AskZikukWorkspace({
             />
           ) : null}
 
-          {turns.map(turn => (
-            <AskZikukResult
+          {turns.map((turn, idx) => (
+            <div
               key={turn.id}
-              turnId={turn.id}
-              question={turn.question}
-              text={turn.answer}
-              sources={turn.sources}
-              tokens={tokens}
-              accent={accent}
-              onOpenSource={handleOpenSource}
-            />
+              ref={idx === turns.length - 1 ? latestTurnRef : null}
+            >
+              <AskZikukResult
+                turnId={turn.id}
+                question={turn.question}
+                text={turn.answer}
+                sources={turn.sources}
+                knowledgeTier={turn.knowledgeTier}
+                contextAvailable={turn.contextAvailable}
+                tokens={tokens}
+                accent={accent}
+                onOpenSource={handleOpenSource}
+                mode={turn.mode}
+                generationIncomplete={turn.generationIncomplete}
+              />
+            </div>
           ))}
 
           {activePendingQuestion ? (
@@ -284,6 +310,7 @@ export function AskZikukWorkspace({
                 loading
                 tokens={tokens}
                 accent={accent}
+                mode={mode}
               />
             </div>
           ) : null}
@@ -341,6 +368,8 @@ export function AskZikukWorkspace({
           accent={accent}
           canSubmit={composerCanSubmit}
           isLoading={isLoading}
+          mode={mode}
+          onSelectMode={setMode}
           inputRef={inputRef}
           onChange={setQuestion}
           onSubmit={handleSubmit}

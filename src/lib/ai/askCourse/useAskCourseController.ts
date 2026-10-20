@@ -10,6 +10,9 @@ import {
   zikukAiRequest,
   type AskCourseRecentTurn,
   type AskCourseSourceRef,
+  type ContextAvailable,
+  type KnowledgeTier,
+  type TeachingMode,
   type ZikukAiErrorCode,
 } from '../gatewayClient';
 import { logAskCourseSubmitDiag } from './logAskCourseSubmitDiag';
@@ -25,6 +28,8 @@ export type AskCourseState = {
   submittedQuestion: string | null;
   resultText: string | null;
   sources: AskCourseSourceRef[];
+  knowledgeTier?: KnowledgeTier;
+  contextAvailable?: ContextAvailable;
   errorMessage: string | null;
   errorCode: ZikukAiErrorCode | null;
 };
@@ -58,6 +63,8 @@ export function useAskCourseController(input: {
    * Called only when getSubmitContext is absent.
    */
   getRecentTurns?: () => AskCourseRecentTurn[];
+  /** Teaching mode for ask_course v2 (explain, teach_me, just_answer, exam_prep). */
+  mode?: TeachingMode;
   /**
    * When set, success is handed to the session layer and controller returns to IDLE
    * (composer cleared). Single-result SUCCESS state is skipped.
@@ -66,9 +73,13 @@ export function useAskCourseController(input: {
     question: string;
     text: string;
     sources: AskCourseSourceRef[];
+    mode?: TeachingMode;
+    knowledgeTier?: KnowledgeTier;
+    contextAvailable?: ContextAvailable;
+    generationIncomplete?: boolean;
   }) => void;
 }) {
-  const { sectionId, open, getSubmitContext, getRecentTurns, onAskSuccess } = input;
+  const { sectionId, open, getSubmitContext, getRecentTurns, onAskSuccess, mode = 'explain' } = input;
   const [state, setState] = useState<AskCourseState>(IDLE);
   const genRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -77,6 +88,9 @@ export function useAskCourseController(input: {
   phaseRef.current = state.phase;
   const sectionIdRef = useRef(sectionId);
   sectionIdRef.current = sectionId;
+  const modeRef = useRef<TeachingMode>(mode);
+  modeRef.current = mode;
+  const lastSubmittedModeRef = useRef<TeachingMode>(mode);
   const getSubmitContextRef = useRef(getSubmitContext);
   getSubmitContextRef.current = getSubmitContext;
   const getRecentTurnsRef = useRef(getRecentTurns);
@@ -143,13 +157,16 @@ export function useAskCourseController(input: {
   }, []);
 
   const runAsk = useCallback(
-    async (rawQuestion: string) => {
+    async (rawQuestion: string, overrideMode?: TeachingMode) => {
       const question = normalizeQuestion(rawQuestion);
       if (!question) return;
       if (phaseRef.current === 'loading') return;
 
       const sid = sectionIdRef.current;
       if (!sid) return;
+
+      const effectiveMode: TeachingMode = overrideMode || modeRef.current || 'explain';
+      lastSubmittedModeRef.current = effectiveMode;
 
       // ONE immutable snapshot of prior context BEFORE this turn.
       let recentTurns: AskCourseRecentTurn[] | undefined;
@@ -240,9 +257,10 @@ export function useAskCourseController(input: {
           capability: 'ask_course',
           sectionId: sid,
           question,
+          teachingMode: effectiveMode,
           ...(recentTurns ? { recentTurns } : {}),
         },
-        { signal: ac.signal },
+        { signal: ac.signal, surface: 'ask' },
       ).catch((e: unknown) => {
         if (ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) {
           return {
@@ -277,9 +295,20 @@ export function useAskCourseController(input: {
         }
         const text = response.result.text;
         const sources = response.result.sources;
+        const knowledgeTier = response.result.knowledgeTier;
+        const contextAvailable = response.result.contextAvailable;
+        const generationIncomplete = response.result.generationIncomplete;
         const successHandler = onAskSuccessRef.current;
         if (successHandler) {
-          successHandler({ question, text, sources });
+          successHandler({
+            question,
+            text,
+            sources,
+            mode: effectiveMode,
+            knowledgeTier,
+            contextAvailable,
+            generationIncomplete,
+          });
           questionRef.current = '';
           setState(IDLE);
           return;
@@ -291,6 +320,8 @@ export function useAskCourseController(input: {
           submittedQuestion: question,
           resultText: text,
           sources,
+          knowledgeTier,
+          contextAvailable,
           errorMessage: null,
           errorCode: null,
         });
@@ -315,14 +346,14 @@ export function useAskCourseController(input: {
     [abortInFlight],
   );
 
-  const submit = useCallback(() => {
-    void runAsk(questionRef.current);
+  const submit = useCallback((overrideMode?: TeachingMode) => {
+    void runAsk(questionRef.current, overrideMode);
   }, [runAsk]);
 
   const retry = useCallback(() => {
     const q = normalizeQuestion(questionRef.current) || normalizeQuestion(state.question);
     if (!q) return;
-    void runAsk(q);
+    void runAsk(q, lastSubmittedModeRef.current);
   }, [runAsk, state.question]);
 
   return {

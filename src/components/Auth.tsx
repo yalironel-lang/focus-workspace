@@ -1,9 +1,20 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { isSupabaseConfigured } from '../lib/supabase';
+import type { MagicLinkNotice, MagicLinkStatus } from '../lib/auth/stagingMagicLink';
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ZikukLogo } from './ZikukLogo';
+
+const stagingEmailAuthEnabled = import.meta.env.VITE_STAGING_EMAIL_AUTH === 'true';
+
+const MAGIC_LINK_COPY: Record<MagicLinkStatus | MagicLinkNotice, string> = {
+  invalid_email: 'Enter a valid email address.',
+  sent: 'Check your inbox for a sign-in link. It can only be used once.',
+  rate_limited: 'Too many sign-in emails were requested. Wait a little, then try again.',
+  failed: 'Sign-in could not be completed. Try again.',
+  expired: 'This sign-in link is no longer valid. Request a new one.',
+};
 
 /** Google "G" SVG — inline so there's no external icon dependency */
 function GoogleIcon() {
@@ -61,6 +72,74 @@ function ZikukAuthBackground() {
       {/* Mobile-only center readability boost */}
       <div className="auth-bg-vignette-mobile absolute inset-0 md:hidden" />
     </div>
+  );
+}
+
+export function StagingMagicLinkPanel() {
+  const [email, setEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [status, setStatus] = useState<MagicLinkStatus | null>(null);
+  const { signInWithMagicLink, magicLinkNotice } = useAuth();
+  const notice = status ?? magicLinkNotice;
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    try {
+      setStatus(await signInWithMagicLink(email));
+    } catch {
+      setStatus('failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form data-testid="staging-magic-link-form" onSubmit={handleSubmit} noValidate>
+      <label htmlFor="staging-magic-link-email" className="sr-only">
+        Email
+      </label>
+      <input
+        id="staging-magic-link-email"
+        data-testid="staging-magic-link-email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        value={email}
+        onChange={event => {
+          setEmail(event.target.value);
+          if (status) setStatus(null);
+        }}
+        placeholder="Email address"
+        className="mb-3 w-full rounded-xl px-4 py-3.5 text-sm outline-none"
+        style={{
+          backgroundColor: 'rgba(255,255,255,0.06)',
+          color: 'rgba(248,250,252,0.96)',
+          border: '1px solid rgba(255,255,255,0.12)',
+        }}
+      />
+      <button
+        type="submit"
+        disabled={submitting}
+        className="flex w-full items-center justify-center rounded-xl py-3.5 text-sm font-semibold transition-all disabled:opacity-50"
+        style={{
+          backgroundColor: '#fff',
+          color: '#1a1a1a',
+          border: '1px solid rgba(226,232,240,0.9)',
+        }}
+      >
+        {submitting ? <Loader2 className="h-4 w-4 animate-spin" style={{ color: '#334155' }} /> : 'Email me a sign-in link'}
+      </button>
+      {notice ? (
+        <p
+          role="status"
+          className="mt-3 text-center text-sm leading-relaxed"
+          style={{ color: notice === 'sent' ? 'rgba(167,243,208,0.92)' : 'rgba(252,165,165,0.92)' }}
+        >
+          {MAGIC_LINK_COPY[notice]}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -166,6 +245,11 @@ export function Auth() {
                   Enter ZIKUK
                 </p>
 
+                {stagingEmailAuthEnabled ? (
+                  <div className="mb-3">
+                    <StagingMagicLinkPanel />
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleGoogle}

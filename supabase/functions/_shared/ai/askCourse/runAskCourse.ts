@@ -2,11 +2,18 @@
  * M0.5D ask_course orchestrator (injectable I/O — no network in unit tests).
  *
  * Order:
- *   section ownership → beginRequest once → embed question → search
+ *   section ownership → PDF capture ownership → active-document ownership
+ *   → beginRequest once
+ *   → document window OR embed + section search
  *   → filter → knowledge_not_found OR generate → recordUsage
+ *
+ * A window route reads indexed pages of the owned PDF and skips section search.
+ * A topical question still uses section-wide retrieval.
  */
 
-import { SERVER_MAX_OUTPUT_TOKENS } from '../bounds.ts';
+import { resolveServerMaxOutputTokens } from '../chatCompletionsRequestPolicy.ts';
+import { completeChatWithinDeadline } from '../chatAttempt.ts';
+import { mapProviderFailureToClient } from '../mapProviderFailure.ts';
 import type { AiEnforcementStore, UsageOutcome } from '../enforcement.ts';
 import { estimateCostUsdMicros } from '../aiPricing.ts';
 import type { AiEmbeddingProvider } from '../knowledge/embeddingTypes.ts';
@@ -15,7 +22,14 @@ import { KNOWLEDGE_EMBEDDING_DIMENSIONS, KNOWLEDGE_EMBEDDING_MODEL_DEFAULT } fro
 import { formatProviderDiagnosticLog } from '../providerOpenAICompatible.ts';
 import type { AiProvider } from '../providerTypes.ts';
 import { routeModel, type RouterConfig } from '../routeModel.ts';
-import type { ZikukAiAskCourseRequest, ZikukAiResponse } from '../requestTypes.ts';
+import type {
+  ContextAvailable,
+  DocumentWindowCoverage,
+  DocumentWindowCursor,
+  KnowledgeTier,
+  ZikukAiAskCourseRequest,
+  ZikukAiResponse,
+} from '../requestTypes.ts';
 import { authorizeAskCourseSection, type LoadSectionOwner } from './authorizeSection.ts';
 import { ASK_COURSE_RPC_CANDIDATE_LIMIT } from './bounds.ts';
 import { buildAskCourseMessages } from './promptAskCourse.ts';
@@ -28,9 +42,23 @@ import {
   resolveAskCourseHitMetadata,
   type LoadNotebookFsoForCitation,
 } from './resolveCitationMetadata.ts';
-import type { KnowledgeSearchHit } from './retrievalTypes.ts';
+import type { KnowledgeSearchHit, PromptCourseChunk } from './retrievalTypes.ts';
 import { buildAskCourseRetrievalQuery } from './buildAskCourseRetrievalQuery.ts';
 import type { AskCourseRecentTurn } from '../requestTypes.ts';
+import { isOwnedPdfCaptureSource, isOwnedPdfSource, type LoadPdfCaptureSource } from './pdfCapture.ts';
+import {
+  classifyActiveDocumentQuestion,
+  documentWindowRange,
+  DOCUMENT_WINDOW_FETCH_LIMIT,
+  fitDocumentWindow,
+  scopeCurrentPageChunks,
+  type DocumentWindowChunk,
+} from './documentWindow.ts';
+import type { ActiveDocumentBrief } from './promptAskCourse.ts';
+import {
+  applyClaimLevelGrounding,
+  contextAvailableForGrounding,
+} from './evaluateGroundingProvenance.ts';
 
 export type AskCourseSearchFn = (input: {
   userId: string;
@@ -41,8 +69,20 @@ export type AskCourseSearchFn = (input: {
   embeddingDimensions: number;
 }) => Promise<{ ok: true; raw: unknown } | { ok: false }>;
 
+export type LoadDocumentWindow = (input: {
+  userId: string;
+  sectionId: string;
+  sourceObjectId: string;
+  pageFrom: number;
+  pageTo: number;
+  limit: number;
+}) => Promise<{ ok: true; rows: DocumentWindowChunk[] } | { ok: false }>;
+
 export type AskCourseDeps = {
   loadSectionOwner: LoadSectionOwner;
+  loadPdfCaptureSource?: LoadPdfCaptureSource;
+  /** Page-ordered indexed text for one owned PDF. Absent in older test doubles. */
+  loadDocumentWindow?: LoadDocumentWindow;
   embeddingProvider: AiEmbeddingProvider;
   embeddingRouterConfig?: EmbeddingRouterConfig;
   searchKnowledge: AskCourseSearchFn;
@@ -52,6 +92,8 @@ export type AskCourseDeps = {
   routerConfig: RouterConfig;
   enforcement: AiEnforcementStore;
   signal?: AbortSignal;
+  /** Epoch ms when the Edge request began. Enables the chat idle deadline. */
+  requestStartedAt?: number;
 };
 
 export type AskCourseUsageExtras = {
@@ -63,7 +105,7 @@ export type AskCourseUsageExtras = {
 function mapProviderOutcome(code: string): UsageOutcome {
   if (code === 'provider_timeout') return 'provider_timeout';
   if (code === 'rate_limited') return 'rate_limited';
-  if (code === 'bad_response') return 'bad_response';
+  if (code === 'bad_response' || code === 'output_budget_exhausted') return 'bad_response';
   return 'provider_error';
 }
 
@@ -105,6 +147,8 @@ export type AskCoursePipelineResult = {
     ok: boolean;
     errorCode?: string;
     latencyMs: number;
+    knowledgeTier?: KnowledgeTier;
+    contextAvailable?: ContextAvailable;
   };
 };
 
@@ -117,12 +161,14 @@ export async function runAskCoursePipeline(input: {
   const { authUserId, request, deps } = input;
   const sectionId = request.sectionId;
   const question = request.question;
+  const capture = request.version === 3 ? request.capture : undefined;
+  const activeDocument = request.version === 1 ? undefined : request.activeDocument;
   const recentTurns: AskCourseRecentTurn[] =
-    request.version === 2 && request.recentTurns ? request.recentTurns : [];
-  // v1: embed question only. v2: deterministic contextual retrieval text (user prior only).
+    request.version !== 1 && request.recentTurns ? request.recentTurns : [];
+  // v1: embed question only. v2/v3: deterministic contextual retrieval query (SKE1.2).
   const embeddingInputText =
-    request.version === 2
-      ? buildAskCourseRetrievalQuery({ question, recentTurns })
+    request.version !== 1
+      ? buildAskCourseRetrievalQuery({ question, recentTurns, capture })
       : question;
 
   const baseMeta = {
@@ -148,6 +194,70 @@ export async function runAskCoursePipeline(input: {
       meta: { ...baseMeta, ok: false, errorCode: 'not_found', latencyMs: Date.now() - started },
     };
   }
+
+  // Reject missing/foreign/deleted/non-PDF sources before quota or provider work.
+  if (capture) {
+    let source = null;
+    try {
+      source =
+        (await deps.loadPdfCaptureSource?.({
+          userId: authUserId,
+          sectionId,
+          sourceObjectId: capture.sourceObjectId,
+        })) ?? null;
+    } catch {
+      /* fail closed */
+    }
+    if (!isOwnedPdfCaptureSource(source, authUserId, capture)) {
+      return {
+        response: {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'not_found',
+            message: 'The attached PDF is no longer available in this course. Capture it again.',
+          },
+        },
+        meta: { ...baseMeta, ok: false, errorCode: 'not_found', latencyMs: Date.now() - started },
+      };
+    }
+  }
+
+  // Identity check only. Do not add this document's text to retrieval or the prompt.
+  if (activeDocument) {
+    let source = null;
+    try {
+      source =
+        (await deps.loadPdfCaptureSource?.({
+          userId: authUserId,
+          sectionId,
+          sourceObjectId: activeDocument.sourceObjectId,
+        })) ?? null;
+    } catch {
+      /* fail closed */
+    }
+    if (
+      !isOwnedPdfSource(source, authUserId, {
+        sourceObjectId: activeDocument.sourceObjectId,
+        sectionId,
+        pageNumber: activeDocument.pageNumber,
+      })
+    ) {
+      return {
+        response: {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'not_found',
+            message: 'That PDF is not available in this course.',
+          },
+        },
+        meta: { ...baseMeta, ok: false, errorCode: 'not_found', latencyMs: Date.now() - started },
+      };
+    }
+  }
+
+  deps.signal?.throwIfAborted();
 
   // 2) ONE product quota begin
   let begin;
@@ -191,171 +301,334 @@ export async function runAskCoursePipeline(input: {
     };
   }
 
-  // 3) Embed retrieval text (v1 = question; v2 = contextual query)
-  const routeEmb = routeEmbeddingModel(deps.embeddingRouterConfig ?? {});
-  const embedded = await deps.embeddingProvider.embed({
-    model: routeEmb.model,
-    dimensions: routeEmb.dimensions,
-    inputs: [embeddingInputText],
-    signal: deps.signal,
-  });
-  if (!embedded.ok) {
-    const code = mapEmbeddingToGateway(embedded.code);
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: {
-          code,
-          message:
-            code === 'rate_limited'
-              ? 'Too many requests. Try again shortly.'
-              : code === 'quota_exceeded'
-                ? 'Daily AI limit reached. Try again tomorrow.'
-                : code === 'provider_timeout'
-                  ? 'The AI service timed out. Try again.'
-                  : code === 'provider_unavailable'
-                    ? 'The AI service is temporarily unavailable.'
-                    : 'Something went wrong.',
+  const retrieve = async () => {
+    // 3) Embed retrieval text (v1 = question; v2 = contextual query; v3 = capture + instruction)
+    const routeEmb = routeEmbeddingModel(deps.embeddingRouterConfig ?? {});
+    const embedded = await deps.embeddingProvider.embed({
+      model: routeEmb.model,
+      dimensions: routeEmb.dimensions,
+      inputs: [embeddingInputText],
+      signal: deps.signal,
+    });
+    if (!embedded.ok) {
+      const code = mapEmbeddingToGateway(embedded.code);
+      return {
+        response: {
+          version: 1 as const,
+          ok: false as const,
+          error: {
+            code,
+            message:
+              code === 'rate_limited'
+                ? 'Too many requests. Try again shortly.'
+                : code === 'quota_exceeded'
+                  ? 'Daily AI limit reached. Try again tomorrow.'
+                  : code === 'provider_timeout'
+                    ? 'The AI service timed out. Try again.'
+                    : code === 'provider_unavailable'
+                      ? 'The AI service is temporarily unavailable.'
+                      : 'Something went wrong.',
+          },
         },
-      },
-      meta: {
-        ...baseMeta,
-        plan: begin.plan,
-        ok: false,
-        errorCode: code,
-        embeddingInputTokens: undefined,
-        latencyMs: Date.now() - started,
-      },
+        meta: {
+          ...baseMeta,
+          plan: begin.plan,
+          ok: false as boolean,
+          errorCode: code,
+          embeddingInputTokens: undefined,
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
+    if (embedded.embeddings.length !== 1 || embedded.embeddings[0]!.length !== KNOWLEDGE_EMBEDDING_DIMENSIONS) {
+      return {
+        response: {
+          version: 1 as const,
+          ok: false as const,
+          error: { code: 'internal_error' as const, message: 'Something went wrong.' },
+        },
+        meta: {
+          ...baseMeta,
+          plan: begin.plan,
+          ok: false as boolean,
+          errorCode: 'internal_error',
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
+
+    const embeddingInputTokens = embedded.usage?.inputTokens;
+
+    // 4) Search
+    const search = await deps.searchKnowledge({
+      userId: authUserId,
+      sectionId,
+      queryEmbedding: embedded.embeddings[0]!,
+      limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
+      embeddingModel: routeEmb.model || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
+      embeddingDimensions: routeEmb.dimensions,
+    });
+    if (!search.ok) {
+      return {
+        response: {
+          version: 1 as const,
+          ok: false as const,
+          error: { code: 'internal_error' as const, message: 'Something went wrong.' },
+        },
+        meta: {
+          ...baseMeta,
+          plan: begin.plan,
+          ok: false as boolean,
+          errorCode: 'internal_error',
+          embeddingInputTokens,
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
+
+    const parsed = parseKnowledgeSearchRows(search.raw);
+    if (!parsed.ok) {
+      return {
+        response: {
+          version: 1 as const,
+          ok: false as const,
+          error: { code: 'internal_error' as const, message: 'Something went wrong.' },
+        },
+        meta: {
+          ...baseMeta,
+          plan: begin.plan,
+          ok: false as boolean,
+          errorCode: 'internal_error',
+          embeddingInputTokens,
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
+
+    // Defense: drop any hit that somehow isn't for this section's search contract
+    // (RPC already scopes; this is belt-and-suspenders on object shape only.)
+    const parsedHits: KnowledgeSearchHit[] = parsed.hits;
+
+    // Resolve live Notebook titles; drop unresolvable notebook evidence.
+    const hits = await resolveAskCourseHitMetadata({
+      userId: authUserId,
+      sectionId,
+      hits: parsedHits,
+      loadNotebookFso: deps.loadNotebookFsoForCitation,
+    });
+
+    const { chunks, diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
+    console.log(formatAskCourseRetrievalLogLine(diagnostics));
+
+    return { chunks, diagnostics, embeddingInputTokens };
+  };
+
+  const documentRoute = activeDocument ? classifyActiveDocumentQuestion(question) : null;
+  const useWindow = Boolean(activeDocument && documentRoute && documentRoute !== 'topical');
+
+  let chunks: PromptCourseChunk[] = [];
+  let embeddingInputTokens: number | undefined;
+  let diagnostics: { reason: string; candidateCount: number } = {
+    reason: 'retrieval_unavailable',
+    candidateCount: 0,
+  };
+  let activeBrief: ActiveDocumentBrief | undefined;
+  let documentWindow: DocumentWindowCoverage | undefined;
+
+  if (useWindow && activeDocument && documentRoute) {
+    const cursor: DocumentWindowCursor | undefined =
+      request.version !== 1 ? request.documentCursor : undefined;
+    const range = documentWindowRange({
+      route: documentRoute,
+      visiblePage: activeDocument.pageNumber,
+      cursor,
+      sourceObjectId: activeDocument.sourceObjectId,
+    });
+    const loaded = deps.loadDocumentWindow
+      ? await deps.loadDocumentWindow({
+          userId: authUserId,
+          sectionId,
+          sourceObjectId: activeDocument.sourceObjectId,
+          pageFrom: range.pageFrom,
+          pageTo: range.pageTo,
+          limit: DOCUMENT_WINDOW_FETCH_LIMIT,
+        })
+      : { ok: false as const };
+    deps.signal?.throwIfAborted();
+    const rows = loaded.ok ? loaded.rows : [];
+    const scoped =
+      documentRoute === 'current_page'
+        ? scopeCurrentPageChunks(rows, activeDocument.pageNumber)
+        : rows;
+    const fitted = fitDocumentWindow(
+      scoped,
+      undefined,
+      rows.length >= DOCUMENT_WINDOW_FETCH_LIMIT,
+    );
+    const fileName = rows.find((row) => row.fileName)?.fileName ?? null;
+    const pageCount = rows.find((row) => typeof row.pageCount === 'number')?.pageCount ?? null;
+    activeBrief = {
+      fileName,
+      pageCount,
+      visiblePage: activeDocument.pageNumber,
+      route: documentRoute,
+      fromPage: fitted.fromPage,
+      toPage: fitted.toPage,
+      partial: fitted.partial,
+      empty: fitted.chunks.length === 0,
     };
-  }
-  if (embedded.embeddings.length !== 1 || embedded.embeddings[0]!.length !== KNOWLEDGE_EMBEDDING_DIMENSIONS) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: 'internal_error', message: 'Something went wrong.' },
-      },
-      meta: {
-        ...baseMeta,
-        plan: begin.plan,
-        ok: false,
-        errorCode: 'internal_error',
-        latencyMs: Date.now() - started,
-      },
+    chunks = fitted.chunks.map((chunk, index) => ({
+      citationIndex: index + 1,
+      sourceKind: 'free_space_pdf' as const,
+      sourceObjectId: chunk.sourceObjectId,
+      notebookObjectId: null,
+      fileName: chunk.fileName,
+      pageNumber: chunk.pageNumber,
+      text: chunk.text,
+    }));
+    let resumeFromPage = fitted.resumeFromPage;
+    let partial = fitted.partial;
+    // A page that cannot fit has already been resumed once. Move on.
+    if (
+      documentRoute === 'continue' &&
+      cursor &&
+      cursor.sourceObjectId === activeDocument.sourceObjectId &&
+      fitted.fromPage !== null &&
+      cursor.resumeFromPage === fitted.fromPage &&
+      fitted.partial &&
+      fitted.fromPage === fitted.toPage &&
+      fitted.resumeFromPage === fitted.fromPage
+    ) {
+      resumeFromPage = fitted.fromPage + 1;
+      partial = false;
+    }
+    if (fitted.fromPage !== null && fitted.toPage !== null && resumeFromPage !== null) {
+      documentWindow = {
+        sourceObjectId: activeDocument.sourceObjectId,
+        fileName,
+        pageCount,
+        fromPage: fitted.fromPage,
+        toPage: fitted.toPage,
+        resumeFromPage,
+        partial,
+      };
+    }
+    if (activeBrief) activeBrief.partial = partial;
+    diagnostics = {
+      reason: loaded.ok ? 'document_window' : 'document_window_unavailable',
+      candidateCount: rows.length,
     };
+  } else {
+    const retrieval = await retrieve();
+    deps.signal?.throwIfAborted();
+    if ('response' in retrieval && !capture) return retrieval;
+
+    chunks = 'chunks' in retrieval ? retrieval.chunks : [];
+    embeddingInputTokens =
+      'embeddingInputTokens' in retrieval
+        ? retrieval.embeddingInputTokens
+        : retrieval.meta.embeddingInputTokens;
+    diagnostics =
+      'diagnostics' in retrieval
+        ? retrieval.diagnostics
+        : { reason: 'retrieval_unavailable', candidateCount: 0 };
+
+    if (activeDocument && documentRoute === 'topical') {
+      const identity = deps.loadDocumentWindow
+        ? await deps.loadDocumentWindow({
+            userId: authUserId,
+            sectionId,
+            sourceObjectId: activeDocument.sourceObjectId,
+            pageFrom: activeDocument.pageNumber,
+            pageTo: activeDocument.pageNumber,
+            limit: 1,
+          })
+        : { ok: false as const };
+      const row = identity.ok ? identity.rows[0] : undefined;
+      activeBrief = {
+        fileName: row?.fileName ?? null,
+        pageCount: row?.pageCount ?? null,
+        visiblePage: activeDocument.pageNumber,
+        route: 'topical',
+        fromPage: null,
+        toPage: null,
+        partial: false,
+        empty: true,
+      };
+    }
   }
 
-  const embeddingInputTokens = embedded.usage?.inputTokens;
+  // A window route does not fall through to section search when the PDF has no text.
 
-  // 4) Search
-  const search = await deps.searchKnowledge({
-    userId: authUserId,
-    sectionId,
-    queryEmbedding: embedded.embeddings[0]!,
-    limit: ASK_COURSE_RPC_CANDIDATE_LIMIT,
-    embeddingModel: routeEmb.model || KNOWLEDGE_EMBEDDING_MODEL_DEFAULT,
-    embeddingDimensions: routeEmb.dimensions,
-  });
-  if (!search.ok) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: 'internal_error', message: 'Something went wrong.' },
-      },
-      meta: {
-        ...baseMeta,
-        plan: begin.plan,
-        ok: false,
-        errorCode: 'internal_error',
-        embeddingInputTokens,
-        latencyMs: Date.now() - started,
-      },
-    };
-  }
+  if (chunks.length === 0 && !capture) {
+    const isExpansionEligible = Boolean(request.version !== 1 && request.teachingMode);
+    if (!isExpansionEligible) {
+      // Legacy request without teachingMode: preserve fail-closed knowledge_not_found
+      console.log(
+        JSON.stringify({
+          event: 'ask_course_outcome',
+          outcome: 'knowledge_not_found',
+          reason: diagnostics.reason,
+          retrievalCandidateCount: diagnostics.candidateCount,
+          finalEvidenceCount: 0,
+          // no question / chunks / answer
+        }),
+      );
+      return {
+        response: {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'knowledge_not_found',
+            message: 'No matching course material was found for this question.',
+          },
+        },
+        meta: {
+          ...baseMeta,
+          plan: begin.plan,
+          ok: false,
+          errorCode: 'knowledge_not_found',
+          retrievalHitCount: 0,
+          embeddingInputTokens,
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
 
-  const parsed = parseKnowledgeSearchRows(search.raw);
-  if (!parsed.ok) {
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: { code: 'internal_error', message: 'Something went wrong.' },
-      },
-      meta: {
-        ...baseMeta,
-        plan: begin.plan,
-        ok: false,
-        errorCode: 'internal_error',
-        embeddingInputTokens,
-        latencyMs: Date.now() - started,
-      },
-    };
-  }
-
-  // Defense: drop any hit that somehow isn't for this section's search contract
-  // (RPC already scopes; this is belt-and-suspenders on object shape only.)
-  const parsedHits: KnowledgeSearchHit[] = parsed.hits;
-
-  // Resolve live Notebook titles; drop unresolvable notebook evidence.
-  const hits = await resolveAskCourseHitMetadata({
-    userId: authUserId,
-    sectionId,
-    hits: parsedHits,
-    loadNotebookFso: deps.loadNotebookFsoForCitation,
-  });
-
-  const { chunks, diagnostics } = filterAskCourseHitsWithDiagnostics(hits);
-  console.log(formatAskCourseRetrievalLogLine(diagnostics));
-
-  if (chunks.length === 0) {
-    // Metadata-only: request consumed product begin, terminated before generation.
+    // Smart Knowledge Expansion (SKE1.1): Teach using general academic knowledge
     console.log(
       JSON.stringify({
         event: 'ask_course_outcome',
-        outcome: 'knowledge_not_found',
+        outcome: 'knowledge_expansion',
+        tier: 'general_academic',
         reason: diagnostics.reason,
         retrievalCandidateCount: diagnostics.candidateCount,
         finalEvidenceCount: 0,
-        // no question / chunks / answer
+        teachingMode: request.teachingMode,
       }),
     );
-    return {
-      response: {
-        version: 1,
-        ok: false,
-        error: {
-          code: 'knowledge_not_found',
-          message: 'No matching course material was found for this question.',
-        },
-      },
-      meta: {
-        ...baseMeta,
-        plan: begin.plan,
-        ok: false,
-        errorCode: 'knowledge_not_found',
-        retrievalHitCount: 0,
-        embeddingInputTokens,
-        latencyMs: Date.now() - started,
-      },
-    };
   }
 
   const sources = sourcesFromPromptChunks(chunks);
   const messages = buildAskCourseMessages({
     question,
     chunks,
-    recentTurns: request.version === 2 ? recentTurns : undefined,
+    recentTurns: request.version !== 1 ? recentTurns : undefined,
+    capture,
+    teachingMode: request.version !== 1 ? request.teachingMode : undefined,
+    activeDocument: activeBrief,
   });
   const route = routeModel({ capability: 'ask_course', modality: 'text' }, deps.routerConfig);
 
-  const providerResult = await deps.generationProvider.complete({
-    model: route.model,
-    messages,
-    maxTokens: SERVER_MAX_OUTPUT_TOKENS,
-    signal: deps.signal,
-  });
+  const providerResult = await completeChatWithinDeadline(
+    deps.generationProvider,
+    {
+      model: route.model,
+      messages,
+      maxTokens: resolveServerMaxOutputTokens(route.model),
+    },
+    { requestStartedAt: deps.requestStartedAt, parent: deps.signal },
+  );
 
   const latencyMs = Date.now() - started;
 
@@ -370,40 +643,27 @@ export async function runAskCoursePipeline(input: {
       model: route.model,
       outcome: mapProviderOutcome(providerResult.code),
       errorCode: providerResult.code,
-      inputTokens: null,
-      outputTokens: null,
-      reasoningTokens: null,
-      totalTokens: null,
+      inputTokens: providerResult.usage?.inputTokens ?? null,
+      outputTokens: providerResult.usage?.outputTokens ?? null,
+      reasoningTokens: providerResult.usage?.reasoningTokens ?? null,
+      totalTokens: providerResult.usage?.totalTokens ?? null,
       estimatedCostUsdMicros: null,
       latencyMs: providerResult.latencyMs,
       sectionId,
       providerRequestId: providerResult.providerRequestId ?? null,
     });
-    const code =
-      providerResult.code === 'rate_limited'
-        ? 'rate_limited'
-        : providerResult.code === 'provider_timeout'
-          ? 'provider_timeout'
-          : 'provider_unavailable';
+    const mapped = mapProviderFailureToClient(providerResult.code);
     return {
       response: {
         version: 1,
         ok: false,
-        error: {
-          code,
-          message:
-            code === 'rate_limited'
-              ? 'Too many requests. Try again shortly.'
-              : code === 'provider_timeout'
-                ? 'The AI service timed out. Try again.'
-                : 'The AI service is temporarily unavailable.',
-        },
+        error: mapped,
       },
       meta: {
         ...baseMeta,
         plan: begin.plan,
         ok: false,
-        errorCode: code,
+        errorCode: mapped.code,
         retrievalHitCount: chunks.length,
         embeddingInputTokens,
         generationLatencyMs: providerResult.latencyMs,
@@ -452,25 +712,50 @@ export async function runAskCoursePipeline(input: {
     );
   }
 
+  const contextAvailable = contextAvailableForGrounding({
+    indexedChunkTexts: chunks.map((chunk) => chunk.text),
+    captureText: capture?.text,
+  });
+  const grounded = applyClaimLevelGrounding({
+    question,
+    answerText: providerResult.text,
+    chunks: chunks.map((chunk) => ({
+      citationIndex: chunk.citationIndex,
+      text: chunk.text,
+    })),
+    captureText: capture?.text,
+    contextAvailable,
+  });
+  const knowledgeTier: KnowledgeTier = grounded.knowledgeTier;
+  const answerText = grounded.text;
+
   return {
     response: {
       version: 1,
       ok: true,
       result: {
         type: 'ask_course',
-        text: providerResult.text,
+        text: answerText,
         sources,
+        knowledgeTier,
+        contextAvailable,
+        ...(providerResult.generationIncomplete ? { generationIncomplete: true } : {}),
+        ...(documentWindow ? { documentWindow } : {}),
       },
       meta: {
         capability: 'ask_course',
         latencyMs,
         retrievalHitCount: chunks.length,
+        knowledgeTier,
+        contextAvailable,
       },
     },
     meta: {
       ...baseMeta,
       plan: begin.plan,
       ok: true,
+      knowledgeTier,
+      contextAvailable,
       retrievalHitCount: chunks.length,
       embeddingInputTokens,
       generationLatencyMs: providerResult.latencyMs,

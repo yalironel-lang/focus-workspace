@@ -348,6 +348,22 @@ export function StudySessionShell({
                       >
                         Fit width
                       </button>
+                      {pdf.onFitPage ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          style={{
+                            ...focusButtonStyle(tokens, false),
+                            marginLeft: 4,
+                          }}
+                          onClick={() => {
+                            pdf.onFitPage?.();
+                            setPdfMenuOpen(false);
+                          }}
+                        >
+                          Fit page
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

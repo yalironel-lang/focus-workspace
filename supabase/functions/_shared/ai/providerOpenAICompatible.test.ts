@@ -277,6 +277,46 @@ describe('createOpenAICompatibleProvider diagnostics', () => {
     assertSafeDiagnostics(result);
   });
 
+  it('HTTP 200 length with empty content is output budget exhaustion', async () => {
+    const result = await completeWith(200, {
+      choices: [{ message: { content: '' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 20, completion_tokens: 8000 },
+    }, { 'x-request-id': 'req_length_empty' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('output_budget_exhausted');
+    expect(result.message).toBe('Model output token budget exhausted.');
+    expect(result.diagnostics).toEqual({
+      providerHttpStatus: 200,
+      model: MODEL,
+      endpoint: 'chat_completions',
+      requestId: 'req_length_empty',
+      finishReason: 'length',
+      emptyText: true,
+    });
+    assertSafeDiagnostics(result);
+  });
+
+  it('HTTP 200 length with visible text stays a success and is marked incomplete', async () => {
+    const result = await completeWith(200, {
+      choices: [{ message: { content: 'Capital grows until ' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 20, completion_tokens: 8000 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toBe('Capital grows until');
+    expect(result.generationIncomplete).toBe(true);
+  });
+
+  it('HTTP 200 stop with visible text is a complete answer', async () => {
+    const result = await completeWith(200, {
+      choices: [{ message: { content: 'Capital reaches a steady state.' }, finish_reason: 'stop' }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.generationIncomplete).toBeUndefined();
+  });
+
   it('H. captures x-request-id', async () => {
     const result = await completeWith(
       400,
@@ -402,5 +442,134 @@ describe('I. client-safe mappings remain unchanged', () => {
       expect(timeout.response.error.code).toBe('provider_timeout');
       expect(timeout.response.error.message).not.toContain('SECRET_STACK');
     }
+  });
+
+  it('keeps empty length exhaustion distinct from provider unavailability', async () => {
+    const { response } = await runGatewayPipeline({
+      body: validRequest(),
+      authUserId: 'user-auth-1',
+      provider: {
+        complete: vi.fn(async () => ({
+          ok: false as const,
+          code: 'output_budget_exhausted' as const,
+          message: 'Model output token budget exhausted.',
+          status: 200,
+          latencyMs: 4,
+          diagnostics: {
+            providerHttpStatus: 200,
+            model: MODEL,
+            endpoint: 'chat_completions' as const,
+            finishReason: 'length',
+            emptyText: true,
+            requestId: 'req_budget',
+          },
+        })),
+      },
+      routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
+    });
+    expect(response).toEqual({
+      version: 1,
+      ok: false,
+      error: {
+        code: 'output_budget_exhausted',
+        message: "The AI couldn't complete this explanation. Try asking for a shorter section.",
+      },
+    });
+    expect(JSON.stringify(response)).not.toContain('req_budget');
+  });
+
+  it('copies the incomplete flag onto a nonempty explain answer', async () => {
+    const { response } = await runGatewayPipeline({
+      body: validRequest(),
+      authUserId: 'user-auth-1',
+      provider: {
+        complete: vi.fn(async () => ({
+          ok: true as const,
+          text: 'The derivative is 2x',
+          rawModel: MODEL,
+          latencyMs: 3,
+          generationIncomplete: true,
+        })),
+      },
+      routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
+    });
+    expect(response.ok).toBe(true);
+    if (!response.ok || response.result.type !== 'text') return;
+    expect(response.result.text).toBe('The derivative is 2x');
+    expect(response.result.generationIncomplete).toBe(true);
+  });
+});
+
+describe('chat idle deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not call the provider when the remaining budget is too small', async () => {
+    const complete = vi.fn();
+    const { response } = await runGatewayPipeline({
+      body: validRequest(),
+      authUserId: 'user-auth-1',
+      requestStartedAt: Date.now() - 140_000,
+      provider: { complete },
+      routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
+    });
+    expect(complete).not.toHaveBeenCalled();
+    expect(response.ok).toBe(false);
+    if (!response.ok) expect(response.error.code).toBe('provider_timeout');
+  });
+
+  it('aborts one in-flight chat call at the deadline and returns one timeout', async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    let calls = 0;
+    const pending = runGatewayPipeline({
+      body: validRequest(),
+      authUserId: 'user-auth-1',
+      requestStartedAt: started,
+      provider: {
+        complete: (input) =>
+          new Promise((resolve) => {
+            calls += 1;
+            const finish = () =>
+              resolve({
+                ok: false as const,
+                code: 'provider_timeout' as const,
+                message: 'aborted',
+                latencyMs: 1,
+              });
+            if (input.signal?.aborted) finish();
+            else input.signal?.addEventListener('abort', finish);
+          }),
+      },
+      routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
+    });
+    await vi.advanceTimersByTimeAsync(130_000);
+    const { response } = await pending;
+    expect(calls).toBe(1);
+    expect(response.ok).toBe(false);
+    if (!response.ok) expect(response.error.code).toBe('provider_timeout');
+  });
+
+  it('does not call the provider when the caller already cancelled', async () => {
+    const parent = new AbortController();
+    parent.abort();
+    const complete = vi.fn();
+    const { response } = await runGatewayPipeline({
+      body: validRequest(),
+      authUserId: 'user-auth-1',
+      requestStartedAt: Date.now(),
+      signal: parent.signal,
+      provider: { complete },
+      routerConfig: { model: MODEL },
+      enforcement: createMemoryEnforcementStore(),
+    });
+    expect(complete).not.toHaveBeenCalled();
+    expect(response.ok).toBe(false);
+    if (!response.ok) expect(response.error.code).toBe('provider_timeout');
   });
 });

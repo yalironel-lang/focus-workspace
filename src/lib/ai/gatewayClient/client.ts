@@ -10,6 +10,9 @@ import {
   AI_GATEWAY_FUNCTION_NAME,
   type AskCourseRecentTurn,
   type AskCourseSourceRef,
+  type ContextAvailable,
+  type DocumentWindowCoverage,
+  type KnowledgeTier,
   type ZikukAiAskCourseRequest,
   type ZikukAiErrorCode,
   type ZikukAiRequest,
@@ -18,6 +21,23 @@ import {
 
 function asError(code: ZikukAiErrorCode, message: string): ZikukAiResponse {
   return { version: 1, ok: false, error: { code, message } };
+}
+
+function parseDocumentWindow(raw: unknown): DocumentWindowCoverage | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.sourceObjectId !== 'string' || !value.sourceObjectId.trim()) return undefined;
+  const pages = [value.fromPage, value.toPage, value.resumeFromPage];
+  if (pages.some((page) => typeof page !== 'number' || !Number.isInteger(page) || page < 1)) return undefined;
+  return {
+    sourceObjectId: value.sourceObjectId,
+    fileName: typeof value.fileName === 'string' ? value.fileName : null,
+    pageCount: typeof value.pageCount === 'number' ? value.pageCount : null,
+    fromPage: value.fromPage as number,
+    toPage: value.toPage as number,
+    resumeFromPage: value.resumeFromPage as number,
+    partial: value.partial === true,
+  };
 }
 
 function parseSources(raw: unknown): AskCourseSourceRef[] | null {
@@ -67,6 +87,26 @@ function parseSources(raw: unknown): AskCourseSourceRef[] | null {
   return out;
 }
 
+function parseKnowledgeTier(value: unknown): KnowledgeTier | undefined {
+  return value === 'course_material' ||
+    value === 'pdf_selection' ||
+    value === 'general_academic' ||
+    value === 'mixed'
+    ? value
+    : undefined;
+}
+
+function generationIncomplete(value: unknown): true | undefined {
+  return value === true ? true : undefined;
+}
+
+function parseContextAvailable(value: unknown): ContextAvailable | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const o = value as Record<string, unknown>;
+  if (typeof o.hasIndexedChunks !== 'boolean' || typeof o.hasPdfCapture !== 'boolean') return undefined;
+  return { hasIndexedChunks: o.hasIndexedChunks, hasPdfCapture: o.hasPdfCapture };
+}
+
 function parseResponseBody(data: unknown): ZikukAiResponse | null {
   if (!data || typeof data !== 'object') return null;
   const o = data as Record<string, unknown>;
@@ -78,7 +118,11 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
       return {
         version: 1,
         ok: true,
-        result: { type: 'text', text: result.text },
+        result: {
+          type: 'text',
+          text: result.text,
+          ...(generationIncomplete(result.generationIncomplete) ? { generationIncomplete: true } : {}),
+        },
         ...(meta && meta.capability === 'explain_selection'
           ? {
               meta: {
@@ -92,15 +136,31 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
     if (result?.type === 'ask_course' && typeof result.text === 'string') {
       const sources = parseSources(result.sources);
       if (!sources) return null;
+      const knowledgeTier = parseKnowledgeTier(result.knowledgeTier);
+      const contextAvailable = parseContextAvailable(result.contextAvailable);
+      const incomplete = generationIncomplete(result.generationIncomplete);
+      const documentWindow = parseDocumentWindow(result.documentWindow);
       const meta = o.meta as {
         capability?: string;
         latencyMs?: number;
         retrievalHitCount?: number;
+        knowledgeTier?: unknown;
+        contextAvailable?: unknown;
       } | undefined;
+      const metaTier = parseKnowledgeTier(meta?.knowledgeTier);
+      const metaContext = parseContextAvailable(meta?.contextAvailable);
       return {
         version: 1,
         ok: true,
-        result: { type: 'ask_course', text: result.text, sources },
+        result: {
+          type: 'ask_course',
+          text: result.text,
+          sources,
+          ...(knowledgeTier ? { knowledgeTier } : {}),
+          ...(contextAvailable ? { contextAvailable } : {}),
+          ...(incomplete ? { generationIncomplete: true } : {}),
+          ...(documentWindow ? { documentWindow } : {}),
+        },
         ...(meta && meta.capability === 'ask_course'
           ? {
               meta: {
@@ -109,6 +169,8 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
                 ...(typeof meta.retrievalHitCount === 'number'
                   ? { retrievalHitCount: meta.retrievalHitCount }
                   : {}),
+                ...(metaTier ? { knowledgeTier: metaTier } : {}),
+                ...(metaContext ? { contextAvailable: metaContext } : {}),
               },
             }
           : {}),
@@ -145,10 +207,25 @@ async function parseStructuredErrorFromInvoke(error: unknown): Promise<ZikukAiRe
   }
 }
 
-/** Serialize ask_course without downgrading v2 or stripping recentTurns. */
+/** Serialize ask_course without downgrading v3/v2 or stripping recentTurns/capture. */
 export function serializeAskCourseGatewayBody(
   request: ZikukAiAskCourseRequest,
 ): ZikukAiAskCourseRequest {
+  if (request.version === 3) {
+    const recentTurns = request.recentTurns;
+    const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
+    return {
+      version: 3,
+      capability: 'ask_course',
+      sectionId: request.sectionId,
+      question: request.question,
+      capture: request.capture,
+      ...(request.teachingMode ? { teachingMode: request.teachingMode } : {}),
+      ...(hasTurns ? { recentTurns: recentTurns as AskCourseRecentTurn[] } : {}),
+      ...(request.activeDocument ? { activeDocument: request.activeDocument } : {}),
+      ...(request.documentCursor ? { documentCursor: request.documentCursor } : {}),
+    };
+  }
   if (request.version === 2) {
     const recentTurns = request.recentTurns;
     const hasTurns = Array.isArray(recentTurns) && recentTurns.length > 0;
@@ -157,7 +234,10 @@ export function serializeAskCourseGatewayBody(
       capability: 'ask_course',
       sectionId: request.sectionId,
       question: request.question,
+      ...(request.teachingMode ? { teachingMode: request.teachingMode } : {}),
       ...(hasTurns ? { recentTurns: recentTurns as AskCourseRecentTurn[] } : {}),
+      ...(request.activeDocument ? { activeDocument: request.activeDocument } : {}),
+      ...(request.documentCursor ? { documentCursor: request.documentCursor } : {}),
     };
   }
   return {
@@ -170,7 +250,7 @@ export function serializeAskCourseGatewayBody(
 
 function logAskCourseWireDiag(body: ZikukAiAskCourseRequest): void {
   if (!import.meta.env.DEV) return;
-  const turns = body.version === 2 ? body.recentTurns ?? [] : [];
+  const turns = body.version !== 1 ? body.recentTurns ?? [] : [];
   let recentUserTurnCount = 0;
   let recentAssistantTurnCount = 0;
   for (const t of turns) {
@@ -182,6 +262,8 @@ function logAskCourseWireDiag(body: ZikukAiAskCourseRequest): void {
     version: body.version,
     capability: body.capability,
     hasSectionId: Boolean(body.sectionId),
+    hasCapture: body.version === 3 ? Boolean(body.capture) : false,
+    hasActiveDocument: body.version !== 1 && Boolean(body.activeDocument),
     hasRecentTurns: turns.length > 0,
     recentTurnsCount: turns.length,
     recentUserTurnCount,
@@ -190,13 +272,82 @@ function logAskCourseWireDiag(body: ZikukAiAskCourseRequest): void {
   });
 }
 
+export type GatewayCallSurface = 'tutor' | 'ask' | 'explain';
+
+type ContentTypeClass = 'json' | 'html' | 'empty' | 'other';
+
+function contentTypeClass(header: string | null | undefined): ContentTypeClass {
+  if (!header || !header.trim()) return 'empty';
+  const value = header.toLowerCase();
+  if (value.includes('json')) return 'json';
+  if (value.includes('text/html')) return 'html';
+  return 'other';
+}
+
+/** Provider or platform correlation id only. Rejects tokens and free text. */
+function safeCorrelationId(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9._:-]{1,80}$/.test(trimmed)) return undefined;
+  if (trimmed.startsWith('eyJ')) return undefined;
+  return trimmed;
+}
+
+function logTransportFailure(input: {
+  surface?: GatewayCallSurface;
+  errorName: string;
+  httpStatus: number | null;
+  contentTypeClass: ContentTypeClass;
+  requestId?: string;
+}): void {
+  const line: Record<string, unknown> = {
+    event: 'zikuk_ai_gateway_transport',
+    surface: input.surface ?? 'unknown',
+    errorName: input.errorName.slice(0, 80),
+    httpStatus: input.httpStatus,
+    contentTypeClass: input.contentTypeClass,
+    parseFailed: true,
+  };
+  if (input.requestId) line.requestId = input.requestId;
+  console.error(JSON.stringify(line));
+}
+
+function transportFacts(error: unknown): {
+  errorName: string;
+  httpStatus: number | null;
+  contentTypeClass: ContentTypeClass;
+  requestId?: string;
+} {
+  const errorName =
+    error && typeof error === 'object' && typeof (error as { name?: unknown }).name === 'string'
+      ? (error as { name: string }).name
+      : 'unknown';
+  const ctx =
+    error && typeof error === 'object'
+      ? (error as { context?: unknown }).context
+      : undefined;
+  let httpStatus: number | null = null;
+  let header: string | null = null;
+  let requestId: string | undefined;
+  if (ctx && typeof ctx === 'object') {
+    const status = (ctx as { status?: unknown }).status;
+    if (typeof status === 'number' && Number.isFinite(status)) httpStatus = status;
+    const headers = (ctx as { headers?: { get?: (name: string) => string | null } }).headers;
+    if (headers && typeof headers.get === 'function') {
+      header = headers.get('content-type');
+      requestId = safeCorrelationId(headers.get('x-request-id'));
+    }
+  }
+  return { errorName, httpStatus, contentTypeClass: contentTypeClass(header), requestId };
+}
+
 /**
  * Invoke the secure ZIKUK AI Gateway with the current Supabase session JWT.
  * Does not accept provider/model/apiKey — those are server-only.
  */
 export async function zikukAiRequest(
   request: ZikukAiRequest,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; surface?: GatewayCallSurface },
 ): Promise<ZikukAiResponse> {
   if (!isSupabaseConfigured) {
     return asError('internal_error', 'ZIKUK is not connected to the cloud.');
@@ -233,16 +384,29 @@ export async function zikukAiRequest(
       if (status === 401) {
         return asError('unauthenticated', 'Sign in required to use ZIKUK AI.');
       }
+      logTransportFailure({ ...transportFacts(error), surface: opts?.surface });
       return asError('provider_unavailable', 'AI Gateway is temporarily unavailable.');
     }
 
     const parsed = parseResponseBody(data);
     if (parsed) return parsed;
+    logTransportFailure({
+      surface: opts?.surface,
+      errorName: 'unexpected_response',
+      httpStatus: null,
+      contentTypeClass: 'empty',
+    });
     return asError('internal_error', 'Unexpected response from AI Gateway.');
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') {
       return asError('provider_timeout', 'Request cancelled.');
     }
+    logTransportFailure({
+      surface: opts?.surface,
+      errorName: e instanceof Error ? e.name : 'unknown',
+      httpStatus: null,
+      contentTypeClass: 'empty',
+    });
     return asError('provider_unavailable', 'Could not reach AI Gateway.');
   }
 }

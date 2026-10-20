@@ -13,6 +13,21 @@ function findClose(input: string, from: number, closer: string): number {
 }
 
 /**
+ * `$...$` is also how models write currency. A span of ordinary words, or one
+ * that ends in a dangling backslash from `\$`, is prose — not an expression.
+ * Explicit `\(...\)` / `\[...\]` / `$$` spans are unaffected.
+ */
+export function dollarSpanIsMath(latex: string): boolean {
+  const body = latex.trim();
+  if (!body) return false;
+  if (/\\[a-zA-Z]+/.test(body)) return true;
+  if (/[\^_{}]/.test(body)) return true;
+  if (/[A-Za-z]{4,}/.test(body)) return false;
+  if (/\\$/.test(body)) return false;
+  return true;
+}
+
+/**
  * Parse mixed educational text from explain_selection into render segments.
  */
 export function parseAiExplanationSegments(input: string): AiExplanationSegment[] {
@@ -62,6 +77,13 @@ export function parseAiExplanationSegments(input: string): AiExplanationSegment[
       continue;
     }
 
+    // Escaped currency dollar — not a math delimiter.
+    if (input.startsWith('\\$', i)) {
+      pushText('$');
+      i += 2;
+      continue;
+    }
+
     // Inline: \( ... \)
     if (input.startsWith('\\(', i)) {
       const close = findClose(input, i + 2, '\\)');
@@ -77,15 +99,16 @@ export function parseAiExplanationSegments(input: string): AiExplanationSegment[
       continue;
     }
 
-    // Inline: $ ... $ (not $$)
+    // Inline: $ ... $ (not $$). Currency and prose stay text.
     if (input[i] === '$') {
       const close = findClose(input, i + 1, '$');
       if (close !== -1 && input[close + 1] !== '$') {
         const latex = input.slice(i + 1, close).trim();
-        if (latex) segments.push({ type: 'inline', latex });
-        else pushText(input.slice(i, close + 1));
-        i = close + 1;
-        continue;
+        if (latex && dollarSpanIsMath(latex)) {
+          segments.push({ type: 'inline', latex });
+          i = close + 1;
+          continue;
+        }
       }
       pushText('$');
       i += 1;
@@ -100,7 +123,7 @@ export function parseAiExplanationSegments(input: string): AiExplanationSegment[
         next = j;
         break;
       }
-      if (ch === '\\' && (input[j + 1] === '[' || input[j + 1] === '(')) {
+      if (ch === '\\' && (input[j + 1] === '[' || input[j + 1] === '(' || input[j + 1] === '$')) {
         next = j;
         break;
       }

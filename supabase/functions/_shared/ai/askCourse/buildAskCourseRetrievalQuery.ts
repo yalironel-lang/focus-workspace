@@ -11,9 +11,14 @@
  * Explicit standalone topics keep current-question dominance (no context hijack).
  */
 
-import type { AskCourseRecentTurn } from '../requestTypes.ts';
+import type { AskCourseRecentTurn, PdfCaptureAttachment } from '../requestTypes.ts';
 import { ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS } from './bounds.ts';
-import { shouldLeadRetrievalWithPriorUserContext } from './isReferentialAskCourseFollowUp.ts';
+import { isExplicitSourceOnlyQuestion } from './evaluateGroundingProvenance.ts';
+import {
+  isExplicitStandaloneAskCourseQuestion,
+  isReferentialAskCourseFollowUp,
+  shouldLeadRetrievalWithPriorUserContext,
+} from './isReferentialAskCourseFollowUp.ts';
 
 function packPriorUserLines(priorUsers: AskCourseRecentTurn[]): string[] {
   let budget = ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS;
@@ -41,8 +46,44 @@ function boundPriorBlock(priorLines: string[]): string {
 export function buildAskCourseRetrievalQuery(input: {
   question: string;
   recentTurns?: AskCourseRecentTurn[];
+  capture?: PdfCaptureAttachment;
 }): string {
   const question = input.question.trim();
+
+  // Attached PDF selection handling (SKE1.2):
+  // Prevent query pollution for standalone questions while preserving context for referential queries.
+  if (input.capture) {
+    const rawCapture = input.capture.text.trim();
+    const boundedCapture = rawCapture.length > 500 ? rawCapture.slice(0, 500).trimEnd() : rawCapture;
+
+    const isStandalone = isExplicitStandaloneAskCourseQuestion(question);
+    const isReferential = isReferentialAskCourseFollowUp(question);
+    const sourceOnly = isExplicitSourceOnlyQuestion(question);
+
+    if (isStandalone && !isReferential && !sourceOnly) {
+      const qWords = new Set(question.toLowerCase().split(/\W+/).filter(w => w.length >= 4));
+      const cWords = new Set(rawCapture.toLowerCase().split(/\W+/).filter(w => w.length >= 4));
+      let overlap = 0;
+      for (const w of qWords) {
+        if (cWords.has(w)) overlap++;
+      }
+      if (overlap === 0) {
+        // Disjoint standalone question: question only to prevent vector pollution
+        return `CURRENT QUESTION:\n${question}`;
+      }
+      return `CURRENT QUESTION:\n${question}\n\nATTACHED SELECTION CONTEXT:\n${boundedCapture}`;
+    }
+
+    if (
+      sourceOnly ||
+      isReferential ||
+      /\b(this|the|selected|above|here|paragraph|quote|excerpt)\b/i.test(question)
+    ) {
+      return `PDF SELECTION:\n${boundedCapture}\n\nQUESTION:\n${question}`;
+    }
+
+    return `CURRENT QUESTION:\n${question}\n\nATTACHED SELECTION CONTEXT:\n${boundedCapture}`;
+  }
   const priorUsers = (input.recentTurns ?? []).filter((t) => t.role === 'user');
   const priorLines = packPriorUserLines(priorUsers);
 

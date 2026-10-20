@@ -207,6 +207,8 @@ describe('AskZikukAnswer academic rendering (M0.9C3)', () => {
     }).not.toThrow();
     expect(host!.querySelector('[data-ask-zikuk-answer]')).toBeTruthy();
     expect(host!.textContent).toContain('still ok');
+    expect(host!.textContent).not.toContain('Could not render this expression');
+    expect(host!.textContent).toContain('\\frac{a{b');
   });
 
   it('11. raw HTML / unsafe content does not execute', () => {

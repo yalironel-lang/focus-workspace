@@ -147,6 +147,52 @@ describe('zikukAiRequest non-2xx structured errors', () => {
     });
   });
 
+  it('D2. HTML transport failure logs status class and not the question', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const secretQuestion = 'SECRET_STUDENT_QUESTION_SOLLOW';
+    invoke.mockResolvedValue({
+      data: null,
+      error: {
+        name: 'FunctionsHttpError',
+        message: secretQuestion,
+        context: new Response('<html>SECRET_STUDENT_QUESTION_SOLLOW</html>', {
+          status: 504,
+          headers: {
+            'Content-Type': 'text/html',
+            'x-request-id': 'req_transport_1',
+          },
+        }),
+      },
+    });
+    const res = await zikukAiRequest(
+      {
+        version: 1,
+        capability: 'ask_course',
+        sectionId: 'sec-1',
+        question: secretQuestion,
+      },
+      { surface: 'tutor' },
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('provider_unavailable');
+      expect(res.error.message).toBe('AI Gateway is temporarily unavailable.');
+    }
+    const logged = String(errorSpy.mock.calls.at(-1)?.[0] ?? '');
+    const parsed = JSON.parse(logged) as Record<string, unknown>;
+    expect(parsed).toMatchObject({
+      event: 'zikuk_ai_gateway_transport',
+      surface: 'tutor',
+      errorName: 'FunctionsHttpError',
+      httpStatus: 504,
+      contentTypeClass: 'html',
+      parseFailed: true,
+      requestId: 'req_transport_1',
+    });
+    expect(logged).not.toContain(secretQuestion);
+    expect(logged).not.toContain('<html>');
+  });
+
   it('E. missing error.context → provider_unavailable', async () => {
     invoke.mockResolvedValue({
       data: null,

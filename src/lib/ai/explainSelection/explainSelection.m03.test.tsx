@@ -252,6 +252,37 @@ describe('useExplainSelectionController', () => {
 
     expect(api.state.phase).toBe('success');
     expect(api.state.resultText).toBe('It means the slope.');
+    expect(api.state.generationIncomplete).toBeUndefined();
+    ed.destroy();
+  });
+
+  it('stores generationIncomplete when the provider stops early', async () => {
+    const ed = makeEditor('Saving adds to the capital stock.');
+    selectAllText(ed);
+    let api!: ReturnType<typeof useExplainSelectionController>;
+    zikukAiRequest.mockResolvedValueOnce({
+      version: 1,
+      ok: true,
+      result: { type: 'text', text: 'Capital grows until', generationIncomplete: true },
+    });
+    mount(
+      createElement(Harness, {
+        editor: ed,
+        onReady: next => {
+          api = next;
+        },
+      }),
+    );
+    act(() => {
+      api.activateExplain();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.state.phase).toBe('success');
+    expect(api.state.resultText).toBe('Capital grows until');
+    expect(api.state.generationIncomplete).toBe(true);
+    expect(zikukAiRequest).toHaveBeenCalledTimes(1);
     ed.destroy();
   });
 

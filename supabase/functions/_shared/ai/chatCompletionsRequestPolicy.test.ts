@@ -6,9 +6,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  SERVER_MAX_OUTPUT_TOKENS,
+  SERVER_REASONING_MAX_OUTPUT_TOKENS,
+} from '../../../../supabase/functions/_shared/ai/bounds.ts';
+import {
   buildChatCompletionsBody,
   isReasoningCompatibleChatModel,
   resolveChatCompletionsPolicy,
+  resolveServerMaxOutputTokens,
 } from '../../../../supabase/functions/_shared/ai/chatCompletionsRequestPolicy.ts';
 import { createOpenAICompatibleProvider } from '../../../../supabase/functions/_shared/ai/providerOpenAICompatible.ts';
 
@@ -41,6 +46,32 @@ describe('resolveChatCompletionsPolicy', () => {
         temperature: 0.4,
       });
     }
+  });
+});
+
+describe('resolveServerMaxOutputTokens', () => {
+  it('gives gpt-5.6-luna the reasoning budget and keeps gpt-4o-mini at 1200', () => {
+    expect(SERVER_MAX_OUTPUT_TOKENS).toBe(1200);
+    expect(SERVER_REASONING_MAX_OUTPUT_TOKENS).toBe(8000);
+    expect(resolveServerMaxOutputTokens('gpt-5.6-luna')).toBe(8000);
+    expect(resolveServerMaxOutputTokens('gpt-4o-mini')).toBe(1200);
+  });
+
+  it('gpt-5.6-luna request body uses the reasoning cap and omits max_tokens and temperature', () => {
+    const maxTokens = resolveServerMaxOutputTokens('gpt-5.6-luna');
+    const body = buildChatCompletionsBody({
+      model: 'gpt-5.6-luna',
+      messages: MESSAGES,
+      maxTokens,
+    });
+    expect(body).toEqual({
+      model: 'gpt-5.6-luna',
+      messages: MESSAGES,
+      max_completion_tokens: 8000,
+    });
+    expect(body).not.toHaveProperty('max_tokens');
+    expect(body).not.toHaveProperty('temperature');
+    expect(body).not.toHaveProperty('reasoning_effort');
   });
 });
 

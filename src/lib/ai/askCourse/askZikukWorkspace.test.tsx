@@ -374,6 +374,7 @@ describe('AskZikukWorkspace', () => {
       capability: 'ask_course',
       sectionId: 'sec-calc',
       question: 'Explain Euler',
+      teachingMode: 'explain',
     });
   });
 
@@ -705,6 +706,7 @@ describe('AskZikukWorkspace', () => {
       capability: 'ask_course',
       sectionId: 'sec-persist-test',
       question: violetQ,
+      teachingMode: 'explain',
     });
     expect(zikukAiRequest.mock.calls[0][0]).not.toHaveProperty('recentTurns');
 

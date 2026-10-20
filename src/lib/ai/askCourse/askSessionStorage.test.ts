@@ -220,4 +220,98 @@ describe('askSessionStorage', () => {
       pageId: 'pg-1',
     });
   });
+
+  it('persists and restores course teaching mode and turn-level mode', () => {
+    const ok = writeAskSession(USER, SEC, {
+      turns: [turn({ mode: 'teach_me' })],
+      draft: 'draft in exam prep',
+      mode: 'exam_prep',
+    });
+    expect(ok).toBe(true);
+    const stored = readAskSession(USER, SEC);
+    expect(stored).not.toBeNull();
+    expect(stored!.mode).toBe('exam_prep');
+    expect(stored!.turns[0]!.mode).toBe('teach_me');
+  });
+
+  it('migrates legacy version 1 sessions seamlessly to version 2 with default explain mode', () => {
+    const v1Raw = {
+      version: 1,
+      sectionId: SEC,
+      turns: [
+        {
+          id: 'v1-turn',
+          question: 'Legacy question',
+          answer: 'Legacy answer',
+          sources: [],
+          status: 'success',
+        },
+      ],
+      draft: 'v1 draft',
+      updatedAt: 123456,
+    };
+
+    const parsed = parsePersistedAskSession(v1Raw, SEC);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.version).toBe(2);
+    expect(parsed!.mode).toBe('explain');
+    expect(parsed!.turns).toHaveLength(1);
+    expect(parsed!.turns[0]!.question).toBe('Legacy question');
+    expect(parsed!.turns[0]!.mode).toBeUndefined();
+  });
+
+  it('falls back to explain mode when invalid mode is encountered in storage', () => {
+    const invalidModeRaw = {
+      version: 2,
+      sectionId: SEC,
+      turns: [],
+      draft: '',
+      mode: 'invalid_mode_xyz',
+      updatedAt: 123456,
+    };
+
+    const parsed = parsePersistedAskSession(invalidModeRaw, SEC);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.mode).toBe('explain');
+  });
+
+  it('persists pdf_selection, mixed, and context after refresh', () => {
+    writeAskSession(USER, SEC, {
+      turns: [
+        turn({
+          id: 'pdf',
+          knowledgeTier: 'pdf_selection',
+          contextAvailable: { hasIndexedChunks: false, hasPdfCapture: true },
+          sources: [],
+        }),
+        turn({
+          id: 'mixed',
+          knowledgeTier: 'mixed',
+          contextAvailable: { hasIndexedChunks: true, hasPdfCapture: true },
+        }),
+      ],
+      draft: '',
+    });
+    const stored = readAskSession(USER, SEC);
+    expect(stored?.turns[0]).toMatchObject({
+      knowledgeTier: 'pdf_selection',
+      contextAvailable: { hasIndexedChunks: false, hasPdfCapture: true },
+    });
+    expect(stored?.turns[1]?.knowledgeTier).toBe('mixed');
+  });
+
+  it('persists incomplete metadata and still reads a session without it', () => {
+    writeAskSession(USER, SEC, {
+      turns: [turn({ id: 'cut', generationIncomplete: true })],
+      draft: '',
+    });
+    expect(readAskSession(USER, SEC)?.turns[0]?.generationIncomplete).toBe(true);
+
+    writeAskSession(USER, SEC, {
+      turns: [turn({ id: 'whole' })],
+      draft: '',
+    });
+    expect(readAskSession(USER, SEC)?.turns[0]?.generationIncomplete).toBeUndefined();
+    expect(readAskSession(USER, SEC)?.turns).toHaveLength(1);
+  });
 });

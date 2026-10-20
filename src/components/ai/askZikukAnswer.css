@@ -1,0 +1,59 @@
+/* Shared Tutor / Ask ZIKUK answer typography.
+   Unlayered so it wins over Tailwind's list and heading reset. */
+
+[data-ask-zikuk-answer='1'] {
+  font-size: 15.5px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+[data-ask-zikuk-answer='1'] [data-ask-zikuk-md='p'] {
+  margin: 0 0 0.85em;
+}
+
+[data-ask-zikuk-answer='1'] > :first-child {
+  margin-top: 0;
+}
+
+[data-ask-zikuk-answer='1'] > :last-child {
+  margin-bottom: 0;
+}
+
+[data-ask-zikuk-answer='1'] :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.2em 0 0.4em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+
+[data-ask-zikuk-answer='1'] > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0.1em;
+}
+
+[data-ask-zikuk-answer='1'] h1 { font-size: 1.28em; }
+[data-ask-zikuk-answer='1'] h2 { font-size: 1.16em; }
+[data-ask-zikuk-answer='1'] h3 { font-size: 1.08em; }
+[data-ask-zikuk-answer='1'] h4 { font-size: 1.02em; }
+[data-ask-zikuk-answer='1'] h5,
+[data-ask-zikuk-answer='1'] h6 { font-size: 1em; }
+
+[data-ask-zikuk-answer='1'] ul,
+[data-ask-zikuk-answer='1'] ol {
+  margin: 0.25em 0 1em;
+  padding-inline-start: 1.4em;
+}
+
+[data-ask-zikuk-answer='1'] ul { list-style: disc outside; }
+[data-ask-zikuk-answer='1'] ol { list-style: decimal outside; }
+
+[data-ask-zikuk-answer='1'] li {
+  margin: 0.32em 0;
+  padding-inline-start: 0.15em;
+}
+
+[data-ask-zikuk-answer='1'] li > [data-ask-zikuk-md='p'] {
+  margin: 0.12em 0;
+}
+
+[data-ask-zikuk-answer='1'] strong { font-weight: 700; }
+[data-ask-zikuk-answer='1'] em { font-style: italic; }

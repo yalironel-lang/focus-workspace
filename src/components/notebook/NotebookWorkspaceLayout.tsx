@@ -1,13 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
-import {
-  NotebookPanelRailToggle,
-  NOTEBOOK_PANEL_RAIL_WIDTH_PX,
-} from './NotebookPanelRailToggle';
 
-const SIDEBAR_BREAKPOINT_PX = 768;
-const SIDEBAR_WIDTH_PX = 240;
+const SIDEBAR_WIDTH_PX = 260;
 
 interface Props {
   enabled: boolean;
@@ -31,47 +26,9 @@ export function NotebookWorkspaceLayout({
   onTopicsOpenChange,
   topicsSuppressed = false,
 }: Props) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [wideLayout, setWideLayout] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth >= SIDEBAR_BREAKPOINT_PX : true,
-  );
-
-  useEffect(() => {
-    if (!enabled || typeof window === 'undefined') return;
-    const mq = window.matchMedia(`(min-width: ${SIDEBAR_BREAKPOINT_PX}px)`);
-    const sync = () => setWideLayout(mq.matches);
-    sync();
-    mq.addEventListener('change', sync);
-    return () => mq.removeEventListener('change', sync);
-  }, [enabled]);
-
-  useEffect(() => {
-    if (wideLayout) return;
-    setDrawerOpen(false);
-  }, [breadcrumb, wideLayout]);
-
   if (!enabled) {
     return <>{children}</>;
   }
-
-  const sidebarPanel = (
-    <div
-      style={{
-        width: SIDEBAR_WIDTH_PX,
-        flexShrink: 0,
-        borderRight: `1px solid ${tokens.cardBorder}`,
-        background: tokens.cardBg,
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-        height: '100%',
-      }}
-    >
-      {navigator}
-    </div>
-  );
-
-  const showTopicsChrome = wideLayout && !topicsSuppressed;
 
   return (
     <div
@@ -81,41 +38,53 @@ export function NotebookWorkspaceLayout({
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
-        height: '100%',
+        position: 'relative',
       }}
     >
       <div
+        data-nb-workspace-breadcrumb="1"
         style={{
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '8px 12px',
+          gap: 8,
+          padding: '4px 10px',
           borderBottom: `1px solid ${tokens.cardBorder}`,
           background: tokens.wellBg,
+          minHeight: 34,
         }}
       >
-        {!wideLayout ? (
+        {!topicsSuppressed && navigator ? (
           <button
             type="button"
-            aria-label="Pages"
-            onClick={() => setDrawerOpen(true)}
+            aria-label={topicsOpen ? 'Close Pages' : 'Open Pages'}
+            aria-expanded={topicsOpen}
+            data-testid="notebook-pages-toggle-btn"
+            onClick={() => onTopicsOpenChange(!topicsOpen)}
             style={{
               minHeight: TOUCH_TARGET_MIN_PX,
               minWidth: TOUCH_TARGET_MIN_PX,
-              padding: '0 12px',
-              borderRadius: 8,
-              border: `1px solid ${tokens.cardBorder}`,
-              background: tokens.cardBg,
-              color: tokens.textSecondary,
+              padding: '0 10px',
+              borderRadius: 6,
+              border: `1px solid ${topicsOpen ? tokens.accent : tokens.cardBorder}`,
+              background: topicsOpen ? `${tokens.accent}18` : tokens.cardBg,
+              color: topicsOpen ? tokens.accent : 'rgba(255, 248, 235, 0.92)',
               fontSize: 11,
               fontWeight: 700,
               cursor: 'pointer',
               touchAction: 'manipulation',
               flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
             }}
           >
-            Pages
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
+              <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            <span>Pages</span>
           </button>
         ) : null}
         <div
@@ -135,98 +104,76 @@ export function NotebookWorkspaceLayout({
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
-        {showTopicsChrome ? (
-          <div
-            style={{
-              display: 'flex',
-              flexShrink: 0,
-              alignItems: 'stretch',
-              minHeight: 0,
-              position: 'relative',
-              zIndex: topicsOpen ? 12 : undefined,
-            }}
-          >
-            <div
-              style={{
-                width: topicsOpen ? SIDEBAR_WIDTH_PX : 0,
-                overflow: 'hidden',
-                flexShrink: 0,
-                minHeight: 0,
-                borderRight: topicsOpen ? `1px solid ${tokens.cardBorder}` : 'none',
-                background: tokens.cardBg,
-              }}
-            >
-              <div
-                style={{
-                  width: SIDEBAR_WIDTH_PX,
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  minHeight: 0,
-                }}
-              >
-                {navigator}
-              </div>
-            </div>
-            <div
-              style={{
-                width: NOTEBOOK_PANEL_RAIL_WIDTH_PX,
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                alignSelf: 'stretch',
-                position: topicsOpen ? 'absolute' : 'relative',
-                left: topicsOpen
-                  ? SIDEBAR_WIDTH_PX - Math.floor(NOTEBOOK_PANEL_RAIL_WIDTH_PX / 2)
-                  : undefined,
-                top: topicsOpen ? '50%' : undefined,
-                transform: topicsOpen ? 'translateY(-50%)' : undefined,
-                zIndex: 12,
-                pointerEvents: 'auto',
-              }}
-            >
-              <NotebookPanelRailToggle
-                tokens={tokens}
-                edge="left"
-                panelOpen={topicsOpen}
-                variant={topicsOpen ? 'seam' : 'rail'}
-                collapseLabel="Collapse Topics"
-                expandLabel="Show Topics"
-                onToggle={() => onTopicsOpenChange(!topicsOpen)}
-              />
-            </div>
-          </div>
-        ) : null}
-
+        {/* Notebook writing surface: Always in-flow, takes full available width */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {children}
         </div>
 
-        {!wideLayout && drawerOpen ? (
+        {/* Overlay Pages / Topics Navigator: zero width in flow, overlays on open */}
+        {!topicsSuppressed && navigator && topicsOpen ? (
           <>
             <div
               role="presentation"
-              onClick={() => setDrawerOpen(false)}
+              aria-hidden="true"
+              onClick={() => onTopicsOpenChange(false)}
               style={{
                 position: 'absolute',
                 inset: 0,
-                background: 'rgba(0,0,0,0.35)',
-                zIndex: 2,
+                background: 'rgba(0, 0, 0, 0.35)',
+                zIndex: 20,
               }}
             />
             <div
+              data-nb-pages-drawer="1"
               style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 bottom: 0,
-                width: Math.min(SIDEBAR_WIDTH_PX + NOTEBOOK_PANEL_RAIL_WIDTH_PX, 280),
-                zIndex: 3,
-                boxShadow: '8px 0 24px rgba(0,0,0,0.35)',
+                width: Math.min(SIDEBAR_WIDTH_PX, 280),
+                zIndex: 21,
+                display: 'flex',
+                flexDirection: 'column',
+                background: tokens.cardBg,
+                borderRight: `1px solid ${tokens.cardBorder}`,
+                boxShadow: '8px 0 24px rgba(0, 0, 0, 0.35)',
+                overflow: 'hidden',
               }}
             >
-              {sidebarPanel}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 10px',
+                  borderBottom: `1px solid ${tokens.cardBorder}`,
+                  background: tokens.wellBg,
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 700, color: tokens.textSecondary }}>
+                  Pages &amp; Topics
+                </span>
+                <button
+                  type="button"
+                  aria-label="Close Pages"
+                  onClick={() => onTopicsOpenChange(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: tokens.textMuted,
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    fontSize: 14,
+                    borderRadius: 4,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {navigator}
+              </div>
             </div>
           </>
         ) : null}

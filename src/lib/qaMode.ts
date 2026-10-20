@@ -18,7 +18,11 @@ export function qaModeFromStorage(storage: Pick<Storage, 'getItem'>): boolean {
   }
 }
 
-/** True when build badge / ink QA panel should render. */
+/**
+ * Non-visual diagnostics (sync timeline and similar).
+ * Development builds stay enabled so existing QA tooling keeps recording.
+ * The on-screen ink panel uses `isQaOverlayEnabled` instead.
+ */
 export function isQaModeEnabled(opts: {
   dev: boolean;
   search: string;
@@ -27,6 +31,19 @@ export function isQaModeEnabled(opts: {
   if (opts.dev) return true;
   if (qaModeFromUrl(opts.search)) return true;
   return qaModeFromStorage(opts.storage);
+}
+
+/**
+ * On-screen ink QA badge. Explicit opt-in only.
+ * A normal student session, including the local development server, stays clear.
+ * Enable with `?qa=1` (stored as FW_QA_MODE) or localStorage FW_QA_MODE=1.
+ * The payload is build and stroke metrics only — no notebook text, filenames, or credentials.
+ */
+export function isQaOverlayEnabled(opts: {
+  search: string;
+  storage: Pick<Storage, 'getItem'>;
+}): boolean {
+  return qaModeFromUrl(opts.search) || qaModeFromStorage(opts.storage);
 }
 
 /** Persist QA mode when URL contains ?qa=1. Call once at app boot. */

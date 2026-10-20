@@ -13,12 +13,14 @@
  */
 
 import { estimateCostUsdMicros } from './aiPricing.ts';
-import { SERVER_MAX_OUTPUT_TOKENS } from './bounds.ts';
+import { resolveServerMaxOutputTokens } from './chatCompletionsRequestPolicy.ts';
 import type { AiEnforcementStore, UsageOutcome } from './enforcement.ts';
 import { buildExplainSelectionMessages } from './promptExplainSelection.ts';
 import {
   preflightGatewayRequest,
 } from './preflightGatewayRequest.ts';
+import { completeChatWithinDeadline } from './chatAttempt.ts';
+import { mapProviderFailureToClient } from './mapProviderFailure.ts';
 import { formatProviderDiagnosticLog } from './providerOpenAICompatible.ts';
 import type { AiProvider } from './providerTypes.ts';
 import { routeModel, type RouterConfig } from './routeModel.ts';
@@ -37,6 +39,8 @@ export type GatewayPipelineInput = {
   provider: AiProvider;
   routerConfig: RouterConfig;
   signal?: AbortSignal;
+  /** Epoch ms when the Edge request began. Enables the chat idle deadline. */
+  requestStartedAt?: number;
   /** Required for provider stage in production; tests may inject memory store. */
   enforcement?: AiEnforcementStore;
   /** Required for ask_course (section auth + embed + search). */
@@ -49,6 +53,8 @@ export type GatewayPipelineAfterPreflightInput = {
   provider: AiProvider;
   routerConfig: RouterConfig;
   signal?: AbortSignal;
+  /** Epoch ms when the Edge request began. Enables the chat idle deadline. */
+  requestStartedAt?: number;
   /** Fail-closed before provider when absent in production Edge. */
   enforcement: AiEnforcementStore;
   askCourseDeps?: Omit<AskCourseDeps, 'generationProvider' | 'routerConfig' | 'enforcement' | 'signal'>;
@@ -94,7 +100,7 @@ function deniedResponse(
 function mapProviderOutcome(code: string): UsageOutcome {
   if (code === 'provider_timeout') return 'provider_timeout';
   if (code === 'rate_limited') return 'rate_limited';
-  if (code === 'bad_response') return 'bad_response';
+  if (code === 'bad_response' || code === 'output_budget_exhausted') return 'bad_response';
   return 'provider_error';
 }
 
@@ -132,6 +138,7 @@ export async function runGatewayPipelineAfterPreflight(
         routerConfig: input.routerConfig,
         enforcement,
         signal: input.signal,
+        requestStartedAt: input.requestStartedAt,
       },
     });
     const usageLog: GatewayUsageLog = {
@@ -220,12 +227,15 @@ export async function runGatewayPipelineAfterPreflight(
   const messages = buildExplainSelectionMessages(providerPayload);
   const route = routeModel({ capability: request.capability, modality: 'text' }, input.routerConfig);
 
-  const providerResult = await input.provider.complete({
-    model: route.model,
-    messages,
-    maxTokens: SERVER_MAX_OUTPUT_TOKENS,
-    signal: input.signal,
-  });
+  const providerResult = await completeChatWithinDeadline(
+    input.provider,
+    {
+      model: route.model,
+      messages,
+      maxTokens: resolveServerMaxOutputTokens(route.model),
+    },
+    { requestStartedAt: input.requestStartedAt, parent: input.signal },
+  );
 
   const usageLog: GatewayUsageLog = {
     authUserId,
@@ -255,10 +265,10 @@ export async function runGatewayPipelineAfterPreflight(
       model: route.model,
       outcome: mapProviderOutcome(providerResult.code),
       errorCode: providerResult.code,
-      inputTokens: null,
-      outputTokens: null,
-      reasoningTokens: null,
-      totalTokens: null,
+      inputTokens: providerResult.usage?.inputTokens ?? null,
+      outputTokens: providerResult.usage?.outputTokens ?? null,
+      reasoningTokens: providerResult.usage?.reasoningTokens ?? null,
+      totalTokens: providerResult.usage?.totalTokens ?? null,
       estimatedCostUsdMicros: null,
       latencyMs: providerResult.latencyMs,
       sectionId,
@@ -277,25 +287,12 @@ export async function runGatewayPipelineAfterPreflight(
       );
     }
 
-    const code =
-      providerResult.code === 'rate_limited'
-        ? 'rate_limited'
-        : providerResult.code === 'provider_timeout'
-          ? 'provider_timeout'
-          : 'provider_unavailable';
+    const mapped = mapProviderFailureToClient(providerResult.code);
     return {
       response: {
         version: 1,
         ok: false,
-        error: {
-          code,
-          message:
-            code === 'rate_limited'
-              ? 'Too many requests. Try again shortly.'
-              : code === 'provider_timeout'
-                ? 'The AI service timed out. Try again.'
-                : 'The AI service is temporarily unavailable.',
-        },
+        error: mapped,
       },
       usageLog,
     };
@@ -347,7 +344,11 @@ export async function runGatewayPipelineAfterPreflight(
     response: {
       version: 1,
       ok: true,
-      result: { type: 'text', text: providerResult.text },
+      result: {
+        type: 'text',
+        text: providerResult.text,
+        ...(providerResult.generationIncomplete ? { generationIncomplete: true } : {}),
+      },
       meta: { capability: 'explain_selection', latencyMs: providerResult.latencyMs },
     },
     usageLog,
@@ -385,6 +386,7 @@ export async function runGatewayPipeline(
     provider: input.provider,
     routerConfig: input.routerConfig,
     signal: input.signal,
+    requestStartedAt: input.requestStartedAt,
     enforcement: input.enforcement,
     askCourseDeps: input.askCourseDeps,
   });

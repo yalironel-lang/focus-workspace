@@ -52,6 +52,7 @@ import { resetCandidateEditorHistory } from '../../../lib/notebookTiptap/candida
 import type { AtmosphereTokens } from '../../../hooks/useAtmosphere';
 import { NotebookTiptapProductBlockMenu } from './NotebookTiptapProductBlockMenu';
 import { NotebookTiptapProductMoreMenu } from './NotebookTiptapProductMoreMenu';
+import { NotebookResponsiveToolbar } from '../NotebookResponsiveToolbar';
 
 import { isNotebookEngineeringChromeEnabled } from '../../../lib/notebookTiptap/featureFlag';
 import { NotebookCandidateQaPanel } from './NotebookCandidateQaPanel';
@@ -825,12 +826,25 @@ export function NotebookTiptapCandidateEditor({
       ) : (
         <>
           {/* Product document tools — sticky within Notebook scroll viewport ([data-nb-body-scroll]). */}
-          <div
-            data-nb-product-toolbar="1"
-            data-nb-product-toolbar-sticky="1"
-            data-nb-product-toolbar-polish="1"
+          <NotebookResponsiveToolbar
+            ariaLabel="Notebook editing"
+            gap={2}
+            dividerWidth={13}
+            overflowVariant="icon"
+            divider={<div aria-hidden style={nbProductGroupDividerStyle()} />}
+            rootProps={{
+              'data-nb-product-toolbar': '1',
+              'data-nb-product-toolbar-sticky': '1',
+              'data-nb-product-toolbar-polish': '1',
+            }}
             style={nbProductToolbarShellStyle()}
-          >
+            items={[
+              {
+                id: 'history',
+                priority: 'primary',
+                label: 'History',
+                fallbackWidth: 64,
+                inline: (
             <div data-nb-product-toolbar-group="history" style={nbProductGroupStyle()}>
               <button
                 type="button"
@@ -867,9 +881,14 @@ export function NotebookTiptapCandidateEditor({
                 <Redo2 size={15} strokeWidth={2.1} aria-hidden />
               </button>
             </div>
-
-            <div aria-hidden style={nbProductGroupDividerStyle()} />
-
+                ),
+              },
+              {
+                id: 'add',
+                priority: 'primary',
+                label: 'Add',
+                fallbackWidth: 88,
+                inline: (
             <div data-nb-product-toolbar-group="add" style={nbProductGroupStyle()}>
               <NotebookTiptapProductBlockMenu
                 onBeforeOpen={() => {
@@ -907,36 +926,14 @@ export function NotebookTiptapCandidateEditor({
                 }}
               />
             </div>
-
-            <input
-              ref={imageFileInputRef}
-              type="file"
-              accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
-              data-nb-product-image-input="1"
-              aria-hidden="true"
-              tabIndex={-1}
-              style={{ display: 'none' }}
-              onChange={e => {
-                const file = e.target.files?.[0] ?? null;
-                e.target.value = '';
-                if (!file) {
-                  pendingImageInsertTargetRef.current = null;
-                  return;
-                }
-                if (!onInsertImageFile) {
-                  pendingImageInsertTargetRef.current = null;
-                  return;
-                }
-                const insertTarget =
-                  pendingImageInsertTargetRef.current ??
-                  (editor ? resolveNbImageInsertTarget(editor.state) : { kind: 'split' as const });
-                pendingImageInsertTargetRef.current = null;
-                void onInsertImageFile(file, { insertTarget });
-              }}
-            />
-
-            <div aria-hidden style={nbProductGroupDividerStyle()} />
-
+                ),
+              },
+              {
+                id: 'direction',
+                priority: 'secondary',
+                label: 'Text direction',
+                fallbackWidth: 72,
+                inline: (
             <div data-nb-product-toolbar-group="direction" style={nbProductGroupStyle()}>
               <select
                 data-nb-product-dir="1"
@@ -968,19 +965,54 @@ export function NotebookTiptapCandidateEditor({
                 <option value="rtl">RTL</option>
               </select>
             </div>
-
-            {onExportPdf || onCustomizeNotebook ? (
-              <>
-                <div aria-hidden style={nbProductGroupDividerStyle()} />
+                ),
+              },
+              ...(onExportPdf || onCustomizeNotebook
+                ? [
+                    {
+                      id: 'more',
+                      priority: 'secondary' as const,
+                      label: 'Notebook actions',
+                      fallbackWidth: 32,
+                      inline: (
                 <div data-nb-product-toolbar-group="more" style={nbProductGroupStyle()}>
                   <NotebookTiptapProductMoreMenu
                     onCustomizeNotebook={onCustomizeNotebook}
                     onExportPdf={onExportPdf}
                   />
                 </div>
-              </>
-            ) : null}
-          </div>
+                      ),
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          <input
+            ref={imageFileInputRef}
+            type="file"
+            accept={NOTEBOOK_IMAGE_FILE_ACCEPT}
+            data-nb-product-image-input="1"
+            aria-hidden="true"
+            tabIndex={-1}
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0] ?? null;
+              e.target.value = '';
+              if (!file) {
+                pendingImageInsertTargetRef.current = null;
+                return;
+              }
+              if (!onInsertImageFile) {
+                pendingImageInsertTargetRef.current = null;
+                return;
+              }
+              const insertTarget =
+                pendingImageInsertTargetRef.current ??
+                (editor ? resolveNbImageInsertTarget(editor.state) : { kind: 'split' as const });
+              pendingImageInsertTargetRef.current = null;
+              void onInsertImageFile(file, { insertTarget });
+            }}
+          />
 
           <EditorContent editor={editor} />
           {editor ? (

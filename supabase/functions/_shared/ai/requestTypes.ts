@@ -18,6 +18,7 @@ export type ZikukAiErrorCode =
   | 'rate_limited'
   | 'provider_unavailable'
   | 'provider_timeout'
+  | 'output_budget_exhausted'
   | 'quota_exceeded'
   | 'ai_disabled'
   | 'internal_error';
@@ -128,19 +129,83 @@ export type ZikukAiAskCourseRequestV1 = {
   question: string;
 };
 
+export const VALID_TEACHING_MODES = [
+  'explain',
+  'teach_me',
+  'just_answer',
+  'exam_prep',
+] as const;
+
+export type TeachingMode = (typeof VALID_TEACHING_MODES)[number];
+
+export function isTeachingMode(value: unknown): value is TeachingMode {
+  return typeof value === 'string' && (VALID_TEACHING_MODES as readonly string[]).includes(value);
+}
+
 /**
  * ask_course v2 — current question + optional bounded recentTurns.
  * Conversation resolves referents; COURSE MATERIAL remains factual authority.
  */
+/**
+ * Open PDF identity for the Tutor. Not a capture and not retrieved text.
+ * The server checks ownership. It does not treat this as document content.
+ */
+export type ActivePdfDocument = {
+  sourceKind: 'free_space_pdf';
+  sourceObjectId: string;
+  pageNumber: number;
+};
+
+/**
+ * Where the next document window should start. This is not a citation page.
+ * The server uses it only for an explicit "next" question.
+ */
+export type DocumentWindowCursor = {
+  sourceObjectId: string;
+  resumeFromPage: number;
+};
+
+export type DocumentWindowCoverage = {
+  sourceObjectId: string;
+  fileName: string | null;
+  pageCount: number | null;
+  fromPage: number;
+  toPage: number;
+  resumeFromPage: number;
+  partial: boolean;
+};
+
 export type ZikukAiAskCourseRequestV2 = {
   version: 2;
   capability: 'ask_course';
   sectionId: string;
   question: string;
   recentTurns?: AskCourseRecentTurn[];
+  teachingMode?: TeachingMode;
+  /** Optional. Absent on Ask ZIKUK and on older Tutor clients. */
+  activeDocument?: ActivePdfDocument;
+  /** Optional continuation point for the same open PDF. */
+  documentCursor?: DocumentWindowCursor;
 };
 
-export type ZikukAiAskCourseRequest = ZikukAiAskCourseRequestV1 | ZikukAiAskCourseRequestV2;
+/** Explicit user-provided PDF data; ownership is checked by the server. */
+export type PdfCaptureAttachment = {
+  sourceKind: 'free_space_pdf';
+  sourceObjectId: string;
+  sectionId: string;
+  pageNumber: number;
+  text: string;
+};
+
+export type ZikukAiAskCourseRequestV3 = Omit<ZikukAiAskCourseRequestV2, 'version'> & {
+  version: 3;
+  capture: PdfCaptureAttachment;
+};
+
+export type ZikukAiAskCourseRequest =
+  | ZikukAiAskCourseRequestV1
+  | ZikukAiAskCourseRequestV2
+  | ZikukAiAskCourseRequestV3;
 
 export type ZikukAiRequest = ZikukAiExplainSelectionRequest | ZikukAiAskCourseRequest;
 
@@ -161,11 +226,22 @@ export type AskCourseSourceRef =
       pageTitle: string | null;
     };
 
+export type KnowledgeTier =
+  | 'course_material'
+  | 'pdf_selection'
+  | 'general_academic'
+  | 'mixed';
+
+export type ContextAvailable = {
+  hasIndexedChunks: boolean;
+  hasPdfCapture: boolean;
+};
+
 export type ZikukAiResponse =
   | {
       version: 1;
       ok: true;
-      result: { type: 'text'; text: string };
+      result: { type: 'text'; text: string; generationIncomplete?: boolean };
       meta?: { capability: 'explain_selection'; latencyMs?: number };
     }
   | {
@@ -175,11 +251,19 @@ export type ZikukAiResponse =
         type: 'ask_course';
         text: string;
         sources: AskCourseSourceRef[];
+        knowledgeTier?: KnowledgeTier;
+        contextAvailable?: ContextAvailable;
+        /** True when visible text exists and the provider stopped for length. */
+        generationIncomplete?: boolean;
+        /** Present only when this turn read a page window of the open PDF. */
+        documentWindow?: DocumentWindowCoverage;
       };
       meta?: {
         capability: 'ask_course';
         latencyMs?: number;
         retrievalHitCount?: number;
+        knowledgeTier?: KnowledgeTier;
+        contextAvailable?: ContextAvailable;
       };
     }
   | {
@@ -237,6 +321,11 @@ export const FORBIDDEN_CLIENT_CONTROL_KEYS = [
   'retrieved_context',
   'systemPrompt',
   'system_prompt',
+  'knowledgeTier',
+  'knowledge_tier',
+  'tier',
+  'contextAvailable',
+  'context_available',
 ] as const;
 
 /** Strict allowlist for ask_course v1 request objects. */
@@ -254,6 +343,15 @@ export const ASK_COURSE_ALLOWED_KEYS_V2 = [
   'sectionId',
   'question',
   'recentTurns',
+  'teachingMode',
+  'activeDocument',
+  'documentCursor',
+] as const;
+
+/** Strict allowlist for ask_course v3 request objects. */
+export const ASK_COURSE_ALLOWED_KEYS_V3 = [
+  ...ASK_COURSE_ALLOWED_KEYS_V2,
+  'capture',
 ] as const;
 
 /** @deprecated Prefer ASK_COURSE_ALLOWED_KEYS_V1 — kept for existing imports/tests. */

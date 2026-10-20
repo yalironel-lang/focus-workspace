@@ -23,6 +23,7 @@ import {
   splitAskInlinePieces,
   type AskProtectedSlot,
 } from '../../lib/ai/askCourse/prepareAskAcademicMarkdown';
+import './askZikukAnswer.css';
 
 type Props = {
   text: string;
@@ -32,6 +33,7 @@ type Props = {
   accentColor?: string;
   onCitationActivate?: (source: AskCourseSourceRef) => void;
   className?: string;
+  generationIncomplete?: boolean;
 };
 
 function CitationButton(props: {
@@ -103,6 +105,7 @@ function SlotView(props: {
           displayMode={false}
           textColor={textColor}
           mutedColor={mutedColor}
+          answerFallback
         />
       </span>
     );
@@ -127,6 +130,7 @@ function SlotView(props: {
           displayMode
           textColor={textColor}
           mutedColor={mutedColor}
+          answerFallback
         />
       </span>
     );
@@ -222,10 +226,9 @@ function expandChildren(
 }
 
 const headingBase: CSSProperties = {
-  margin: '1.1em 0 0.45em',
   fontWeight: 700,
-  letterSpacing: '-0.01em',
-  lineHeight: 1.35,
+  letterSpacing: '-0.015em',
+  lineHeight: 1.3,
 };
 
 export const AskZikukAnswer = memo(function AskZikukAnswer({
@@ -236,6 +239,7 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
   accentColor = '#94a3b8',
   onCitationActivate,
   className,
+  generationIncomplete = false,
 }: Props) {
   const prepared = useMemo(() => prepareAskAcademicMarkdown(text), [text]);
   const byIndex = useMemo(() => {
@@ -265,8 +269,6 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
       data-ask-zikuk-academic="1"
       style={{
         wordBreak: 'break-word',
-        fontSize: 15,
-        lineHeight: 1.7,
         color: textColor,
       }}
     >
@@ -287,7 +289,7 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
               );
             }
             return (
-              <p style={{ margin: '0 0 0.85em' }} data-ask-zikuk-md="p">
+              <p data-ask-zikuk-md="p">
                 {wrapInline(children)}
               </p>
             );
@@ -333,31 +335,17 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
             </em>
           ),
           ul: ({ children }) => (
-            <ul
-              data-ask-zikuk-md="ul"
-              style={{
-                margin: '0.35em 0 0.9em',
-                paddingInlineStart: '1.35em',
-                listStyleType: 'disc',
-              }}
-            >
+            <ul data-ask-zikuk-md="ul">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol
-              data-ask-zikuk-md="ol"
-              style={{
-                margin: '0.35em 0 0.9em',
-                paddingInlineStart: '1.35em',
-                listStyleType: 'decimal',
-              }}
-            >
+            <ol data-ask-zikuk-md="ol">
               {children}
             </ol>
           ),
           li: ({ children }) => (
-            <li data-ask-zikuk-md="li" style={{ margin: '0.28em 0', paddingInlineStart: 2 }}>
+            <li data-ask-zikuk-md="li">
               {wrapInline(children)}
             </li>
           ),
@@ -414,7 +402,7 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
               {children}
             </blockquote>
           ),
-          br: () => ' ',
+          br: () => <br data-ask-zikuk-md="br" />,
           hr: () => (
             <hr
               data-ask-zikuk-md="hr"
@@ -462,6 +450,11 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
       >
         {prepared.markdown}
       </ReactMarkdown>
+      {generationIncomplete ? (
+        <p data-answer-incomplete="1" style={{ margin: '0.8em 0 0', color: mutedColor }}>
+          This answer stopped before it was finished.
+        </p>
+      ) : null}
     </div>
   );
 });

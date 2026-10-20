@@ -29,8 +29,13 @@ export function chatCompletionsUrl(baseUrl: string): string {
   return joinUrl(b, 'v1/chat/completions');
 }
 
+type RawChoice = {
+  message?: { content?: string; refusal?: string };
+  finish_reason?: string;
+};
+
 type RawResponse = {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: RawChoice[];
   usage?: unknown;
   error?: {
     message?: unknown;
@@ -55,6 +60,8 @@ export function buildProviderFailureDiagnostics(input: {
   requestId?: string | null;
   errorType?: unknown;
   errorCode?: unknown;
+  finishReason?: unknown;
+  emptyText?: boolean;
 }): ProviderFailureDiagnostics {
   const diagnostics: ProviderFailureDiagnostics = {
     providerHttpStatus: input.status,
@@ -64,9 +71,12 @@ export function buildProviderFailureDiagnostics(input: {
   const type = asNonEmptyString(input.errorType);
   const code = asNonEmptyString(input.errorCode);
   const requestId = asNonEmptyString(input.requestId ?? undefined);
+  const finishReason = asNonEmptyString(input.finishReason);
   if (type) diagnostics.providerErrorType = type;
   if (code) diagnostics.providerErrorCode = code;
   if (requestId) diagnostics.requestId = requestId;
+  if (finishReason) diagnostics.finishReason = finishReason;
+  if (input.emptyText) diagnostics.emptyText = true;
   return diagnostics;
 }
 
@@ -82,6 +92,8 @@ export function formatProviderDiagnosticLog(d: ProviderFailureDiagnostics): stri
   if (d.providerErrorType) line.providerErrorType = d.providerErrorType;
   if (d.providerErrorCode) line.providerErrorCode = d.providerErrorCode;
   if (d.requestId) line.requestId = d.requestId;
+  if (d.finishReason) line.finishReason = d.finishReason;
+  if (d.emptyText) line.emptyText = true;
   return JSON.stringify(line);
 }
 
@@ -133,6 +145,8 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
           };
         }
 
+        const usage = normalizeProviderUsage(json.usage);
+
         if (res.status === 429) {
           return {
             ok: false,
@@ -141,6 +155,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             status: 429,
             latencyMs,
             providerRequestId: requestId ?? undefined,
+            usage,
             diagnostics: buildProviderFailureDiagnostics({
               status: 429,
               model: input.model,
@@ -159,6 +174,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
             status: res.status,
             latencyMs,
             providerRequestId: requestId ?? undefined,
+            usage,
             diagnostics: buildProviderFailureDiagnostics({
               status: res.status,
               model: input.model,
@@ -169,18 +185,30 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
           };
         }
 
-        const text = json.choices?.[0]?.message?.content?.trim() ?? '';
+        const choice = json.choices?.[0];
+        const finishReason = choice?.finish_reason;
+        const text = choice?.message?.content?.trim() ?? '';
         if (!text) {
+          const isLengthExhaustion = finishReason === 'length';
           return {
             ok: false,
-            code: 'bad_response',
-            message: 'Empty response from model provider.',
+            code: isLengthExhaustion ? 'output_budget_exhausted' : 'bad_response',
+            message: isLengthExhaustion
+              ? 'Model output token budget exhausted.'
+              : 'Empty response from model provider.',
             status: res.status,
             latencyMs,
             providerRequestId: requestId ?? undefined,
+            usage,
+            diagnostics: buildProviderFailureDiagnostics({
+              status: res.status,
+              model: input.model,
+              requestId,
+              finishReason,
+              emptyText: true,
+            }),
           };
         }
-        const usage = normalizeProviderUsage(json.usage);
         return {
           ok: true,
           text,
@@ -188,6 +216,7 @@ export function createOpenAICompatibleProvider(config: OpenAICompatibleConfig): 
           rawModel: input.model,
           latencyMs,
           providerRequestId: requestId ?? undefined,
+          ...(finishReason === 'length' ? { generationIncomplete: true } : {}),
         };
       } catch (e) {
         const latencyMs = Date.now() - started;

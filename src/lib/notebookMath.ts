@@ -67,6 +67,14 @@ export function parseMathSegments(input: string): MathSegment[] {
   return segments.length > 0 ? segments : [{ type: 'text', value: input }];
 }
 
+/**
+ * Student-facing fallback when a model span is not valid LaTeX.
+ * Drops a dangling escape only. Does not rewrite commands or invent formulas.
+ */
+export function readableMathFallback(latex: string): string {
+  return latex.replace(/\\\$/g, '$').replace(/\\$/g, '').trim();
+}
+
 export function renderKatexHtml(latex: string, displayMode: boolean): KatexRenderResult {
   const trimmed = latex.trim();
   if (!trimmed) {

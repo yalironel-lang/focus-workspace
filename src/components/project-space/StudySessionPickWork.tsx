@@ -7,9 +7,25 @@ interface Props {
   candidates: ProjectSpaceObject[];
   onPick: (workObjectId: string) => void;
   onCancel: () => void;
+  title?: string;
+  subtitle?: string;
+  connectedIds?: string[];
+  onCreateNew?: () => void;
+  newButtonLabel?: string;
 }
 
-export function StudySessionPickWork({ tokens, sourceTitle, candidates, onPick, onCancel }: Props) {
+export function StudySessionPickWork({
+  tokens,
+  sourceTitle,
+  candidates,
+  onPick,
+  onCancel,
+  title,
+  subtitle,
+  connectedIds,
+  onCreateNew,
+  newButtonLabel = '+ New Notebook',
+}: Props) {
   return (
     <div
       role="dialog"
@@ -39,49 +55,93 @@ export function StudySessionPickWork({ tokens, sourceTitle, candidates, onPick, 
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 700, color: tokens.textPrimary, marginBottom: 4 }}>
-          Study this exam
+          {title || 'Study this exam'}
         </div>
         <div style={{ fontSize: 12, color: tokens.textMuted, marginBottom: 14 }}>
-          Pick a math notebook for {sourceTitle || 'this exam'}.
+          {subtitle || `Pick a math notebook for ${sourceTitle || 'this exam'}.`}
         </div>
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {candidates.map(c => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => onPick(c.id)}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: `1px solid ${tokens.cardBorder}`,
-                  background: tokens.wellBg,
-                  color: tokens.textPrimary,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {c.title || 'Math notebook'}
-              </button>
-            </li>
-          ))}
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+          {candidates.map(c => {
+            const isConnected = connectedIds ? connectedIds.includes(c.id) : false;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => onPick(c.id)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: `1px solid ${isConnected ? tokens.accentSubtle || tokens.cardBorder : tokens.cardBorder}`,
+                    background: tokens.wellBg,
+                    color: tokens.textPrimary,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.title || 'Untitled Notebook'}
+                  </span>
+                  {isConnected && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        color: tokens.accent,
+                        flexShrink: 0,
+                      }}
+                    >
+                      Connected
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
-        <button
-          type="button"
-          onClick={onCancel}
-          style={{
-            marginTop: 12,
-            fontSize: 11,
-            color: tokens.textMuted,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          {onCreateNew ? (
+            <button
+              type="button"
+              onClick={onCreateNew}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: tokens.accent,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px 6px',
+                borderRadius: 6,
+              }}
+            >
+              {newButtonLabel}
+            </button>
+          ) : <div />}
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              fontSize: 12,
+              color: tokens.textMuted,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px 6px',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

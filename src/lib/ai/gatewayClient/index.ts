@@ -4,11 +4,19 @@
  */
 
 export type {
+  ActivePdfDocument,
   AskCourseRecentTurn,
+  DocumentWindowCoverage,
+  DocumentWindowCursor,
   AskCourseSourceRef,
+  ContextAvailable,
+  KnowledgeTier,
+  PdfCaptureAttachment,
+  TeachingMode,
   ZikukAiAskCourseRequest,
   ZikukAiAskCourseRequestV1,
   ZikukAiAskCourseRequestV2,
+  ZikukAiAskCourseRequestV3,
   ZikukAiCapability,
   ZikukAiErrorCode,
   ZikukAiExplainSelectionRequest,

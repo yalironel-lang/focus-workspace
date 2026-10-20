@@ -9,6 +9,8 @@ export type StudyExamPdfControls = {
   onPageDelta: (delta: number) => void;
   onZoomDelta: (delta: number) => void;
   onFitWidth: () => void;
+  /** Fits the visible page to the scrollport. Optional for older callers. */
+  onFitPage?: () => void;
   /** Study marks (page flags + highlight regions) — set from FreeSpacePdfCard in study session. */
   marks?: PdfStudyMarksChrome | null;
 };

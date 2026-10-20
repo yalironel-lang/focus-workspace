@@ -135,6 +135,9 @@ export function NotebookExplainSelectionPanel({
         {state.phase === 'success' && state.resultText != null ? (
           <div data-nb-candidate-explain-success="1">
             <AiExplanationContent text={state.resultText} />
+            {state.generationIncomplete === true ? (
+              <p data-answer-incomplete="1">This answer stopped before it was finished.</p>
+            ) : null}
           </div>
         ) : null}
 

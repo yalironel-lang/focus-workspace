@@ -92,6 +92,48 @@ describe('serializeAskCourseGatewayBody', () => {
     });
   });
 
+  it('keeps activeDocument beside capture and drops it when absent', () => {
+    const activeDocument = {
+      sourceKind: 'free_space_pdf' as const,
+      sourceObjectId: 'pdf-1',
+      pageNumber: 4,
+    };
+    expect(
+      serializeAskCourseGatewayBody({
+        version: 2,
+        capability: 'ask_course',
+        sectionId: 'sec-1',
+        question: 'Teach me this PDF.',
+        teachingMode: 'teach_me',
+        activeDocument,
+      }),
+    ).toEqual({
+      version: 2,
+      capability: 'ask_course',
+      sectionId: 'sec-1',
+      question: 'Teach me this PDF.',
+      teachingMode: 'teach_me',
+      activeDocument,
+    });
+    const captured = serializeAskCourseGatewayBody({
+      version: 3,
+      capability: 'ask_course',
+      sectionId: 'sec-1',
+      question: 'Explain this selection.',
+      capture: {
+        sourceKind: 'free_space_pdf',
+        sourceObjectId: 'pdf-1',
+        sectionId: 'sec-1',
+        pageNumber: 2,
+        text: 'Selected equation',
+      },
+      activeDocument,
+    });
+    expect(captured.version === 3 && captured.capture.text).toBe('Selected equation');
+    expect(captured.version === 3 && captured.activeDocument).toEqual(activeDocument);
+    expect(captured).not.toHaveProperty('fileName');
+  });
+
   it('preserves legacy v1 shape', () => {
     expect(
       serializeAskCourseGatewayBody({

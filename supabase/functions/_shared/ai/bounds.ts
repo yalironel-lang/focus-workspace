@@ -13,3 +13,9 @@ export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 /** Server-controlled provider output cap — client cannot override. */
 export const SERVER_MAX_OUTPUT_TOKENS = 1200;
+
+/**
+ * Server-controlled provider output cap for reasoning models where hidden reasoning
+ * tokens and visible output share the completion budget.
+ */
+export const SERVER_REASONING_MAX_OUTPUT_TOKENS = 8000;
