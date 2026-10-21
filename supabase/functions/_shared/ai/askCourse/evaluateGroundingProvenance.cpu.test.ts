@@ -127,10 +127,11 @@ describe('quotation detection equivalence', () => {
     const quotingChunks = [quoted, ...CHUNKS.slice(1)];
     const quotingAnswer = longAnswer(40, `${quoted} [1]`);
     const quotedResult = productionPath(quotingAnswer, quotingChunks, '');
-    expect(quotedResult.knowledgeTier).toBe('course_material');
+    expect(quotedResult.knowledgeTier).toBe('mixed');
     expect(quotedResult.text).toContain(quoted);
     expect(quotedResult.text).toContain('[1]');
     expect(quotedResult.text).toContain('### Step 1. Define the production function');
+    expect(quotedResult.text).toContain('goes beyond a direct statement');
 
     const plain = productionPath();
     expect(plain.knowledgeTier).toBe('general_academic');
@@ -207,7 +208,7 @@ describe('faithful paraphrase versus unsupported source claims', () => {
 
   it('keeps a close paraphrase without calling the source unsupported', () => {
     const result = ground('It is option (b): real GDP minus trend real GDP.');
-    expect(result.knowledgeTier).toBe('mixed');
+    expect(result.knowledgeTier).toBe('course_material');
     expect(result.text).toContain('real GDP minus trend real GDP');
     expect(result.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
     expect(result.text).not.toContain('cannot be established');
@@ -222,7 +223,7 @@ describe('faithful paraphrase versus unsupported source claims', () => {
   it('does not treat a different claim as supported', () => {
     const loose = ground('The cyclical part is government spending.');
     expect(loose.knowledgeTier).toBe('mixed');
-    expect(loose.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(loose.text).toContain('general academic reasoning');
     expect(loose.knowledgeTier).not.toBe('course_material');
 
     const unrelated = ground('Nominal wages determine the contract.');

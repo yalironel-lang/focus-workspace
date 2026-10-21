@@ -222,10 +222,21 @@ export function getTeachingModeDirective(mode?: TeachingMode): string {
   }
 }
 
+/**
+ * Qualifies Explain only after a non-empty PDF-source retrieval.
+ * Conceptual Explain, empty retrieval, and the other modes keep their current text.
+ */
+export const EXPLAIN_RETRIEVED_PDF_DEPTH =
+  'When answering a question about a specific PDF or document, match the depth of the response to what the student actually asks. For a direct factual lookup that is explicitly answered by the retrieved passages, provide the supported answer concisely without adding unrelated explanations, examples, option labels, or source-limitation statements. If the student asks why, how, for a comparison, or for an explanation, provide the appropriate depth while grounding document-specific claims in the retrieved evidence. Mention missing source information only when it materially affects answering the question. Never present unsupported information as if it came from the document.';
+
 function withTeachingMode(basePrompt: string, mode?: TeachingMode, brief?: ActiveDocumentBrief): string {
   const directive = getTeachingModeDirective(mode);
   const withMode = directive ? `${basePrompt} ${directive}` : basePrompt;
-  return brief ? `${withMode} ${activePdfRule(brief)}` : withMode;
+  const withPdf = brief ? `${withMode} ${activePdfRule(brief)}` : withMode;
+  if (mode === 'explain' && brief?.route === 'pdf_source' && brief.empty === false) {
+    return `${withPdf} ${EXPLAIN_RETRIEVED_PDF_DEPTH}`;
+  }
+  return withPdf;
 }
 
 export function buildAskCourseMessages(input: {

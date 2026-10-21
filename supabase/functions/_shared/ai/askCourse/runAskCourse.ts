@@ -62,6 +62,7 @@ import {
   contextAvailableForGrounding,
   sourceOnlyLimitationMessage,
 } from './evaluateGroundingProvenance.ts';
+import { createGroundingDecisionDiagnosticSink } from './groundingDecisionDiagnostics.ts';
 
 export type AskCourseSearchFn = (input: {
   userId: string;
@@ -818,6 +819,7 @@ export async function runAskCoursePipeline(input: {
     })),
     captureText: capture?.text,
     contextAvailable,
+    diagnostics: createGroundingDecisionDiagnosticSink(),
   });
   const knowledgeTier: KnowledgeTier = grounded.knowledgeTier;
   const answerText = grounded.text;

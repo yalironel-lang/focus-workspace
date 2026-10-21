@@ -4,17 +4,33 @@
  * Available context (what the model was given) is reported separately from
  * supported answer provenance (what the answer can be attributed to).
  *
- * A tier of course_material or pdf_selection requires a direct quotation that
- * does not reverse the source or change its numbers. Paraphrase, simplification,
- * translation, and mathematical restatement stay mixed: useful, and explicitly
- * uncertain. Distinctive-term overlap is not verified grounding.
+ * A tier of course_material or pdf_selection requires source support that
+ * preserves any recognized mathematical relation. A shared opening cannot
+ * override a different operator, operand order, negation, or quantity.
+ * Equivalent subtraction wording is supported without being a verbatim
+ * quotation. An added explanation does not erase that support. A new number,
+ * reversal, unsupported cause, or unrelated substitution is still removed.
  *
  * Source-only questions are judged sentence by sentence. A faithful explanation
  * is kept and qualified. A course-specific fact, reversal, changed number,
  * unsupported cause, or unrelated substitution is removed.
+ *
+ * A strong badge is a second decision. Every substantive claim in the retained
+ * answer must be supported or equivalent against that badge's evidence.
+ * Retrieved prose, an explicit answer key, or the selected PDF is that
+ * evidence. A quoted span does not cover a later claim, including one that
+ * reuses a source word or has no comma.
  */
 
 import type { ContextAvailable, KnowledgeTier } from '../requestTypes.ts';
+import {
+  claimDisposition,
+  emitGroundingDecisionDiagnostics,
+  type GroundingDecisionCode,
+  type GroundingDecisionDiagnosticSink,
+  type GroundingNoticeClass,
+  type GroundingRelationClass,
+} from './groundingDecisionDiagnostics.ts';
 
 const STOP_WORDS = new Set([
   'about', 'above', 'after', 'again', 'against', 'all', 'and', 'any', 'are', 'aren',
@@ -148,6 +164,14 @@ function cleanupCitationGaps(text: string): string {
 export const SOURCE_ONLY_INTERPRETATION_NOTICE =
   'This explanation is not established as a direct statement of the available source.';
 
+/** A model sentence the source does not establish. It is not a verified derivation. */
+export const DERIVED_REASONING_NOTICE =
+  'This part is general academic reasoning. It is not a statement from the PDF, and it is not independently verified.';
+
+/** A copied choice. It is not an explanation and it is not the keyed answer. */
+export const OPTION_REPEAT_NOTICE =
+  'This repeats a listed option. The PDF does not identify it as the answer, and it is not independently verified.';
+
 const REJECTED_PART_NOTICE =
   'The unsupported part cannot be established from the available source.';
 
@@ -157,6 +181,10 @@ const REJECTED_PART_NOTICE =
  */
 export const CONTRADICTED_OPTION_NOTICE =
   'The named option does not match the available source.';
+
+/** Separates a kept explanation from a definition the source does support. */
+export const ADDITIONAL_EXPLANATION_NOTICE =
+  'The additional explanation goes beyond a direct statement of the available source.';
 
 const CAUSAL_RE =
   /\b(because|therefore|thus|hence|caused by|causes|leads to|results in|due to)\b/i;
@@ -173,11 +201,23 @@ const FOREIGN_FUNCTION = new Set([
   'den', 'dem', 'los', 'las', 'una', 'por', 'con', 'del', 'che', 'non', 'sono',
 ]);
 
+/** Periods inside these abbreviations are not sentence boundaries. */
+const ABBREVIATION_PERIOD = /\b(i\.e|e\.g|etc|vs|cf|viz)\./gi;
+const ABBREVIATION_PERIOD_MARK = '\uE000';
+
+function protectAbbreviations(text: string): string {
+  return text.replace(ABBREVIATION_PERIOD, `$1${ABBREVIATION_PERIOD_MARK}`);
+}
+
+function restoreAbbreviations(text: string): string {
+  return text.split(ABBREVIATION_PERIOD_MARK).join('.');
+}
+
 export function splitClaims(text: string): string[] {
-  const rough = text.split(/(?<=[.!?])\s+|\n+/);
+  const rough = protectAbbreviations(text).split(/(?<=[.!?])\s+|\n+/);
   const claims: string[] = [];
   for (const part of rough) {
-    const trimmed = part.trim();
+    const trimmed = restoreAbbreviations(part.trim());
     if (!trimmed) continue;
     if (/^(?:\[\s*(?:\d+|pdf selection)\s*\]\s*)+$/i.test(trimmed) && claims.length > 0) {
       claims[claims.length - 1] += ` ${trimmed}`;
@@ -189,7 +229,7 @@ export function splitClaims(text: string): string[] {
 }
 
 function contentStems(text: string): Set<string> {
-  const normalized = textForSupportMeasurement(text)
+  const normalized = unwrapInlineTex(textForSupportMeasurement(text))
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .toLowerCase();
@@ -432,17 +472,353 @@ export function enforceServerCitationIntegrity(input: {
   return cleanupCitationGaps(result);
 }
 
+type RelationOp = 'difference' | 'sum' | 'less_than' | 'greater_than';
+
+type MathRelation = {
+  op: RelationOp;
+  left: string;
+  right: string;
+  leftHarmful: string[];
+  rightHarmful: string[];
+  strippedHarmless: boolean;
+  negated: boolean;
+};
+
+const RELATION_BOUNDARY = new Set([
+  'is', 'are', 'was', 'were', 'equals', 'equal', 'be', 'means', 'defined', 'as',
+  'not', 'never', 'no', 'bound', 'diff', 'sum',
+]);
+
+function relationSentences(text: string): string[] {
+  return protectAbbreviations(text)
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((sentence) => restoreAbbreviations(sentence.trim()))
+    .filter((sentence) => sentence.length > 0);
+}
+
+/**
+ * A spaced en dash is subtraction only when it is the single dash in the
+ * claim and both sides are words, not a number range or a clause aside.
+ * Paired dashes and unspaced compounds stay punctuation.
+ */
+const EN_DASH_ASIDE = new Set([
+  'which', 'who', 'whom', 'where', 'when', 'while', 'although', 'however',
+  'because', 'if', 'that', 'this', 'these', 'those', 'see', 'including',
+  'unlike', 'rather', 'instead', 'namely', 'below', 'above',
+]);
+
+function applyClearSubtractionEnDash(text: string): string {
+  const spaced = [...text.matchAll(/(?<=[\p{L}\p{N}])[ \t]+\u2013[ \t]+(?=[\p{L}\p{N}])/gu)];
+  if (spaced.length !== 1) return text;
+  const match = spaced[0]!;
+  const at = match.index ?? 0;
+  const leftToken = text.slice(0, at).match(/[\p{L}\p{N}]+$/u)?.[0]?.toLowerCase() ?? '';
+  const rightToken = text.slice(at + match[0].length).match(/^[\p{L}\p{N}]+/u)?.[0]?.toLowerCase() ?? '';
+  if (!leftToken || !rightToken) return text;
+  if (/^\d+$/.test(leftToken) || /^\d+$/.test(rightToken)) return text;
+  if (EN_DASH_ASIDE.has(leftToken) || EN_DASH_ASIDE.has(rightToken)) return text;
+  return `${text.slice(0, at)} diff ${text.slice(at + match[0].length)}`;
+}
+
+/** Formatting around an expression. The words and the minus sign stay. */
+function unwrapInlineTex(text: string): string {
+  return text
+    .replace(/\\text\{([^{}]*)\}/gi, '$1')
+    .replace(/\\(?:mathrm|mathbf|mathit|operatorname)\{([^{}]*)\}/gi, '$1')
+    .replace(/\\\[|\\\]|\\\(|\\\)/g, ' ');
+}
+
+function prepareRelationText(text: string): string {
+  return applyClearSubtractionEnDash(unwrapInlineTex(text))
+    .replace(/\bdifference between\s+([^.;]{1,80}?)\s+and\s+([^.;]{1,80})/gi, '$1 diff $2')
+    .replace(/\u2212/g, ' diff ')
+    .replace(/(\p{L}|\p{N})\s+-\s+(\p{L}|\p{N})/gu, '$1 diff $2')
+    .replace(/\bminus\b/gi, ' diff ')
+    .replace(/\bless than\b/gi, ' lt ')
+    .replace(/\bgreater than\b/gi, ' gt ')
+    .replace(/</g, ' lt ')
+    .replace(/>/g, ' gt ')
+    .replace(/\bless\b/gi, ' diff ')
+    .replace(/\bplus\b/gi, ' sum ')
+    .replace(/\+/g, ' sum ')
+    .replace(/=/g, ' bound ')
+    .replace(/[,:;]/g, ' bound ');
+}
+
+function hasUnparsedOperator(text: string): boolean {
+  const unwrapped = unwrapInlineTex(text);
+  if (applyClearSubtractionEnDash(unwrapped) !== unwrapped) return true;
+  if (/[\u2212+]/.test(unwrapped)) return true;
+  if (/(?:\p{L}|\p{N})\s+-\s+(?:\p{L}|\p{N})/u.test(unwrapped)) return true;
+  if (/\bminus\b/i.test(unwrapped)) return true;
+  if (/\bplus\b/i.test(unwrapped)) return true;
+  if (/\bless\b(?!\s+than\b)/i.test(unwrapped)) return true;
+  return false;
+}
+
+function normalizeOperand(text: string): string {
+  const cleaned = text
+    .toLowerCase()
+    .replace(/\b(the|a|an|its|their)\b/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.replace(/^[a-d]\s+(?=\p{L})/u, '');
+}
+
+/** Words that restate the same measured quantity. Anything else is not assumed harmless. */
+const HARMLESS_OPERAND_MODIFIERS = new Set(['measured', 'observed']);
+
+/**
+ * Modifiers that change quantity, sign, timing, or scope. An unrecognized
+ * extra word is not in this set and is not treated as a contradiction.
+ */
+const HARMFUL_OPERAND_MODIFIERS = new Set([
+  'twice', 'double', 'doubled', 'triple', 'tripled', 'half', 'percent', 'percentage',
+  'negative', 'positive',
+  'previous', 'prior', 'last', 'next', 'future', 'past', 'current', 'today',
+  'yesterday', 'tomorrow', 'annual', 'quarterly', 'monthly', 'lagged', 'expected',
+  'nominal', 'potential', 'capita', 'domestic', 'national', 'local', 'regional', 'gross', 'net',
+]);
+
+function analyzeOperand(text: string): { core: string; harmful: string[]; strippedHarmless: boolean } {
+  const tokens = normalizeOperand(text).split(' ').filter((token) => token.length > 0);
+  const harmful = tokens.filter((token) => HARMFUL_OPERAND_MODIFIERS.has(token) || /^\d+$/.test(token));
+  const core = tokens.filter(
+    (token) => !HARMLESS_OPERAND_MODIFIERS.has(token) && !HARMFUL_OPERAND_MODIFIERS.has(token) && !/^\d+$/.test(token),
+  );
+  return {
+    core: core.join(' '),
+    harmful,
+    strippedHarmless: tokens.some((token) => HARMLESS_OPERAND_MODIFIERS.has(token)),
+  };
+}
+
+function isChoiceLine(sentence: string): boolean {
+  return /^\s*(?:\([a-d]\)|[a-d][.)])\s+\S/i.test(sentence);
+}
+
+/** Solution prose. A listed choice is not, by itself, the worked answer. */
+function solutionProse(corpus: string): string {
+  return relationSentences(corpus)
+    .filter((sentence) => !isChoiceLine(sentence))
+    .join('\n');
+}
+
+function extractRelations(text: string): MathRelation[] {
+  // A citation marker is not an operand. [1] must not become a harmful digit.
+  const tokens = prepareRelationText(stripMarkers(text))
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0);
+  const relations: MathRelation[] = [];
+  tokens.forEach((token, index) => {
+    if (token !== 'diff' && token !== 'sum' && token !== 'lt' && token !== 'gt') return;
+    const op: RelationOp =
+      token === 'diff' ? 'difference' : token === 'sum' ? 'sum' : token === 'lt' ? 'less_than' : 'greater_than';
+    const left: string[] = [];
+    for (let cursor = index - 1; cursor >= 0 && left.length < 6; cursor -= 1) {
+      const word = tokens[cursor]!;
+      if (RELATION_BOUNDARY.has(word)) break;
+      left.unshift(word);
+      if (/^\d+$/.test(word)) break;
+    }
+    const right: string[] = [];
+    for (let cursor = index + 1; cursor < tokens.length && right.length < 6; cursor += 1) {
+      const word = tokens[cursor]!;
+      if (RELATION_BOUNDARY.has(word)) break;
+      right.push(word);
+      if (/^\d+$/.test(word)) break;
+    }
+    const leftShape = analyzeOperand(left.join(' '));
+    const rightShape = analyzeOperand(right.join(' '));
+    if (!leftShape.core || !rightShape.core) return;
+    const before = tokens.slice(Math.max(0, index - 5), index);
+    relations.push({
+      op,
+      left: leftShape.core,
+      right: rightShape.core,
+      leftHarmful: leftShape.harmful,
+      rightHarmful: rightShape.harmful,
+      strippedHarmless: leftShape.strippedHarmless || rightShape.strippedHarmless,
+      negated: before.some((word) => word === 'not' || word === 'never' || word === 'no'),
+    });
+  });
+  return relations;
+}
+
+function sameTokens(left: string[], right: string[]): boolean {
+  return left.join(' ') === right.join(' ');
+}
+
+function coresAlign(left: string, right: string): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.endsWith(` ${right}`) || right.endsWith(` ${left}`);
+}
+
+/**
+ * The operands line up, but one side adds a harmful subject such as nominal.
+ * An ordinary extra word stays unrelated.
+ */
+function alignedHarmfulConflict(claim: MathRelation, source: MathRelation): boolean {
+  if (claim.negated !== source.negated) return false;
+  if (!coresAlign(claim.left, source.left) || !coresAlign(claim.right, source.right)) return false;
+  return !sameTokens(claim.leftHarmful, source.leftHarmful) || !sameTokens(claim.rightHarmful, source.rightHarmful);
+}
+
+function orderSensitive(op: RelationOp): boolean {
+  return op !== 'sum';
+}
+
+/**
+ * Equivalent when the operation and cores match, including a harmless modifier.
+ * A harmful modifier, reversed order, different operation, or negation is a
+ * contradiction. Cores that are not the same relation are unrelated.
+ */
+function compareRelations(
+  claim: MathRelation,
+  source: MathRelation,
+): 'equivalent' | 'contradiction' | 'unrelated' {
+  const sameOrder = claim.left === source.left && claim.right === source.right;
+  const swapped = claim.left === source.right && claim.right === source.left;
+  if (!sameOrder && !swapped) {
+    if (alignedHarmfulConflict(claim, source)) return 'contradiction';
+    return 'unrelated';
+  }
+  const harmfulOk = sameOrder
+    ? sameTokens(claim.leftHarmful, source.leftHarmful) && sameTokens(claim.rightHarmful, source.rightHarmful)
+    : sameTokens(claim.leftHarmful, source.rightHarmful) && sameTokens(claim.rightHarmful, source.leftHarmful);
+  if (claim.op !== source.op || claim.negated !== source.negated) return 'contradiction';
+  if (!harmfulOk) return 'contradiction';
+  if (orderSensitive(claim.op) && swapped) return 'contradiction';
+  return 'equivalent';
+}
+
+function relationDecision(
+  claim: MathRelation,
+  sources: MathRelation[],
+): 'equivalent' | 'contradiction' | 'unmatched' {
+  let contradicted = false;
+  for (const source of sources) {
+    const compared = compareRelations(claim, source);
+    if (compared === 'equivalent') return 'equivalent';
+    if (compared === 'contradiction') contradicted = true;
+  }
+  return contradicted ? 'contradiction' : 'unmatched';
+}
+
+function supportedOnlyByChoice(claim: string, corpus: string): boolean {
+  const claimRelations = extractRelations(claim);
+  if (claimRelations.length === 0) return false;
+  const proseRelations = relationSentences(solutionProse(corpus)).flatMap((sentence) => extractRelations(sentence));
+  if (claimRelations.every((relation) => proseRelations.some((source) => compareRelations(relation, source) === 'equivalent'))) {
+    return false;
+  }
+  const choiceRelations = relationSentences(corpus)
+    .filter((sentence) => isChoiceLine(sentence))
+    .flatMap((sentence) => extractRelations(sentence));
+  return claimRelations.every((relation) =>
+    choiceRelations.some((source) => compareRelations(relation, source) === 'equivalent'),
+  );
+}
+
+function quotesOperatorPhrase(claim: string, source: string): boolean {
+  const claimNorm = normalizeForMatch(claim);
+  const sourceNorm = normalizeForMatch(source);
+  const operator =
+    /(?:\u2212|\bminus\b|\bplus\b|\bless\b(?!\s+than\b)|(?<=[\p{L}\p{N}])\s+-\s+(?=[\p{L}\p{N}]))/giu;
+  for (const match of sourceNorm.matchAll(operator)) {
+    const at = match.index ?? 0;
+    let start = at;
+    let end = at + match[0].length;
+    while (end - start < 24 && (start > 0 || end < sourceNorm.length)) {
+      if (start > 0) start -= 1;
+      if (end < sourceNorm.length && end - start < 24) end += 1;
+    }
+    const phrase = sourceNorm.slice(start, end);
+    if (phrase.length >= 24 && claimNorm.includes(phrase)) return true;
+  }
+  return false;
+}
+
+/**
+ * Verbatim only when the source's own operator wording is quoted.
+ * Equivalent when the operation and operand order match, including a
+ * harmless modifier such as "measured". A shared opening cannot save a
+ * different operator, order, negation, or harmful modifier. A choice is
+ * not solution evidence. An unrecognized operand change is unmatched,
+ * which is uncertain rather than a contradiction.
+ */
+export function mathRelationSupport(
+  claim: string,
+  corpus: string,
+): 'verbatim' | 'equivalent' | 'contradiction' | 'unmatched' | 'unparsed' | 'none' {
+  const claimRelations = extractRelations(claim);
+  if (claimRelations.length === 0) {
+    return hasUnparsedOperator(claim) ? 'unparsed' : 'none';
+  }
+  const prose = solutionProse(corpus);
+  const sentences = relationSentences(prose);
+  const anchored = sentences.filter((sentence) => answerQuotesSource(claim, sentence));
+  const anchoredRelations = anchored.flatMap((sentence) => extractRelations(sentence));
+  const sourceRelations = sentences.flatMap((sentence) => extractRelations(sentence));
+  const pool = anchoredRelations.length > 0 ? anchoredRelations : sourceRelations;
+  const decisions = claimRelations.map((relation) => relationDecision(relation, pool));
+  if (decisions.some((decision) => decision === 'contradiction')) return 'contradiction';
+  if (decisions.every((decision) => decision === 'equivalent')) {
+    const stripped = claimRelations.some((relation) => relation.strippedHarmless);
+    if (!stripped && quotesOperatorPhrase(claim, prose)) return 'verbatim';
+    return 'equivalent';
+  }
+  return 'unmatched';
+}
+
+function signedQuantities(text: string): Array<{ sign: '+' | '-'; bare: string }> {
+  const normalized = text.toLowerCase().replace(/\u2212/g, '-').replace(/\bnegative\b/g, '-');
+  const found: Array<{ sign: '+' | '-'; bare: string }> = [];
+  for (const match of normalized.matchAll(/(?:^|[^\p{L}\p{N}])(-)?\s*(\d+(?:\.\d+)?\p{L}*)/gu)) {
+    const bare = match[2];
+    if (!bare) continue;
+    found.push({ sign: match[1] ? '-' : '+', bare });
+  }
+  return found;
+}
+
+/** A quoted expression whose sign differs from the source sentence. */
+function statedSignDisagrees(claim: string, corpus: string): boolean {
+  const sentences = relationSentences(solutionProse(corpus));
+  return sentences.some((sentence) => {
+    if (!answerQuotesSource(claim, sentence)) return false;
+    const sourceSigns = new Map<string, Set<'+' | '-'>>();
+    for (const item of signedQuantities(sentence)) {
+      const signs = sourceSigns.get(item.bare) ?? new Set<'+' | '-'>();
+      signs.add(item.sign);
+      sourceSigns.set(item.bare, signs);
+    }
+    return signedQuantities(claim).some((item) => {
+      const signs = sourceSigns.get(item.bare);
+      return Boolean(signs && !signs.has(item.sign));
+    });
+  });
+}
+
 function hasSupportedQuotation(answer: string, source: string, question: string): boolean {
-  // No sentence can quote a source phrase that the complete answer lacks.
-  if (!answerQuotesSource(answer, source)) return false;
+  const prose = solutionProse(source);
+  if (!prose || !answerQuotesSource(answer, prose) || statedSignDisagrees(answer, source)) return false;
   const parts = splitClaims(answer);
   const pieces = parts.length > 0 ? parts : [answer];
-  return pieces.some(
-    (part) =>
-      answerQuotesSource(part, source) &&
+  // Judge each sentence on its own so the next sentence cannot extend an operand.
+  if (pieces.some((part) => mathRelationSupport(part, source) === 'contradiction')) return false;
+  return pieces.some((part) => {
+    const support = mathRelationSupport(part, source);
+    return (
+      answerQuotesSource(part, prose) &&
+      (support === 'verbatim' || support === 'none') &&
       !hasPolarityConflict(part, source) &&
-      !hasNumericOrMagnitudeConflict(part, source, question),
-  );
+      !hasNumericOrMagnitudeConflict(part, source, question)
+    );
+  });
 }
 
 /** Same flags evaluateGroundingProvenance reports, without scanning quotations. */
@@ -528,11 +904,11 @@ type AcademicClaimSegment = {
  * the course-fact check without discarding the whitespace between them.
  */
 function academicClaimSegments(text: string): AcademicClaimSegment[] {
-  const parts = text.split(/((?<=[.!?])\s+|\n+)/);
+  const parts = protectAbbreviations(text).split(/((?<=[.!?])\s+|\n+)/);
   const segs: AcademicClaimSegment[] = [];
   for (let i = 0; i < parts.length; i += 2) {
-    const body = parts[i] ?? '';
-    const trailing = parts[i + 1] ?? '';
+    const body = restoreAbbreviations(parts[i] ?? '');
+    const trailing = restoreAbbreviations(parts[i + 1] ?? '');
     const trimmed = body.trim();
     if (!trimmed) {
       if (segs.length > 0) {
@@ -665,6 +1041,7 @@ function isSymbolicNotation(claim: string, corpus: string, question: string): bo
 const PRIOR_CHECKER_NOTICES = [
   REJECTED_PART_NOTICE,
   CONTRADICTED_OPTION_NOTICE,
+  ADDITIONAL_EXPLANATION_NOTICE,
   SOURCE_ONLY_INTERPRETATION_NOTICE,
   'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
 ];
@@ -699,7 +1076,7 @@ function normalizedClaim(claim: string): string {
  */
 function isEchoedCheckerNotice(claim: string): boolean {
   const normalized = normalizedClaim(claim);
-  return [REJECTED_PART_NOTICE, CONTRADICTED_OPTION_NOTICE].some(
+  return [REJECTED_PART_NOTICE, CONTRADICTED_OPTION_NOTICE, ADDITIONAL_EXPLANATION_NOTICE].some(
     (notice) => notice.replace(/[.!?]+$/g, '').trim().toLowerCase() === normalized,
   );
 }
@@ -759,6 +1136,126 @@ function claimIsRejected(
   return false;
 }
 
+type SourceClaimDecision = {
+  text: string | null;
+  quoted: boolean;
+  equivalent: boolean;
+  interpretive: boolean;
+  rejected: boolean;
+  relation: GroundingRelationClass;
+  code: GroundingDecisionCode;
+};
+
+function rejectionCode(
+  claim: string,
+  corpus: string,
+  question: string,
+): GroundingDecisionCode {
+  if (isUnsupportedCourseFact(claim, corpus)) return 'course_fact';
+  if (hasPolarityConflict(claim, corpus)) return 'polarity_conflict';
+  if (hasNumericOrMagnitudeConflict(claim, corpus, question)) return 'numeric_conflict';
+  return 'zero_overlap';
+}
+
+const SOURCE_KEY_PATTERNS = [
+  /\bthe\s+correct\s+answer\s+is\s+\(?([a-d])\)?/i,
+  /\bthe\s+answer\s+is\s+\(?([a-d])\)?/i,
+  /\boption\s+\(?([a-d])\)?\s+is\s+correct\b/i,
+];
+
+function lettersInSolutionProse(text: string): string[] {
+  const found = new Set<string>();
+  for (const sentence of relationSentences(solutionProse(text))) {
+    for (const pattern of SOURCE_KEY_PATTERNS) {
+      const letter = sentence.match(pattern)?.[1]?.toLowerCase();
+      if (letter) found.add(letter);
+    }
+  }
+  return [...found];
+}
+
+/** One letter per question region. A choice line cannot name the key. */
+function keyedOptionBodies(corpus: string): string[] {
+  const bodies: string[] = [];
+  for (const region of questionRegions(corpus)) {
+    const letters = lettersInSolutionProse(region);
+    if (letters.length !== 1) continue;
+    const letter = letters[0]!;
+    for (const option of parseOptions(region)) {
+      if (option.letter === letter && option.body) bodies.push(option.body);
+    }
+  }
+  return bodies;
+}
+
+function uniqueSourceKeyLetters(corpus: string): string[] {
+  const found = new Set<string>();
+  for (const region of questionRegions(corpus)) {
+    const letters = lettersInSolutionProse(region);
+    if (letters.length === 1) found.add(letters[0]!);
+  }
+  return [...found];
+}
+
+function keyedRelationSupport(claim: string, corpus: string): 'equivalent' | 'contradiction' | 'none' {
+  const bodies = keyedOptionBodies(corpus);
+  if (bodies.length === 0) return 'none';
+  let equivalent = false;
+  let contradiction = false;
+  for (const body of bodies) {
+    const support = mathRelationSupport(claim, body);
+    if (support === 'verbatim' || support === 'equivalent') equivalent = true;
+    else if (support === 'contradiction') contradiction = true;
+  }
+  if (equivalent && contradiction) return 'none';
+  if (equivalent) return 'equivalent';
+  if (contradiction) return 'contradiction';
+  return 'none';
+}
+
+function isBareOptionRepeat(claim: string, question: string, corpus: string): boolean {
+  if (!supportedOnlyByChoice(claim, corpus)) return false;
+  const choiceText = relationSentences(corpus)
+    .filter((sentence) => isChoiceLine(sentence))
+    .join('\n');
+  const covered = new Set([...contentStems(question), ...contentStems(choiceText)]);
+  return [...contentStems(claim)].every((stem) => covered.has(stem));
+}
+
+function optionRepeatClaim(claim: string, relation: GroundingRelationClass): SourceClaimDecision {
+  return {
+    text: stripMarkers(claim),
+    quoted: false,
+    equivalent: false,
+    interpretive: false,
+    rejected: false,
+    relation,
+    code: 'option_repeat',
+  };
+}
+
+function derivedClaim(claim: string, relation: GroundingRelationClass): SourceClaimDecision {
+  return {
+    text: stripMarkers(claim),
+    quoted: false,
+    equivalent: false,
+    interpretive: false,
+    rejected: false,
+    relation,
+    code: 'derived_unverified',
+  };
+}
+
+function judgeLabeledOption(
+  letter: string,
+  substantive: string,
+  corpus: string,
+): 'verified' | 'contradicted' | 'unverified' {
+  const keys = uniqueSourceKeyLetters(corpus);
+  if (keys.length === 1) return keys[0] === letter ? 'verified' : 'contradicted';
+  return judgeOptionLabel(letter, substantive, corpus);
+}
+
 function acceptSourceOnlyClaim(
   claim: string,
   input: {
@@ -767,27 +1264,120 @@ function acceptSourceOnlyClaim(
     captureText: string;
     corpus: string;
   },
-): { text: string | null; quoted: boolean; interpretive: boolean; rejected: boolean } {
-  if (!claim.trim()) return { text: null, quoted: false, interpretive: false, rejected: false };
+): SourceClaimDecision {
+  if (!claim.trim()) {
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: false,
+      relation: 'none',
+      code: 'empty',
+    };
+  }
   if (isSelfLimitation(claim)) {
-    return { text: stripMarkers(claim), quoted: false, interpretive: true, rejected: false };
+    return {
+      text: stripMarkers(claim),
+      quoted: false,
+      equivalent: false,
+      interpretive: true,
+      rejected: false,
+      relation: 'not_applicable',
+      code: 'self_limitation',
+    };
+  }
+
+  const polar = judgePolarAnswer(claim, input.question, input.corpus);
+  if (polar === 'supported') {
+    return {
+      text: stripMarkers(claim),
+      quoted: false,
+      equivalent: true,
+      interpretive: false,
+      rejected: false,
+      relation: 'none',
+      code: 'equivalent',
+    };
+  }
+  if (polar === 'contradicted') {
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: true,
+      relation: 'none',
+      code: 'polarity_conflict',
+    };
+  }
+
+  const relation = mathRelationSupport(claim, input.corpus);
+  const keyed = keyedRelationSupport(claim, input.corpus);
+  // A contradicted relation rejects the whole sentence. A shared opening
+  // must not survive as a quotation after the operator has been cut off.
+  // A listed option is not source evidence. A prose answer key can be.
+  if (relation === 'contradiction' || keyed === 'contradiction' || statedSignDisagrees(claim, input.corpus)) {
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: true,
+      relation: 'contradiction',
+      code: 'relation_contradiction',
+    };
   }
 
   const causal = splitUnsupportedCause(claim, input.corpus);
   if (causal) {
     const main = causal.main
       ? acceptSourceOnlyClaim(causal.main, input)
-      : { text: null, quoted: false, interpretive: false, rejected: false };
+      : {
+          text: null,
+          quoted: false,
+          equivalent: false,
+          interpretive: false,
+          rejected: false,
+          relation: 'none' as const,
+          code: 'empty' as const,
+        };
     return {
       text: main.text,
       quoted: main.quoted,
+      equivalent: main.equivalent,
       interpretive: main.interpretive,
       rejected: true,
+      relation,
+      code: 'causal_split',
     };
   }
 
-  if (isUnsupportedCourseFact(claim, input.corpus) || hasPolarityConflict(claim, input.corpus) || hasNumericOrMagnitudeConflict(claim, input.corpus, input.question)) {
-    return { text: null, quoted: false, interpretive: false, rejected: true };
+  if (
+    isUnsupportedCourseFact(claim, input.corpus) ||
+    hasPolarityConflict(claim, input.corpus) ||
+    hasNumericOrMagnitudeConflict(claim, input.corpus, input.question)
+  ) {
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: true,
+      relation,
+      code: rejectionCode(claim, input.corpus, input.question),
+    };
+  }
+  if (keyed === 'equivalent') {
+    return {
+      text: stripMarkers(claim),
+      quoted: false,
+      equivalent: true,
+      interpretive: false,
+      rejected: false,
+      relation: 'equivalent',
+      code: 'equivalent',
+    };
   }
 
   const quoted = enforceServerCitationIntegrity({
@@ -800,15 +1390,57 @@ function acceptSourceOnlyClaim(
     input.chunks.some((chunk) => hasSupportedQuotation(claim, chunk.text, input.question)) ||
     (input.captureText.length > 0 && hasSupportedQuotation(claim, input.captureText, input.question));
   if (supported) {
-    return { text: quoted, quoted: true, interpretive: false, rejected: false };
+    return {
+      text: quoted,
+      quoted: true,
+      equivalent: false,
+      interpretive: false,
+      rejected: false,
+      relation,
+      code: 'quoted',
+    };
+  }
+  if (relation === 'equivalent') {
+    return {
+      text: stripMarkers(claim),
+      quoted: false,
+      equivalent: true,
+      interpretive: false,
+      rejected: false,
+      relation,
+      code: 'equivalent',
+    };
+  }
+  if (relation === 'unmatched' && supportedOnlyByChoice(claim, input.corpus)) {
+    return isBareOptionRepeat(claim, input.question, input.corpus)
+      ? optionRepeatClaim(claim, relation)
+      : derivedClaim(claim, relation);
+  }
+  if (isPolarFragment(claim)) {
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: true,
+      relation,
+      code: 'zero_overlap',
+    };
   }
   if (claimIsRejected(claim, input.corpus, input.question)) {
-    return { text: null, quoted: false, interpretive: false, rejected: true };
+    const code = rejectionCode(claim, input.corpus, input.question);
+    if (code === 'zero_overlap' && stemOverlapCount(claim, input.question) > 0) return derivedClaim(claim, relation);
+    return {
+      text: null,
+      quoted: false,
+      equivalent: false,
+      interpretive: false,
+      rejected: true,
+      relation,
+      code,
+    };
   }
-  if (isFaithfulParaphrase(claim, input.corpus)) {
-    return { text: stripMarkers(claim), quoted: false, interpretive: false, rejected: false };
-  }
-  return { text: stripMarkers(claim), quoted: false, interpretive: true, rejected: false };
+  return derivedClaim(claim, relation);
 }
 
 const ANSWER_LABEL_PATTERNS = [
@@ -941,18 +1573,396 @@ function judgeOptionLabel(
  * Ordinary questions keep their text, with unsupported course-logistics
  * sentences removed and citations limited to supported quotations.
  */
+/**
+ * A fragment with no proposition of its own. Yes and No are not in this set:
+ * they can affirm or deny the question.
+ */
+const HARMLESS_STANDALONE_FRAGMENTS = new Set([
+  'ie',
+  'eg',
+  'etc',
+  'cf',
+  'viz',
+  'vs',
+  'for example',
+  'for instance',
+  'as follows',
+  'see below',
+  'see above',
+  'note',
+  'namely',
+  'nb',
+]);
+
+function isPolarFragment(claim: string): boolean {
+  return /^(?:yes|no|true|false)\.?$/i.test(claim.trim());
+}
+
+function isHarmlessFragment(claim: string): boolean {
+  if (isPolarFragment(claim)) return false;
+  if (!/[\p{L}\p{N}]/u.test(claim)) return true;
+  const key = claim
+    .trim()
+    .replace(/[.!?]+$/g, '')
+    .replace(/\./g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return HARMLESS_STANDALONE_FRAGMENTS.has(key);
+}
+
+function propositionFromQuestion(question: string): string | null {
+  const match = question
+    .trim()
+    .replace(/[?\s]+$/g, '')
+    .match(
+      /^(?:according to\s+(?:the\s+)?(?:pdf|notes|source|text|material|materials|selection),?\s+)?(?:is|are|was|were)\s+(.+)$/i,
+    );
+  const proposition = match?.[1]?.trim();
+  return proposition ? proposition : null;
+}
+
+/**
+ * Yes or No is source-supported only when the question asks a proposition
+ * whose relation is equivalent, verbatim, or contradicted. Anything less
+ * stays on the ordinary rejection path.
+ */
+function judgePolarAnswer(
+  claim: string,
+  question: string,
+  corpus: string,
+): 'supported' | 'contradicted' | 'uncertain' | null {
+  if (!isPolarFragment(claim)) return null;
+  const proposition = propositionFromQuestion(question);
+  if (!proposition) return 'uncertain';
+  const support = mathRelationSupport(proposition, corpus);
+  const affirms = /^(?:yes|true)\.?$/i.test(claim.trim());
+  if (support === 'equivalent' || support === 'verbatim') return affirms ? 'supported' : 'contradicted';
+  if (support === 'contradiction') return affirms ? 'contradicted' : 'supported';
+  if (support === 'none' && answerQuotesSource(proposition, solutionProse(corpus))) {
+    return affirms ? 'supported' : 'contradicted';
+  }
+  return 'uncertain';
+}
+
+function skippedClaimCode(
+  claim: string,
+  corpus: string,
+  question: string,
+): GroundingDecisionCode | 'skipped_label' | null {
+  if (claimLabelLetter(claim)) return 'skipped_label';
+  if (isEchoedCheckerNotice(claim)) return 'skipped_echo';
+  if (isHarmlessRetrievalNarration(claim)) return 'skipped_narration';
+  if (isHarmlessFragment(claim)) return 'skipped_fragment';
+  if (isSymbolicNotation(claim, corpus, question)) return 'skipped_symbol';
+  return null;
+}
+
+/**
+ * Headings, labels, and connectives have no proposition of their own.
+ * A later academic sentence still does.
+ */
+function isOrdinaryNonSubstantive(claim: string): boolean {
+  const trimmed = claim.trim();
+  if (!trimmed) return true;
+  const withoutMarkers = trimmed.replace(/\[\s*(?:\d+|pdf selection)\s*\]/gi, ' ').trim();
+  if (!withoutMarkers) return true;
+  if (
+    isEchoedCheckerNotice(withoutMarkers) ||
+    isHarmlessFragment(withoutMarkers) ||
+    isHarmlessRetrievalNarration(withoutMarkers) ||
+    isStandaloneRetrievalStatusSentence(withoutMarkers) ||
+    claimLabelLetter(withoutMarkers)
+  ) {
+    return true;
+  }
+  if (/^#{1,6}\s+\S/.test(withoutMarkers)) return true;
+  if (/^\*\*[^*]{1,160}\*\*$/.test(withoutMarkers)) return true;
+  if (contentStems(withoutMarkers).size === 0) return true;
+  const connective = withoutMarkers.replace(/[.!?:]+$/g, '').trim();
+  if (
+    connective.length <= 48 &&
+    contentStems(connective).size <= 2 &&
+    /^(?:in other words|that is|for example|for instance|as follows|see below|see above|next|here|in short|in summary|to summarize|put differently|namely|note)\b/i.test(
+      connective,
+    )
+  ) {
+    return true;
+  }
+  return /:\s*$/.test(withoutMarkers) && withoutMarkers.length <= 80 && contentStems(withoutMarkers).size <= 4;
+}
+
+/**
+ * Evidence decision for one substantive claim. Strong public tiers may use
+ * only supported and equivalent. Uncertain withholds the badge.
+ */
+export type ClaimEvidenceKind =
+  | 'supported'
+  | 'equivalent'
+  | 'choice_only'
+  | 'contradicted'
+  | 'unsupported'
+  | 'uncertain'
+  | 'not_substantive';
+
+const SIGN_OR_HARMLESS_STEMS = new Set(['negat', 'posit', 'measu', 'obser']);
+const FILLER_STEMS = new Set(['also', 'well', 'still', 'even', 'merel', 'simpl', 'indee']);
+
+function normalizedClaimBody(claim: string): string {
+  return normalizeForMatch(textForSupportMeasurement(claim)).replace(/[.!?]+$/g, '').trim();
+}
+
+/** Longest source wording that actually appears in the claim. A short prefix is not preferred over the whole sentence. */
+function longestContainedPhrase(claimNorm: string, sourceNorm: string): string {
+  if (!claimNorm || !sourceNorm) return '';
+  if (sourceNorm.length >= 8 && claimNorm.includes(sourceNorm)) return sourceNorm;
+  const words = sourceNorm.split(' ').filter((word) => word.length > 0);
+  let best = '';
+  for (let start = 0; start < words.length; start++) {
+    let phrase = '';
+    for (let end = start; end < words.length; end++) {
+      const next = phrase ? `${phrase} ${words[end]}` : words[end]!;
+      if (next.length > 160) break;
+      if (!claimNorm.includes(next)) break;
+      phrase = next;
+    }
+    if (phrase.length >= 24 && phrase.length > best.length && /\p{L}{4,}/u.test(phrase)) best = phrase;
+  }
+  return best;
+}
+
+/** Solution prose, plus an option body only when the source explicitly keys that letter. */
+function coverageSentences(evidence: string): string[] {
+  return [...relationSentences(solutionProse(evidence)), ...keyedOptionBodies(evidence)];
+}
+
+function quotationCoverage(
+  claim: string,
+  evidence: string,
+): { phrase: string; sentence: string } | null {
+  const claimNorm = normalizedClaimBody(claim);
+  let best: { phrase: string; sentence: string } | null = null;
+  for (const sentence of coverageSentences(evidence)) {
+    const sentenceNorm = normalizeForMatch(sentence).replace(/[.!?]+$/g, '').trim();
+    const phrase = longestContainedPhrase(claimNorm, sentenceNorm);
+    if (!phrase) continue;
+    if (!best || phrase.length > best.phrase.length) best = { phrase, sentence: sentenceNorm };
+  }
+  return best;
+}
+
+function residualAfterPhrase(claim: string, phrase: string): string {
+  return normalizedClaimBody(claim).replace(phrase, ' ').replace(/\s+/g, ' ').trim();
+}
+
+const FRAME_STEMS = new Set([
+  ...RETRIEVAL_NARRATION_STEMS,
+  ...OPTION_LABEL_STEMS,
+  'answe',
+  'state',
+  'says',
+  'show',
+  'accor',
+  'indic',
+  'menti',
+  'write',
+]);
+
+/**
+ * A sign word, a page label, or the question's own wording is not a second
+ * proposition. A new academic stem still is.
+ */
+function residualIsTrivial(residual: string, claim: string, evidence: string, question: string): boolean {
+  const stems = contentStems(residual);
+  if (stems.size === 0) return true;
+  const questionStems = contentStems(question);
+  for (const stem of stems) {
+    if (
+      SIGN_OR_HARMLESS_STEMS.has(stem) ||
+      FILLER_STEMS.has(stem) ||
+      FRAME_STEMS.has(stem) ||
+      questionStems.has(stem)
+    ) {
+      continue;
+    }
+    return false;
+  }
+  return !statedSignDisagrees(claim, evidence);
+}
+
+/**
+ * The uncovered wording still restates the matched sentence.
+ * One shared stem does not. A new stem majority does not.
+ */
+function residualRestatesSentence(residual: string, sentenceNorm: string): boolean {
+  const stems = contentStems(residual);
+  if (stems.size === 0) return true;
+  const sourceStems = contentStems(sentenceNorm);
+  let overlap = 0;
+  for (const stem of stems) {
+    if (sourceStems.has(stem)) overlap += 1;
+  }
+  const novel = stems.size - overlap;
+  return overlap >= 2 && novel <= 1 && novel * 2 <= overlap;
+}
+
+/**
+ * No verbatim span. Equivalent only when the claim restates one source
+ * sentence and does not mostly add new stems. Question wording is not evidence.
+ */
+function paraphraseKind(claim: string, evidence: string): 'equivalent' | 'uncertain' {
+  const prose = solutionProse(evidence);
+  const fragment = bestSourceFragment(claim, prose);
+  const stems = contentStems(claim);
+  if (stems.size === 0 || !prose) return 'uncertain';
+  const overlap = stemOverlapCount(claim, fragment);
+  const novel = stems.size - overlap;
+  if (overlap >= 3 && novel * 2 <= overlap) return 'equivalent';
+  return 'uncertain';
+}
+
+/**
+ * Shared claim-evidence decision. Ordinary, source-only, and selected-text
+ * answers all use this before a strong badge. The evidence string is retrieved
+ * prose, a keyed solution, or the selected PDF, not the question and not an
+ * unkeyed choice line.
+ */
+export function decideClaimEvidence(
+  claim: string,
+  evidence: string,
+  question: string,
+): ClaimEvidenceKind {
+  if (isOrdinaryNonSubstantive(claim)) return 'not_substantive';
+  if (
+    statedSignDisagrees(claim, evidence) ||
+    hasPolarityConflict(claim, evidence) ||
+    hasNumericOrMagnitudeConflict(claim, evidence, question)
+  ) {
+    return 'contradicted';
+  }
+  const relation = mathRelationSupport(claim, evidence);
+  const keyed = keyedRelationSupport(claim, evidence);
+  if (relation === 'contradiction' || keyed === 'contradiction') return 'contradicted';
+  if ((relation === 'unmatched' || relation === 'unparsed') && keyed !== 'equivalent') {
+    if (supportedOnlyByChoice(claim, evidence) && isBareOptionRepeat(claim, question, evidence)) {
+      return 'choice_only';
+    }
+    return 'uncertain';
+  }
+  const covered = quotationCoverage(claim, evidence);
+  if (covered) {
+    const residual = residualAfterPhrase(claim, covered.phrase);
+    const sameClaim =
+      residualIsTrivial(residual, claim, evidence, question) ||
+      residualRestatesSentence(residual, covered.sentence);
+    if (!sameClaim) return 'unsupported';
+    if (relation === 'equivalent' || keyed === 'equivalent') return 'equivalent';
+    if (relation === 'verbatim') return 'supported';
+    const sentenceCopied =
+      covered.phrase === covered.sentence || residualIsTrivial(residual, claim, evidence, question);
+    return sentenceCopied ? 'supported' : 'equivalent';
+  }
+  if (relation === 'verbatim') return 'supported';
+  if (relation === 'equivalent' || keyed === 'equivalent') return 'equivalent';
+  return paraphraseKind(claim, evidence);
+}
+
+function evidenceForStrongTier(
+  tier: KnowledgeTier,
+  chunkTexts: string[],
+  captureText: string,
+): string {
+  if (tier === 'pdf_selection') return captureText;
+  const chunks = chunkTexts.join('\n');
+  if (chunks.trim()) return chunks;
+  return captureText;
+}
+
+/** Strong tiers require every substantive claim to be supported or equivalent. Anything less is mixed. */
+function applyStrongAttributionGate(
+  text: string,
+  tier: KnowledgeTier,
+  evidence: string,
+  question: string,
+): { text: string; knowledgeTier: KnowledgeTier; downgraded: boolean } {
+  if (tier !== 'course_material' && tier !== 'pdf_selection') {
+    return { text, knowledgeTier: tier, downgraded: false };
+  }
+  for (const claim of splitClaims(text)) {
+    const decision = decideClaimEvidence(claim, evidence, question);
+    if (decision === 'supported' || decision === 'equivalent' || decision === 'not_substantive') continue;
+    const distinguished = text.includes(ADDITIONAL_EXPLANATION_NOTICE)
+      ? text
+      : cleanupCitationGaps(`${text}\n\n${ADDITIONAL_EXPLANATION_NOTICE}`);
+    return { text: distinguished, knowledgeTier: 'mixed', downgraded: true };
+  }
+  return { text, knowledgeTier: tier, downgraded: false };
+}
+
+/**
+ * An ordinary answer keeps its wording. A relation the solution prose does
+ * not establish still cannot make the whole answer course material.
+ * A listed choice is not that proof.
+ */
+function ordinaryUnestablishedRelation(
+  answer: string,
+  corpus: string,
+  question: string,
+): { optionRepeat: boolean; derived: boolean } | null {
+  let optionRepeat = false;
+  let derived = false;
+  for (const claim of splitClaims(answer)) {
+    if (extractRelations(claim).length === 0) continue;
+    const support = mathRelationSupport(claim, corpus);
+    if (support === 'verbatim' || support === 'equivalent') continue;
+    if (
+      support === 'unmatched' &&
+      supportedOnlyByChoice(claim, corpus) &&
+      isBareOptionRepeat(claim, question, corpus)
+    ) {
+      optionRepeat = true;
+    } else {
+      derived = true;
+    }
+  }
+  if (!optionRepeat && !derived) return null;
+  return { optionRepeat, derived };
+}
+
 export function applyClaimLevelGrounding(input: {
   question: string;
   answerText: string;
   chunks: { citationIndex: number; text: string }[];
   captureText?: string | null;
   contextAvailable: ContextAvailable;
+  diagnostics?: GroundingDecisionDiagnosticSink;
 }): { text: string; knowledgeTier: KnowledgeTier } {
   const captureText = input.captureText?.trim() ?? '';
   const chunkTexts = input.chunks.map((chunk) => chunk.text.trim()).filter((text) => text.length > 0);
   const corpus = [captureText, ...chunkTexts].filter((text) => text.length > 0).join('\n');
   const sourceOnly = isExplicitSourceOnlyQuestion(input.question);
   const answerText = omitRetrievalStatusSentences(input.answerText);
+  const finish = (
+    output: { text: string; knowledgeTier: KnowledgeTier },
+    notice: GroundingNoticeClass,
+    traces: Parameters<typeof emitGroundingDecisionDiagnostics>[1]['traces'] = [],
+    claimCount = traces.length,
+  ) => {
+    const gated = applyStrongAttributionGate(
+      output.text,
+      output.knowledgeTier,
+      evidenceForStrongTier(output.knowledgeTier, chunkTexts, captureText),
+      input.question,
+    );
+    const gatedNotice = gated.downgraded && notice === 'none' ? 'additional_explanation' : notice;
+    emitGroundingDecisionDiagnostics(input.diagnostics, {
+      claimCount,
+      knowledgeTier: gated.knowledgeTier,
+      notice: gatedNotice,
+      traces,
+    });
+    return { text: gated.text, knowledgeTier: gated.knowledgeTier };
+  };
 
   if (!sourceOnly) {
     const cited = enforceServerCitationIntegrity({
@@ -963,10 +1973,23 @@ export function applyClaimLevelGrounding(input: {
     });
     const text = dropUnsupportedCourseFacts(cited, corpus);
     if (!text) {
-      return {
-        text: sourceOnlyLimitationMessage(input.contextAvailable),
-        knowledgeTier: 'mixed',
-      };
+      return finish(
+        {
+          text: sourceOnlyLimitationMessage(input.contextAvailable),
+          knowledgeTier: 'mixed',
+        },
+        'source_limitation',
+      );
+    }
+    const unestablished = ordinaryUnestablishedRelation(text, corpus, input.question);
+    if (unestablished) {
+      const pieces = [text];
+      if (unestablished.optionRepeat) pieces.push(OPTION_REPEAT_NOTICE);
+      if (unestablished.derived) pieces.push(DERIVED_REASONING_NOTICE);
+      return finish(
+        { text: cleanupCitationGaps(pieces.join('\n\n')), knowledgeTier: 'mixed' },
+        'derived_unverified',
+      );
     }
     const tier = evaluateGroundingProvenance({
       question: input.question,
@@ -974,31 +1997,35 @@ export function applyClaimLevelGrounding(input: {
       indexedChunkTexts: chunkTexts,
       captureText,
     }).tier;
-    return { text, knowledgeTier: tier };
+    return finish({ text, knowledgeTier: tier }, 'none');
   }
 
   if (!corpus) {
-    return {
-      text: sourceOnlyLimitationMessage(input.contextAvailable),
-      knowledgeTier: 'mixed',
-    };
+    return finish(
+      {
+        text: sourceOnlyLimitationMessage(input.contextAvailable),
+        knowledgeTier: 'mixed',
+      },
+      'source_limitation',
+    );
   }
 
   let quotedKept = 0;
+  let equivalentKept = 0;
   let interpretiveKept = 0;
+  let derivedKept = 0;
+  let optionRepeats = 0;
   let academicRejections = 0;
   let contradictedLabels = 0;
   const claims = splitClaims(answerText);
   const academic: Array<ReturnType<typeof acceptSourceOnlyClaim> | null> = [];
+  const skipCodes: Array<GroundingDecisionCode | 'skipped_label' | null> = [];
   const substantive: string[] = [];
   for (const claim of claims) {
-    if (
-      claimLabelLetter(claim) ||
-      isEchoedCheckerNotice(claim) ||
-      isHarmlessRetrievalNarration(claim) ||
-      isSymbolicNotation(claim, corpus, input.question)
-    ) {
+    const skipped = skippedClaimCode(claim, corpus, input.question);
+    if (skipped) {
       academic.push(null);
+      skipCodes.push(skipped);
       continue;
     }
     const decision = acceptSourceOnlyClaim(claim, {
@@ -1008,52 +2035,131 @@ export function applyClaimLevelGrounding(input: {
       corpus,
     });
     academic.push(decision);
-    if (decision.text && !decision.interpretive && !decision.rejected) substantive.push(decision.text);
+    skipCodes.push(null);
+    if (decision.code === 'derived_unverified') derivedKept += 1;
+    if (decision.code === 'option_repeat') optionRepeats += 1;
+    if (
+      decision.text &&
+      !decision.interpretive &&
+      !decision.rejected &&
+      decision.code !== 'derived_unverified' &&
+      decision.code !== 'option_repeat'
+    ) {
+      substantive.push(decision.text);
+    }
     if (decision.quoted) quotedKept += 1;
+    if (decision.equivalent) equivalentKept += 1;
     if (decision.interpretive) interpretiveKept += 1;
     if (decision.rejected) academicRejections += 1;
   }
 
   const substantiveText = substantive.join('\n');
   const kept: string[] = [];
+  const traces: Parameters<typeof emitGroundingDecisionDiagnostics>[1]['traces'] = [];
   claims.forEach((claim, index) => {
     const letter = claimLabelLetter(claim);
     if (letter) {
-      const verdict = judgeOptionLabel(letter, substantiveText, corpus);
+      const verdict = judgeLabeledOption(letter, substantiveText, corpus);
       if (verdict === 'verified') kept.push(claim);
       else if (verdict === 'contradicted') contradictedLabels += 1;
+      traces.push({
+        claimIndex: index,
+        relation: 'not_applicable',
+        decision:
+          verdict === 'verified'
+            ? 'label_verified'
+            : verdict === 'contradicted'
+              ? 'label_contradicted'
+              : 'label_unverified',
+        disposition: verdict === 'verified' ? 'retained' : 'removed',
+      });
       return;
     }
     const decision = academic[index];
     if (decision?.text) kept.push(decision.text);
+    if (!decision) {
+      const skip = skipCodes[index];
+      traces.push({
+        claimIndex: index,
+        relation: 'not_applicable',
+        decision: skip && skip !== 'skipped_label' ? skip : 'skipped_echo',
+        disposition: 'removed',
+      });
+      return;
+    }
+    traces.push({
+      claimIndex: index,
+      relation: decision.relation,
+      decision: decision.code,
+      disposition: claimDisposition(claim, decision.text),
+    });
   });
 
   if (kept.length === 0) {
-    return {
-      text: sourceOnlyLimitationMessage(input.contextAvailable),
-      knowledgeTier: 'mixed',
-    };
+    return finish(
+      {
+        text: sourceOnlyLimitationMessage(input.contextAvailable),
+        knowledgeTier: 'mixed',
+      },
+      'source_limitation',
+      traces,
+      claims.length,
+    );
   }
 
   const pieces = [...kept];
   const alreadyLimited = kept.some((claim) => isSelfLimitation(claim));
+  const supportedKept = quotedKept + equivalentKept;
+  let notice: GroundingNoticeClass = 'none';
   if (!alreadyLimited && interpretiveKept > 0 && academicRejections > 0) {
+    notice = 'combined';
     pieces.push(
       'This explanation is not a direct statement of the available source, and the unsupported part cannot be established from that source.',
     );
+  } else if (!alreadyLimited && supportedKept > 0 && interpretiveKept > 0) {
+    notice = 'additional_explanation';
+    pieces.push(ADDITIONAL_EXPLANATION_NOTICE);
   } else if (!alreadyLimited && interpretiveKept > 0) {
+    notice = 'interpretation';
     pieces.push(SOURCE_ONLY_INTERPRETATION_NOTICE);
   } else if (!alreadyLimited && academicRejections > 0) {
+    notice = 'rejected_part';
     pieces.push(REJECTED_PART_NOTICE);
   }
   // A wrong letter is disclosed on its own. An academic rejection already
   // says the answer is not fully grounded, so the letter stays removed
   // without a second notice.
+  if (optionRepeats > 0) {
+    notice = 'derived_unverified';
+    pieces.push(OPTION_REPEAT_NOTICE);
+  }
+  if (derivedKept > 0) {
+    notice = 'derived_unverified';
+    pieces.push(DERIVED_REASONING_NOTICE);
+  }
   if (!alreadyLimited && contradictedLabels > 0 && academicRejections === 0) {
+    if (notice === 'additional_explanation') notice = 'additional_explanation_and_contradicted_option';
+    else if (notice === 'interpretation') notice = 'interpretation_and_contradicted_option';
+    else notice = 'contradicted_option';
     pieces.push(CONTRADICTED_OPTION_NOTICE);
   }
   const text = cleanupCitationGaps(pieces.join(' '));
 
+  if (academicRejections > 0 || contradictedLabels > 0 || derivedKept > 0 || optionRepeats > 0) {
+    return finish({ text, knowledgeTier: 'mixed' }, notice, traces, claims.length);
+  }
+  if (interpretiveKept > 0 && supportedKept === 0) {
+    return finish({ text, knowledgeTier: 'mixed' }, notice, traces, claims.length);
+  }
+  // A model-written limitation stays uncertain even beside a supported definition.
+  if (alreadyLimited) {
+    return finish({ text, knowledgeTier: 'mixed' }, notice, traces, claims.length);
+  }
+  // A verified relation is source support. It is not a verbatim quotation
+  // unless the source's own operator wording was quoted.
+  if (equivalentKept > 0 && quotedKept === 0) {
+    return finish({ text, knowledgeTier: 'course_material' }, notice, traces, claims.length);
+  }
   if (interpretiveKept === 0 && academicRejections === 0 && contradictedLabels === 0) {
     const tier = evaluateGroundingProvenance({
       question: input.question,
@@ -1061,8 +2167,16 @@ export function applyClaimLevelGrounding(input: {
       indexedChunkTexts: chunkTexts,
       captureText,
     }).tier;
-    return { text, knowledgeTier: tier === 'general_academic' ? 'mixed' : tier };
+    return finish(
+      { text, knowledgeTier: tier === 'general_academic' ? 'mixed' : tier },
+      notice,
+      traces,
+      claims.length,
+    );
+  }
+  if (supportedKept > 0) {
+    return finish({ text, knowledgeTier: 'course_material' }, notice, traces, claims.length);
   }
 
-  return { text, knowledgeTier: 'mixed' };
+  return finish({ text, knowledgeTier: 'mixed' }, notice, traces, claims.length);
 }

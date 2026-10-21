@@ -20,7 +20,10 @@ import { runAskCoursePipeline, type AskCourseDeps } from './runAskCourse.ts';
 import { buildAskCourseRetrievalQuery } from './buildAskCourseRetrievalQuery.ts';
 import {
   applyClaimLevelGrounding,
+  DERIVED_REASONING_NOTICE,
+  OPTION_REPEAT_NOTICE,
   CONTRADICTED_OPTION_NOTICE,
+  mathRelationSupport,
   SOURCE_ONLY_INTERPRETATION_NOTICE,
 } from './evaluateGroundingProvenance.ts';
 import { createFakeEmbeddingProvider } from '../knowledge/fakeEmbeddingProvider.ts';
@@ -726,9 +729,11 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
       }),
     });
     if (course.response.ok && course.response.result.type === 'ask_course') {
-      expect(course.response.result.knowledgeTier).toBe('course_material');
+      expect(course.response.result.knowledgeTier).toBe('mixed');
       expect(course.response.result.text).toContain(quotedChunk);
       expect(course.response.result.text).toContain('[1]');
+      expect(course.response.result.text).toContain('Further commentary is unsupported');
+      expect(course.response.result.text).toContain('goes beyond a direct statement');
       expect(course.response.result.text).not.toContain('[99]');
       expect(course.response.result.sources).toHaveLength(1);
     }
@@ -814,7 +819,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(math.knowledgeTier).toBe('mixed');
     expect(math.text).toContain('instantaneous rate of change');
-    expect(math.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(math.text).toContain(DERIVED_REASONING_NOTICE);
     expect(math.knowledgeTier).not.toBe('pdf_selection');
 
     const legal = await ask({
@@ -824,7 +829,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(legal.knowledgeTier).toBe('mixed');
     expect(legal.text).toContain('relies on a promise');
-    expect(legal.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(legal.text).toContain(DERIVED_REASONING_NOTICE);
 
     const translation = await ask({
       question: 'Explain only using the selected text.',
@@ -843,7 +848,7 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     });
     expect(translatedScript.knowledgeTier).toBe('mixed');
     expect(translatedScript.text).toContain('connects the flux');
-    expect(translatedScript.text).toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(translatedScript.text).toContain(DERIVED_REASONING_NOTICE);
 
     const examDate = await ask({
       question: 'What is the exam date according to the course materials?',
@@ -918,8 +923,11 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
       chunk: divergence,
       answer: `${divergence} [1] Further commentary is unsupported [99].`,
     });
-    expect(cited.knowledgeTier).toBe('course_material');
+    expect(cited.knowledgeTier).toBe('mixed');
+    expect(cited.text).toContain(divergence);
     expect(cited.text).toContain('[1]');
+    expect(cited.text).toContain('Further commentary is unsupported');
+    expect(cited.text).toContain('goes beyond a direct statement');
     expect(cited.text).not.toContain('[99]');
 
     const stripped = await ask({
@@ -971,8 +979,11 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
       captureText: '',
       contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false },
     });
-    expect(preserved.knowledgeTier).toBe('course_material');
-    expect(preserved.text).toBe(answer);
+    expect(preserved.knowledgeTier).toBe('mixed');
+    expect(preserved.text.startsWith(answer)).toBe(true);
+    expect(preserved.text).toContain('[1]');
+    expect(preserved.text).toContain('f\'(k) > n + g + δ');
+    expect(preserved.text).toContain('not independently verified');
 
     const mixed = applyClaimLevelGrounding({
       question: 'Explain the model step by step.',
@@ -992,12 +1003,12 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
       captureText: '',
       contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false },
     });
-    expect(removed.text).toBe(answer);
+    expect(removed.text.startsWith(answer)).toBe(true);
     expect(removed.text).not.toContain('12 May');
     expect(removed.text).toContain('### Step 1. Define the production function');
     expect(removed.text).toContain('- Physical capital');
     expect(removed.text).toContain('[1]');
-    expect(removed.knowledgeTier).toBe('course_material');
+    expect(removed.knowledgeTier).toBe('mixed');
   });
 
   it('omits standalone retrieval-status sentences without weakening academic checks', () => {
@@ -1624,6 +1635,276 @@ describe('ZIKUK AI — SKE1.2 Provenance Integrity & Retrieval Suite', () => {
     expect(causal.text).not.toContain('sticky');
     expect(causal.text).toContain(unsupportedNotice);
     expect(causal.knowledgeTier).toBe('mixed');
+  });
+
+  it('verifies a mathematical relation before a shared opening can support it', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const less = 'The cyclical part of real GDP is real GDP less trend real GDP.';
+    const minus = 'The cyclical part of real GDP is real GDP minus trend real GDP.';
+    const signed = 'The cyclical part of real GDP is real GDP − trend real GDP.';
+    const added = 'The cyclical part of real GDP is real GDP plus trend real GDP.';
+    const reversed = 'The cyclical part of real GDP is trend real GDP less real GDP.';
+    const unsupportedNotice = 'The unsupported part cannot be established from the available source.';
+    const chunks = [
+      {
+        citationIndex: 1,
+        text: [
+          'The cyclical part of real GDP is real GDP less trend real GDP.',
+          '(a) trend real GDP less measured output',
+          '(b) real GDP less trend real GDP',
+          '(c) nominal GDP plus trend real GDP',
+          '(d) trend real GDP without a residual',
+          'A later question on the same page asks about fiscal policy.',
+          '(a) taxes on wages',
+          '(b) government spending',
+          '(c) the interest rate',
+          '(d) the exchange rate',
+        ].join('\n'),
+      },
+      {
+        citationIndex: 2,
+        text: 'Another retrieved page discusses inventories.\n(a) planned investment\n(b) unplanned inventories',
+      },
+      {
+        citationIndex: 3,
+        text: 'A third retrieved page discusses employment.\n(a) hours worked',
+      },
+      {
+        citationIndex: 4,
+        text: 'A fourth retrieved page discusses prices.\n(a) the price level',
+      },
+    ];
+    const corpus = chunks.map((chunk) => chunk.text).join('\n');
+    const base = {
+      question,
+      chunks,
+      captureText: '',
+      contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false } as const,
+    };
+    const judge = (answerText: string) => applyClaimLevelGrounding({ ...base, answerText });
+
+    expect(mathRelationSupport(less, corpus)).toBe('verbatim');
+    const correct = judge(less);
+    expect(correct.text).toContain('real GDP less trend real GDP');
+    expect(correct.text).not.toContain(unsupportedNotice);
+    expect(correct.knowledgeTier).toBe('course_material');
+
+    expect(mathRelationSupport(added, corpus)).toBe('contradiction');
+    const addition = judge(added);
+    expect(addition.text).not.toContain('plus');
+    expect(addition.knowledgeTier).toBe('mixed');
+
+    expect(mathRelationSupport(reversed, corpus)).toBe('contradiction');
+    const reversedResult = judge(reversed);
+    expect(reversedResult.text).not.toContain('trend real GDP less real GDP');
+    expect(reversedResult.knowledgeTier).toBe('mixed');
+
+    expect(mathRelationSupport(minus, corpus)).toBe('equivalent');
+    expect(mathRelationSupport(signed, corpus)).toBe('equivalent');
+    const minusResult = judge(minus);
+    const signedResult = judge(signed);
+    expect(minusResult.text).toContain('minus trend real GDP');
+    expect(signedResult.text).toContain('− trend real GDP');
+    expect(minusResult.text).not.toContain(unsupportedNotice);
+    expect(signedResult.text).not.toContain(unsupportedNotice);
+    expect(minusResult.knowledgeTier).toBe('course_material');
+    expect(signedResult.knowledgeTier).toBe('course_material');
+
+    const paraphrase = 'Cyclical real GDP is real GDP minus trend real GDP.';
+    expect(mathRelationSupport(paraphrase, corpus)).toBe('equivalent');
+    const paraphraseResult = judge(paraphrase);
+    expect(paraphraseResult.text).toContain('minus trend real GDP');
+    expect(paraphraseResult.knowledgeTier).toBe('course_material');
+
+    const deviation = 'It is how far measured activity sits from the smooth path.';
+    const deviationAlone = judge(deviation);
+    expect(deviationAlone.text).toContain('smooth path');
+    expect(deviationAlone.text).toContain(DERIVED_REASONING_NOTICE);
+    expect(deviationAlone.knowledgeTier).toBe('mixed');
+
+    const explained = judge(`${less} ${deviation}`);
+    expect(explained.text).toContain('real GDP less trend real GDP');
+    expect(explained.text).toContain('smooth path');
+    expect(explained.text).toContain(DERIVED_REASONING_NOTICE);
+    expect(explained.text).not.toContain(SOURCE_ONLY_INTERPRETATION_NOTICE);
+    expect(explained.text).not.toContain(unsupportedNotice);
+    expect(explained.knowledgeTier).toBe('mixed');
+
+    const symbol = judge('\\( y - \\bar{y} \\).');
+    expect(symbol.text).not.toContain('bar');
+    expect(symbol.knowledgeTier).toBe('mixed');
+    const withSymbol = judge(`${less} \\( y - \\bar{y} \\).`);
+    expect(withSymbol.text).toContain('real GDP less trend real GDP');
+    expect(withSymbol.text).not.toContain(unsupportedNotice);
+    expect(withSymbol.knowledgeTier).toBe('course_material');
+
+    const correctLetter = judge(`${signed} The correct option is (b).`);
+    expect(correctLetter.text).toContain('The correct option is (b).');
+    expect(correctLetter.knowledgeTier).toBe('course_material');
+    const wrongLetter = judge(`${signed} The correct option is (c).`);
+    expect(wrongLetter.text).toContain('− trend real GDP');
+    expect(wrongLetter.text).not.toContain('(c)');
+    expect(wrongLetter.text).toContain(CONTRADICTED_OPTION_NOTICE);
+    expect(wrongLetter.text).not.toContain(unsupportedNotice);
+    expect(wrongLetter.knowledgeTier).toBe('mixed');
+
+    const negated = 'The cyclical part of real GDP is not real GDP less trend real GDP.';
+    expect(mathRelationSupport(negated, corpus)).toBe('contradiction');
+    const negatedResult = judge(`${less} ${negated}`);
+    expect(negatedResult.text).toContain('real GDP less trend real GDP');
+    expect(negatedResult.text).not.toContain('is not real GDP');
+    expect(negatedResult.text).toContain(unsupportedNotice);
+    expect(negatedResult.knowledgeTier).toBe('mixed');
+
+    const quantity = 'The cyclical part of real GDP is real GDP less 9 trend real GDP.';
+    const quantityResult = judge(`${less} ${quantity}`);
+    expect(quantityResult.text).not.toContain('9');
+    expect(quantityResult.text).toContain(unsupportedNotice);
+    expect(quantityResult.knowledgeTier).toBe('mixed');
+
+    const causal = judge(`${less} This holds because wages are sticky.`);
+    expect(causal.text).not.toContain('sticky');
+    expect(causal.text).toContain(unsupportedNotice);
+    expect(causal.knowledgeTier).toBe('mixed');
+
+    const unrelated = judge(`${less} Hydrogen bonds stabilize the alpha helix.`);
+    expect(unrelated.text).not.toContain('Hydrogen bonds');
+    expect(unrelated.text).toContain(unsupportedNotice);
+    expect(unrelated.knowledgeTier).toBe('mixed');
+
+    const mixed = judge(`${less} ${deviation} Hydrogen bonds stabilize the alpha helix.`);
+    expect(mixed.text).toContain('real GDP less trend real GDP');
+    expect(mixed.text).toContain('smooth path');
+    expect(mixed.text).not.toContain('Hydrogen bonds');
+    expect(mixed.text).toContain(unsupportedNotice);
+    expect(mixed.text).toContain(DERIVED_REASONING_NOTICE);
+    expect(mixed.knowledgeTier).toBe('mixed');
+
+    const longOpening =
+      'The cyclical part of real GDP is the component that remains after the smooth path is removed, and it is real GDP plus trend real GDP.';
+    expect(mathRelationSupport(longOpening, corpus)).toBe('contradiction');
+    const adversarial = judge(longOpening);
+    expect(adversarial.text).not.toContain('plus trend real GDP');
+    expect(adversarial.knowledgeTier).toBe('mixed');
+
+    const longReversed =
+      'The cyclical part of real GDP is, in the wording of the retrieved passage, trend real GDP less real GDP.';
+    expect(mathRelationSupport(longReversed, corpus)).toBe('contradiction');
+    const reversedOpening = judge(`${less} ${longReversed}`);
+    expect(reversedOpening.text).toContain('real GDP less trend real GDP');
+    expect(reversedOpening.text).not.toContain('trend real GDP less real GDP');
+    expect(reversedOpening.text).toContain(unsupportedNotice);
+    expect(reversedOpening.knowledgeTier).toBe('mixed');
+
+    expect(
+      mathRelationSupport('Non-residential investment is well-known in GDP-trend studies.', corpus),
+    ).toBe('none');
+    expect(mathRelationSupport('The formula ends with a dangling minus.', corpus)).toBe('unparsed');
+    const unparsed = judge('The cyclical part of real GDP is written with a dangling minus.');
+    expect(unparsed.knowledgeTier).not.toBe('course_material');
+    expect(mathRelationSupport('The cyclical part of real GDP is written with a dangling minus.', corpus)).toBe(
+      'unparsed',
+    );
+  });
+
+  it('accepts a harmless operand modifier and ignores a distractor quotation', () => {
+    const question = 'According to the PDF, what is the cyclical part of real GDP?';
+    const unsupportedNotice = 'The unsupported part cannot be established from the available source.';
+    const chunks = [
+      {
+        citationIndex: 1,
+        text: [
+          'The cyclical part of real GDP is real GDP less trend real GDP.',
+          '(a) trend real GDP less measured output',
+          '(b) real GDP less trend real GDP',
+          '(c) nominal GDP plus trend real GDP',
+          '(d) trend real GDP without a residual',
+          'A later question on the same page asks about fiscal policy.',
+          '(a) taxes on wages',
+          '(b) government spending',
+          '(c) the interest rate',
+          '(d) the exchange rate',
+        ].join('\n'),
+      },
+      {
+        citationIndex: 2,
+        text: 'Another retrieved page discusses inventories.\n(a) planned investment\n(b) unplanned inventories',
+      },
+      {
+        citationIndex: 3,
+        text: 'A third retrieved page discusses employment.\n(a) hours worked',
+      },
+      {
+        citationIndex: 4,
+        text: 'A fourth retrieved page discusses prices.\n(a) the price level',
+      },
+    ];
+    const corpus = chunks.map((chunk) => chunk.text).join('\n');
+    const judge = (answerText: string) =>
+      applyClaimLevelGrounding({
+        question,
+        chunks,
+        captureText: '',
+        contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false },
+        answerText,
+      });
+
+    const measured = 'The cyclical part of real GDP is measured real GDP less trend real GDP.';
+    expect(mathRelationSupport(measured, corpus)).toBe('equivalent');
+    const measuredResult = judge(measured);
+    expect(measuredResult.text).toContain('measured real GDP less trend real GDP');
+    expect(measuredResult.text).not.toContain(unsupportedNotice);
+    expect(measuredResult.knowledgeTier).toBe('course_material');
+
+    const observed = 'Cyclical real GDP is observed real GDP minus trend real GDP.';
+    expect(mathRelationSupport(observed, corpus)).toBe('equivalent');
+    expect(judge(observed).knowledgeTier).toBe('course_material');
+
+    const nominal = 'The cyclical part of real GDP is nominal real GDP less trend real GDP.';
+    expect(mathRelationSupport(nominal, corpus)).toBe('contradiction');
+    const nominalResult = judge(nominal);
+    expect(nominalResult.text).not.toContain('nominal real GDP');
+    expect(nominalResult.knowledgeTier).toBe('mixed');
+
+    const doubled = 'The cyclical part of real GDP is twice real GDP less trend real GDP.';
+    expect(mathRelationSupport(doubled, corpus)).toBe('contradiction');
+    expect(judge(doubled).text).not.toContain('twice');
+    expect(judge(doubled).knowledgeTier).toBe('mixed');
+
+    const lagged = "The cyclical part of real GDP is last year's real GDP less trend real GDP.";
+    expect(mathRelationSupport(lagged, corpus)).not.toBe('equivalent');
+    expect(mathRelationSupport(lagged, corpus)).not.toBe('verbatim');
+    expect(judge(lagged).knowledgeTier).not.toBe('course_material');
+
+    const unknownModifier = 'The cyclical part of real GDP is seasonally adjusted real GDP less trend real GDP.';
+    expect(mathRelationSupport(unknownModifier, corpus)).toBe('unmatched');
+    const unknownResult = judge(unknownModifier);
+    expect(unknownResult.text).toContain('seasonally adjusted real GDP');
+    expect(unknownResult.knowledgeTier).not.toBe('course_material');
+
+    const distractor = 'Nominal GDP plus trend real GDP.';
+    expect(judge(distractor).knowledgeTier).not.toBe('course_material');
+    expect(judge(distractor).text).not.toContain('nominal GDP plus');
+
+    const distractorOpening =
+      'The cyclical part of real GDP is nominal GDP plus trend real GDP.';
+    expect(judge(distractorOpening).knowledgeTier).not.toBe('course_material');
+    expect(judge(distractorOpening).text).not.toContain('nominal GDP plus');
+
+    const otherChoice = 'The cyclical part of real GDP is trend real GDP less measured output.';
+    expect(judge(otherChoice).knowledgeTier).not.toBe('course_material');
+    expect(judge(otherChoice).text).toContain(OPTION_REPEAT_NOTICE);
+
+    const solution = 'The cyclical part of real GDP is real GDP less trend real GDP.';
+    const correctLetter = judge(`${solution} The correct option is (b).`);
+    expect(correctLetter.text).toContain('The correct option is (b).');
+    expect(correctLetter.knowledgeTier).toBe('course_material');
+
+    const wrongLetter = judge(`${solution} The correct option is (c).`);
+    expect(wrongLetter.text).toContain(solution);
+    expect(wrongLetter.text).not.toContain('(c)');
+    expect(wrongLetter.text).toContain(CONTRADICTED_OPTION_NOTICE);
+    expect(wrongLetter.knowledgeTier).toBe('mixed');
   });
 
   it('grounds an incomplete nonempty answer once and keeps the incomplete flag', async () => {

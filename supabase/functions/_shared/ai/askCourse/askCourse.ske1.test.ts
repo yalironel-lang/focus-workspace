@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ADDITIONAL_EXPLANATION_NOTICE } from './evaluateGroundingProvenance.ts';
 import { runAskCoursePipeline, type AskCourseDeps } from './runAskCourse.ts';
 import { buildAskCourseMessages } from './promptAskCourse.ts';
 import { createFakeEmbeddingProvider } from '../knowledge/fakeEmbeddingProvider.ts';
@@ -135,7 +136,7 @@ describe('ZIKUK AI — Smart Knowledge Expansion (SKE1.1)', () => {
     }
   });
 
-  it('3. returns course_material tier when retrieved chunks support the answer', async () => {
+  it('3. withholds course material when the answer adds a claim the chunk does not state', async () => {
     const rawHit = {
       similarity: 0.85,
       source_kind: 'free_space_pdf',
@@ -174,7 +175,9 @@ describe('ZIKUK AI — Smart Knowledge Expansion (SKE1.1)', () => {
 
     expect(res.response.ok).toBe(true);
     if (res.response.ok && res.response.result.type === 'ask_course') {
-      expect(res.response.result.knowledgeTier).toBe('course_material');
+      expect(res.response.result.knowledgeTier).toBe('mixed');
+      expect(res.response.result.text).toContain('line integral');
+      expect(res.response.result.text).toContain(ADDITIONAL_EXPLANATION_NOTICE);
       expect(res.response.result.sources.length).toBe(1);
       expect(res.response.result.sources[0]?.sourceKind).toBe('free_space_pdf');
     }

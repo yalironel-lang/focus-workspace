@@ -561,8 +561,9 @@ describe('tutor answer layout', () => {
       captureText: '',
       contextAvailable: { hasIndexedChunks: true, hasPdfCapture: false },
     });
-    expect(grounded.knowledgeTier).toBe('course_material');
-    expect(grounded.text).toBe(answer);
+    expect(grounded.knowledgeTier).toBe('mixed');
+    expect(grounded.text.startsWith(answer)).toBe(true);
+    expect(grounded.text).toContain('not independently verified');
 
     const prepared = prepareAskAcademicMarkdown(grounded.text);
     expect(prepared.markdown).toContain('### Step 1. Define the production function');
