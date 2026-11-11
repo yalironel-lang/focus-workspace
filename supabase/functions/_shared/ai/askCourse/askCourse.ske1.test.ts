@@ -5,10 +5,12 @@
  * Verifies:
  * 1. Zero retrieval chunks + teachingMode -> Succeeds with knowledgeTier: 'general_academic' and sources: [].
  * 2. Retrieved chunks that support the answer -> knowledgeTier: 'course_material' and sources: [...].
- * 3. PDF capture with 0 retrieval chunks and a grounded answer -> knowledgeTier: 'pdf_selection'.
- * 4. Zero retrieval chunks + no teachingMode (legacy) -> Fails closed with 'knowledge_not_found'.
- * 5. Prompt format when chunks are empty injects general academic fallback guidance into COURSE MATERIAL.
- * 6. System prompt contains SMART KNOWLEDGE EXPANSION instructions.
+ * 3. Retrieved chunks that support a partial answer -> knowledgeTier: 'mixed' with explanation notice.
+ * 4. PDF capture + explained answer beyond the selection -> 'mixed' (strong attribution).
+ * 4b. PDF capture + quote-only answer -> knowledgeTier: 'pdf_selection'.
+ * 5. Zero retrieval chunks + no teachingMode (legacy) -> Fails closed with 'knowledge_not_found'.
+ * 6. Prompt format when chunks are empty injects general academic fallback guidance into COURSE MATERIAL.
+ * 7. System prompt contains SMART KNOWLEDGE EXPANSION instructions.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -183,7 +185,7 @@ describe('ZIKUK AI — Smart Knowledge Expansion (SKE1.1)', () => {
     }
   });
 
-  it('4. returns pdf_selection tier when PDF capture is present and grounded with 0 chunks (SKE1.2)', async () => {
+  it('4. downgrades PDF capture + explained answer beyond the selection to mixed (strong attribution)', async () => {
     const deps = buildMockDeps({
       searchKnowledge: async () => ({ ok: true as const, raw: [] }),
       generationProvider: {
@@ -219,7 +221,57 @@ describe('ZIKUK AI — Smart Knowledge Expansion (SKE1.1)', () => {
 
     expect(res.response.ok).toBe(true);
     if (res.response.ok && res.response.result.type === 'ask_course') {
+      // Quotation of the short formula is recognized; unsupported explanation
+      // (roots / parabola) forces mixed with an explicit notice — not a silent
+      // demotion to general_academic.
+      expect(res.response.result.knowledgeTier).toBe('mixed');
+      expect(res.response.result.text).toContain(ADDITIONAL_EXPLANATION_NOTICE);
+      expect(res.response.result.contextAvailable).toEqual({
+        hasIndexedChunks: false,
+        hasPdfCapture: true,
+      });
+    }
+  });
+
+  it('4b. returns pdf_selection when the answer quotes the selected PDF formula only', async () => {
+    const deps = buildMockDeps({
+      searchKnowledge: async () => ({ ok: true as const, raw: [] }),
+      generationProvider: {
+        complete: async () => ({
+          ok: true,
+          text: 'f(x) = x^2 - 4',
+          latencyMs: 42,
+          usage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 },
+        }),
+      },
+    });
+
+    const req: ZikukAiAskCourseRequestV3 = {
+      version: 3,
+      capability: 'ask_course',
+      sectionId: VALID_SECTION_ID,
+      question: 'What is the selected equation?',
+      teachingMode: 'just_answer',
+      capture: {
+        sourceKind: 'free_space_pdf',
+        sourceObjectId: VALID_PDF_ID,
+        sectionId: VALID_SECTION_ID,
+        pageNumber: 1,
+        text: 'f(x) = x^2 - 4',
+      },
+    };
+
+    const res = await runAskCoursePipeline({
+      authUserId: VALID_USER_ID,
+      request: req,
+      deps,
+    });
+
+    expect(res.response.ok).toBe(true);
+    if (res.response.ok && res.response.result.type === 'ask_course') {
       expect(res.response.result.knowledgeTier).toBe('pdf_selection');
+      expect(res.response.result.text).toBe('f(x) = x^2 - 4');
+      expect(res.response.result.text).not.toContain(ADDITIONAL_EXPLANATION_NOTICE);
       expect(res.response.result.contextAvailable).toEqual({
         hasIndexedChunks: false,
         hasPdfCapture: true,

@@ -87,6 +87,9 @@ function isNonEmptyId(v: unknown): v is string {
 function parseKnowledgeTier(value: unknown): KnowledgeTier | undefined {
   return value === 'course_material' ||
     value === 'pdf_selection' ||
+    value === 'pdf_page_native' ||
+    value === 'pdf_page_recovered' ||
+    value === 'pdf_selection_visual' ||
     value === 'general_academic' ||
     value === 'mixed'
     ? value
@@ -207,7 +210,13 @@ function parseIntent(raw: unknown): TutorCaptureIntent | null {
   if (!isNonEmptyId(att.sourceObjectId)) return null;
   if (!isNonEmptyId(att.sectionId)) return null;
   if (typeof att.pageNumber !== 'number' || !Number.isFinite(att.pageNumber)) return null;
-  if (att.attachmentType !== 'text_selection') return null;
+  if (
+    att.attachmentType !== 'text_selection' &&
+    att.attachmentType !== 'recovered_page' &&
+    att.attachmentType !== 'native_page'
+  ) {
+    return null;
+  }
   if (typeof att.extractedText !== 'string' || !att.extractedText.trim()) return null;
 
   const regionNorm = att.regionNorm as Record<string, unknown> | undefined;
@@ -239,7 +248,7 @@ function parseIntent(raw: unknown): TutorCaptureIntent | null {
         w: regionNorm.w,
         h: regionNorm.h,
       },
-      attachmentType: 'text_selection',
+      attachmentType: att.attachmentType,
       extractedText: att.extractedText.slice(0, TUTOR_SESSION_MAX_EXTRACTED_TEXT_CHARS),
     },
   };
@@ -430,24 +439,39 @@ export function writeTutorSession(
       existing?.mode ||
       'explain';
 
-    const intentPayload: TutorCaptureIntent | null = data.intent
-      ? {
-          action: teachingModeToLegacyAction(effectiveMode),
-          mode: effectiveMode,
-          attachment: {
-            ...data.intent.attachment,
-            extractedText: data.intent.attachment.extractedText.slice(0, TUTOR_SESSION_MAX_EXTRACTED_TEXT_CHARS),
-          },
-        }
-      : null;
+    // Visual Capture V1: never persist JPEG payloads (ephemeral request-only).
+    const intentPayload: TutorCaptureIntent | null =
+      data.intent && data.intent.attachment.attachmentType !== 'visual_selection'
+        ? {
+            action: teachingModeToLegacyAction(effectiveMode),
+            mode: effectiveMode,
+            attachment: {
+              sourceKind: data.intent.attachment.sourceKind,
+              sourceObjectId: data.intent.attachment.sourceObjectId,
+              sectionId: data.intent.attachment.sectionId,
+              pageNumber: data.intent.attachment.pageNumber,
+              regionNorm: data.intent.attachment.regionNorm,
+              attachmentType: data.intent.attachment.attachmentType,
+              extractedText: data.intent.attachment.extractedText.slice(
+                0,
+                TUTOR_SESSION_MAX_EXTRACTED_TEXT_CHARS,
+              ),
+            },
+          }
+        : null;
 
     const effectivePresentation = data.presentation ?? existing?.presentation;
     const effectiveArchived = data.archivedThreads ?? existing?.archivedThreads;
+    const isVisualIntent = data.intent?.attachment.attachmentType === 'visual_selection';
     const attachmentAttached = intentPayload
       ? typeof data.attachmentAttached === 'boolean'
         ? data.attachmentAttached
         : existing?.attachmentAttached !== false
-      : false;
+      : isVisualIntent
+        ? typeof data.attachmentAttached === 'boolean'
+          ? data.attachmentAttached
+          : true
+        : false;
 
     const boundedPayload: PersistedTutorSession = {
       version: TUTOR_SESSION_STORAGE_VERSION,

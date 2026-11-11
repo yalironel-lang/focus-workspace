@@ -1,0 +1,127 @@
+{
+  "scope": "new cached-image, network-none, synthetic-only PostgreSQL",
+  "candidate": "local-34b07e1319c641c1",
+  "image": "sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe",
+  "checks": [
+    {
+      "case": "cached_official_image",
+      "status": "PASS"
+    },
+    {
+      "case": "isolation_before_sql",
+      "status": "PASS"
+    },
+    {
+      "case": "database_identity",
+      "status": "PASS"
+    },
+    {
+      "case": "original_migration_compatibility",
+      "status": "PASS"
+    },
+    {
+      "case": "baseline_expired_liability_defect_reproduced",
+      "status": "PASS",
+      "meaning": "unsafe admission reproduced; NOT security acceptance"
+    },
+    {
+      "case": "baseline_wrong_day_defect_reproduced",
+      "status": "PASS",
+      "meaning": "unsafe refund reproduced; NOT security acceptance"
+    },
+    {
+      "case": "wrong_marker_stops_before_ddl",
+      "status": "PASS"
+    },
+    {
+      "case": "legacy_cross_day_stops_before_ddl",
+      "status": "PASS"
+    },
+    {
+      "case": "corrected_migration_compatibility",
+      "status": "PASS"
+    },
+    {
+      "case": "rollback_restores_definitions_preserves_data",
+      "status": "PASS"
+    },
+    {
+      "case": "planned_corrected_restore_preserves_data",
+      "status": "PASS"
+    },
+    {
+      "case": "locked_expired_liability_fails_closed",
+      "status": "PASS"
+    },
+    {
+      "case": "expired_dispatched_liability_is_charged",
+      "status": "PASS"
+    },
+    {
+      "case": "wrong_day_refund_fixed",
+      "status": "PASS"
+    },
+    {
+      "case": "concurrent_admission_exact_capacity",
+      "status": "PASS",
+      "admitted": 2,
+      "denied": 18
+    },
+    {
+      "case": "dispatch_confirmed",
+      "status": "PASS"
+    },
+    {
+      "case": "dispatched_release_denied",
+      "status": "PASS"
+    },
+    {
+      "case": "conservative_charge_cannot_be_released",
+      "status": "PASS"
+    },
+    {
+      "case": "delayed_settlement_reconciles",
+      "status": "PASS"
+    },
+    {
+      "case": "duplicate_concurrent_settlement_no_double_charge",
+      "status": "PASS"
+    },
+    {
+      "case": "conflicting_settlement_denied",
+      "status": "PASS"
+    },
+    {
+      "case": "above_reservation_spend_recorded_but_fails",
+      "status": "PASS"
+    },
+    {
+      "case": "expired_pending_cannot_dispatch",
+      "status": "PASS"
+    },
+    {
+      "case": "ordinary_role_acl_denials",
+      "status": "PASS"
+    },
+    {
+      "case": "service_role_execution",
+      "status": "PASS"
+    },
+    {
+      "case": "rollback_canaries_unchanged",
+      "status": "PASS"
+    },
+    {
+      "case": "final_isolation",
+      "status": "PASS"
+    }
+  ],
+  "status": "PASS",
+  "cleanup": "PASS",
+  "remoteDatabaseAccess": false,
+  "postgresVersion": "17.11 (Debian 17.11-1.pgdg13+2)",
+  "sqlSha256": {
+    "original": "c751a624079b34cb214f08d1e30c48fc7130fc776ad3c449e30ef7a7f910d1e2",
+    "corrected": "f2e23ed08bce051231f255c6d4dfa2b4ee6a104e6ca90c902d41cb209816f017"
+  }
+}

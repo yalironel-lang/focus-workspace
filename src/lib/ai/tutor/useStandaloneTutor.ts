@@ -11,6 +11,7 @@ import {
   type PdfCaptureAttachment,
   type ZikukAiAskCourseRequest,
   type ZikukAiErrorCode,
+  isVisualSelectionCapture,
 } from '../gatewayClient';
 import {
   legacyActionToTeachingMode,
@@ -25,8 +26,13 @@ import {
   archiveTutorThread,
   type TutorArchivedThread,
 } from './tutorSessionStorage';
+import { fitVisualRequestToWireBudget } from '../visualCapture/visualPayloadWireBudget';
+import { formatStudentTutorErrorMessage } from './tutorErrorMessage';
+import type { PilotRenderEvidence } from './tutorPilotEvidence';
 
 export type TutorTurn = {
+  /** Ephemeral only; the session serializer intentionally excludes this field. */
+  pilotEvidence?: PilotRenderEvidence;
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -127,6 +133,19 @@ export function useStandaloneTutor(
   modeRef.current = mode;
 
   const [attachmentAttached, setAttachmentAttachedState] = useState(() => {
+    if (options.initialIntent) {
+      if (options.initialIntent.attachment.attachmentType === 'visual_selection') return true;
+      if (userId && sectionId && sourceObjectId) {
+        const persisted = readTutorSession(userId, sectionId, sourceObjectId);
+        if (persisted && persisted.intent) {
+          const sameKey = captureAttachmentKey(persisted.intent) === captureAttachmentKey(options.initialIntent);
+          if (sameKey && persisted.attachmentAttached === false) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
     if (userId && sectionId && sourceObjectId) {
       const persisted = readTutorSession(userId, sectionId, sourceObjectId);
       if (persisted) {
@@ -134,7 +153,7 @@ export function useStandaloneTutor(
         return persisted.attachmentAttached !== false;
       }
     }
-    return Boolean(options.initialIntent);
+    return false;
   });
   const attachmentAttachedRef = useRef(attachmentAttached);
   attachmentAttachedRef.current = attachmentAttached;
@@ -166,6 +185,25 @@ export function useStandaloneTutor(
   });
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Keep ownership until the transport settles, even after cancellation: aborting
+  // a browser request does not prove that the server stopped processing it.
+  const inFlightRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const turns = [...state.turns, ...archivedThreads.flatMap(thread => thread.turns)];
+    const expiries = turns.flatMap(turn => turn.pilotEvidence ? [turn.pilotEvidence.expiresAt] : []);
+    if (!expiries.length) return;
+    const timer = setTimeout(() => {
+      const stripExpired = (turn: TutorTurn): TutorTurn => {
+        if (!turn.pilotEvidence || turn.pilotEvidence.expiresAt > Date.now()) return turn;
+        const clean = { ...turn };
+        delete clean.pilotEvidence;
+        return clean;
+      };
+      setState(previous => ({ ...previous, turns: previous.turns.map(stripExpired) }));
+      setArchivedThreads(previous => previous.map(thread => ({ ...thread, turns: thread.turns.map(stripExpired) })));
+    }, Math.max(0, Math.min(...expiries) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [state.turns, archivedThreads]);
   const turnsRef = useRef<TutorTurn[]>(state.turns);
   turnsRef.current = state.turns;
   const [captureIntent, setCaptureIntentState] = useState<TutorCaptureIntent | null>(() => {
@@ -191,8 +229,12 @@ export function useStandaloneTutor(
         ? readTutorSession(userId, sectionId, sourceObjectId)?.intent ?? null
         : null;
     const storedKey = storedIntent ? captureAttachmentKey(storedIntent) : '';
+    const isVisual = options.initialIntent.attachment.attachmentType === 'visual_selection';
+    const isNewIncomingIntent = previous === undefined && (isVisual || !storedIntent || storedKey !== key);
     const replacedSelection =
-      (previous !== undefined && previous !== key) || (storedKey !== '' && storedKey !== key);
+      isNewIncomingIntent ||
+      (previous !== undefined && previous !== key) ||
+      (storedKey !== '' && storedKey !== key);
     if (replacedSelection) {
       setAttachmentAttachedState(true);
       attachmentAttachedRef.current = true;
@@ -220,7 +262,9 @@ export function useStandaloneTutor(
           const persistedMode = persisted.mode ?? (persisted.intent ? legacyActionToTeachingMode(persisted.intent.action) : 'explain');
           setModeState(persistedMode);
           modeRef.current = persistedMode;
-          const attached = Boolean(nextIntent) && persisted.attachmentAttached !== false;
+          const attached = nextIntent?.attachment.attachmentType === 'visual_selection'
+            ? true
+            : Boolean(nextIntent) && persisted.attachmentAttached !== false;
           setAttachmentAttachedState(attached);
           attachmentAttachedRef.current = attached;
           setArchivedThreads(persisted.archivedThreads ?? []);
@@ -302,6 +346,7 @@ export function useStandaloneTutor(
   const abort = useCallback(() => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    setState(prev => ({ ...prev, status: 'idle', errorMessage: null }));
   }, []);
 
   const reset = useCallback(() => {
@@ -422,43 +467,43 @@ export function useStandaloneTutor(
     async (questionText: string, isInitial: boolean = false, turnMode?: TeachingMode) => {
       const trimmed = questionText.trim();
       const currentSectionId = sectionIdRef.current;
-      if (!trimmed || !currentSectionId) return;
+      if (!trimmed || !currentSectionId || inFlightRef.current) return;
 
-      const effectiveMode: TeachingMode = turnMode || modeRef.current;
-      if (effectiveMode !== modeRef.current) {
-        setModeState(effectiveMode);
-        modeRef.current = effectiveMode;
-        if (activeIntentRef.current) {
-          activeIntentRef.current = {
-            ...activeIntentRef.current,
-            mode: effectiveMode,
-            action: teachingModeToLegacyAction(effectiveMode),
-          };
-          setCaptureIntentState(activeIntentRef.current);
-        }
-      }
-
-      abortControllerRef.current?.abort();
       const ac = new AbortController();
+      inFlightRef.current = ac;
       abortControllerRef.current = ac;
 
-      const userTurn: TutorTurn = {
-        id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        role: 'user',
-        content: trimmed,
-        timestamp: Date.now(),
-      };
-
-      const prevTurns = isInitial ? [] : turnsRef.current;
-      const updatedTurns = [...prevTurns, userTurn];
-
-      setState({
-        status: 'loading',
-        turns: updatedTurns,
-        errorMessage: null,
-      });
-
       try {
+        const effectiveMode: TeachingMode = turnMode || modeRef.current;
+        if (effectiveMode !== modeRef.current) {
+          setModeState(effectiveMode);
+          modeRef.current = effectiveMode;
+          if (activeIntentRef.current) {
+            activeIntentRef.current = {
+              ...activeIntentRef.current,
+              mode: effectiveMode,
+              action: teachingModeToLegacyAction(effectiveMode),
+            };
+            setCaptureIntentState(activeIntentRef.current);
+          }
+        }
+
+        const userTurn: TutorTurn = {
+          id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          role: 'user',
+          content: trimmed,
+          timestamp: Date.now(),
+        };
+
+        const prevTurns = isInitial ? [] : turnsRef.current;
+        const updatedTurns = [...prevTurns, userTurn];
+
+        setState({
+          status: 'loading',
+          turns: updatedTurns,
+          errorMessage: null,
+        });
+
         // Build recent turns from prior history (excluding the current turn)
         const recentTurns: AskCourseRecentTurn[] = prevTurns.map(t => ({
           role: t.role,
@@ -467,13 +512,33 @@ export function useStandaloneTutor(
 
         const attachment = attachmentAttachedRef.current ? activeIntentRef.current?.attachment : undefined;
         const capture: PdfCaptureAttachment | undefined = attachment
-          ? {
-              sourceKind: 'free_space_pdf',
-              sourceObjectId: attachment.sourceObjectId,
-              sectionId: attachment.sectionId,
-              pageNumber: attachment.pageNumber,
-              text: attachment.extractedText,
-            }
+          ? attachment.attachmentType === 'visual_selection' && attachment.visual
+            ? {
+                sourceKind: 'free_space_pdf',
+                sourceObjectId: attachment.sourceObjectId,
+                sectionId: attachment.sectionId,
+                pageNumber: attachment.pageNumber,
+                regionNorm: attachment.regionNorm,
+                attachmentType: 'visual_selection',
+                textKind: 'visual_selection',
+                mime: attachment.visual.mime,
+                imageBase64: attachment.visual.imageBase64,
+                widthPx: attachment.visual.widthPx,
+                heightPx: attachment.visual.heightPx,
+                userConfirmedVisual: true,
+              }
+            : {
+                sourceKind: 'free_space_pdf',
+                sourceObjectId: attachment.sourceObjectId,
+                sectionId: attachment.sectionId,
+                pageNumber: attachment.pageNumber,
+                text: attachment.extractedText,
+                ...(attachment.attachmentType === 'recovered_page'
+                  ? { textKind: 'recovered_page' as const }
+                  : attachment.attachmentType === 'native_page'
+                    ? { textKind: 'native_page' as const }
+                    : {}),
+              }
           : undefined;
         const activeDocument = activePdfDocument(sourceObjectIdRef.current, visiblePageRef.current);
         const documentCursor = documentCursorForSource(turnsRef.current, sourceObjectIdRef.current);
@@ -501,15 +566,37 @@ export function useStandaloneTutor(
               ...(documentCursor ? { documentCursor } : {}),
             };
 
-        const response = await zikukAiRequest(request, { signal: ac.signal, surface: 'tutor' });
+        let outboundRequest: ZikukAiAskCourseRequest = request;
+        if (request.version === 3 && request.capture && isVisualSelectionCapture(request.capture)) {
+          const fitted = await fitVisualRequestToWireBudget(request);
+          if (ac.signal.aborted || abortControllerRef.current !== ac) return;
+          if (!fitted.ok) {
+            setState(prev => ({
+              ...prev,
+              status: 'error',
+              errorMessage: fitted.message,
+              errorCode: 'invalid_request',
+            }));
+            return;
+          }
+          outboundRequest = fitted.request;
+        }
+
+        if (ac.signal.aborted || abortControllerRef.current !== ac) return;
+        const response = await zikukAiRequest(outboundRequest, { signal: ac.signal, surface: 'tutor' });
+        // A transport/mock may resolve after cancellation. Never render or persist
+        // its answer/receipt into a newer user/course/document conversation.
+        if (ac.signal.aborted || abortControllerRef.current !== ac) return;
 
         if (!response.ok) {
-          const msg = response.error?.message || 'The AI Tutor could not answer. Please try again.';
+          const rawMsg = response.error?.message;
+          const code = response.error?.code ?? null;
+          const msg = formatStudentTutorErrorMessage(code, rawMsg);
           setState(prev => ({
             ...prev,
             status: 'error',
             errorMessage: msg,
-            errorCode: response.error?.code ?? null,
+            errorCode: code,
           }));
           return;
         }
@@ -528,6 +615,7 @@ export function useStandaloneTutor(
               : {}),
             ...(response.result.generationIncomplete ? { generationIncomplete: true } : {}),
             ...(response.result.documentWindow ? { documentWindow: response.result.documentWindow } : {}),
+            ...(response.meta?.capability === 'ask_course' && response.meta.pilotRenderEvidence ? { pilotEvidence: response.meta.pilotRenderEvidence } : {}),
           };
 
           const finalTurns = [...updatedTurns, assistantTurn];
@@ -546,16 +634,20 @@ export function useStandaloneTutor(
           });
         }
       } catch (err: unknown) {
+        if (ac.signal.aborted || abortControllerRef.current !== ac) return;
         if (err instanceof Error && err.name === 'AbortError') {
+          setState(prev => ({ ...prev, status: 'idle', errorMessage: null }));
           return;
         }
+        const rawMsg = err instanceof Error ? err.message : 'Network error communicating with AI tutor.';
         setState(prev => ({
           ...prev,
           status: 'error',
-          errorMessage: err instanceof Error ? err.message : 'Network error communicating with AI tutor.',
+          errorMessage: formatStudentTutorErrorMessage(null, rawMsg),
           errorCode: null,
         }));
       } finally {
+        if (inFlightRef.current === ac) inFlightRef.current = null;
         if (abortControllerRef.current === ac) {
           abortControllerRef.current = null;
         }

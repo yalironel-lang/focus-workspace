@@ -1,0 +1,73 @@
+{
+  "date": "2026-11-09",
+  "priorCandidate": "local-ed1c32525a4880a2",
+  "candidateId": "local-2e50443a572696c2",
+  "scopedFiles": 1329,
+  "sourceChanges": [
+    "scripts/security/release-audit/browser/launch-diagnostics.mjs",
+    "scripts/security/release-audit/browser/launch-diagnostics.test.mjs",
+    "scripts/security/release-audit/browser/playwright.config.mjs",
+    "scripts/security/release-audit/browser/run-offline.mjs",
+    "scripts/security/release-audit/migration022-corrected-rehearsal.sql",
+    "supabase/functions/_shared/ai/projectLevelSpendingGuard.ts",
+    "supabase/functions/_shared/ai/tokenBounds.review.test.ts",
+    "supabase/functions/_shared/ai/tokenLedgerCorrection.review.test.ts",
+    "supabase/functions/ai-gateway/index.ts"
+  ],
+  "phaseOne": {
+    "savedIndependentReview": "complete",
+    "linkedRehearsalProcedure": "was absent; now completed",
+    "unexpectedPriorCandidateChanges": 0
+  },
+  "verification": {
+    "applicationGateway": {
+      "filesPassed": 320,
+      "testsPassed": 4216,
+      "failed": 0,
+      "seconds": 127.48,
+      "liveFilesExcluded": 3
+    },
+    "newTokenBoundTests": {
+      "passed": 21,
+      "meaning": "planning output classification and explicit no-proof/no-paid-dispatch containment"
+    },
+    "newSqlArtifactChecks": {
+      "passed": 8,
+      "meaning": "6 static contracts and 2 independent arithmetic design replays; no PostgreSQL execution"
+    },
+    "browserDiagnosticMocks": {
+      "passed": 6,
+      "browserAssertionsExecuted": 0
+    },
+    "strictEdgeOfflineCompatibility": "PASS",
+    "nativeDeno": "UNVERIFIED",
+    "frontendTypeScript": "PASS",
+    "deploymentGuards": {
+      "passed": 8
+    },
+    "unchangedG285": "Prior 205 local PASS and reported 72 live PASS preserved; not rerun without impact",
+    "unchangedDeploymentOutcomes": "Prior 29 PASS retained; script hash unchanged"
+  },
+  "compatibility": {
+    "hostedPaidInference": "INTENTIONALLY BLOCKED: no reviewed complete input/attempt bound exists",
+    "notReleasableAsWorkingTutor": true,
+    "dollarBudget": "Unsupported; fail closed preserved; recommend conditional token-only B after prerequisites",
+    "productionConfiguration": "UNKNOWN; not accessed"
+  },
+  "sqlCorrection": {
+    "artifact": "scripts/security/release-audit/migration022-corrected-rehearsal.sql",
+    "originalMigrationUnchanged": true,
+    "applied": false,
+    "postgresSyntaxAndConcurrencyVerified": false,
+    "scope": "guarded disposable database only"
+  },
+  "browser": {
+    "defaultMissingHeadlessShell": "confirmed from installed registry and Playwright source",
+    "webkit": "not installed",
+    "fullChromium": "arm64 executable present; no quarantine attribute on binary; early exit cause UNKNOWN",
+    "preparation": "explicit installed full Chromium selection and allowlisted launch diagnostics; no retry/download"
+  },
+  "releaseDecision": "NO-GO",
+  "remoteCallsOrCredentialsOrDatabaseStarts": false,
+  "missionControlV2FilesChanged": false
+}

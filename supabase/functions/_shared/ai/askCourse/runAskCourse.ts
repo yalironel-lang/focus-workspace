@@ -22,7 +22,7 @@ import { routeEmbeddingModel, type EmbeddingRouterConfig } from '../knowledge/ro
 import { KNOWLEDGE_EMBEDDING_DIMENSIONS, KNOWLEDGE_EMBEDDING_MODEL_DEFAULT } from '../knowledge/bounds.ts';
 import { formatProviderDiagnosticLog } from '../providerOpenAICompatible.ts';
 import type { AiProvider } from '../providerTypes.ts';
-import { routeModel, type RouterConfig } from '../routeModel.ts';
+import { routeModel, tryRouteVisionModel, type RouterConfig } from '../routeModel.ts';
 import type {
   ContextAvailable,
   DocumentWindowCoverage,
@@ -31,6 +31,8 @@ import type {
   ZikukAiAskCourseRequest,
   ZikukAiResponse,
 } from '../requestTypes.ts';
+import { isVisualSelectionCapture } from '../requestTypes.ts';
+import { PDF_VISUAL_SELECTION_MARKER } from '../visualCapture/visualSelectionContract.ts';
 import { authorizeAskCourseSection, type LoadSectionOwner } from './authorizeSection.ts';
 import { ASK_COURSE_RPC_CANDIDATE_LIMIT } from './bounds.ts';
 import { buildAskCourseMessages } from './promptAskCourse.ts';
@@ -63,6 +65,15 @@ import {
   sourceOnlyLimitationMessage,
 } from './evaluateGroundingProvenance.ts';
 import { createGroundingDecisionDiagnosticSink } from './groundingDecisionDiagnostics.ts';
+import { makePilotReceipt, type PilotContext, type PilotReceipt } from '../tutorPilotEvidence.ts';
+import {
+  isReasoningModel,
+  SAFE_STANDARD_GENERATION_TOKENS,
+  SAFE_REASONING_GENERATION_TOKENS,
+} from '../projectLevelSpendingGuard.ts';
+
+/** Hard character clamp to ensure embedding input can never exceed reserved 1,500 token allowance. */
+export const MAX_ASK_COURSE_EMBEDDING_INPUT_CHARS = 4_000;
 
 export type AskCourseSearchFn = (input: {
   userId: string;
@@ -94,6 +105,8 @@ export type LoadDocumentWindow = (input: {
 }) => Promise<{ ok: true; rows: DocumentWindowChunk[] } | { ok: false }>;
 
 export type AskCourseDeps = {
+  /** Created only by the staging HTTP gate, never accepted from request JSON. */
+  pilotEvidence?: PilotContext;
   loadSectionOwner: LoadSectionOwner;
   loadPdfCaptureSource?: LoadPdfCaptureSource;
   /** Page-ordered indexed text for one owned PDF. Absent in older test doubles. */
@@ -111,6 +124,14 @@ export type AskCourseDeps = {
   signal?: AbortSignal;
   /** Epoch ms when the Edge request began. Enables the chat idle deadline. */
   requestStartedAt?: number;
+  /** Called right before upstream LLM provider dispatch for durable crash accounting and final payload bounding. */
+  onProviderDispatch?: (payload?: {
+    capability?: string;
+    model?: string;
+    messages?: any;
+    maxTokens?: number;
+    embeddingTokens?: number;
+  }) => Promise<void> | void;
 };
 
 export type AskCourseUsageExtras = {
@@ -124,6 +145,12 @@ function mapProviderOutcome(code: string): UsageOutcome {
   if (code === 'rate_limited') return 'rate_limited';
   if (code === 'bad_response' || code === 'output_budget_exhausted') return 'bad_response';
   return 'provider_error';
+}
+
+export function estimateEmbeddingInputTokens(text: string): number {
+  if (!text || text.length === 0) return 0;
+  // Conservative estimate: ~3 chars per token for English/multilingual text + 16 token headroom
+  return Math.max(16, Math.ceil(text.length / 3) + 16);
 }
 
 function mapEmbeddingToGateway(
@@ -183,10 +210,15 @@ export async function runAskCoursePipeline(input: {
   const recentTurns: AskCourseRecentTurn[] =
     request.version !== 1 && request.recentTurns ? request.recentTurns : [];
   // v1: embed question only. v2/v3: deterministic contextual retrieval query (SKE1.2).
-  const embeddingInputText =
+  const rawEmbeddingInputText =
     request.version !== 1
       ? buildAskCourseRetrievalQuery({ question, recentTurns, capture })
       : question;
+  // Bounded embedding input: ensures oversized inputs can never exceed the 1,500 token allowance
+  const embeddingInputText =
+    rawEmbeddingInputText.length > MAX_ASK_COURSE_EMBEDDING_INPUT_CHARS
+      ? rawEmbeddingInputText.slice(0, MAX_ASK_COURSE_EMBEDDING_INPUT_CHARS)
+      : rawEmbeddingInputText;
 
   const baseMeta = {
     sectionId,
@@ -237,6 +269,35 @@ export async function runAskCoursePipeline(input: {
         },
         meta: { ...baseMeta, ok: false, errorCode: 'not_found', latencyMs: Date.now() - started },
       };
+    }
+    if (isVisualSelectionCapture(capture)) {
+      const visionRoute = tryRouteVisionModel(deps.routerConfig);
+      if (!('providerId' in visionRoute)) {
+        console.log(
+          JSON.stringify({
+            event: 'ask_course_visual_rejected',
+            code: visionRoute.code,
+            // no image bytes / data URLs
+          }),
+        );
+        return {
+          response: {
+            version: 1,
+            ok: false,
+            error: {
+              code: 'invalid_request',
+              message:
+                'Visual understanding is not available with the configured Tutor model. Use text capture or ask an administrator to enable a vision-capable model.',
+            },
+          },
+          meta: {
+            ...baseMeta,
+            ok: false,
+            errorCode: 'invalid_request',
+            latencyMs: Date.now() - started,
+          },
+        };
+      }
     }
   }
 
@@ -318,9 +379,16 @@ export async function runAskCoursePipeline(input: {
     };
   }
 
-  const retrieve = async (scope?: { sourceObjectId: string }) => {
+  const retrieve = async (scope?: { sourceObjectId: string }): Promise<AskCoursePipelineResult | {
+    chunks: PromptCourseChunk[]; diagnostics: {reason:string;candidateCount:number};
+    embeddingInputTokens:number; pageCount:number|null;
+  }> => {
     // 3) Embed retrieval text (v1 = question; v2 = contextual query; v3 = capture + instruction)
     const routeEmb = routeEmbeddingModel(deps.embeddingRouterConfig ?? {});
+
+    // Mark upstream provider dispatch before network call
+    await deps.onProviderDispatch?.();
+
     const embedded = await deps.embeddingProvider.embed({
       model: routeEmb.model,
       dimensions: routeEmb.dimensions,
@@ -328,6 +396,17 @@ export async function runAskCoursePipeline(input: {
       signal: deps.signal,
     });
     if (!embedded.ok) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_embedding_error',
+          code: embedded.code,
+          message: embedded.message,
+          providerHttpStatus: embedded.providerHttpStatus,
+          latencyMs: embedded.latencyMs,
+          model: routeEmb.model,
+        }),
+      );
+      const consumedEmbeddingTokens = estimateEmbeddingInputTokens(embeddingInputText);
       const code = mapEmbeddingToGateway(embedded.code);
       return {
         response: {
@@ -352,11 +431,15 @@ export async function runAskCoursePipeline(input: {
           plan: begin.plan,
           ok: false as boolean,
           errorCode: code,
-          embeddingInputTokens: undefined,
+          embeddingInputTokens: consumedEmbeddingTokens,
+          totalTokens: consumedEmbeddingTokens,
           latencyMs: Date.now() - started,
         },
       };
     }
+
+    const embeddingInputTokens = embedded.usage?.inputTokens ?? estimateEmbeddingInputTokens(embeddingInputText);
+
     if (embedded.embeddings.length !== 1 || embedded.embeddings[0]!.length !== KNOWLEDGE_EMBEDDING_DIMENSIONS) {
       return {
         response: {
@@ -369,12 +452,23 @@ export async function runAskCoursePipeline(input: {
           plan: begin.plan,
           ok: false as boolean,
           errorCode: 'internal_error',
+          embeddingInputTokens,
+          totalTokens: embeddingInputTokens,
           latencyMs: Date.now() - started,
         },
       };
     }
 
-    const embeddingInputTokens = embedded.usage?.inputTokens;
+    console.log(
+      JSON.stringify({
+        event: 'zikuk_ai_embedding',
+        ok: true,
+        model: embedded.model ?? routeEmb.model,
+        dimensions: routeEmb.dimensions,
+        inputTokens: embeddingInputTokens,
+        latencyMs: embedded.latencyMs,
+      }),
+    );
 
     // 4) Search
     const search = scope
@@ -410,6 +504,7 @@ export async function runAskCoursePipeline(input: {
           ok: false as boolean,
           errorCode: 'internal_error',
           embeddingInputTokens,
+          totalTokens: embeddingInputTokens,
           latencyMs: Date.now() - started,
         },
       };
@@ -429,6 +524,7 @@ export async function runAskCoursePipeline(input: {
           ok: false as boolean,
           errorCode: 'internal_error',
           embeddingInputTokens,
+          totalTokens: embeddingInputTokens,
           latencyMs: Date.now() - started,
         },
       };
@@ -649,6 +745,7 @@ export async function runAskCoursePipeline(input: {
         contextAvailable,
         retrievalHitCount: 0,
         embeddingInputTokens,
+        totalTokens: embeddingInputTokens,
         latencyMs: Date.now() - started,
       },
     };
@@ -684,6 +781,7 @@ export async function runAskCoursePipeline(input: {
           errorCode: 'knowledge_not_found',
           retrievalHitCount: 0,
           embeddingInputTokens,
+          totalTokens: embeddingInputTokens,
           latencyMs: Date.now() - started,
         },
       };
@@ -698,7 +796,7 @@ export async function runAskCoursePipeline(input: {
         reason: diagnostics.reason,
         retrievalCandidateCount: diagnostics.candidateCount,
         finalEvidenceCount: 0,
-        teachingMode: request.teachingMode,
+        teachingMode: 'teachingMode' in request ? request.teachingMode : undefined,
       }),
     );
   }
@@ -712,14 +810,36 @@ export async function runAskCoursePipeline(input: {
     teachingMode: request.version !== 1 ? request.teachingMode : undefined,
     activeDocument: activeBrief,
   });
-  const route = routeModel({ capability: 'ask_course', modality: 'text' }, deps.routerConfig);
+  const visualAsk = Boolean(capture && isVisualSelectionCapture(capture));
+  const route = routeModel(
+    { capability: 'ask_course', modality: visualAsk ? 'vision' : 'text' },
+    deps.routerConfig,
+  );
+
+  // Snapshot the actual provider input after all retrieval/window fitting.
+  const pilotModelInput = deps.pilotEvidence ? JSON.stringify({
+    model: route.model, messages, maxTokens: resolveServerMaxOutputTokens(route.model, 'ask_course'),
+  }) : '';
+  const pilotPromptText = deps.pilotEvidence ? messages.flatMap(message =>
+    typeof message.content === 'string' ? [message.content] : message.content.flatMap(part => part.type === 'text' ? [part.text] : []),
+  ).join('\n') : '';
+
+  const maxTokens = resolveServerMaxOutputTokens(route.model, 'ask_course');
+
+  await deps.onProviderDispatch?.({
+    capability: 'ask_course',
+    model: route.model,
+    messages,
+    maxTokens,
+    embeddingTokens: embeddingInputTokens,
+  });
 
   const providerResult = await completeChatWithinDeadline(
     deps.generationProvider,
     {
       model: route.model,
       messages,
-      maxTokens: resolveServerMaxOutputTokens(route.model),
+      maxTokens,
     },
     { requestStartedAt: deps.requestStartedAt, parent: deps.signal },
   );
@@ -747,6 +867,13 @@ export async function runAskCoursePipeline(input: {
       providerRequestId: providerResult.providerRequestId ?? null,
     });
     const mapped = mapProviderFailureToClient(providerResult.code);
+    const genUsageTokens = providerResult.usage?.totalTokens;
+    const safeGenTokens =
+      typeof genUsageTokens === 'number' && genUsageTokens > 0
+        ? genUsageTokens
+        : (isReasoningModel(route.model) ? SAFE_REASONING_GENERATION_TOKENS : SAFE_STANDARD_GENERATION_TOKENS);
+    const failureTotalTokens = safeGenTokens + (embeddingInputTokens ?? 0);
+
     return {
       response: {
         version: 1,
@@ -760,6 +887,7 @@ export async function runAskCoursePipeline(input: {
         errorCode: mapped.code,
         retrievalHitCount: chunks.length,
         embeddingInputTokens,
+        totalTokens: failureTotalTokens,
         generationLatencyMs: providerResult.latencyMs,
         model: route.model,
         providerId: route.providerId,
@@ -806,9 +934,15 @@ export async function runAskCoursePipeline(input: {
     );
   }
 
+  const groundingCaptureText =
+    capture && isVisualSelectionCapture(capture)
+      ? PDF_VISUAL_SELECTION_MARKER
+      : capture && !isVisualSelectionCapture(capture)
+        ? capture.text
+        : undefined;
   const contextAvailable = contextAvailableForGrounding({
     indexedChunkTexts: chunks.map((chunk) => chunk.text),
-    captureText: capture?.text,
+    captureText: groundingCaptureText,
   });
   const grounded = applyClaimLevelGrounding({
     question,
@@ -817,12 +951,35 @@ export async function runAskCoursePipeline(input: {
       citationIndex: chunk.citationIndex,
       text: chunk.text,
     })),
-    captureText: capture?.text,
+    captureText: groundingCaptureText,
+    captureTextKind: capture?.textKind ?? null,
     contextAvailable,
     diagnostics: createGroundingDecisionDiagnosticSink(),
   });
   const knowledgeTier: KnowledgeTier = grounded.knowledgeTier;
   const answerText = grounded.text;
+
+  const successGenTokens = providerResult.usage?.totalTokens;
+  const safeSuccessGenTokens =
+    typeof successGenTokens === 'number' && successGenTokens > 0
+      ? successGenTokens
+      : (isReasoningModel(route.model) ? SAFE_REASONING_GENERATION_TOKENS : SAFE_STANDARD_GENERATION_TOKENS);
+  const successTotalTokens = safeSuccessGenTokens + (embeddingInputTokens ?? 0);
+
+  let pilotEvidence: PilotReceipt | undefined;
+  if (deps.pilotEvidence) {
+    try {
+      pilotEvidence = await makePilotReceipt({
+        context: deps.pilotEvidence, question,
+        capture: capture && !isVisualSelectionCapture(capture) ? capture : undefined,
+        chunks, modelInput: pilotModelInput, promptText: pilotPromptText,
+        recentTurns: recentTurns.length, answer: answerText, sources, knowledgeTier,
+        providerRequestId: providerResult.providerRequestId,
+      });
+    } catch {
+      // Missing evidence fails the pilot, never changes a paid answer/accounting.
+    }
+  }
 
   return {
     response: {
@@ -843,6 +1000,7 @@ export async function runAskCoursePipeline(input: {
         retrievalHitCount: chunks.length,
         knowledgeTier,
         contextAvailable,
+        ...(pilotEvidence ? { pilotEvidence } : {}),
       },
     },
     meta: {
@@ -859,7 +1017,7 @@ export async function runAskCoursePipeline(input: {
       inputTokens: providerResult.usage?.inputTokens,
       outputTokens: providerResult.usage?.outputTokens,
       reasoningTokens: providerResult.usage?.reasoningTokens,
-      totalTokens: providerResult.usage?.totalTokens,
+      totalTokens: successTotalTokens,
       estimatedCostUsdMicros: estimatedCost,
       usageEventPersisted: record.ok,
       latencyMs,

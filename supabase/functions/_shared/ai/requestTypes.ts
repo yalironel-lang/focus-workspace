@@ -4,6 +4,8 @@
  * No provider SDKs, no TipTap, no secrets.
  */
 
+import type { PilotReceipt } from './tutorPilotEvidence.ts';
+
 /** Release 1 + M0.5D. */
 export type ZikukAiCapability = 'explain_selection' | 'ask_course';
 
@@ -188,14 +190,65 @@ export type ZikukAiAskCourseRequestV2 = {
   documentCursor?: DocumentWindowCursor;
 };
 
-/** Explicit user-provided PDF data; ownership is checked by the server. */
-export type PdfCaptureAttachment = {
+/**
+ * Exact native selection vs full-page native fallback vs recovered OCR
+ * (Capture Recovery Bridge + Native-Page Fallback V1).
+ */
+export type PdfCaptureTextKind = 'native_selection' | 'native_page' | 'recovered_page';
+
+/** Visual Capture V1 — client-supplied JPEG of a selected PDF region. */
+export type PdfCaptureVisualKind = 'visual_selection';
+
+export type PdfCaptureRegionNorm = { x: number; y: number; w: number; h: number };
+
+/** Explicit user-provided PDF text; ownership is checked by the server. */
+export type PdfTextCaptureAttachment = {
   sourceKind: 'free_space_pdf';
   sourceObjectId: string;
   sectionId: string;
   pageNumber: number;
   text: string;
+  /** Default when omitted: native_selection (legacy clients). */
+  textKind?: PdfCaptureTextKind;
 };
+
+/**
+ * Visual selection — ownership-checked; pixels are not server-re-rendered in V1.
+ * Do not claim server-verified visual provenance in product copy.
+ */
+export type PdfVisualSelectionAttachment = {
+  sourceKind: 'free_space_pdf';
+  sourceObjectId: string;
+  sectionId: string;
+  pageNumber: number;
+  regionNorm: PdfCaptureRegionNorm;
+  attachmentType: 'visual_selection';
+  textKind: PdfCaptureVisualKind;
+  mime: 'image/jpeg' | 'image/png';
+  /** Decoded image bytes — never log or persist. */
+  imageBytes: Uint8Array;
+  widthPx: number;
+  heightPx: number;
+  userConfirmedVisual: true;
+};
+
+export type PdfCaptureAttachment = PdfTextCaptureAttachment | PdfVisualSelectionAttachment;
+
+export function isVisualSelectionCapture(
+  capture: PdfCaptureAttachment,
+): capture is PdfVisualSelectionAttachment {
+  return (
+    'attachmentType' in capture &&
+    capture.attachmentType === 'visual_selection' &&
+    capture.textKind === 'visual_selection'
+  );
+}
+
+export function isTextPdfCapture(
+  capture: PdfCaptureAttachment,
+): capture is PdfTextCaptureAttachment {
+  return !isVisualSelectionCapture(capture);
+}
 
 export type ZikukAiAskCourseRequestV3 = Omit<ZikukAiAskCourseRequestV2, 'version'> & {
   version: 3;
@@ -229,6 +282,9 @@ export type AskCourseSourceRef =
 export type KnowledgeTier =
   | 'course_material'
   | 'pdf_selection'
+  | 'pdf_page_native'
+  | 'pdf_page_recovered'
+  | 'pdf_selection_visual'
   | 'general_academic'
   | 'mixed';
 
@@ -262,6 +318,7 @@ export type ZikukAiResponse =
         capability: 'ask_course';
         latencyMs?: number;
         retrievalHitCount?: number;
+        pilotEvidence?: PilotReceipt;
         knowledgeTier?: KnowledgeTier;
         contextAvailable?: ContextAvailable;
       };

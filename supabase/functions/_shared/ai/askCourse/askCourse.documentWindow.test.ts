@@ -431,7 +431,8 @@ describe('ask_course document window', () => {
     const prompt = messages[0]?.map((message) => message.content).join('\n') ?? '';
     expect(prompt).toContain('Page 2 defines the cyclical part of real GDP.');
     expect(prompt).toContain('matched pages: 2');
-    expect(prompt.length).toBeLessThan(8000);
+    expect(prompt).not.toContain('x'.repeat(100));
+    expect(prompt.length).toBeLessThan(11000);
     expect(result.response.result.sources.every((source) => source.pageNumber === 2)).toBe(true);
   });
 

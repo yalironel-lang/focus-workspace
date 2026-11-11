@@ -11,7 +11,7 @@ import {
 import { MAX_ASK_COURSE_QUESTION_CHARS } from './askCourse/bounds.ts';
 import { normalizeAskCourseRecentTurns } from './askCourse/normalizeRecentTurns.ts';
 import { parseActivePdfDocument, parseDocumentCursor } from './askCourse/activeDocument.ts';
-import { parsePdfCapture } from './askCourse/pdfCapture.ts';
+import { parsePdfCaptureResult, visualCaptureRejectMessage } from './askCourse/pdfCapture.ts';
 import {
   ASK_COURSE_ALLOWED_KEYS_V1,
   ASK_COURSE_ALLOWED_KEYS_V2,
@@ -285,13 +285,15 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
   }
 
   if (version === 3) {
-    const capture = parsePdfCapture(body.capture, sectionId);
-    if (!capture) {
+    const parsedCapture = parsePdfCaptureResult(body.capture, sectionId);
+    if (!parsedCapture.ok) {
       return {
         ok: false,
         code: 'invalid_request',
         message:
-          'PDF selection is invalid or exceeds 4,000 characters. Capture a smaller readable selection.',
+          parsedCapture.kind === 'visual'
+            ? visualCaptureRejectMessage(parsedCapture.code)
+            : 'PDF selection is invalid or exceeds 4,000 characters. Capture a smaller readable selection.',
       };
     }
     const request: ZikukAiAskCourseRequestV3 = {
@@ -299,7 +301,7 @@ function validateAskCourse(body: Record<string, unknown>): ValidateResult {
       capability: 'ask_course',
       sectionId,
       question,
-      capture,
+      capture: parsedCapture.capture,
       ...(recentTurns.length > 0 ? { recentTurns } : {}),
       ...(teachingMode ? { teachingMode } : {}),
       ...(activeDocument ? { activeDocument } : {}),

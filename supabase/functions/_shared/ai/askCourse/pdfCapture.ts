@@ -1,17 +1,39 @@
-import type { PdfCaptureAttachment } from '../requestTypes.ts';
+import type {
+  PdfCaptureAttachment,
+  PdfCaptureTextKind,
+  PdfTextCaptureAttachment,
+  PdfVisualSelectionAttachment,
+} from '../requestTypes.ts';
+import { isVisualSelectionCapture } from '../requestTypes.ts';
+import {
+  messageForVisualReject,
+  parseVisualSelectionAttachment,
+  rawLooksLikeVisualSelection,
+  type VisualContractRejectCode,
+} from '../visualCapture/visualSelectionContract.ts';
 
 export const MAX_PDF_CAPTURE_CHARS = 4000;
 
-export function parsePdfCapture(raw: unknown, sectionId: string): PdfCaptureAttachment | null {
+function parseTextKind(raw: unknown): PdfCaptureTextKind | null {
+  if (raw === undefined) return 'native_selection';
+  if (raw === 'native_selection' || raw === 'native_page' || raw === 'recovered_page') return raw;
+  return null;
+}
+
+export function parsePdfTextCapture(raw: unknown, sectionId: string): PdfTextCaptureAttachment | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const a = raw as Record<string, unknown>;
-  const allowedKeys = ['sourceKind', 'sourceObjectId', 'sectionId', 'pageNumber', 'text'];
+  const allowedKeys = ['sourceKind', 'sourceObjectId', 'sectionId', 'pageNumber', 'text', 'textKind'];
   if (Object.keys(a).some((k) => !allowedKeys.includes(k))) return null;
 
   if (a.sourceKind !== 'free_space_pdf') return null;
   if (typeof a.sectionId !== 'string' || a.sectionId !== sectionId) return null;
-  if (typeof a.sourceObjectId !== 'string' || !a.sourceObjectId.trim() || a.sourceObjectId.length > 200) return null;
-  if (typeof a.pageNumber !== 'number' || !Number.isInteger(a.pageNumber) || a.pageNumber < 1 || a.pageNumber > 10000) return null;
+  if (typeof a.sourceObjectId !== 'string' || !a.sourceObjectId.trim() || a.sourceObjectId.length > 200) {
+    return null;
+  }
+  if (typeof a.pageNumber !== 'number' || !Number.isInteger(a.pageNumber) || a.pageNumber < 1 || a.pageNumber > 10000) {
+    return null;
+  }
   if (
     typeof a.text !== 'string' ||
     a.text.length > MAX_PDF_CAPTURE_CHARS ||
@@ -21,13 +43,46 @@ export function parsePdfCapture(raw: unknown, sectionId: string): PdfCaptureAtta
     return null;
   }
 
+  const textKind = parseTextKind(a.textKind);
+  if (!textKind) return null;
+
   return {
     sourceKind: 'free_space_pdf',
     sourceObjectId: a.sourceObjectId.trim(),
     sectionId,
     pageNumber: a.pageNumber,
     text: a.text.trim(),
+    ...(textKind !== 'native_selection' ? { textKind } : {}),
   };
+}
+
+export type ParsePdfCaptureResult =
+  | { ok: true; capture: PdfCaptureAttachment }
+  | { ok: false; kind: 'text' }
+  | { ok: false; kind: 'visual'; code: VisualContractRejectCode };
+
+/**
+ * Parse v3 capture: text (legacy keys) or visual_selection (discriminated).
+ */
+export function parsePdfCaptureResult(raw: unknown, sectionId: string): ParsePdfCaptureResult {
+  if (rawLooksLikeVisualSelection(raw)) {
+    const visual = parseVisualSelectionAttachment(raw, sectionId);
+    if (!visual.ok) return { ok: false, kind: 'visual', code: visual.code };
+    return { ok: true, capture: visual.attachment };
+  }
+  const text = parsePdfTextCapture(raw, sectionId);
+  if (!text) return { ok: false, kind: 'text' };
+  return { ok: true, capture: text };
+}
+
+/** Legacy helper — text-only; returns null for visual (use parsePdfCaptureResult). */
+export function parsePdfCapture(raw: unknown, sectionId: string): PdfTextCaptureAttachment | null {
+  if (rawLooksLikeVisualSelection(raw)) return null;
+  return parsePdfTextCapture(raw, sectionId);
+}
+
+export function visualCaptureRejectMessage(code: VisualContractRejectCode): string {
+  return messageForVisualReject(code);
 }
 
 export type PdfCaptureSource = {
@@ -90,3 +145,10 @@ export function isOwnedPdfCaptureSource(
 ): boolean {
   return isOwnedPdfSource(row, userId, capture);
 }
+
+export function captureTextForRetrieval(capture: PdfCaptureAttachment): string | undefined {
+  if (isVisualSelectionCapture(capture)) return undefined;
+  return capture.text;
+}
+
+export type { PdfVisualSelectionAttachment };

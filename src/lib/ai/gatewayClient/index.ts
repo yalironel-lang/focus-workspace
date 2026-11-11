@@ -12,6 +12,8 @@ export type {
   ContextAvailable,
   KnowledgeTier,
   PdfCaptureAttachment,
+  PdfTextCaptureAttachment,
+  PdfVisualSelectionAttachment,
   TeachingMode,
   ZikukAiAskCourseRequest,
   ZikukAiAskCourseRequestV1,
@@ -24,5 +26,5 @@ export type {
   ZikukAiResponse,
 } from './types';
 
-export { AI_GATEWAY_FUNCTION_NAME } from './types';
+export { AI_GATEWAY_FUNCTION_NAME, isVisualSelectionCapture } from './types';
 export { zikukAiRequest, serializeAskCourseGatewayBody } from './client';

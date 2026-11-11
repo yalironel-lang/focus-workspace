@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-09",
+  "scope": "Local offline checks only; no credentials/private journals or live requests",
+  "g285": {
+    "passed": 205,
+    "failed": 0,
+    "skipped": 0,
+    "syntaxModules": 30
+  },
+  "applicationAndGatewayVitest": {
+    "filesPassed": 316,
+    "testsPassed": 4146,
+    "failed": 0,
+    "durationSeconds": 143.49,
+    "excluded": [
+      "src/lib/spatialAssetCloud.live.test.ts",
+      "src/lib/notebookPages.live.test.ts",
+      "src/lib/focusCache/userWorkspaceStateCloud.live.test.ts"
+    ]
+  },
+  "applicationBuildTypeScript": {
+    "status": "PASS",
+    "command": "node node_modules/typescript/bin/tsc -p tsconfig.build.json --incremental false"
+  },
+  "localSyntheticBundles": {
+    "staging": "PASS",
+    "production": "PASS",
+    "identityChecks": "PASS for both",
+    "environmentFilesLoaded": false,
+    "output": "/tmp/zikuk-release-audit/dist-{staging,production}",
+    "deployable": false
+  },
+  "deploymentGuardChecks": {
+    "passed": 8,
+    "failed": 0,
+    "liveDeployment": false
+  },
+  "lint": {
+    "status": "BLOCKED",
+    "reason": "No installed node_modules/.bin/eslint; no packages installed"
+  },
+  "warnings": [
+    "Large generated chunks",
+    "Stale Browserslist database",
+    "Node experimental localStorage warning"
+  ],
+  "limitations": [
+    "Offline config explicitly excludes live tests and disables Vite environment-file loading",
+    "Network blocker rejects outbound TCP and global fetch unless tests replace them with mocks",
+    "Successful application/gateway mocks are not evidence of deployed configuration or actual device behavior",
+    "Snapshot is current source only, not successful-live-run source attestation"
+  ]
+}

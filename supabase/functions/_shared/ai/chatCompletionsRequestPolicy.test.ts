@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SERVER_MAX_OUTPUT_TOKENS,
+  SERVER_ASK_COURSE_MAX_OUTPUT_TOKENS,
   SERVER_REASONING_MAX_OUTPUT_TOKENS,
 } from '../../../../supabase/functions/_shared/ai/bounds.ts';
 import {
@@ -50,10 +51,19 @@ describe('resolveChatCompletionsPolicy', () => {
 });
 
 describe('resolveServerMaxOutputTokens', () => {
-  it('gives gpt-5.6-luna the reasoning budget and keeps gpt-4o-mini at 1200', () => {
+  it('gives gpt-5.6-luna the reasoning budget and isolates ask_course (2048) from explain_selection (1200)', () => {
     expect(SERVER_MAX_OUTPUT_TOKENS).toBe(1200);
+    expect(SERVER_ASK_COURSE_MAX_OUTPUT_TOKENS).toBe(2048);
     expect(SERVER_REASONING_MAX_OUTPUT_TOKENS).toBe(8000);
+    // Reasoning models always get reasoning budget across routes
     expect(resolveServerMaxOutputTokens('gpt-5.6-luna')).toBe(8000);
+    expect(resolveServerMaxOutputTokens('gpt-5.6-luna', 'ask_course')).toBe(8000);
+    expect(resolveServerMaxOutputTokens('gpt-5.6-luna', 'explain_selection')).toBe(8000);
+    // Non-reasoning models get dedicated 2048 for ask_course and 1200 for explain_selection
+    expect(resolveServerMaxOutputTokens('gpt-4.1-mini', 'ask_course')).toBe(2048);
+    expect(resolveServerMaxOutputTokens('gpt-4.1-mini', 'explain_selection')).toBe(1200);
+    expect(resolveServerMaxOutputTokens('gpt-4o-mini', 'ask_course')).toBe(2048);
+    expect(resolveServerMaxOutputTokens('gpt-4o-mini', 'explain_selection')).toBe(1200);
     expect(resolveServerMaxOutputTokens('gpt-4o-mini')).toBe(1200);
   });
 

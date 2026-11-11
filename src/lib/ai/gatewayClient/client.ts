@@ -18,6 +18,9 @@ import {
   type ZikukAiRequest,
   type ZikukAiResponse,
 } from './types';
+import { MAX_ASK_COURSE_VISUAL_BODY_BYTES } from '../visualCapture/visualSelectionContract';
+import { parsePilotReceipt } from '../../../../supabase/functions/_shared/ai/tutorPilotEvidence';
+import { beginTutorPilot, verifyTutorPilot } from '../tutor/tutorPilotEvidence';
 
 function asError(code: ZikukAiErrorCode, message: string): ZikukAiResponse {
   return { version: 1, ok: false, error: { code, message } };
@@ -90,6 +93,9 @@ function parseSources(raw: unknown): AskCourseSourceRef[] | null {
 function parseKnowledgeTier(value: unknown): KnowledgeTier | undefined {
   return value === 'course_material' ||
     value === 'pdf_selection' ||
+    value === 'pdf_page_native' ||
+    value === 'pdf_page_recovered' ||
+    value === 'pdf_selection_visual' ||
     value === 'general_academic' ||
     value === 'mixed'
     ? value
@@ -146,9 +152,11 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
         retrievalHitCount?: number;
         knowledgeTier?: unknown;
         contextAvailable?: unknown;
+        pilotEvidence?: unknown;
       } | undefined;
       const metaTier = parseKnowledgeTier(meta?.knowledgeTier);
       const metaContext = parseContextAvailable(meta?.contextAvailable);
+      const pilotReceipt = parsePilotReceipt(meta?.pilotEvidence);
       return {
         version: 1,
         ok: true,
@@ -171,6 +179,7 @@ function parseResponseBody(data: unknown): ZikukAiResponse | null {
                   : {}),
                 ...(metaTier ? { knowledgeTier: metaTier } : {}),
                 ...(metaContext ? { contextAvailable: metaContext } : {}),
+                ...(pilotReceipt ? { pilotEvidence: pilotReceipt } : {}),
               },
             }
           : {}),
@@ -364,12 +373,30 @@ export async function zikukAiRequest(
 
   if (body.capability === 'ask_course') {
     logAskCourseWireDiag(body);
+    if (body.version === 3 && body.capture && 'attachmentType' in body.capture && body.capture.attachmentType === 'visual_selection') {
+      const rawText = JSON.stringify(body);
+      const wireBytes = new TextEncoder().encode(rawText).byteLength;
+      if (wireBytes > MAX_ASK_COURSE_VISUAL_BODY_BYTES) {
+        logTransportFailure({
+          surface: opts?.surface,
+          errorName: 'visual_request_body_too_large',
+          httpStatus: 413,
+          contentTypeClass: 'empty',
+        });
+        return asError('invalid_request', 'The visual request exceeds the 512 KiB request limit.');
+      }
+    }
   }
 
   try {
+    const pilot = body.capability === 'ask_course' && typeof window !== 'undefined' ? beginTutorPilot({
+      supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? '', origin: window.location.origin,
+      search: window.location.search, surface: opts?.surface,
+    }) : undefined;
     const { data, error } = await supabase.functions.invoke(AI_GATEWAY_FUNCTION_NAME, {
       body,
       signal: opts?.signal,
+      ...(pilot ? { headers: pilot.headers } : {}),
     });
 
     if (error) {
@@ -389,6 +416,9 @@ export async function zikukAiRequest(
     }
 
     const parsed = parseResponseBody(data);
+    if (pilot && body.capability === 'ask_course' && parsed?.ok && parsed.result.type === 'ask_course' && parsed.meta?.capability === 'ask_course') {
+      try { parsed.meta.pilotRenderEvidence = await verifyTutorPilot(pilot.key, body, parsed); } catch { /* Evidence failure must not retry inference. */ }
+    }
     if (parsed) return parsed;
     logTransportFailure({
       surface: opts?.surface,

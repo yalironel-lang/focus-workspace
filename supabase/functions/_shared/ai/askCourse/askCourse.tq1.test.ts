@@ -303,7 +303,8 @@ describe('TQ1.1: Academic Scenarios & Grounding Pipeline', () => {
     }
 
     expect(capturedSystemPrompt).toContain('[PDF selection]');
-    expect(capturedSystemPrompt).toContain('GROUNDING IN PDF SELECTION');
+    expect(capturedSystemPrompt).toContain('GROUNDING IN PDF ATTACHMENT');
+    expect(capturedSystemPrompt).toContain('userProvidedPdfSelection');
     expect(capturedUserEnvelope).toMatchObject({
       instruction: 'Explain the geometric intuition of the Mean Value Theorem',
       untrustedContext: {
@@ -313,6 +314,10 @@ describe('TQ1.1: Academic Scenarios & Grounding Pipeline', () => {
         },
       },
     });
+    expect(
+      (capturedUserEnvelope as { untrustedContext?: Record<string, unknown> } | null)
+        ?.untrustedContext?.userProvidedRecoveredPdfPage,
+    ).toBeUndefined();
   });
 
   it('Scenario 4 & 5: Source-only and missing course facts directives are present in system prompts', () => {

@@ -1,0 +1,73 @@
+{
+  "candidateId": "local-34b07e1319c641c1",
+  "parentCandidate": "local-2e50443a572696c2",
+  "scopedFiles": 1330,
+  "sourceChanges": [
+    "scripts/security/release-audit/migration022-corrected-rehearsal.sql",
+    "supabase/functions/_shared/ai/projectAccounting.test.ts",
+    "supabase/functions/_shared/ai/providerBudget.review.test.ts",
+    "supabase/functions/_shared/ai/providerGemini.test.ts",
+    "supabase/functions/_shared/ai/providerGemini.ts",
+    "supabase/functions/_shared/ai/tokenLedgerCorrection.review.test.ts",
+    "supabase/functions/ai-gateway/index.ts"
+  ],
+  "tests": {
+    "applicationGateway": {
+      "filesPassed": 321,
+      "passed": 4234,
+      "failed": 0,
+      "seconds": 126.15,
+      "liveFilesExcluded": 3
+    },
+    "focusedProviderAndSql": {
+      "passed": 110,
+      "failed": 0,
+      "files": 4
+    },
+    "newProviderMocks": {
+      "passed": 16,
+      "meaning": "local fetch/control/wire behavior only; not actual provider limits"
+    },
+    "sqlSourceContracts": {
+      "passed": 9,
+      "meaning": "static contracts and design arithmetic only; no PostgreSQL execution"
+    },
+    "newIncompleteUsageRegression": {
+      "passed": 1
+    }
+  },
+  "typeChecks": {
+    "edgeOfflineCompatibility": "PASS",
+    "frontend": "PASS",
+    "nativeDeno": "UNVERIFIED"
+  },
+  "tutorReenabled": false,
+  "authoritativeTokenBound": "NOT ESTABLISHED",
+  "actualHostedProviderConfiguration": "UNKNOWN; no secrets or remote access",
+  "browser": {
+    "pageAssertionsExecuted": 0,
+    "fullChromiumVersionOnly": "SIGABRT with fresh temporary profile and clean environment",
+    "webkit": "MISSING",
+    "rootCauseFullChromium": "UNKNOWN"
+  },
+  "sql": {
+    "correctionApplied": false,
+    "databaseStarted": false,
+    "newLegacyCrossDayStop": true,
+    "currentProductionCompatibility": "UNKNOWN"
+  },
+  "existingUserCapsOrContracts": "UNKNOWN; no private settings/contracts inspected",
+  "globalSpendCoverage": "Ingestion embeddings are outside Tutor reservation path; BYOK is a separate user-owned billing domain",
+  "preserved": [
+    "G2.85 source/milestone",
+    "single-attempt deployment safeguard",
+    "original Migration 022",
+    "root dependencies",
+    "Mission Control V2 workstream"
+  ],
+  "remoteServicesOrPaidInferenceOrCredentials": false,
+  "releaseDecision": "NO-GO",
+  "conservativeFinalization": "Gateway no longer treats answer success as usage completeness; default retains full reservation",
+  "dependenciesInstalled": false,
+  "currentCandidate": "local-34b07e1319c641c1"
+}

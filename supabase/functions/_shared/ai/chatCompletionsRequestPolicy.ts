@@ -21,8 +21,11 @@ export const LEGACY_CHAT_COMPLETIONS_TEMPERATURE = 0.4;
 
 import {
   SERVER_MAX_OUTPUT_TOKENS,
+  SERVER_ASK_COURSE_MAX_OUTPUT_TOKENS,
   SERVER_REASONING_MAX_OUTPUT_TOKENS,
+  SERVER_GEMINI_REASONING_MAX_OUTPUT_TOKENS,
 } from './bounds.ts';
+import type { ZikukAiCapability } from './requestTypes.ts';
 
 /**
  * True for OpenAI reasoning / GPT-5+ families that require
@@ -41,14 +44,29 @@ export function isReasoningCompatibleChatModel(model: string): boolean {
   return false;
 }
 
+export function isGeminiReasoningModel(model: string): boolean {
+  const id = model.trim().toLowerCase();
+  return /^gemini-3(?:\.[0-9]+)?-flash/.test(id);
+}
+
 /**
  * Return bounded server token budget: allocates expanded completion headroom
- * for reasoning models (where reasoning tokens count against the budget), while
- * strictly preserving legacy 1200-token limit for non-reasoning models.
+ * for reasoning models (where reasoning tokens count against the budget),
+ * dedicated 2048 headroom for ask_course (Tutor) multi-step problem solving, while
+ * strictly preserving legacy 1200-token limit for explain_selection and other routes.
  */
-export function resolveServerMaxOutputTokens(model: string): number {
+export function resolveServerMaxOutputTokens(
+  model: string,
+  capability?: ZikukAiCapability,
+): number {
+  if (isGeminiReasoningModel(model)) {
+    return SERVER_GEMINI_REASONING_MAX_OUTPUT_TOKENS;
+  }
   if (isReasoningCompatibleChatModel(model)) {
     return SERVER_REASONING_MAX_OUTPUT_TOKENS;
+  }
+  if (capability === 'ask_course') {
+    return SERVER_ASK_COURSE_MAX_OUTPUT_TOKENS;
   }
   return SERVER_MAX_OUTPUT_TOKENS;
 }

@@ -1,8 +1,11 @@
 import type { NormalizedPageRegion } from "../../lib/pdfGeometry/normalizedPageRegion";
 import type { TutorCaptureIntent, TutorCaptureChrome } from "../../lib/ai/tutor/tutorCaptureTypes";
-import { useTutorPdfCapture } from "../../lib/ai/tutor/useTutorPdfCapture";
+import {
+  useTutorPdfCapture,
+  type PageTextLayerProbe,
+} from "../../lib/ai/tutor/useTutorPdfCapture";
 import { PdfTutorCaptureOverlay } from "./PdfTutorCaptureOverlay";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   ExternalLink,
@@ -40,6 +43,48 @@ import {
 } from '../../lib/pdfViewerState';
 import { flushAllFreeSpacePersistence } from '../../lib/freeSpacePersistFlush';
 import { TOUCH_TARGET_MIN_PX } from '../../lib/ui/touchTarget';
+
+/** Compile-time staging/DEV only — Production builds exclude this chunk. */
+const OWNER_PDF_RECOVERY_DIAG_BUILD =
+  import.meta.env.DEV || import.meta.env.VITE_STAGING_EMAIL_AUTH === 'true';
+
+const OwnerPdfRecoveryDiagPanel = OWNER_PDF_RECOVERY_DIAG_BUILD
+  ? lazy(() =>
+      import('./OwnerPdfRecoveryDiagPanel').then((m) => ({
+        default: m.OwnerPdfRecoveryDiagPanel,
+      })),
+    )
+  : null;
+
+function useOwnerPdfRecoveryDiagOptIn(): boolean {
+  const [optedIn, setOptedIn] = useState(() => {
+    if (!OWNER_PDF_RECOVERY_DIAG_BUILD || typeof window === 'undefined') return false;
+    try {
+      if (new URLSearchParams(window.location.search).get('pdfRecoveryDiag') === '1') return true;
+      return window.localStorage.getItem('FW_PDF_RECOVERY_DIAG') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (!OWNER_PDF_RECOVERY_DIAG_BUILD || typeof window === 'undefined') return;
+    try {
+      const fromUrl =
+        new URLSearchParams(window.location.search).get('pdfRecoveryDiag') === '1';
+      if (fromUrl) {
+        window.localStorage.setItem('FW_PDF_RECOVERY_DIAG', '1');
+        setOptedIn(true);
+        return;
+      }
+      setOptedIn(window.localStorage.getItem('FW_PDF_RECOVERY_DIAG') === '1');
+    } catch {
+      setOptedIn(false);
+    }
+  }, []);
+
+  return OWNER_PDF_RECOVERY_DIAG_BUILD && optedIn;
+}
 
 function useCoarsePointer(): boolean {
   const [coarsePointer, setCoarsePointer] = useState(false);
@@ -137,6 +182,7 @@ export function FreeSpacePdfCard({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'recover' | 'error'>('idle');
   const [dragOver, setDragOver] = useState(false);
   const [visiblePage, setVisiblePage] = useState(content.page);
+  const ownerPdfRecoveryDiagOptIn = useOwnerPdfRecoveryDiagOptIn();
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -425,6 +471,21 @@ export function FreeSpacePdfCard({
   );
 
   const extractTextRef = useRef<((page: number, region: NormalizedPageRegion) => Promise<string | undefined>) | null>(null);
+  const probePageTextLayerRef = useRef<((page: number) => Promise<PageTextLayerProbe>) | null>(null);
+  const assessRegionRef = useRef<
+    | ((
+        page: number,
+        region: NormalizedPageRegion,
+      ) => Promise<import('../../lib/ai/tutor/captureRegionDiagnostics').CaptureRegionDiagnostics | null>)
+    | null
+  >(null);
+  const renderRegionImageRef = useRef<
+    | ((
+        page: number,
+        region: NormalizedPageRegion,
+      ) => Promise<import('../../lib/ai/visualCapture/renderPdfRegionImage').RenderPdfRegionImageResult>)
+    | null
+  >(null);
   const tutorCapture = useTutorPdfCapture({
     enabled: loadState === "ready" && !suspendViewer,
     sectionId,
@@ -433,6 +494,19 @@ export function FreeSpacePdfCard({
     onIntent: onTutorCaptureIntent,
     onChromeChange: onTutorCaptureChromeChange,
     extractText: region => extractTextRef.current?.(visiblePage, region) ?? Promise.resolve(undefined),
+    probePageTextLayer: page =>
+      probePageTextLayerRef.current?.(page) ??
+      Promise.resolve({
+        kind: 'empty',
+        itemCount: 0,
+        meaningfulCharCount: 0,
+        hasReadableText: false,
+      }),
+    assessRegion: region =>
+      assessRegionRef.current?.(visiblePage, region) ?? Promise.resolve(null),
+    renderRegionImage: region =>
+      renderRegionImageRef.current?.(visiblePage, region) ??
+      Promise.resolve({ ok: false, code: 'render_failed' as const }),
   });
 
   const studyMarks = usePdfStudyMarks({
@@ -827,7 +901,12 @@ export function FreeSpacePdfCard({
             onVisiblePageChange={publishLivePage}
             onPagePersist={handlePagePersist}
             onError={handleViewerError}
-            onExtractTextReady={extractor => { extractTextRef.current = extractor; }}
+            onExtractTextReady={(extractor, probe, assess, renderRegion) => {
+              extractTextRef.current = extractor;
+              probePageTextLayerRef.current = probe;
+              assessRegionRef.current = assess;
+              renderRegionImageRef.current = renderRegion;
+            }}
             fitPageToken={fitPageToken}
             onCommitZoom={commitViewerZoom}
             renderPageOverlay={
@@ -859,6 +938,37 @@ export function FreeSpacePdfCard({
           />
         ) : null}
       </div>
+      {/*
+        Must be a shrink-0 sibling BELOW the flex-1 viewer well.
+        PdfJsScrollViewer uses absolute inset-0; mounting the panel inside that
+        well hides it under the viewer / clips it via ancestor overflow-hidden.
+      */}
+      {OWNER_PDF_RECOVERY_DIAG_BUILD &&
+      OwnerPdfRecoveryDiagPanel &&
+      ownerPdfRecoveryDiagOptIn ? (
+        <div className="shrink-0 relative z-30" data-testid="owner-pdf-recovery-diag-slot">
+          <Suspense
+            fallback={
+              <div
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  color: '#64748b',
+                  borderTop: '1px dashed #94a3b8',
+                }}
+              >
+                Loading PDF recovery diag…
+              </div>
+            }
+          >
+            <OwnerPdfRecoveryDiagPanel
+              sectionId={sectionId}
+              sourceObjectId={objectId}
+              pageNumber={visiblePage}
+            />
+          </Suspense>
+        </div>
+      ) : null}
     </div>
   );
 }

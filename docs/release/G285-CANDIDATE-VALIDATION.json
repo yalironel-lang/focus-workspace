@@ -1,0 +1,46 @@
+{
+  "date": "2026-11-09",
+  "candidateId": "local-32acfd93b25ed0ae",
+  "applicationAndGatewayVitest": {
+    "files": 317,
+    "passed": 4149,
+    "failed": 0,
+    "durationSeconds": 133.07,
+    "liveTestsExcluded": 3
+  },
+  "g285": {
+    "passed": 205,
+    "failed": 0,
+    "sourceModulesUnchanged": 30
+  },
+  "deploymentOutcomeAdversarialTests": {
+    "passed": 29,
+    "failed": 0,
+    "skipped": 0,
+    "durationSeconds": 35.44,
+    "actualScriptWithSyntheticCLIs": true
+  },
+  "deploymentGuardChecks": {
+    "passed": 8,
+    "failed": 0
+  },
+  "frontendTypeScript": "PASS",
+  "edgeStrictInspection": {
+    "status": "FAIL / incomplete Deno environment",
+    "diagnostics": 27,
+    "confirmedExamples": [
+      "dispatch callback result/void type mismatch at gateway:503",
+      "pipelineResult used before assignment at gateway:506"
+    ],
+    "notAuthoritativeDenoBuild": true
+  },
+  "lint": "TOOLING_GAP; not independently a release blocker without a mandatory policy",
+  "rootLockfileUnchanged": true,
+  "liveOperations": false,
+  "confirmedBehaviorReproductions": [
+    "cost-only configured cap bypasses durable-path dollar evaluation",
+    "application-level settlement rejection reported as success",
+    "missing begin RPC denies admission"
+  ],
+  "important": "Three evidence tests reproduce existing deficiencies; passing tests do not close them."
+}

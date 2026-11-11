@@ -129,7 +129,11 @@ describe('serializeAskCourseGatewayBody', () => {
       },
       activeDocument,
     });
-    expect(captured.version === 3 && captured.capture.text).toBe('Selected equation');
+    expect(
+      captured.version === 3 &&
+        'text' in captured.capture &&
+        captured.capture.text,
+    ).toBe('Selected equation');
     expect(captured.version === 3 && captured.activeDocument).toEqual(activeDocument);
     expect(captured).not.toHaveProperty('fileName');
   });

@@ -2,11 +2,10 @@ import { useState, type FormEvent } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { MagicLinkNotice, MagicLinkStatus } from '../lib/auth/stagingMagicLink';
+import { isStagingEmailAuthEnabled } from '../lib/auth/stagingEmailAuthFlag';
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ZikukLogo } from './ZikukLogo';
-
-const stagingEmailAuthEnabled = import.meta.env.VITE_STAGING_EMAIL_AUTH === 'true';
 
 const MAGIC_LINK_COPY: Record<MagicLinkStatus | MagicLinkNotice, string> = {
   invalid_email: 'Enter a valid email address.',
@@ -245,7 +244,7 @@ export function Auth() {
                   Enter ZIKUK
                 </p>
 
-                {stagingEmailAuthEnabled ? (
+                {isStagingEmailAuthEnabled() ? (
                   <div className="mb-3">
                     <StagingMagicLinkPanel />
                   </div>

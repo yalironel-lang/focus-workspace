@@ -20,9 +20,13 @@ import { readTutorSession, tutorSessionStorageKey, writeTutorSession } from './t
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('../gatewayClient', () => ({
-  zikukAiRequest: vi.fn(),
-}));
+vi.mock('../gatewayClient', async importOriginal => {
+  const actual = await importOriginal<typeof import('../gatewayClient')>();
+  return {
+    ...actual,
+    zikukAiRequest: vi.fn(),
+  };
+});
 
 const tokens = {
   accent: '#f59e0b',

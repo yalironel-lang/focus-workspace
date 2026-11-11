@@ -1,0 +1,89 @@
+{
+  "date": "2026-11-09",
+  "candidateId": "local-ed1c32525a4880a2",
+  "parentCandidate": "local-32acfd93b25ed0ae",
+  "head": "760470850db179821b3aa56043f5e5be3115d8d2",
+  "sourceChanges": [
+    "scripts/security/release-audit/browser/index.html",
+    "scripts/security/release-audit/browser/offline.spec.mjs",
+    "scripts/security/release-audit/browser/playwright.config.mjs",
+    "scripts/security/release-audit/browser/run-offline.mjs",
+    "scripts/security/release-audit/browser/scenarios.mjs",
+    "scripts/security/release-audit/browser/server.mjs",
+    "scripts/security/release-audit/edge-runtime.d.ts",
+    "scripts/security/release-audit/migration022-catalog.sql",
+    "scripts/security/release-audit/tsconfig.edge.json",
+    "supabase/functions/_shared/ai/askCourse/runAskCourse.ts",
+    "supabase/functions/_shared/ai/candidateReadiness.audit.test.ts",
+    "supabase/functions/_shared/ai/projectAccounting.test.ts",
+    "supabase/functions/_shared/ai/projectAccounting.ts",
+    "supabase/functions/_shared/ai/projectLevelSpendingGuard.test.ts",
+    "supabase/functions/_shared/ai/projectLevelSpendingGuard.ts",
+    "supabase/functions/_shared/ai/supabaseEnforcement.ts",
+    "supabase/functions/ai-gateway/index.ts"
+  ],
+  "tests": {
+    "offlineApplicationGateway": {
+      "filesPassed": 318,
+      "passed": 4187,
+      "failed": 0,
+      "liveFilesExcluded": 3,
+      "seconds": 133.71
+    },
+    "g285": {
+      "passed": 205,
+      "failed": 0,
+      "sourceModulesUnchanged": 30
+    },
+    "deploymentOutcome": {
+      "passed": 29,
+      "failed": 0
+    },
+    "deploymentGuards": {
+      "passed": 8,
+      "failed": 0
+    },
+    "newAccountingAdversarial": {
+      "passed": 38,
+      "failed": 0
+    },
+    "previousDefectReproductions": {
+      "convertedToRemediationAssertions": 3,
+      "countedAsDefectReproductionPasses": 0
+    }
+  },
+  "strictChecks": {
+    "edgeOfflineCompatibility": "PASS; strict=true, skipLibCheck=false",
+    "edgeNativePinnedDeno": "UNVERIFIED; Deno unavailable; offline SDK types use installed 2.105.1 instead of pinned remote 2.49.0",
+    "frontendBuildTypeScript": "PASS",
+    "browserMjsSyntax": "PASS"
+  },
+  "browserExecution": {
+    "assertionsPassed": 0,
+    "chromium": "BLOCKED: local executable could not launch",
+    "webkit": "BLOCKED: browser not installed",
+    "cli": "Stalled before tests; stopped",
+    "initialLoopbackSandbox": "EPERM; loopback-only attempt subsequently permitted, engine launch remained blocked"
+  },
+  "migration022": {
+    "modified": false,
+    "applied": false,
+    "currentProductionCompatibility": "UNKNOWN",
+    "isolatedRehearsal": "PREPARED; NOT EXECUTED; requires authorization"
+  },
+  "preserved": {
+    "rootLockfile": true,
+    "singleAttemptDeployScript": true,
+    "g285Modules": true,
+    "reportedLiveAcceptanceMilestone": true
+  },
+  "functionalLimitations": [
+    "Configured dollar cap rejects all requests until authoritative money ledger exists",
+    "No-reservation admission now denied; supported request/token capped reservation required",
+    "Local mocks cannot prove actual PostgreSQL concurrency/expiry/rollback",
+    "Browser-module suite does not replace full authenticated UI/device acceptance"
+  ],
+  "liveStagingProductionOperations": false,
+  "credentialsOrPrivateJournalsRead": false,
+  "releaseDecision": "NO-GO"
+}

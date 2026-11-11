@@ -14,7 +14,7 @@ type RpcClient = {
   rpc(
     fn: string,
     args?: Record<string, unknown>,
-  ): Promise<{ data: unknown; error: { message?: string } | null }>;
+  ): PromiseLike<{ data: unknown; error: { message?: string } | null }>;
 };
 
 function asPlan(v: unknown): AiPlan | undefined {

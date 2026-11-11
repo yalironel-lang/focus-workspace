@@ -29,6 +29,7 @@ describe('Auth staging email login', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('VITE_STAGING_EMAIL_AUTH', 'false');
     auth.magicLinkNotice = null;
     auth.signInWithMagicLink.mockResolvedValue('sent');
     host = document.createElement('div');
@@ -39,6 +40,7 @@ describe('Auth staging email login', () => {
   afterEach(() => {
     act(() => root?.unmount());
     host?.remove();
+    vi.unstubAllEnvs();
   });
 
   it('keeps the production screen on Google sign-in', () => {
@@ -52,6 +54,16 @@ describe('Auth staging email login', () => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(auth.signInWithGoogle).toHaveBeenCalledOnce();
+  });
+
+  it('shows the staging email form on Auth when the flag is exactly true', () => {
+    vi.stubEnv('VITE_STAGING_EMAIL_AUTH', 'true');
+    act(() => {
+      root?.render(createElement(Auth));
+    });
+    expect(host?.querySelector('[data-testid="staging-magic-link-form"]')).toBeTruthy();
+    expect(host?.textContent).toContain('Email me a sign-in link');
+    expect(host?.textContent).toContain('Continue with Google');
   });
 
   it('shows the email form, a sent confirmation, and failure copy', async () => {

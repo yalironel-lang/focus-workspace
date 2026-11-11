@@ -21,6 +21,9 @@ export type ProviderSuccess = {
   providerRequestId?: string;
   /** Visible text was cut off because the completion budget was spent. */
   generationIncomplete?: boolean;
+  retryAttempts?: number;
+  fallbackTriggered?: boolean;
+  originalModel?: string;
 };
 
 /**
@@ -33,7 +36,7 @@ export type ProviderFailureDiagnostics = {
   providerErrorType?: string;
   providerErrorCode?: string;
   model: string;
-  endpoint: 'chat_completions';
+  endpoint: 'chat_completions' | 'gemini_generate_content';
   finishReason?: string;
   emptyText?: boolean;
   requestId?: string;
@@ -54,6 +57,9 @@ export type ProviderFailure = {
   /** Server-only; must not be forwarded to the client response. */
   diagnostics?: ProviderFailureDiagnostics;
   providerRequestId?: string;
+  retryAttempts?: number;
+  fallbackTriggered?: boolean;
+  originalModel?: string;
 };
 
 export type ProviderResult = ProviderSuccess | ProviderFailure;
@@ -63,6 +69,8 @@ export type ProviderCompleteInput = {
   messages: ChatMessage[];
   maxTokens: number;
   signal?: AbortSignal;
+  requestStartedAt?: number;
+  deadlineMs?: number;
 };
 
 export interface AiProvider {

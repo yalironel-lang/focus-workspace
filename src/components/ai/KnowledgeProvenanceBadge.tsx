@@ -9,6 +9,20 @@ const COPY: Record<KnowledgeTier, { label: string; title: string }> = {
     label: 'Selected PDF',
     title: 'The answer repeats wording from the selected PDF text. Shared terms alone are not treated as verified grounding.',
   },
+  pdf_page_native: {
+    label: 'Full-page PDF text',
+    title:
+      'The answer repeats wording from confirmed full-page native PDF text. This is not an exact drag selection; formulas outside the text layer may be absent.',
+  },
+  pdf_page_recovered: {
+    label: 'Recovered PDF page',
+    title: 'The answer repeats wording from recovered/OCR full-page text. This is not an exact drag selection; formulas may be imperfect.',
+  },
+  pdf_selection_visual: {
+    label: 'Selected PDF area (visual)',
+    title:
+      'The answer cites a client-supplied image of a selected PDF area. This is not a text transcription and is not server-verified visual provenance.',
+  },
   general_academic: {
     label: 'General academic knowledge',
     title: 'Not attributed to your course materials or the selected PDF.',

@@ -58,6 +58,14 @@ export type GatewayPipelineAfterPreflightInput = {
   /** Fail-closed before provider when absent in production Edge. */
   enforcement: AiEnforcementStore;
   askCourseDeps?: Omit<AskCourseDeps, 'generationProvider' | 'routerConfig' | 'enforcement' | 'signal'>;
+  /** Called right before upstream LLM provider dispatch for durable crash accounting and final payload bounding. */
+  onProviderDispatch?: (payload?: {
+    capability?: string;
+    model?: string;
+    messages?: any;
+    maxTokens?: number;
+    embeddingTokens?: number;
+  }) => Promise<void> | void;
 };
 
 export type GatewayUsageLog = {
@@ -139,6 +147,7 @@ export async function runGatewayPipelineAfterPreflight(
         enforcement,
         signal: input.signal,
         requestStartedAt: input.requestStartedAt,
+        onProviderDispatch: input.onProviderDispatch,
       },
     });
     const usageLog: GatewayUsageLog = {
@@ -226,13 +235,21 @@ export async function runGatewayPipelineAfterPreflight(
 
   const messages = buildExplainSelectionMessages(providerPayload);
   const route = routeModel({ capability: request.capability, modality: 'text' }, input.routerConfig);
+  const maxTokens = resolveServerMaxOutputTokens(route.model, request.capability);
+
+  await input.onProviderDispatch?.({
+    capability: request.capability,
+    model: route.model,
+    messages,
+    maxTokens,
+  });
 
   const providerResult = await completeChatWithinDeadline(
     input.provider,
     {
       model: route.model,
       messages,
-      maxTokens: resolveServerMaxOutputTokens(route.model),
+      maxTokens,
     },
     { requestStartedAt: input.requestStartedAt, parent: input.signal },
   );

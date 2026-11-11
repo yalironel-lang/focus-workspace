@@ -34,3 +34,11 @@ tmp/m10b2_*/
 .DS_Store
 Thumbs.db
 .vercel
+
+# Supabase CLI temporary metadata
+supabase/.temp/
+
+# Deployment & local scratch
+.vercel-staging/
+scratch/
+

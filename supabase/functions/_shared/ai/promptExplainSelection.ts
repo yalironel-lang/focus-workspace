@@ -5,7 +5,18 @@
 
 import type { ExplainSelectionProviderPayload } from './sanitizeForProvider.ts';
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+/** OpenAI-compatible multimodal content parts (vision). Text-only stays a string. */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | {
+      type: 'image_url';
+      image_url: { url: string; detail?: 'low' | 'high' | 'auto' };
+    };
+
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string | ChatContentPart[];
+};
 
 function formatFocus(payload: ExplainSelectionProviderPayload): string {
   const f = payload.focus;

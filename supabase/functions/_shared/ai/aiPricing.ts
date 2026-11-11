@@ -26,6 +26,16 @@ export const AI_MODEL_PRICE_USD_MICROS_PER_1M: Readonly<
   Record<string, ModelPriceMicrosPer1M>
 > = Object.freeze({});
 
+/** Verified pricing table for Gemini models. */
+export const VERIFIED_GEMINI_PRICE_USD_MICROS_PER_1M: Readonly<
+  Record<string, ModelPriceMicrosPer1M>
+> = Object.freeze({
+  'gemini-3.6-flash': {
+    inputPer1M: 1_500_000,
+    outputPer1M: 7_500_000,
+  },
+});
+
 /**
  * Estimate cost in USD micros. Returns null when pricing is unknown or usage incomplete.
  */
@@ -35,7 +45,7 @@ export function estimateCostUsdMicros(
   priceTable: Readonly<Record<string, ModelPriceMicrosPer1M>> = AI_MODEL_PRICE_USD_MICROS_PER_1M,
 ): number | null {
   if (!model || typeof model !== 'string') return null;
-  const price = priceTable[model];
+  const price = priceTable[model] ?? VERIFIED_GEMINI_PRICE_USD_MICROS_PER_1M[model];
   if (!price) return null;
 
   const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : null;
@@ -51,3 +61,5 @@ export function estimateCostUsdMicros(
   }
   return micros >= 0 ? micros : null;
 }
+
+

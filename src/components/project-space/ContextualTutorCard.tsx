@@ -32,7 +32,9 @@ import {
   getDefaultModeQuestionText,
   isDefaultQuestionText,
 } from '../../lib/ai/tutor/tutorPromptBuilder';
+import { citationPageForOpenPdf } from '../../lib/ai/tutor/tutorPilotEvidence';
 import { useStandaloneTutor } from '../../lib/ai/tutor/useStandaloneTutor';
+import { isTutorRetryAllowed } from '../../lib/ai/tutor/tutorErrorMessage';
 import { readTutorSession, writeTutorPresentation } from '../../lib/ai/tutor/tutorSessionStorage';
 import {
   TUTOR_FLOAT_MIN_HEIGHT,
@@ -162,7 +164,11 @@ function TutorContextRow({
 }: {
   pdfTitle?: string | null;
   visiblePage?: number | null;
-  attachment: { pageNumber: number; extractedText: string } | null;
+  attachment: {
+    pageNumber: number;
+    extractedText: string;
+    attachmentType?: 'text_selection' | 'recovered_page' | 'native_page' | 'visual_selection';
+  } | null;
   attached: boolean;
   onToggleAttached: () => void;
 }) {
@@ -176,12 +182,32 @@ function TutorContextRow({
   else if (page) primary = `Open PDF · Page ${page}`;
   const hasPdf = primary !== 'No open PDF';
   const selection = !attachment ? 'none' : attached ? 'attached' : 'detached';
+  const recovered = attachment?.attachmentType === 'recovered_page';
+  const nativePage = attachment?.attachmentType === 'native_page';
+  const visualSelection = attachment?.attachmentType === 'visual_selection';
+  const attachmentKind = recovered
+    ? 'recovered_page'
+    : nativePage
+      ? 'native_page'
+      : visualSelection
+        ? 'visual_selection'
+        : attachment
+          ? 'text_selection'
+          : '';
+  const attachedLabel = recovered
+    ? 'Recovered page attached'
+    : nativePage
+      ? 'Full-page PDF text attached'
+      : visualSelection
+        ? 'Visual selection attached'
+        : 'Selection attached';
   return (
     <div
       data-testid="tutor-pdf-context"
       data-selection={selection}
       data-page={page ?? ''}
       data-context-open={open ? '1' : '0'}
+      data-attachment-kind={attachmentKind}
       className="shrink-0 border-b text-xs"
       style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
     >
@@ -189,7 +215,7 @@ function TutorContextRow({
         <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{primary}</span>
         {selection === 'attached' ? (
           <span data-testid="tutor-context-attached" className="shrink-0 text-[10px] font-semibold text-indigo-200">
-            Selection attached
+            {attachedLabel}
           </span>
         ) : null}
         <button
@@ -212,14 +238,22 @@ function TutorContextRow({
           {attachment && attached ? (
             <>
               <div className="text-[10px] uppercase tracking-wide text-slate-400">
-                Attached selection · p. {attachment.pageNumber}
+                {recovered
+                  ? `Recovered page text (OCR) · p. ${attachment.pageNumber}`
+                  : nativePage
+                    ? `Full-page PDF text (native) · p. ${attachment.pageNumber}`
+                    : visualSelection
+                      ? `Selected PDF area (visual) · p. ${attachment.pageNumber}`
+                      : `Attached selection · p. ${attachment.pageNumber}`}
               </div>
               <div
                 data-testid="tutor-extracted-text-preview"
                 data-attachment-state="attached"
                 className="line-clamp-3 border-l-2 border-indigo-400/60 pl-2 italic text-slate-200"
               >
-                "{attachment.extractedText}"
+                {visualSelection
+                  ? 'Visual crop of the selected PDF area (not a text transcription; not server-verified).'
+                  : `"${attachment.extractedText}"`}
               </div>
               <button
                 type="button"
@@ -318,6 +352,10 @@ export function ContextualTutorCard({
   const [quickAskOpen, setQuickAskOpen] = useState(false);
   const quickAskOpenRef = useRef(false);
   const quickAskSubmitRef = useRef(false);
+  const quickAskComposingRef = useRef(false);
+  const followUpComposingRef = useRef(false);
+  const followUpSubmitRef = useRef(false);
+  const initialSubmitRef = useRef(false);
   const onQuickAskRevealRef = useRef(onQuickAskReveal);
   onQuickAskRevealRef.current = onQuickAskReveal;
   const storedVisual: TutorSurfaceVisual = embedded ? tutorDockVisual(layout, containerWidth) : isMinimized ? 'minimized' : 'floating';
@@ -1040,6 +1078,7 @@ export function ContextualTutorCard({
   };
 
   const submitQuickAsk = () => {
+    if (quickAskComposingRef.current) return;
     if (quickAskSubmitRef.current || status === 'loading') return;
     const isInitial = turns.length === 0;
     const question = (isInitial ? initialDraft : followUpDraft).trim();
@@ -1055,6 +1094,7 @@ export function ContextualTutorCard({
 
   const onQuickAskKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter') return;
+    if (quickAskComposingRef.current || event.nativeEvent.isComposing) return;
     if (event.shiftKey) {
       event.preventDefault();
       const field = event.currentTarget;
@@ -1075,33 +1115,53 @@ export function ContextualTutorCard({
   // Submit initial question
   const handleSendInitial = (e: React.FormEvent) => {
     e.preventDefault();
+    if (initialSubmitRef.current || status === 'loading') return;
     const q = initialDraft.trim();
-    if (!q || status === 'loading') return;
-    void sendQuestion(q, true, mode);
+    if (!q || !sectionId) return;
+    initialSubmitRef.current = true;
+    setInitialDraft('');
+    void sendQuestion(q, true, mode).finally(() => {
+      initialSubmitRef.current = false;
+    });
   };
 
   // Submit follow-up question
-  const handleSendFollowUp = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendFollowUp = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (followUpComposingRef.current) return;
+    if (followUpSubmitRef.current || status === 'loading') return;
     const q = followUpDraft.trim();
-    if (!q || status === 'loading') return;
+    if (!q || !sectionId) return;
+    followUpSubmitRef.current = true;
     setFollowUpDraft('');
-    void sendQuestion(q, false, mode);
+    void sendQuestion(q, false, mode).finally(() => {
+      followUpSubmitRef.current = false;
+    });
+  };
+
+  const onFollowUpKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    if (followUpComposingRef.current || event.nativeEvent.isComposing) return;
+    if (event.shiftKey) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    handleSendFollowUp();
   };
 
   const handleCitationActivate = useCallback(
     (source: AskCourseSourceRef) => {
-      if (source.sourceKind === 'free_space_pdf') {
-        onNavigateToSource?.(source.pageNumber);
-      }
+      const page = citationPageForOpenPdf(source, effectiveSourceId);
+      if (page !== undefined) onNavigateToSource?.(page);
     },
-    [onNavigateToSource],
+    [onNavigateToSource, effectiveSourceId],
   );
 
   const activeModeOption = TEACHING_MODE_OPTIONS.find(o => o.mode === mode) || TEACHING_MODE_OPTIONS[0];
   const activeModeTheme = getModeTheme(mode);
   const ActiveIcon = activeModeTheme.Icon;
-  const showTutorRetry = errorCode !== 'output_budget_exhausted';
+  const showTutorRetry = isTutorRetryAllowed(errorCode);
   const isFloating = visual === 'floating';
   const isSide = visual === 'side-left' || visual === 'side-right';
   const fittedSideWidth = isSide ? sideDockRenderWidth(layout?.sideDockWidth, containerWidth) : null;
@@ -1245,7 +1305,22 @@ export function ContextualTutorCard({
         />
         {attachment ? (
           <span data-testid="tutor-dock-attachment" className="text-[11px] text-slate-300 truncate shrink-0 max-w-[34%]">
-            {attachmentAttached ? 'Selection attached' : 'Selection detached'} · p. {attachment.pageNumber}
+            {attachment.attachmentType === 'recovered_page'
+              ? attachmentAttached
+                ? 'Recovered page attached'
+                : 'Recovered page detached'
+              : attachment.attachmentType === 'native_page'
+                ? attachmentAttached
+                  ? 'Full-page PDF text attached'
+                  : 'Full-page PDF text detached'
+                : attachment.attachmentType === 'visual_selection'
+                  ? attachmentAttached
+                    ? 'Visual selection attached'
+                    : 'Visual selection detached'
+                  : attachmentAttached
+                    ? 'Selection attached'
+                    : 'Selection detached'}{' '}
+            · p. {attachment.pageNumber}
           </span>
         ) : null}
         {layout?.expandedDockCollapsed ? (
@@ -1266,6 +1341,12 @@ export function ContextualTutorCard({
               placeholder={status === 'loading' ? 'Tutor is answering…' : 'Ask a question'}
               onChange={event => setComposerDraft(event.target.value)}
               onKeyDown={onQuickAskKeyDown}
+              onCompositionStart={() => {
+                quickAskComposingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                quickAskComposingRef.current = false;
+              }}
               className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-indigo-400 disabled:opacity-60"
               style={{
                 minHeight: isNarrow ? 44 : 32,
@@ -1911,6 +1992,8 @@ export function ContextualTutorCard({
                   ref={isLatestTurn ? latestAssistantTurnRef : null}
                   data-latest-turn={isLatestTurn ? '1' : undefined}
                   data-testid="tutor-assistant-turn"
+                  data-pilot-request-id={turn.pilotEvidence?.requestId}
+                  data-pilot-verified={turn.pilotEvidence ? String(turn.pilotEvidence.verified) : undefined}
                   className="space-y-1.5 text-xs leading-relaxed text-slate-100"
                 >
                   {turnMode && (
@@ -1921,7 +2004,11 @@ export function ContextualTutorCard({
                   <AskZikukAnswer
                     text={presentAnswerTextForProvenance(turn.content, turn.knowledgeTier)}
                     sources={
-                      turn.knowledgeTier === 'general_academic' || turn.knowledgeTier === 'pdf_selection'
+                      turn.knowledgeTier === 'general_academic' ||
+                      turn.knowledgeTier === 'pdf_selection' ||
+                      turn.knowledgeTier === 'pdf_page_native' ||
+                      turn.knowledgeTier === 'pdf_page_recovered' ||
+                      turn.knowledgeTier === 'pdf_selection_visual'
                         ? []
                         : turn.sources || []
                     }
@@ -1929,6 +2016,7 @@ export function ContextualTutorCard({
                     mutedColor={tokens.textSecondary}
                     accentColor="#818cf8"
                     onCitationActivate={handleCitationActivate}
+                    canActivateCitation={source => citationPageForOpenPdf(source, effectiveSourceId) !== undefined}
                     generationIncomplete={turn.generationIncomplete}
                   />
                   {turn.knowledgeTier ? (
@@ -2009,6 +2097,13 @@ export function ContextualTutorCard({
                 placeholder={`Ask follow-up or next question in ${activeModeOption.label} mode...`}
                 value={followUpDraft}
                 onChange={e => setFollowUpDraft(e.target.value)}
+                onKeyDown={onFollowUpKeyDown}
+                onCompositionStart={() => {
+                  followUpComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  followUpComposingRef.current = false;
+                }}
                 disabled={status === 'loading'}
                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-indigo-400 transition-colors disabled:opacity-50"
               />
@@ -2016,7 +2111,7 @@ export function ContextualTutorCard({
                 type="submit"
                 data-testid="tutor-followup-send-btn"
                 aria-label="Send follow-up"
-                disabled={!followUpDraft.trim() || status === 'loading'}
+                disabled={!followUpDraft.trim() || status === 'loading' || followUpSubmitRef.current}
                 className="p-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 transition-colors active:scale-95"
               >
                 <ArrowUp className="w-3.5 h-3.5" />

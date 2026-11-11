@@ -38,4 +38,17 @@ describe('pdfTutorTextExtraction', () => {
     expect(isUsefulTutorExtractedText('a')).toBe(false);
     expect(isUsefulTutorExtractedText('Find the derivative of f(x) = x^2')).toBe(true);
   });
+
+  it('returns undefined when the region misses existing glyphs (empty native selection)', () => {
+    const content = {
+      items: [{ str: 'Visible line', transform: [1, 0, 0, 1, 100, 400], width: 80, height: 10 }],
+    };
+    const miss: NormalizedPageRegion = { x: 0.8, y: 0.8, w: 0.15, h: 0.15 };
+    expect(extractPdfTextFromRegion(content, 500, 500, miss)).toBeUndefined();
+  });
+
+  it('returns undefined for an empty text layer', () => {
+    const region: NormalizedPageRegion = { x: 0.1, y: 0.1, w: 0.5, h: 0.5 };
+    expect(extractPdfTextFromRegion({ items: [] }, 500, 500, region)).toBeUndefined();
+  });
 });

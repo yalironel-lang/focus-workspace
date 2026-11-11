@@ -30,6 +30,12 @@ installFwInkDraftModeDiag()
 installHwPaintProfile()
 if (typeof window !== 'undefined') {
   persistQaModeFromUrl(localStorage)
+  // Staging/DEV only — tree-shaken from Production (opt-in helpers only; no PDF text).
+  if (import.meta.env.DEV || import.meta.env.VITE_STAGING_EMAIL_AUTH === 'true') {
+    void import('./lib/ai/tutor/ownerPdfRecoveryDiagOptIn').then((m) => {
+      m.persistOwnerPdfRecoveryDiagOptInFromSearch(window.location.search, localStorage)
+    })
+  }
 }
 initPerformanceSafeModeListeners()
 suppressVercelToolbar()

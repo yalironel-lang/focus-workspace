@@ -34,6 +34,7 @@ import type { KnowledgeIngestDeps } from '../_shared/ai/knowledge/runKnowledgeIn
 import type { KnowledgeIndexDeps } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
 import type { FinalizeRecoveredPdfDeps } from '../_shared/ai/knowledge/runFinalizeRecoveredPdf.ts';
 import type { SourceIndexMeta } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
+import { createKnowledgeSpendingStore } from '../_shared/ai/knowledge/knowledgeSpendingStore.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -327,6 +328,8 @@ Deno.serve(async (req: Request) => {
       embeddingModel,
       embeddingDimensions,
       embeddingProvider: createOpenAICompatibleEmbeddingProvider({ apiKey, baseUrl }),
+      spendingStore: createKnowledgeSpendingStore(admin),
+      requireSpendingReservation: true,
 
       async loadSourceForObject({ userId, sectionId, sourceObjectId }) {
         const { data: section, error: secErr } = await admin
@@ -531,6 +534,8 @@ Deno.serve(async (req: Request) => {
       embeddingModel,
       embeddingDimensions,
       embeddingProvider: indexDeps.embeddingProvider,
+      spendingStore: indexDeps.spendingStore,
+      requireSpendingReservation: indexDeps.requireSpendingReservation,
       loadSourceForObject: indexDeps.loadSourceForObject,
       loadSourceById: loadSourceMetaById,
       async loadPageTexts({ sourceId, sourceVersion }) {

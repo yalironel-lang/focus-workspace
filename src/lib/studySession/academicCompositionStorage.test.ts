@@ -135,13 +135,13 @@ describe('academicCompositionStorage — pure storage & validation', () => {
         'user-1',
         'sec-1',
         'main',
-        { pdfObjectId: 'pdf-1', notebookObjectId: 'nb-1' },
+        { pdfObjectId: 'pdf-1', notebookObjectId: 'nb-1', secondarySurface: 'notebook' },
       )).not.toThrow();
       expect(saveAcademicCompositionRecovery(
         'user-1',
         'sec-1',
         'main',
-        { pdfObjectId: 'pdf-1', notebookObjectId: 'nb-1' },
+        { pdfObjectId: 'pdf-1', notebookObjectId: 'nb-1', secondarySurface: 'notebook' },
       )).toBe(false);
     } finally {
       proto.getItem = origGet;

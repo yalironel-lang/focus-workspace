@@ -22,6 +22,7 @@ import {
 import type { AiEmbeddingProvider } from './embeddingTypes.ts';
 import { mapEmbeddingErrorToIndexFailureCode } from './embeddingTypes.ts';
 import { routeEmbeddingModel } from './routeEmbedding.ts';
+import { calculateAuthoritativeEmbeddingBound } from '../projectLevelSpendingGuard.ts';
 
 export type KnowledgeIndexRequest = {
   version: 1;
@@ -147,6 +148,26 @@ export type KnowledgeIndexDeps = {
   embeddingProvider: AiEmbeddingProvider;
   embeddingModel?: string | null;
   embeddingDimensions?: number | null;
+  /** Optional pre-dispatch spending guard reservation store. */
+  spendingStore?: {
+    begin: (input: {
+      userId: string;
+      capability: 'knowledge_index_embed';
+      estimatedTokens: number;
+      chunkCount: number;
+    }) => Promise<{
+      allowed: boolean;
+      reservationId?: string | null;
+      code?: string;
+      reason?: string;
+      message?: string;
+      dispatchReservation?: () => Promise<{ ok: boolean; error?: string }>;
+      settleReservation?: (actualTokens?: number) => Promise<{ ok: boolean; error?: string }>;
+      releaseReservation?: () => Promise<{ ok: boolean; error?: string }>;
+    }>;
+  };
+  /** If true, requires spendingStore to be present and admitted before paid dispatch. */
+  requireSpendingReservation?: boolean;
   /** Optional metadata-only usage hook (no content). */
   recordUsage?: (input: {
     capability: 'knowledge_index_embed';
@@ -337,13 +358,73 @@ export async function runKnowledgeIndexForSource(input: {
   for (const batch of batches) {
     batchCount += 1;
     const texts = batch.chunks.map(embeddingInputForChunk);
-    const embedded = await deps.embeddingProvider.embed({
-      model: route.model,
-      dimensions: route.dimensions,
-      inputs: texts,
-    });
+
+    let reservation: {
+      reservationId?: string | null;
+      dispatchReservation?: () => Promise<{ ok: boolean; error?: string }>;
+      settleReservation?: (actualTokens?: number) => Promise<{ ok: boolean; error?: string }>;
+      releaseReservation?: () => Promise<{ ok: boolean; error?: string }>;
+    } | null = null;
+
+    const estimatedBatchTokens = calculateAuthoritativeEmbeddingBound(texts, route.model);
+
+    if (deps.spendingStore) {
+      const decision = await deps.spendingStore.begin({
+        userId: source.userId,
+        capability: 'knowledge_index_embed',
+        estimatedTokens: estimatedBatchTokens,
+        chunkCount: batch.chunks.length,
+      });
+
+      if (!decision.allowed) {
+        // Budget rejected: stop immediately.
+        // DO NOT destructively reset ingestion state. Prior indexed retrieval version is preserved.
+        return {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'embedding_quota_exceeded',
+            message: decision.message || 'AI daily embedding limit reached. Existing indexed content preserved.',
+          },
+        };
+      }
+      reservation = decision;
+    } else if (deps.requireSpendingReservation) {
+      return {
+        version: 1,
+        ok: false,
+        error: {
+          code: 'embedding_quota_exceeded',
+          message: 'Embedding spending reservation is required but not configured. No request was dispatched.',
+        },
+      };
+    }
+
+    if (reservation?.dispatchReservation) {
+      const dispatchConfirmed = await reservation.dispatchReservation();
+      if (dispatchConfirmed && !dispatchConfirmed.ok) {
+        return fail('internal_error', 'Accounting dispatch unconfirmed.');
+      }
+    }
+
+    let embedded;
+    try {
+      embedded = await deps.embeddingProvider.embed({
+        model: route.model,
+        dimensions: route.dimensions,
+        inputs: texts,
+      });
+    } catch (err) {
+      if (reservation?.settleReservation) {
+        await reservation.settleReservation(estimatedBatchTokens);
+      }
+      throw err;
+    }
 
     if (!embedded.ok) {
+      if (reservation?.settleReservation) {
+        await reservation.settleReservation(estimatedBatchTokens);
+      }
       return failJob(
         embedded.code,
         'Embedding provider failed.',
@@ -352,6 +433,9 @@ export async function runKnowledgeIndexForSource(input: {
     }
 
     if (embedded.embeddings.length !== batch.chunks.length) {
+      if (reservation?.settleReservation) {
+        await reservation.settleReservation(estimatedBatchTokens);
+      }
       return failJob(
         'embedding_invalid_response',
         'Embedding count mismatch.',
@@ -359,6 +443,9 @@ export async function runKnowledgeIndexForSource(input: {
       );
     }
     if (embedded.dimensions !== KNOWLEDGE_EMBEDDING_DIMENSIONS) {
+      if (reservation?.settleReservation) {
+        await reservation.settleReservation(estimatedBatchTokens);
+      }
       return failJob(
         'embedding_invalid_response',
         'Unexpected embedding dimensions.',
@@ -369,6 +456,12 @@ export async function runKnowledgeIndexForSource(input: {
     if (typeof embedded.usage?.inputTokens === 'number') {
       inputTokensAcc += embedded.usage.inputTokens;
       hadTokenUsage = true;
+      if (reservation?.settleReservation) {
+        await reservation.settleReservation(embedded.usage.inputTokens);
+      }
+    } else if (reservation?.settleReservation) {
+      // Conservative settlement when usage is missing from provider
+      await reservation.settleReservation(estimatedBatchTokens);
     }
 
     const rows = batch.chunks.map((c, i) => ({

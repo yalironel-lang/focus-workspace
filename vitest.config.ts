@@ -6,8 +6,16 @@ export default defineConfig({
       allow: ['/Users/ylyrwnl/focus-dev'],
     },
   },
+  // Deterministic auth gate for the suite: ignore developer `.env.local`.
+  // Staging-specific cases stub `VITE_STAGING_EMAIL_AUTH=true` explicitly.
+  env: {
+    VITE_STAGING_EMAIL_AUTH: 'false',
+  },
   test: {
     environment: 'happy-dom',
+    env: {
+      VITE_STAGING_EMAIL_AUTH: 'false',
+    },
     setupFiles: ['fake-indexeddb/auto', 'src/test/localStorageSetup.ts'],
     include: [
       'src/lib/studySession/**/*.test.ts',
@@ -26,6 +34,7 @@ export default defineConfig({
       'src/lib/ai/askCourse/**/*.test.tsx',
       'src/lib/ai/tutor/**/*.test.ts',
       'src/lib/ai/tutor/**/*.test.tsx',
+      'src/lib/ai/visualCapture/**/*.test.ts',
       'src/lib/ai/intelligenceByok.v1h3.test.tsx',
       'src/lib/courseTrap/**/*.test.ts',
       'src/lib/notebookDebugIngest.v1h3.test.ts',

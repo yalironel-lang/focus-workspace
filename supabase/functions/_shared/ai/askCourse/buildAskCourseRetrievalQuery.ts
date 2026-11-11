@@ -12,6 +12,8 @@
  */
 
 import type { AskCourseRecentTurn, PdfCaptureAttachment } from '../requestTypes.ts';
+import { isVisualSelectionCapture } from '../requestTypes.ts';
+import { PDF_VISUAL_SELECTION_MARKER } from '../visualCapture/visualSelectionContract.ts';
 import { ASK_COURSE_MAX_RETRIEVAL_PRIOR_USER_CHARS } from './bounds.ts';
 import { isExplicitSourceOnlyQuestion } from './evaluateGroundingProvenance.ts';
 import {
@@ -53,6 +55,10 @@ export function buildAskCourseRetrievalQuery(input: {
   // Attached PDF selection handling (SKE1.2):
   // Prevent query pollution for standalone questions while preserving context for referential queries.
   if (input.capture) {
+    if (isVisualSelectionCapture(input.capture)) {
+      // No OCR text — avoid embedding image bytes; light marker only for referential continuity.
+      return `CURRENT QUESTION:\n${question}\n\nATTACHED SELECTION CONTEXT:\n${PDF_VISUAL_SELECTION_MARKER}`;
+    }
     const rawCapture = input.capture.text.trim();
     const boundedCapture = rawCapture.length > 500 ? rawCapture.slice(0, 500).trimEnd() : rawCapture;
 

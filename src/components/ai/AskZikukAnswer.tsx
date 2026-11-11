@@ -32,6 +32,7 @@ type Props = {
   mutedColor?: string;
   accentColor?: string;
   onCitationActivate?: (source: AskCourseSourceRef) => void;
+  canActivateCitation?: (source: AskCourseSourceRef) => boolean;
   className?: string;
   generationIncomplete?: boolean;
 };
@@ -42,8 +43,9 @@ function CitationButton(props: {
   mutedColor: string;
   accentColor: string;
   onCitationActivate?: (source: AskCourseSourceRef) => void;
+  canActivateCitation?: (source: AskCourseSourceRef) => boolean;
 }) {
-  const { index, source, mutedColor, accentColor, onCitationActivate } = props;
+  const { index, source, mutedColor, accentColor, onCitationActivate, canActivateCitation } = props;
   if (!source) {
     return <span style={{ color: mutedColor, whiteSpace: 'nowrap' }}>[{index}]</span>;
   }
@@ -52,6 +54,8 @@ function CitationButton(props: {
       type="button"
       data-ask-zikuk-citation={index}
       aria-label={`Open source ${index}`}
+      disabled={canActivateCitation ? !canActivateCitation(source) : false}
+      title={canActivateCitation && !canActivateCitation(source) ? 'This source is outside the open PDF.' : undefined}
       onClick={() => onCitationActivate?.(source)}
       style={{
         display: 'inline',
@@ -177,6 +181,7 @@ function expandString(
     accentColor: string;
     textColor: string;
     onCitationActivate?: (source: AskCourseSourceRef) => void;
+    canActivateCitation?: (source: AskCourseSourceRef) => boolean;
   },
 ): ReactNode[] {
   return splitAskInlinePieces(value).map((piece, i) => {
@@ -201,6 +206,7 @@ function expandString(
         mutedColor={ctx.mutedColor}
         accentColor={ctx.accentColor}
         onCitationActivate={ctx.onCitationActivate}
+        canActivateCitation={ctx.canActivateCitation}
       />
     );
   });
@@ -215,6 +221,7 @@ function expandChildren(
     accentColor: string;
     textColor: string;
     onCitationActivate?: (source: AskCourseSourceRef) => void;
+    canActivateCitation?: (source: AskCourseSourceRef) => boolean;
   },
 ): ReactNode {
   return Children.map(children, (child, i) => {
@@ -238,6 +245,7 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
   mutedColor = '#94a3b8',
   accentColor = '#94a3b8',
   onCitationActivate,
+  canActivateCitation,
   className,
   generationIncomplete = false,
 }: Props) {
@@ -256,8 +264,9 @@ export const AskZikukAnswer = memo(function AskZikukAnswer({
       accentColor,
       textColor,
       onCitationActivate,
+      canActivateCitation,
     }),
-    [prepared.slots, byIndex, mutedColor, accentColor, textColor, onCitationActivate],
+    [prepared.slots, byIndex, mutedColor, accentColor, textColor, onCitationActivate, canActivateCitation],
   );
 
   const wrapInline = (node: ReactNode) => expandChildren(node, ctx);

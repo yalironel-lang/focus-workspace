@@ -7,10 +7,22 @@ import type { KnowledgeTier } from '../gatewayClient';
  * look like verified grounding.
  */
 export function presentAnswerTextForProvenance(text: string, tier?: KnowledgeTier): string {
-  if (tier !== 'general_academic' && tier !== 'pdf_selection') return text;
+  if (
+    tier !== 'general_academic' &&
+    tier !== 'pdf_selection' &&
+    tier !== 'pdf_page_native' &&
+    tier !== 'pdf_page_recovered' &&
+    tier !== 'pdf_selection_visual'
+  ) {
+    return text;
+  }
   let next = text.replace(/\s*\[\s*\d+\s*\]/g, '');
   if (tier === 'general_academic') {
-    next = next.replace(/\s*\[\s*pdf selection\s*\]/gi, '');
+    next = next
+      .replace(/\s*\[\s*pdf selection\s*\]/gi, '')
+      .replace(/\s*\[\s*pdf page text\s*\]/gi, '')
+      .replace(/\s*\[\s*pdf page recovery\s*\]/gi, '')
+      .replace(/\s*\[\s*pdf visual selection\s*\]/gi, '');
   }
   return next.replace(/[ \t]{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
 }

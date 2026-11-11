@@ -26,6 +26,7 @@ import type {
   KnowledgeIndexDeps,
   SourceIndexMeta,
 } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
+import { createKnowledgeSpendingStore } from '../_shared/ai/knowledge/knowledgeSpendingStore.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -324,6 +325,8 @@ Deno.serve(async (req: Request) => {
       embeddingModel,
       embeddingDimensions,
       embeddingProvider,
+      spendingStore: createKnowledgeSpendingStore(admin),
+      requireSpendingReservation: true,
       beginIndex: async (input) => {
         const { data, error } = await admin.rpc('ai_knowledge_begin_index', {
           p_source_id: input.sourceId,

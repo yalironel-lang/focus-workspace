@@ -42,6 +42,23 @@ describe('tutorSessionStorage', () => {
     localStorage.clear();
   });
 
+  it('never persists visual image payloads while preserving answer provenance', () => {
+    const imageBase64 = 'PRIVATE_IMAGE_SENTINEL';
+    const intent = { ...dummyIntent, attachment: { ...dummyIntent.attachment,
+      attachmentType: 'visual_selection' as const,
+      visual: { mime: 'image/jpeg' as const, imageBase64, widthPx: 32, heightPx: 32, userConfirmedVisual: true as const },
+    } };
+    expect(writeTutorSession('user-A', 'sec-1', 'pdf-1', {
+      intent, turns: [{ ...dummyTurn2, knowledgeTier: 'pdf_selection_visual' }],
+    })).toBe(true);
+    const raw = localStorage.getItem(tutorSessionStorageKey('user-A', 'sec-1', 'pdf-1'))!;
+    expect(raw).not.toContain(imageBase64);
+    expect(raw).not.toContain('imageBase64');
+    const loaded = readTutorSession('user-A', 'sec-1', 'pdf-1');
+    expect(loaded?.intent).toBeNull();
+    expect(loaded?.turns[0].knowledgeTier).toBe('pdf_selection_visual');
+  });
+
   it('writes and reads back a valid tutor session', () => {
     const success = writeTutorSession('user-A', 'sec-1', 'pdf-1', {
       intent: dummyIntent,

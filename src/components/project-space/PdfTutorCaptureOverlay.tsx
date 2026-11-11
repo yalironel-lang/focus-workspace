@@ -7,14 +7,14 @@ import {
   TUTOR_CAPTURE_ACTION_OPTIONS,
   type TutorCaptureAction,
 } from '../../lib/ai/tutor/tutorCaptureTypes';
-import { Lightbulb, HelpCircle, Zap, X } from 'lucide-react';
+import { Lightbulb, HelpCircle, Zap, X, Eye } from 'lucide-react';
 
 type Props = {
   tokens: AtmosphereTokens;
   active: boolean;
   selection: NormalizedPageRegion | null;
   onCommitSelection: (region: NormalizedPageRegion | null) => void;
-  onChooseAction: (action: TutorCaptureAction) => void;
+  onChooseAction: (action: TutorCaptureAction, options?: { forceVisual?: boolean }) => void;
   onClearSelection: () => void;
   onCancelCapture: () => void;
 };
@@ -183,6 +183,19 @@ export function PdfTutorCaptureOverlay({
               <span>{opt.label}</span>
             </button>
           ))}
+          <div className="w-px h-4 bg-white/15 mx-0.5" />
+          <button
+            type="button"
+            data-testid="tutor-action-visual"
+            aria-label="Understand visually"
+            title="Understand selected area visually"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors hover:bg-white/10 active:scale-95"
+            style={{ color: tokens.textPrimary || '#fff' }}
+            onClick={() => onChooseAction('explain', { forceVisual: true })}
+          >
+            <Eye className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Visual</span>
+          </button>
           <div className="w-px h-4 bg-white/15 mx-0.5" />
           <button
             type="button"

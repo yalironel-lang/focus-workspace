@@ -65,14 +65,45 @@ export function teachingModeToLegacyAction(mode: TeachingMode): TutorCaptureActi
   return 'explain';
 }
 
+/** Full-page region used when attaching recovered OCR or native page text (not a drag selection). */
+export const RECOVERED_PAGE_REGION_NORM: NormalizedPageRegion = {
+  x: 0,
+  y: 0,
+  w: 1,
+  h: 1,
+};
+
+/** Alias for full-page native fallback (same geometry; distinct attachmentType). */
+export const NATIVE_PAGE_REGION_NORM = RECOVERED_PAGE_REGION_NORM;
+
+export type TutorAttachmentType =
+  | 'text_selection'
+  | 'recovered_page'
+  | 'native_page'
+  | 'visual_selection';
+
+/** Ephemeral JPEG payload — must not be written to session storage / IDB. */
+export type TutorVisualPayload = {
+  mime: 'image/jpeg' | 'image/png';
+  imageBase64: string;
+  widthPx: number;
+  heightPx: number;
+};
+
 export type TutorContextAttachment = {
   sourceKind: 'free_space_pdf';
   sourceObjectId: string;
   sectionId: string;
   pageNumber: number;
   regionNorm: NormalizedPageRegion;
-  attachmentType: 'text_selection';
+  attachmentType: TutorAttachmentType;
+  /**
+   * Text extract for text/native/recovered; for visual_selection a short label only
+   * (not a transcription of the image).
+   */
   extractedText: string;
+  /** Present only for visual_selection; never persist. */
+  visual?: TutorVisualPayload;
 };
 
 export type TutorCaptureIntent = {

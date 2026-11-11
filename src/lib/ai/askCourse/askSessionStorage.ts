@@ -115,6 +115,9 @@ function parseTurn(raw: unknown): AskSessionTurn | null {
   const knowledgeTier =
     o.knowledgeTier === 'course_material' ||
     o.knowledgeTier === 'pdf_selection' ||
+    o.knowledgeTier === 'pdf_selection_visual' ||
+    o.knowledgeTier === 'pdf_page_native' ||
+    o.knowledgeTier === 'pdf_page_recovered' ||
     o.knowledgeTier === 'general_academic' ||
     o.knowledgeTier === 'mixed'
       ? o.knowledgeTier

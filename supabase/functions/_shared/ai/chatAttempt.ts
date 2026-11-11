@@ -119,7 +119,12 @@ export async function completeChatWithinDeadline(
     if (attempt.parentAborted || attempt.skipped) {
       return { ...TIMEOUT_RESULT, latencyMs: Math.max(0, Date.now() - timing.requestStartedAt) };
     }
-    return await provider.complete({ ...input, signal: attempt.signal });
+    return await provider.complete({
+      ...input,
+      signal: attempt.signal,
+      requestStartedAt: timing.requestStartedAt,
+      deadlineMs: attempt.budgetMs,
+    });
   } finally {
     attempt.dispose();
   }

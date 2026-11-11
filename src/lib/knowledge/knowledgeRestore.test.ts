@@ -3,7 +3,7 @@
  * M7.0 — Restore safety: no false success; tombstone survives persist failure.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ensureTestLocalStorage } from './testLocalStorage';
+import { ensureTestLocalStorage, patchStorageMethod } from './testLocalStorage';
 ensureTestLocalStorage();
 import { boardScopedFreeSpaceKeys } from '../freeSpacePersistence';
 import type { ProjectSpaceObject } from '../../hooks/useSectionFreeSpaceObjects';
@@ -129,12 +129,17 @@ function withFailingObjectsWrite<T>(fn: () => Promise<T>): Promise<T> {
   const key = objectsKey();
   ensureTestLocalStorage();
   const original = localStorage.setItem.bind(localStorage);
-  localStorage.setItem = ((k: string, value: string) => {
-    if (k === key) throw new DOMException('QuotaExceededError');
-    return original(k, value);
-  }) as Storage['setItem'];
+  // happy-dom Storage Proxy ignores `storage.setItem = …`; defineProperty works.
+  const unpatch = patchStorageMethod(
+    localStorage,
+    'setItem',
+    ((k: string, value: string) => {
+      if (k === key) throw new DOMException('QuotaExceededError');
+      return original(k, value);
+    }) as Storage['setItem'],
+  );
   return fn().finally(() => {
-    localStorage.setItem = original;
+    unpatch();
   });
 }
 

@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>Offline release regression harness</title>
+<script type="module">
+import * as notebook from '/src/lib/notebookPages/index.ts';
+import * as queue from '/src/lib/focusCache/pendingOperations.ts';
+import * as pdf from '/src/lib/pdfRenderGeometry.ts';
+import * as study from '/src/lib/studySession/academicCompositionStorage.ts';
+import * as tutor from '/src/lib/ai/tutor/tutorSessionStorage.ts';
+window.__releaseModules={notebook,queue,pdf,study,tutor};
+</script>

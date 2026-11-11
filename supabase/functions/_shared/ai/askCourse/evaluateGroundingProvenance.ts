@@ -61,7 +61,7 @@ function extractSignificantTokens(text: string): Set<string> {
 /** Remove attribution markers before measuring support. Markers are not evidence. */
 function textForSupportMeasurement(text: string): string {
   return text
-    .replace(/\[\s*pdf selection\s*\]/gi, ' ')
+    .replace(/\[\s*(?:pdf selection|pdf page text|pdf page recovery)\s*\]/gi, ' ')
     .replace(/\[\s*\d+\s*\]/g, ' ');
 }
 
@@ -127,6 +127,8 @@ export type GroundingProvenanceInput = {
   /** Retrieved chunk texts. Presence alone is context, not verified grounding. */
   indexedChunkTexts: string[];
   captureText?: string | null;
+  /** native_selection (default) vs native_page vs recovered OCR vs visual_selection */
+  captureTextKind?: 'native_selection' | 'native_page' | 'recovered_page' | 'visual_selection' | null;
 };
 
 export type GroundingProvenanceResult = {
@@ -219,7 +221,7 @@ export function splitClaims(text: string): string[] {
   for (const part of rough) {
     const trimmed = restoreAbbreviations(part.trim());
     if (!trimmed) continue;
-    if (/^(?:\[\s*(?:\d+|pdf selection)\s*\]\s*)+$/i.test(trimmed) && claims.length > 0) {
+    if (/^(?:\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\]\s*)+$/i.test(trimmed) && claims.length > 0) {
       claims[claims.length - 1] += ` ${trimmed}`;
     } else {
       claims.push(trimmed);
@@ -385,7 +387,7 @@ function isCognateTranslation(claim: string, corpus: string): boolean {
 }
 
 function stripMarkers(text: string): string {
-  return cleanupCitationGaps(text.replace(/\[\s*(?:\d+|pdf selection)\s*\]/gi, ' '));
+  return cleanupCitationGaps(text.replace(/\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\]/gi, ' '));
 }
 
 /**
@@ -449,7 +451,8 @@ export function enforceServerCitationIntegrity(input: {
   question?: string;
 }): string {
   const capture = input.captureText?.trim() ?? '';
-  const pattern = /\[\s*(?:(\d+)|pdf selection)\s*\]/gi;
+  const pattern =
+    /\[\s*(?:(\d+)|pdf selection|pdf page text|pdf page recovery|pdf visual selection)\s*\]/gi;
   let result = '';
   let last = 0;
   let match: RegExpExecArray | null;
@@ -462,6 +465,9 @@ export function enforceServerCitationIntegrity(input: {
       const index = Number(indexText);
       const chunk = input.chunks.find((item) => item.citationIndex === index);
       keep = Boolean(chunk && citationWindowSupportsSource(claim, chunk.text, input.question ?? ''));
+    } else if (/pdf visual selection/i.test(match[0])) {
+      // V1: cannot quote-check pixels; keep marker only when a visual capture was authorized.
+      keep = Boolean(capture);
     } else if (capture) {
       keep = citationWindowSupportsSource(claim, capture, input.question ?? '');
     }
@@ -777,7 +783,10 @@ export function mathRelationSupport(
 function signedQuantities(text: string): Array<{ sign: '+' | '-'; bare: string }> {
   const normalized = text.toLowerCase().replace(/\u2212/g, '-').replace(/\bnegative\b/g, '-');
   const found: Array<{ sign: '+' | '-'; bare: string }> = [];
-  for (const match of normalized.matchAll(/(?:^|[^\p{L}\p{N}])(-)?\s*(\d+(?:\.\d+)?\p{L}*)/gu)) {
+  // Exclude `^` from the boundary so exponents such as `x^2` are not treated as
+  // a positive quantity `+2`. Otherwise an answer that quotes `f(x)=x^2-4` and
+  // then states a root `x=-2` is falsely rejected by statedSignDisagrees.
+  for (const match of normalized.matchAll(/(?:^|[^\p{L}\p{N}^])(-)?\s*(\d+(?:\.\d+)?\p{L}*)/gu)) {
     const bare = match[2];
     if (!bare) continue;
     found.push({ sign: match[1] ? '-' : '+', bare });
@@ -812,9 +821,15 @@ function hasSupportedQuotation(answer: string, source: string, question: string)
   if (pieces.some((part) => mathRelationSupport(part, source) === 'contradiction')) return false;
   return pieces.some((part) => {
     const support = mathRelationSupport(part, source);
+    // `unparsed` means operators were present but not reduced to a typed
+    // relation. A real quotation of the source must still count — otherwise
+    // short PDF formulas such as `f(x) = x^2 - 4` are demoted to
+    // general_academic even when the answer embeds them. Equivalence without
+    // quotation is handled later by claim-level grounding (`equivalent`), not
+    // here. Contradictions and unmatched relations stay excluded.
     return (
       answerQuotesSource(part, prose) &&
-      (support === 'verbatim' || support === 'none') &&
+      (support === 'verbatim' || support === 'none' || support === 'unparsed') &&
       !hasPolarityConflict(part, source) &&
       !hasNumericOrMagnitudeConflict(part, source, question)
     );
@@ -847,10 +862,21 @@ export function evaluateGroundingProvenance(
   const questionTokens = extractSignificantTokens(input.question);
 
   const chunkQuoted = chunkTexts.some((text) => hasSupportedQuotation(measuredAnswer, text, input.question));
-  const captureQuoted = hasPdfCapture && hasSupportedQuotation(measuredAnswer, captureText, input.question);
+  const visualMarkerCited =
+    input.captureTextKind === 'visual_selection' &&
+    hasPdfCapture &&
+    /\[\s*pdf visual selection\s*\]/i.test(input.answerText);
+  const captureQuoted =
+    visualMarkerCited ||
+    (hasPdfCapture &&
+      input.captureTextKind !== 'visual_selection' &&
+      hasSupportedQuotation(measuredAnswer, captureText, input.question));
   const quotedFromAvailableSource = chunkQuoted || captureQuoted;
 
   if (chunkQuoted && captureQuoted) {
+    if (input.captureTextKind === 'visual_selection') {
+      return { tier: 'mixed', contextAvailable, quotedFromAvailableSource };
+    }
     const chunkTokens = new Set<string>();
     for (const text of chunkTexts) {
       for (const token of extractSignificantTokens(text)) chunkTokens.add(token);
@@ -871,21 +897,91 @@ export function evaluateGroundingProvenance(
     return { tier: 'course_material', contextAvailable, quotedFromAvailableSource };
   }
   if (captureQuoted) {
-    return { tier: 'pdf_selection', contextAvailable, quotedFromAvailableSource };
+    const captureTier: KnowledgeTier =
+      input.captureTextKind === 'visual_selection'
+        ? 'pdf_selection_visual'
+        : input.captureTextKind === 'recovered_page'
+          ? 'pdf_page_recovered'
+          : input.captureTextKind === 'native_page'
+            ? 'pdf_page_native'
+            : 'pdf_selection';
+    return {
+      tier: captureTier,
+      contextAvailable,
+      quotedFromAvailableSource,
+    };
   }
+
+function hasSharedNovelPhrase(answer: string, chunkText: string, question: string): boolean {
+  const qStems = contentStems(question);
+  const words = textForSupportMeasurement(answer)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w) && !/^\d+$/.test(w));
+  const normChunk = textForSupportMeasurement(chunkText)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ');
+  for (let i = 0; i < words.length - 1; i++) {
+    const s1 = words[i]!.slice(0, 5);
+    const s2 = words[i + 1]!.slice(0, 5);
+    if (!qStems.has(s1) || !qStems.has(s2)) {
+      const phrase = `${words[i]} ${words[i + 1]}`;
+      if (normChunk.includes(phrase)) return true;
+    }
+  }
+  return false;
+}
+
+function maxNovelStemOverlap(answer: string, chunkTexts: string[], question: string): number {
+  const qStems = contentStems(question);
+  const aStems = contentStems(answer);
+  const aNovel = new Set<string>();
+  for (const s of aStems) {
+    if (!qStems.has(s)) aNovel.add(s);
+  }
+  if (aNovel.size === 0) return 0;
+  let maxOverlap = 0;
+  for (const chunk of chunkTexts) {
+    let overlap = 0;
+    const cStems = contentStems(chunk);
+    for (const s of aNovel) {
+      if (cStems.has(s)) overlap++;
+    }
+    if (overlap > maxOverlap) maxOverlap = overlap;
+  }
+  return maxOverlap;
+}
 
   const captureTokens = hasPdfCapture ? extractSignificantTokens(captureText) : new Set<string>();
-  const chunkTokenUnion = new Set<string>();
-  for (const text of chunkTexts) {
-    for (const token of extractSignificantTokens(text)) chunkTokenUnion.add(token);
-  }
-  const weakInfluence =
-    overlapCount(captureTokens, answerTokens) +
-      overlapCount(captureTokens, questionTokens) +
-      overlapCount(chunkTokenUnion, answerTokens) >=
-    1;
+  const captureInfluence =
+    hasPdfCapture &&
+    (overlapCount(captureTokens, answerTokens) > 0 || overlapCount(captureTokens, questionTokens) > 0);
 
-  if (weakInfluence || (isExplicitSourceOnlyQuestion(input.question) && (hasPdfCapture || hasIndexedChunks))) {
+  const hasCitationMarker =
+    hasIndexedChunks &&
+    /\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\]/i.test(input.answerText);
+
+  const hasCourseMaterialRef =
+    hasIndexedChunks &&
+    /course (?:material|notes|text|readings?)/i.test(measuredAnswer) &&
+    maxNovelStemOverlap(measuredAnswer, chunkTexts, input.question) >= 1;
+
+  const sharedPhrase =
+    hasIndexedChunks &&
+    chunkTexts.some((chunk) => hasSharedNovelPhrase(measuredAnswer, chunk, input.question));
+
+  const strongStemOverlap =
+    hasIndexedChunks &&
+    maxNovelStemOverlap(measuredAnswer, chunkTexts, input.question) >= 3;
+
+  const passiveChunkInfluence =
+    hasCitationMarker || hasCourseMaterialRef || sharedPhrase || strongStemOverlap;
+
+  const sourceOnlyQuestion =
+    isExplicitSourceOnlyQuestion(input.question) && (hasPdfCapture || hasIndexedChunks);
+
+  if (captureInfluence || passiveChunkInfluence || sourceOnlyQuestion) {
     return { tier: 'mixed', contextAvailable, quotedFromAvailableSource: false };
   }
 
@@ -919,7 +1015,7 @@ function academicClaimSegments(text: string): AcademicClaimSegment[] {
       }
       continue;
     }
-    if (/^(?:\[\s*(?:\d+|pdf selection)\s*\]\s*)+$/i.test(trimmed) && segs.length > 0) {
+    if (/^(?:\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\]\s*)+$/i.test(trimmed) && segs.length > 0) {
       const prev = segs[segs.length - 1]!;
       prev.body += prev.trailing + body;
       prev.trailing = trailing;
@@ -947,7 +1043,7 @@ export function isStandaloneRetrievalStatusSentence(claim: string): boolean {
   const normalized = claim
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/(?:\s*\[\s*(?:\d+|pdf selection)\s*\])+\s*$/i, '')
+    .replace(/(?:\s*\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\])+\s*$/i, '')
     .replace(/[.!?]+$/g, '')
     .trim();
   if (!normalized || normalized.length > 80) return false;
@@ -1064,7 +1160,7 @@ function normalizedClaim(claim: string): string {
   return claim
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/(?:\s*\[\s*(?:\d+|pdf selection)\s*\])+\s*$/i, '')
+    .replace(/(?:\s*\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\])+\s*$/i, '')
     .replace(/[.!?]+$/g, '')
     .trim()
     .toLowerCase();
@@ -1665,7 +1761,7 @@ function skippedClaimCode(
 function isOrdinaryNonSubstantive(claim: string): boolean {
   const trimmed = claim.trim();
   if (!trimmed) return true;
-  const withoutMarkers = trimmed.replace(/\[\s*(?:\d+|pdf selection)\s*\]/gi, ' ').trim();
+  const withoutMarkers = trimmed.replace(/\[\s*(?:\d+|pdf selection|pdf page text|pdf page recovery)\s*\]/gi, ' ').trim();
   if (!withoutMarkers) return true;
   if (
     isEchoedCheckerNotice(withoutMarkers) ||
@@ -1872,7 +1968,14 @@ function evidenceForStrongTier(
   chunkTexts: string[],
   captureText: string,
 ): string {
-  if (tier === 'pdf_selection') return captureText;
+  if (
+    tier === 'pdf_selection' ||
+    tier === 'pdf_page_native' ||
+    tier === 'pdf_page_recovered' ||
+    tier === 'pdf_selection_visual'
+  ) {
+    return captureText;
+  }
   const chunks = chunkTexts.join('\n');
   if (chunks.trim()) return chunks;
   return captureText;
@@ -1885,7 +1988,13 @@ function applyStrongAttributionGate(
   evidence: string,
   question: string,
 ): { text: string; knowledgeTier: KnowledgeTier; downgraded: boolean } {
-  if (tier !== 'course_material' && tier !== 'pdf_selection') {
+  // pdf_selection_visual: V1 cannot text-verify pixels — do not apply strong text gate.
+  if (
+    tier !== 'course_material' &&
+    tier !== 'pdf_selection' &&
+    tier !== 'pdf_page_native' &&
+    tier !== 'pdf_page_recovered'
+  ) {
     return { text, knowledgeTier: tier, downgraded: false };
   }
   for (const claim of splitClaims(text)) {
@@ -1908,7 +2017,13 @@ function ordinaryUnestablishedRelation(
   answer: string,
   corpus: string,
   question: string,
+  captureTextKind?: 'native_selection' | 'native_page' | 'recovered_page' | 'visual_selection' | null,
 ): { optionRepeat: boolean; derived: boolean } | null {
+  // Visual captures: V1 cannot text-verify pixels against the placeholder marker.
+  // Mathematical derivations from the attached image must not be flagged as unverified text derivations.
+  if (captureTextKind === 'visual_selection') {
+    return null;
+  }
   let optionRepeat = false;
   let derived = false;
   for (const claim of splitClaims(answer)) {
@@ -1934,10 +2049,12 @@ export function applyClaimLevelGrounding(input: {
   answerText: string;
   chunks: { citationIndex: number; text: string }[];
   captureText?: string | null;
+  captureTextKind?: 'native_selection' | 'native_page' | 'recovered_page' | 'visual_selection' | null;
   contextAvailable: ContextAvailable;
   diagnostics?: GroundingDecisionDiagnosticSink;
 }): { text: string; knowledgeTier: KnowledgeTier } {
   const captureText = input.captureText?.trim() ?? '';
+  const captureTextKind = input.captureTextKind ?? null;
   const chunkTexts = input.chunks.map((chunk) => chunk.text.trim()).filter((text) => text.length > 0);
   const corpus = [captureText, ...chunkTexts].filter((text) => text.length > 0).join('\n');
   const sourceOnly = isExplicitSourceOnlyQuestion(input.question);
@@ -1981,7 +2098,7 @@ export function applyClaimLevelGrounding(input: {
         'source_limitation',
       );
     }
-    const unestablished = ordinaryUnestablishedRelation(text, corpus, input.question);
+    const unestablished = ordinaryUnestablishedRelation(text, corpus, input.question, captureTextKind);
     if (unestablished) {
       const pieces = [text];
       if (unestablished.optionRepeat) pieces.push(OPTION_REPEAT_NOTICE);
@@ -1996,6 +2113,7 @@ export function applyClaimLevelGrounding(input: {
       answerText: text,
       indexedChunkTexts: chunkTexts,
       captureText,
+      captureTextKind,
     }).tier;
     return finish({ text, knowledgeTier: tier }, 'none');
   }
@@ -2166,6 +2284,7 @@ export function applyClaimLevelGrounding(input: {
       answerText: text,
       indexedChunkTexts: chunkTexts,
       captureText,
+      captureTextKind,
     }).tier;
     return finish(
       { text, knowledgeTier: tier === 'general_academic' ? 'mixed' : tier },

@@ -6,6 +6,8 @@
  */
 
 import type { ZikukAiContext } from '../context/types';
+import type { PilotReceipt } from '../../../../supabase/functions/_shared/ai/tutorPilotEvidence';
+import type { PilotRenderEvidence } from '../tutor/tutorPilotEvidence';
 
 export type ZikukAiCapability = 'explain_selection' | 'ask_course';
 
@@ -85,13 +87,56 @@ export type ZikukAiAskCourseRequestV2 = {
   documentCursor?: DocumentWindowCursor;
 };
 
-export type PdfCaptureAttachment = {
+/**
+ * textKind discriminates:
+ * - native_selection: exact native PDF.js drag selection
+ * - native_page: confirmed full-page native text fallback (not OCR)
+ * - recovered_page: recovered full-page OCR text
+ * - visual_selection: client JPEG of selected region (Visual Capture V1)
+ * Omitted / native_selection keeps pre-bridge clients compatible.
+ */
+export type PdfCaptureTextKind = 'native_selection' | 'native_page' | 'recovered_page';
+export type PdfCaptureVisualKind = 'visual_selection';
+
+export type PdfCaptureRegionNorm = { x: number; y: number; w: number; h: number };
+
+export type PdfTextCaptureAttachment = {
   sourceKind: 'free_space_pdf';
   sourceObjectId: string;
   sectionId: string;
   pageNumber: number;
   text: string;
+  /** Default when omitted: native_selection */
+  textKind?: PdfCaptureTextKind;
 };
+
+/** Wire format for visual_selection — base64 JPEG, never persisted client-side. */
+export type PdfVisualSelectionAttachment = {
+  sourceKind: 'free_space_pdf';
+  sourceObjectId: string;
+  sectionId: string;
+  pageNumber: number;
+  regionNorm: PdfCaptureRegionNorm;
+  attachmentType: 'visual_selection';
+  textKind: PdfCaptureVisualKind;
+  mime: 'image/jpeg' | 'image/png';
+  imageBase64: string;
+  widthPx: number;
+  heightPx: number;
+  userConfirmedVisual: true;
+};
+
+export type PdfCaptureAttachment = PdfTextCaptureAttachment | PdfVisualSelectionAttachment;
+
+export function isVisualSelectionCapture(
+  capture: PdfCaptureAttachment,
+): capture is PdfVisualSelectionAttachment {
+  return (
+    'attachmentType' in capture &&
+    capture.attachmentType === 'visual_selection' &&
+    capture.textKind === 'visual_selection'
+  );
+}
 
 export type ZikukAiAskCourseRequestV3 = Omit<ZikukAiAskCourseRequestV2, 'version'> & {
   version: 3;
@@ -125,6 +170,9 @@ export type AskCourseSourceRef =
 export type KnowledgeTier =
   | 'course_material'
   | 'pdf_selection'
+  | 'pdf_page_native'
+  | 'pdf_page_recovered'
+  | 'pdf_selection_visual'
   | 'general_academic'
   | 'mixed';
 
@@ -157,6 +205,8 @@ export type ZikukAiResponse =
         capability: 'ask_course';
         latencyMs?: number;
         retrievalHitCount?: number;
+        pilotEvidence?: PilotReceipt;
+        pilotRenderEvidence?: PilotRenderEvidence;
         knowledgeTier?: KnowledgeTier;
         contextAvailable?: ContextAvailable;
       };

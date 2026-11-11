@@ -114,7 +114,13 @@ export function AskZikukResult({
           <AskZikukAnswer
             text={presentAnswerTextForProvenance(text, knowledgeTier)}
             sources={
-              knowledgeTier === 'general_academic' || knowledgeTier === 'pdf_selection' ? [] : sources
+              knowledgeTier === 'general_academic' ||
+              knowledgeTier === 'pdf_selection' ||
+              knowledgeTier === 'pdf_page_native' ||
+              knowledgeTier === 'pdf_page_recovered' ||
+              knowledgeTier === 'pdf_selection_visual'
+                ? []
+                : sources
             }
             textColor={tokens.textPrimary}
             mutedColor={tokens.textMuted}
@@ -124,7 +130,10 @@ export function AskZikukResult({
           />
           {sources.length > 0 &&
           knowledgeTier !== 'general_academic' &&
-          knowledgeTier !== 'pdf_selection' ? (
+          knowledgeTier !== 'pdf_selection' &&
+          knowledgeTier !== 'pdf_page_native' &&
+          knowledgeTier !== 'pdf_page_recovered' &&
+          knowledgeTier !== 'pdf_selection_visual' ? (
             <div data-ask-zikuk-sources-column="1">
               <AskZikukSources
                 sources={sources}

@@ -9,6 +9,12 @@
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
+    "build:release:production": "bash scripts/build-release-targets.sh production",
+    "build:release:staging": "bash scripts/build-release-targets.sh staging",
+    "build:release:both": "bash scripts/build-release-targets.sh both",
+    "verify:build:production": "node scripts/verify-build-target.mjs --target production --dist dist-production",
+    "verify:build:staging": "node scripts/verify-build-target.mjs --target staging --dist dist-staging",
+    "test:deploy-staging-guards": "bash scripts/test-deploy-staging-guards.sh",
     "deploy:staging": "bash scripts/deploy-staging.sh"
   },
   "dependencies": {

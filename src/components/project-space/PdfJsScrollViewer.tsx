@@ -1,5 +1,11 @@
 import type { NormalizedPageRegion } from "../../lib/pdfGeometry/normalizedPageRegion";
+import { assessPdfPageTextLayer } from "../../lib/ai/tutor/assessPdfPageTextLayer";
+import { assessCaptureRegionExtraction } from "../../lib/ai/tutor/captureRegionDiagnostics";
 import { extractPdfTextFromRegion, type PdfTextContent } from "../../lib/ai/tutor/pdfTutorTextExtraction";
+import {
+  renderPdfRegionImage,
+  type RenderPdfRegionImageResult,
+} from "../../lib/ai/visualCapture/renderPdfRegionImage";
 import {
   useCallback,
   useEffect,
@@ -42,7 +48,20 @@ export interface PdfJsScrollViewerProps {
   onPagePersist: (page: number) => void;
   onError?: () => void;
   renderPageOverlay?: (page: number) => ReactNode;
-  onExtractTextReady?: (extractor: (page: number, region: NormalizedPageRegion) => Promise<string | undefined>) => void;
+  onExtractTextReady?: (
+    extractor: (page: number, region: NormalizedPageRegion) => Promise<string | undefined>,
+    probePageTextLayer: (
+      page: number,
+    ) => Promise<import('../../lib/ai/tutor/useTutorPdfCapture').PageTextLayerProbe>,
+    assessRegion: (
+      page: number,
+      region: NormalizedPageRegion,
+    ) => Promise<import('../../lib/ai/tutor/captureRegionDiagnostics').CaptureRegionDiagnostics | null>,
+    renderRegionImage: (
+      page: number,
+      region: NormalizedPageRegion,
+    ) => Promise<RenderPdfRegionImageResult>,
+  ) => void;
   /** Increment to fit the visible page to the scrollport height. */
   fitPageToken?: number;
   /** Writes a zoom chosen by Fit page. Does not run for stored zoom values. */
@@ -105,23 +124,75 @@ export function PdfJsScrollViewer({
   pageHeightsRef.current = pageHeights;
   visiblePageRef.current = visiblePage;
 
-  const extractText = useCallback(async (pageNum: number, region: NormalizedPageRegion) => {
+  const loadPageTextContent = useCallback(async (pageNum: number) => {
     const pdf = pdfRef.current;
-    if (!pdf) return undefined;
+    if (!pdf) return null;
     let cached = textContentCacheRef.current.get(pageNum);
     if (!cached) {
       const pdfPage = await pdf.getPage(pageNum);
       const viewport = pdfPage.getViewport({ scale: 1 });
-      cached = { content: (await pdfPage.getTextContent()) as unknown as PdfTextContent, width: viewport.width, height: viewport.height };
+      cached = {
+        content: (await pdfPage.getTextContent()) as unknown as PdfTextContent,
+        width: viewport.width,
+        height: viewport.height,
+      };
       textContentCacheRef.current.set(pageNum, cached);
     }
-    const resolved = cached;
-    return resolved ? extractPdfTextFromRegion(resolved.content, resolved.width, resolved.height, region) : undefined;
+    return cached;
   }, []);
 
+  const extractText = useCallback(async (pageNum: number, region: NormalizedPageRegion) => {
+    const resolved = await loadPageTextContent(pageNum);
+    return resolved
+      ? extractPdfTextFromRegion(resolved.content, resolved.width, resolved.height, region)
+      : undefined;
+  }, [loadPageTextContent]);
+
+  const probePageTextLayer = useCallback(async (pageNum: number) => {
+    const resolved = await loadPageTextContent(pageNum);
+    if (!resolved) {
+      return {
+        kind: 'empty' as const,
+        itemCount: 0,
+        meaningfulCharCount: 0,
+        hasReadableText: false,
+      };
+    }
+    const assessment = assessPdfPageTextLayer(
+      resolved.content,
+      resolved.width,
+      resolved.height,
+    );
+    return {
+      ...assessment,
+      /** Useful full-page native text only — not a single leftover glyph. */
+      hasReadableText: assessment.kind === 'useful',
+    };
+  }, [loadPageTextContent]);
+
+  const assessRegion = useCallback(async (pageNum: number, region: NormalizedPageRegion) => {
+    const resolved = await loadPageTextContent(pageNum);
+    if (!resolved) return null;
+    return assessCaptureRegionExtraction(
+      resolved.content,
+      resolved.width,
+      resolved.height,
+      region,
+    );
+  }, [loadPageTextContent]);
+
+  const renderRegionImage = useCallback(
+    async (pageNum: number, region: NormalizedPageRegion): Promise<RenderPdfRegionImageResult> => {
+      const pdf = pdfRef.current;
+      if (!pdf) return { ok: false, code: 'render_failed' };
+      return renderPdfRegionImage({ pdf, pageNumber: pageNum, region });
+    },
+    [],
+  );
+
   useEffect(() => {
-    onExtractTextReady?.(extractText);
-  }, [extractText, onExtractTextReady]);
+    onExtractTextReady?.(extractText, probePageTextLayer, assessRegion, renderRegionImage);
+  }, [extractText, probePageTextLayer, assessRegion, renderRegionImage, onExtractTextReady]);
 
   const cancelAllRenderTasks = useCallback(() => {
     for (const task of renderTasksRef.current.values()) {

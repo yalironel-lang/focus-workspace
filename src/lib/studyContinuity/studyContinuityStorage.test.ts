@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { patchStorageMethod } from '../knowledge/testLocalStorage';
 import {
   studyContinuityStorageKey,
   loadStudyContinuityStore,
@@ -136,25 +137,28 @@ describe('WC-6A1 StudyContinuity Storage & Persistence', () => {
 
   // I. localStorage exception safe fallback
   it('I. handles localStorage exceptions gracefully without crashing', () => {
-    const originalGet = localStorage.getItem;
-    const originalSet = localStorage.setItem;
-
-    localStorage.getItem = () => {
+    // happy-dom Storage Proxy ignores direct method assignment; use defineProperty.
+    const unpatchGet = patchStorageMethod(localStorage, 'getItem', (() => {
       throw new Error('QuotaExceeded / SecurityError');
-    };
-    expect(loadStudyContinuityStore('user-1', 'sec-1', 'board-1')).toBeNull();
+    }) as Storage['getItem']);
+    try {
+      expect(loadStudyContinuityStore('user-1', 'sec-1', 'board-1')).toBeNull();
+    } finally {
+      unpatchGet();
+    }
 
-    localStorage.setItem = () => {
+    const unpatchSet = patchStorageMethod(localStorage, 'setItem', (() => {
       throw new Error('QuotaExceeded');
-    };
-    expect(saveStudyContinuityRecord('user-1', 'sec-1', 'board-1', {
-      sourceObjectId: 'pdf-1',
-      workObjectId: 'nb-1',
-      lastActiveAt: 1000,
-    })).toBe(false);
-
-    localStorage.getItem = originalGet;
-    localStorage.setItem = originalSet;
+    }) as Storage['setItem']);
+    try {
+      expect(saveStudyContinuityRecord('user-1', 'sec-1', 'board-1', {
+        sourceObjectId: 'pdf-1',
+        workObjectId: 'nb-1',
+        lastActiveAt: 1000,
+      })).toBe(false);
+    } finally {
+      unpatchSet();
+    }
   });
 
   // J. 10-record maximum & K. 11th record prunes oldest

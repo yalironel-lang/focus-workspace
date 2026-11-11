@@ -1,3 +1,4 @@
+import { confirmProjectDispatch, finalizeProjectAccounting } from '../_shared/ai/projectAccounting.ts';
 /**
  * ZIKUK AI Gateway — Supabase Edge Function (M0.2 + M0.2.6 + M0.4 + M0.5D ask_course).
  *
@@ -15,57 +16,49 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.0';
-import { MAX_REQUEST_BODY_BYTES } from '../_shared/ai/bounds.ts';
+import {
+  MAX_ASK_COURSE_VISUAL_BODY_BYTES,
+  MAX_REQUEST_BODY_BYTES,
+} from '../_shared/ai/bounds.ts';
+import { allowVisualSizedGatewayBody } from '../_shared/ai/visualCapture/visualSelectionContract.ts';
 import { KNOWLEDGE_EMBEDDING_DIMENSIONS } from '../_shared/ai/knowledge/bounds.ts';
 import { createOpenAICompatibleEmbeddingProvider } from '../_shared/ai/knowledge/providerEmbeddings.ts';
 import { preflightGatewayRequest } from '../_shared/ai/preflightGatewayRequest.ts';
 import { createOpenAICompatibleProvider } from '../_shared/ai/providerOpenAICompatible.ts';
+import { createCompositeProvider } from '../_shared/ai/providerGemini.ts';
+import { resolveEffectiveModelForUser } from '../_shared/ai/userScopedRouting.ts';
+import {
+  calculateAuthoritativePayloadInputBound,
+  checkProjectSpendingGuard,
+  createPostgresProjectSpendingStore,
+  requireVerifiedTokenReservation,
+  verifyFinalProviderPayloadBound,
+} from '../_shared/ai/projectLevelSpendingGuard.ts';
 import {
   formatUsageLogLine,
   runGatewayPipelineAfterPreflight,
 } from '../_shared/ai/runGatewayPipeline.ts';
 import { createSupabaseEnforcementStore } from '../_shared/ai/supabaseEnforcement.ts';
 import type { ZikukAiResponse } from '../_shared/ai/requestTypes.ts';
+import {
+  buildEmergencyDisabledResponse,
+  httpStatusFor,
+  isEmergencyDisabled,
+} from '../_shared/ai/gatewayHttpStatus.ts';
+import { PILOT_HEADER, pilotContext } from '../_shared/ai/tutorPilotEvidence.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': `authorization, x-client-info, apikey, content-type, ${PILOT_HEADER}`,
 };
 
 function jsonResponse(body: ZikukAiResponse, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 }
 
-function httpStatusFor(code: string): number {
-  switch (code) {
-    case 'unauthenticated':
-      return 401;
-    case 'auth_mismatch':
-    case 'ai_disabled':
-      return 403;
-    case 'invalid_request':
-    case 'unsupported_capability':
-    case 'unsupported_content':
-      return 400;
-    case 'not_found':
-    case 'knowledge_not_found':
-      return 404;
-    case 'rate_limited':
-    case 'quota_exceeded':
-      return 429;
-    case 'provider_timeout':
-      return 504;
-    case 'output_budget_exhausted':
-      return 422;
-    case 'provider_unavailable':
-      return 502;
-    default:
-      return 500;
-  }
-}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -87,7 +80,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const contentLength = Number(req.headers.get('content-length') ?? '0');
-    if (contentLength > MAX_REQUEST_BODY_BYTES) {
+    // Hard ceiling is the visual budget; text-only stays at 64 KiB after body inspection.
+    if (contentLength > MAX_ASK_COURSE_VISUAL_BODY_BYTES) {
       return jsonResponse(
         {
           version: 1,
@@ -99,7 +93,18 @@ Deno.serve(async (req: Request) => {
     }
 
     const rawText = await req.text();
-    if (rawText.length > MAX_REQUEST_BODY_BYTES) {
+    const bodyBytes = new TextEncoder().encode(rawText).byteLength;
+    if (bodyBytes > MAX_ASK_COURSE_VISUAL_BODY_BYTES) {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: { code: 'invalid_request', message: 'Request body too large.' },
+        },
+        413,
+      );
+    }
+    if (bodyBytes > MAX_REQUEST_BODY_BYTES && !allowVisualSizedGatewayBody(rawText)) {
       return jsonResponse(
         {
           version: 1,
@@ -146,12 +151,68 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(preflight.response, status);
     }
 
+    const emergencyDisable = isEmergencyDisabled(Deno.env.get('AI_EMERGENCY_DISABLE'));
+    if (emergencyDisable) {
+      console.warn(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: 'ai_disabled',
+          reason: 'emergency_disabled',
+        }),
+      );
+      const disabled = buildEmergencyDisabledResponse();
+      return jsonResponse(disabled.response, disabled.status);
+    }
+
     const apiKey = Deno.env.get('AI_PROVIDER_API_KEY') ?? '';
     const baseUrl = Deno.env.get('AI_PROVIDER_BASE_URL') ?? 'https://api.openai.com/v1';
-    const model = Deno.env.get('AI_MODEL') ?? '';
+    const defaultModel = Deno.env.get('AI_MODEL') ?? '';
+    const visionModel = Deno.env.get('AI_VISION_MODEL') ?? '';
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+    const geminiBaseUrl = Deno.env.get('GEMINI_BASE_URL') ?? undefined;
+    const geminiAllowedUsers = Deno.env.get('AI_GEMINI_ALLOWED_USERS') ?? '';
+    const geminiTestModel = Deno.env.get('AI_GEMINI_TEST_MODEL') ?? 'gemini-3.6-flash';
+    const thinkingBudgetRaw = Deno.env.get('AI_GEMINI_THINKING_BUDGET');
+    const thinkingBudget = thinkingBudgetRaw ? Number(thinkingBudgetRaw) : undefined;
 
-    if (!apiKey || !model) {
+    // Resolve user-scoped model (allows designated staging QA accounts to evaluate Gemini while preserving baseline)
+    const routing = resolveEffectiveModelForUser({
+      authUserId: preflight.authUserId,
+      defaultModel,
+      geminiAllowedUsersRaw: geminiAllowedUsers,
+      geminiTestModelRaw: geminiTestModel,
+      hasGeminiApiKey: Boolean(geminiApiKey || (defaultModel.toLowerCase().startsWith('gemini-') ? apiKey : '')),
+    });
+
+    if (!routing.ok) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: routing.error.code,
+          reason: routing.error.reason,
+        }),
+      );
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: 'AI Gateway is not configured.',
+          },
+        },
+        500,
+      );
+    }
+
+    const model = routing.model;
+    const isGeminiModel = model.toLowerCase().startsWith('gemini-');
+    const hasConfiguredKey = isGeminiModel ? Boolean(geminiApiKey || apiKey) : Boolean(apiKey);
+
+    if (!hasConfiguredKey || !model) {
       console.error(
         JSON.stringify({
           event: 'zikuk_ai_gateway',
@@ -200,14 +261,111 @@ Deno.serve(async (req: Request) => {
     });
     const enforcement = createSupabaseEnforcementStore(admin);
 
-    const provider = createOpenAICompatibleProvider({ apiKey, baseUrl });
+    const maxDailyRequestsRaw = Deno.env.get('AI_PROJECT_MAX_DAILY_REQUESTS');
+    const maxDailyTokensRaw = Deno.env.get('AI_PROJECT_MAX_DAILY_TOKENS');
+    const maxDailyBudgetMicrosRaw = Deno.env.get('AI_PROJECT_MAX_DAILY_BUDGET_USD_MICROS');
+
+    const projectSpendingConfig = {
+      emergencyDisable,
+      maxDailyRequests: maxDailyRequestsRaw ? Number(maxDailyRequestsRaw) : null,
+      maxDailyTokens: maxDailyTokensRaw ? Number(maxDailyTokensRaw) : null,
+      maxDailyCostMicros: maxDailyBudgetMicrosRaw ? Number(maxDailyBudgetMicrosRaw) : null,
+    };
+
+    let estimatedRequestTokens: number;
+    try {
+      const bound = calculateAuthoritativePayloadInputBound(preflight.request, model);
+      estimatedRequestTokens = requireVerifiedTokenReservation(
+        preflight.request.capability,
+        model,
+        bound.isAuthoritative
+          ? {
+              declaredInputTokens: bound.declaredInputTokens,
+              hasVision: bound.hasVision,
+              visionTileCount: bound.visionTileCount,
+              maxAttempts: 1,
+              hasAuthoritativeTokenizerProof: true,
+            }
+          : undefined,
+      );
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: 'unauthorized_inference',
+          reason: err instanceof Error ? err.message : 'TOKEN_INPUT_BOUND_UNVERIFIED',
+          model,
+        }),
+      );
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: 'AI usage controls are temporarily unavailable. Try again shortly.',
+          },
+        },
+        500,
+      );
+    }
+    const postgresSpendingStore = createPostgresProjectSpendingStore(admin);
+
+    const spendingGuardDecision = await checkProjectSpendingGuard({
+      config: projectSpendingConfig,
+      estimatedRequestTokens,
+      userId: preflight.authUserId,
+      capability: preflight.request.capability,
+      store: postgresSpendingStore,
+    });
+
+    if (!spendingGuardDecision.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: 'zikuk_ai_gateway',
+          ok: false,
+          errorCode: spendingGuardDecision.code,
+          reason: spendingGuardDecision.reason,
+          stats: spendingGuardDecision.stats,
+        }),
+      );
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: {
+            code: spendingGuardDecision.code,
+            message: spendingGuardDecision.message,
+          },
+        },
+        httpStatusFor(spendingGuardDecision.code),
+      );
+    }
+
+    const provider = createCompositeProvider({
+      openAi: apiKey ? { apiKey, baseUrl } : undefined,
+      gemini: (geminiApiKey || (isGeminiModel ? apiKey : ''))
+        ? {
+            apiKey: geminiApiKey || apiKey,
+            baseUrl: geminiBaseUrl,
+            thinkingBudget,
+            resilience: {
+              maxCumulativeTokens: estimatedRequestTokens,
+            },
+          }
+        : undefined,
+      enableFallback: false,
+    });
     const embeddingModel = Deno.env.get('AI_EMBEDDING_MODEL')?.trim() || undefined;
     const dimsRaw = Deno.env.get('AI_EMBEDDING_DIMENSIONS');
     const embeddingDimensions = dimsRaw ? Number(dimsRaw) : undefined;
 
+
     const askCourseDeps =
       preflight.request.capability === 'ask_course'
         ? {
+            pilotEvidence: pilotContext({ supabaseUrl, origin: req.headers.get('Origin'), key: req.headers.get(PILOT_HEADER) }),
             loadPdfCaptureSource: async (input: { userId: string; sectionId: string; sourceObjectId: string }) => {
               const { data, error } = await admin
                 .from('free_space_objects')
@@ -249,7 +407,15 @@ Deno.serve(async (req: Request) => {
                 p_embedding_model: input.embeddingModel,
                 p_embedding_dimensions: input.embeddingDimensions ?? KNOWLEDGE_EMBEDDING_DIMENSIONS,
               });
-              if (error) return { ok: false as const };
+              if (error) {
+                console.error(
+                  JSON.stringify({
+                    event: 'zikuk_ai_knowledge_search_error',
+                    error: error.message,
+                  }),
+                );
+                return { ok: false as const };
+              }
               return { ok: true as const, raw: data ?? [] };
             },
             searchPdfSource: async (input: {
@@ -270,7 +436,15 @@ Deno.serve(async (req: Request) => {
                 p_embedding_model: input.embeddingModel,
                 p_embedding_dimensions: input.embeddingDimensions ?? KNOWLEDGE_EMBEDDING_DIMENSIONS,
               });
-              if (error) return { ok: false as const };
+              if (error) {
+                console.error(
+                  JSON.stringify({
+                    event: 'zikuk_ai_knowledge_search_pdf_source_error',
+                    error: error.message,
+                  }),
+                );
+                return { ok: false as const };
+              }
               return { ok: true as const, raw: data ?? [] };
             },
             loadDocumentWindow: async (input: {
@@ -334,19 +508,92 @@ Deno.serve(async (req: Request) => {
           }
         : undefined;
 
-    const { response, usageLog } = await runGatewayPipelineAfterPreflight({
-      authUserId: preflight.authUserId,
-      request: preflight.request,
-      provider,
-      routerConfig: { model },
-      enforcement,
-      askCourseDeps,
-      signal: req.signal,
-      requestStartedAt,
-    });
+    let pipelineResult: Awaited<ReturnType<typeof runGatewayPipelineAfterPreflight>> | undefined;
+    try {
+      pipelineResult = await runGatewayPipelineAfterPreflight({
+        authUserId: preflight.authUserId,
+        request: preflight.request,
+        provider,
+        routerConfig: { model, visionModel: visionModel || null },
+        enforcement,
+        askCourseDeps,
+        signal: req.signal,
+        requestStartedAt,
+        onProviderDispatch: async (finalPayload?: {
+          capability?: string;
+          model?: string;
+          messages?: any;
+          maxTokens?: number;
+          embeddingTokens?: number;
+        }) => {
+          if (finalPayload?.messages && finalPayload.model) {
+            const verification = verifyFinalProviderPayloadBound({
+              capability: finalPayload.capability ?? preflight.request.capability,
+              model: finalPayload.model,
+              messages: finalPayload.messages,
+              maxTokens: finalPayload.maxTokens ?? 2048,
+              reservedTokens: estimatedRequestTokens,
+              embeddingTokens: finalPayload.embeddingTokens ?? 0,
+            });
+            if (!verification.ok) {
+              console.error(
+                JSON.stringify({
+                  event: 'zikuk_ai_gateway',
+                  ok: false,
+                  errorCode: 'quota_exceeded',
+                  reason: 'RESERVATION_EXPOSURE_EXCEEDED',
+                  error: verification.error,
+                  totalRequiredTokens: verification.totalRequiredTokens,
+                  reservedTokens: verification.reservedTokens,
+                }),
+              );
+              throw new Error(verification.error || 'RESERVATION_EXPOSURE_EXCEEDED');
+            }
+          }
+          await confirmProjectDispatch(spendingGuardDecision);
+        },
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('RESERVATION_EXPOSURE_EXCEEDED')) {
+        return jsonResponse(
+          {
+            version: 1,
+            ok: false,
+            error: {
+              code: 'quota_exceeded',
+              message: 'Request payload exceeds token reservation limit.',
+            },
+          },
+          429,
+        );
+      }
+      throw err;
+    } finally {
+      // A successful answer is not proof that every billable attempt supplied
+      // complete usage. Retain the full reservation until provenance is verified.
+      await finalizeProjectAccounting(spendingGuardDecision, pipelineResult?.usageLog?.totalTokens, estimatedRequestTokens);
+    }
+
+    if (!pipelineResult) {
+      return jsonResponse(
+        {
+          version: 1,
+          ok: false,
+          error: { code: 'internal_error', message: 'Something went wrong.' },
+        },
+        500,
+      );
+    }
+
+    const { response, usageLog } = pipelineResult;
 
     if (usageLog) {
       console.log(formatUsageLogLine(usageLog));
+    }
+    if (response.ok && response.result.type === 'ask_course' && response.meta?.capability === 'ask_course' && response.meta.pilotEvidence) {
+      const receipt = response.meta.pilotEvidence;
+      // IDs only: context fingerprints and comparison key never enter logs.
+      console.log(JSON.stringify({ event: 'tutor_pilot', requestId: receipt.requestId, providerRequestId: receipt.providerRequestId }));
     }
 
     const status = response.ok ? 200 : httpStatusFor(response.error.code);

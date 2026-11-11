@@ -21,6 +21,7 @@ import {
   type KnowledgeIndexResponse,
 } from '../_shared/ai/knowledge/runKnowledgeIndex.ts';
 import { KNOWLEDGE_EMBEDDING_MODEL_DEFAULT } from '../_shared/ai/knowledge/bounds.ts';
+import { createKnowledgeSpendingStore } from '../_shared/ai/knowledge/knowledgeSpendingStore.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -145,6 +146,8 @@ Deno.serve(async (req: Request) => {
       embeddingModel,
       embeddingDimensions,
       embeddingProvider: createOpenAICompatibleEmbeddingProvider({ apiKey, baseUrl }),
+      spendingStore: createKnowledgeSpendingStore(admin),
+      requireSpendingReservation: true,
 
       async loadSourceForObject({ userId, sectionId, sourceObjectId }) {
         const { data: section, error: secErr } = await admin

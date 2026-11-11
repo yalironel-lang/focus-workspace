@@ -1,0 +1,26 @@
+# Release sources only; never upload local artifacts or environment files.
+.git
+node_modules
+**/node_modules
+dist
+dist-*
+.env*
+**/*.env
+**/*.env.*
+.vercel
+.vercel-staging
+supabase/.temp
+qa-screenshots
+tmp
+deploy
+.cursor
+.claude
+.codex
+.agents
+**/*.pdf
+# Local evidence/fixtures are not deployment sources.
+scratch
+docs/fixtures
+security
+scripts/security
+cross_layout_*.png
