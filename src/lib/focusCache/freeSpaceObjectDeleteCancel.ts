@@ -150,6 +150,10 @@ export type CancelOrphanPendingWritesInput = {
    * Must be fully hydrated from persisted SOT (all boards). Never pass partial React state.
    */
   authoritativeLocalEntityIds: ReadonlySet<string>;
+  /**
+   * Optional explicit confirmed deleted entity ids (e.g. from tombstones or deletion receipts).
+   */
+  confirmedDeletedEntityIds?: ReadonlySet<string>;
 };
 
 /**
@@ -184,6 +188,32 @@ export async function cancelOrphanPendingFreeSpaceObjectWrites(
       };
     }
 
+    // Invariant C: Never cancel pending writes if the authoritative set is empty (e.g. cache cold start, reload, or wiped localStorage)
+    if (input.authoritativeLocalEntityIds.size === 0 && !input.confirmedDeletedEntityIds) {
+      return { ok: true, succeededEntityIds: [], failedEntityIds: [], removedOps: 0 };
+    }
+
+    // Collect authoritative deletion evidence: pending delete ops or unexpired tombstones
+    const pendingDeleteEntityIds = new Set(
+      listed.value
+        .filter((op) => op.entityType === FREE_SPACE_OBJECT_ENTITY_TYPE && op.operationType === 'delete')
+        .map((op) => op.entityId),
+    );
+
+    let tombstoneEntityIds = new Set<string>();
+    try {
+      const { listTombstones } = await import('../knowledge/tombstoneStore');
+      const tombs = await listTombstones(input.sectionId);
+      const now = Date.now();
+      for (const t of tombs) {
+        if (t.expiresAt > now && t.id) {
+          tombstoneEntityIds.add(t.id);
+        }
+      }
+    } catch {
+      // fail-safe: ignore
+    }
+
     const orphanIds = [
       ...new Set(
         listed.value
@@ -193,7 +223,10 @@ export async function cancelOrphanPendingFreeSpaceObjectWrites(
             (entityId) =>
               typeof entityId === 'string' &&
               entityId.length > 0 &&
-              !input.authoritativeLocalEntityIds.has(entityId),
+              !input.authoritativeLocalEntityIds.has(entityId) &&
+              (pendingDeleteEntityIds.has(entityId) ||
+                tombstoneEntityIds.has(entityId) ||
+                (input.confirmedDeletedEntityIds?.has(entityId) ?? false)),
           ),
       ),
     ];

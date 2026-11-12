@@ -238,8 +238,8 @@ describe('cancelPendingFreeSpaceObjectWritesAfterLocalDelete', () => {
   });
 });
 
-describe('cancelOrphanPendingFreeSpaceObjectWrites', () => {
-  it('cancels ops for entity absent from authoritative local SOT', async () => {
+describe('cancelOrphanPendingFreeSpaceObjectWrites (Invariant C: Safe Reconciliation)', () => {
+  it('cancels ops for entity absent from authoritative local SOT when confirmed deleted', async () => {
     listMock.mockResolvedValue({
       ok: true,
       value: [
@@ -251,9 +251,28 @@ describe('cancelOrphanPendingFreeSpaceObjectWrites', () => {
       userId: 'user-1',
       sectionId: 'section-1',
       authoritativeLocalEntityIds: new Set(['live']),
+      confirmedDeletedEntityIds: new Set(['gone']),
     });
     expect(result.ok).toBe(true);
     expect(removeMock.mock.calls.map((c) => c[1])).toEqual(['c-gone']);
+  });
+
+  it('preserves entity absent from authoritative local SOT when deletion is unconfirmed (Invariant C)', async () => {
+    listMock.mockResolvedValue({
+      ok: true,
+      value: [
+        op({ id: 'c-unsynced', entityId: 'unsynced', operationType: 'create' }),
+        op({ id: 'c-live', entityId: 'live', operationType: 'update' }),
+      ],
+    });
+    const result = await cancelOrphanPendingFreeSpaceObjectWrites({
+      userId: 'user-1',
+      sectionId: 'section-1',
+      authoritativeLocalEntityIds: new Set(['live']),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.removedOps).toBe(0);
+    expect(removeMock).not.toHaveBeenCalled();
   });
 
   it('preserves entity present in authoritative local SOT', async () => {
@@ -282,8 +301,8 @@ describe('cancelOrphanPendingFreeSpaceObjectWrites', () => {
     expect(removeMock).not.toHaveBeenCalled();
   });
 
-  it('requires authoritativeLocalEntityIds — cancels all create|update when set is empty and ops exist', async () => {
-    // Empty authoritative set means no active local objects after full hydrate.
+  it('preserves pending ops when authoritative set is empty (Invariant C & T19: cache cold start safe)', async () => {
+    // Empty authoritative set (e.g. reload before hydrate, cleared localStorage) must NOT destroy queued writes.
     listMock.mockResolvedValue({
       ok: true,
       value: [op({ id: 'c1', entityId: 'only-queued', operationType: 'create' })],
@@ -294,6 +313,7 @@ describe('cancelOrphanPendingFreeSpaceObjectWrites', () => {
       authoritativeLocalEntityIds: new Set(),
     });
     expect(result.ok).toBe(true);
-    expect(removeMock).toHaveBeenCalledWith(expect.anything(), 'c1');
+    expect(result.removedOps).toBe(0);
+    expect(removeMock).not.toHaveBeenCalled();
   });
 });
