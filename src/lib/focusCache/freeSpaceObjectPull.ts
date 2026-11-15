@@ -178,8 +178,8 @@ export function mergeAcceptedIntoObjectList(
 
 /**
  * Full catch-up only: remove local objects that are absent from the cloud board
- * snapshot. Retains pending CREATE (never reached cloud) and pending DELETE ids.
- * Delete wins over dirty / pending UPDATE (V1: cloud absence is authoritative).
+ * snapshot. Retains pending CREATE/UPDATE/DELETE entity ids and in-memory dirty edits.
+ * Explicit remote deletion only prunes when there are no unacknowledged local writes.
  */
 export function computeCloudAbsenceRemovals(input: {
   localObjects: readonly ProjectSpaceObject[];
@@ -580,8 +580,10 @@ export async function applyFreeSpaceCloudRowsToMountedBoard(
 
   const retainForAbsence = new Set<string>([
     ...guards.pendingCreateEntityIds,
+    ...guards.pendingUpdateEntityIds,
     ...guards.pendingDeleteEntityIds,
     ...input.getPendingDeletedIds(),
+    ...input.getDirtyIds(),
   ]);
 
   const absenceRemoveIds = input.pruneCloudAbsences

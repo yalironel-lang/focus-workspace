@@ -1186,14 +1186,20 @@ export function useSectionFreeSpaceObjects(
   const enqueueCreatesIfPersisted = useCallback(
     (persisted: boolean, created: readonly ProjectSpaceObject[]) => {
       const { sectionId: sid, boardId: bid } = scopeRef.current;
-      enqueueFreeSpaceObjectCreatesAfterLocalPersist(persisted, {
-        userId,
-        sectionId: sid,
-        boardId: bid,
-        objects: created,
-      });
+      enqueueFreeSpaceObjectCreatesAfterLocalPersist(
+        persisted,
+        {
+          userId: userIdRef.current,
+          sectionId: sid,
+          boardId: bid,
+          objects: created,
+        },
+        (objectId, result) => {
+          if (!result.ok) dirtyIdsRef.current.add(objectId);
+        },
+      );
     },
-    [userId],
+    [],
   );
 
   useEffect(() => {
@@ -1231,6 +1237,9 @@ export function useSectionFreeSpaceObjects(
     const ns = resolveCacheNamespace(userId, sectionId);
     if (!ns.ok) return;
     registerFreeSpaceAutoFlushScope(ns.namespace);
+    if (dirtyIdsRef.current.size > 0) {
+      enqueueDirtyUpdatesAfterCommit(objectsRef.current);
+    }
     requestFreeSpacePendingFlushNow(ns.namespace);
     // M0.7B.3: drain existing needsProcess markers for this section only
     // (no historical PDF scan/mark). Piggybacks mount + online recovery.
@@ -1240,6 +1249,9 @@ export function useSectionFreeSpaceObjects(
       },
     ).catch(() => undefined);
     const onOnline = () => {
+      if (dirtyIdsRef.current.size > 0) {
+        enqueueDirtyUpdatesAfterCommit(objectsRef.current);
+      }
       requestFreeSpacePendingFlushNow(ns.namespace);
       void import('../lib/ai/knowledgeProcessHandoff/pdfKnowledgeWiring').then(
         ({ recoverKnowledgeProcessForSection }) => {
@@ -1252,7 +1264,7 @@ export function useSectionFreeSpaceObjects(
       window.removeEventListener('online', onOnline);
       invalidateFreeSpaceAutoFlushScope(ns.namespace);
     };
-  }, [sectionId, userId]);
+  }, [sectionId, userId, enqueueDirtyUpdatesAfterCommit]);
 
   /**
    * PR7b: Realtime thin delivery + mandatory PR7 pull catch-up on SUBSCRIBED.
@@ -1480,12 +1492,11 @@ export function useSectionFreeSpaceObjects(
 
   const appendObjects = useCallback((incoming: ProjectSpaceObject[]) => {
     if (!incoming.length) return;
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, ...incoming];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, ...incoming];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, incoming);
   }, [persistCreates, enqueueCreatesIfPersisted]);
 
@@ -1500,12 +1511,11 @@ export function useSectionFreeSpaceObjects(
       createdAt: now,
       updatedAt: now,
     };
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, obj];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, obj];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
   }, [persistCreates, enqueueCreatesIfPersisted]);
@@ -1532,12 +1542,11 @@ export function useSectionFreeSpaceObjects(
       }, {
         object: fsObjectSyncDiagSummarizeObject(obj),
       });
-      let persisted = false;
-      setObjects(prev => {
-        const next = [...prev, obj];
-        persisted = persistCreates(next);
-        return next;
-      });
+      const prev = objectsRef.current;
+      const next = [...prev, obj];
+      objectsRef.current = next;
+      const persisted = persistCreates(next);
+      setObjects(next);
       if (persisted) {
         fsObjectSyncDiagLog('B_local_object_persist', {
           sectionId: sid,
@@ -1573,12 +1582,11 @@ export function useSectionFreeSpaceObjects(
       }, {
         object: fsObjectSyncDiagSummarizeObject(obj),
       });
-      let persisted = false;
-      setObjects(prev => {
-        const next = [...prev, obj];
-        persisted = persistCreates(next);
-        return next;
-      });
+      const prev = objectsRef.current;
+      const next = [...prev, obj];
+      objectsRef.current = next;
+      const persisted = persistCreates(next);
+      setObjects(next);
       if (persisted) {
         fsObjectSyncDiagLog('B_local_object_persist', {
           sectionId: sid,
@@ -1605,12 +1613,11 @@ export function useSectionFreeSpaceObjects(
       createdAt: now,
       updatedAt: now,
     };
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, obj];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, obj];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
   }, [persistCreates, enqueueCreatesIfPersisted]);
@@ -1647,12 +1654,11 @@ export function useSectionFreeSpaceObjects(
       createdAt: now,
       updatedAt: now,
     };
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, obj];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, obj];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
   }, [persistCreates, enqueueCreatesIfPersisted]);
@@ -1689,12 +1695,11 @@ export function useSectionFreeSpaceObjects(
       createdAt: now,
       updatedAt: now,
     };
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, obj];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, obj];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, [obj]);
     return obj;
   }, [persistCreates, enqueueCreatesIfPersisted]);
@@ -1962,12 +1967,11 @@ export function useSectionFreeSpaceObjects(
     if (source.type === 'studyfile') {
       void copyStudyFileBlob(sectionId, source.id, copy.id);
     }
-    let persisted = false;
-    setObjects(prev => {
-      const next = [...prev, copy];
-      persisted = persistCreates(next);
-      return next;
-    });
+    const prev = objectsRef.current;
+    const next = [...prev, copy];
+    objectsRef.current = next;
+    const persisted = persistCreates(next);
+    setObjects(next);
     enqueueCreatesIfPersisted(persisted, [copy]);
     return copy;
   }, [objects, persistCreates, sectionId, enqueueCreatesIfPersisted]);

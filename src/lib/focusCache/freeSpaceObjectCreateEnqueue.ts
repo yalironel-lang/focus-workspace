@@ -123,6 +123,7 @@ export function enqueueFreeSpaceObjectCreatesAfterLocalPersist(
     boardId: string;
     objects: readonly ProjectSpaceObject[];
   },
+  onResult?: (objectId: string, result: FreeSpaceObjectCreateEnqueueResult) => void,
 ): void {
   if (!persisted || input.objects.length === 0) return;
   for (const object of input.objects) {
@@ -131,6 +132,8 @@ export function enqueueFreeSpaceObjectCreatesAfterLocalPersist(
       sectionId: input.sectionId,
       boardId: input.boardId,
       object,
+    }).then((result) => {
+      onResult?.(object.id, result);
     });
   }
 }

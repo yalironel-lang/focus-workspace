@@ -222,4 +222,20 @@ describe('enqueueFreeSpaceObjectCreatesAfterLocalPersist', () => {
     expect(enqueueMock.mock.calls[0]?.[0]?.entityId).toBe('a');
     expect(enqueueMock.mock.calls[1]?.[0]?.entityId).toBe('b');
   });
+
+  it('invokes onResult callback with enqueue outcome for each object', async () => {
+    const onResult = vi.fn();
+    enqueueFreeSpaceObjectCreatesAfterLocalPersist(
+      true,
+      {
+        userId: 'user-1',
+        sectionId: 'section-1',
+        boardId: 'main',
+        objects: [sampleObject('obj-cb-1')],
+      },
+      onResult,
+    );
+    await vi.waitFor(() => expect(onResult).toHaveBeenCalledTimes(1));
+    expect(onResult).toHaveBeenCalledWith('obj-cb-1', { ok: true });
+  });
 });
