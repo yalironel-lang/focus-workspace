@@ -11,7 +11,7 @@
  * @vitest-environment happy-dom
  */
 
-import { createElement, act } from 'react';
+import { createElement, act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AtmosphereTokens } from '../../hooks/useAtmosphere';
@@ -183,16 +183,20 @@ describe('Incident NBI-01: Cross-Page Codec Collision & Table Serialization', ()
     act(() => {
       root!.render(
         createElement(
-          WorkspaceSurfaceErrorBoundary,
-          { tokens, label: 'Notebook' },
-          createElement(FreeSpaceNotebookSurface, {
-            content,
-            object,
-            tokens,
-            onChange: onChangeSpy,
-            freeSpaceSectionId: SECTION_ID,
-            freeSpaceBoardId: BOARD_ID,
-          }),
+          StrictMode,
+          null,
+          createElement(
+            WorkspaceSurfaceErrorBoundary,
+            { tokens, label: 'Notebook' },
+            createElement(FreeSpaceNotebookSurface, {
+              content,
+              object,
+              tokens,
+              onChange: onChangeSpy,
+              freeSpaceSectionId: SECTION_ID,
+              freeSpaceBoardId: BOARD_ID,
+            }),
+          ),
         ),
       );
     });
@@ -424,5 +428,31 @@ describe('Incident NBI-01: Cross-Page Codec Collision & Table Serialization', ()
     const page2Final = current.pages.find(p => p.id === 'page-2');
     expect(page2Final?.documentBody).toBe(updatedP2Body);
     expect(page2Final?.documentBodyCodecVersion).toBeUndefined();
+  });
+
+  it('K: React StrictMode double-invocation during device-local reload on unversioned Page B does not trigger error boundary', async () => {
+    const { object, content } = createSyntheticMixedNotebook();
+
+    // Emulate cloud document: root body has Page 1 (table, V1 codec)
+    const cloudContent: NotebookContent = {
+      ...content,
+      body: content.pages[0].documentBody,
+      bodyCodecVersion: 1,
+    };
+    delete (cloudContent as { activePageId?: string }).activePageId;
+    delete (cloudContent as { activeSectionId?: string }).activeSectionId;
+    const cloudObject: ProjectSpaceObject = { ...object, content: cloudContent };
+
+    // Device-local storage restores Page 2 (unversioned empty)
+    saveNotebookActivePage(SECTION_ID, BOARD_ID, OBJECT_ID, SEC_NOTES, 'page-2');
+
+    // Render under StrictMode
+    renderSurface(cloudContent, cloudObject);
+    await flushAsync();
+    await flushAsync();
+
+    // Verify error boundary did NOT catch an uncaught Table codec error
+    expect(host?.textContent).not.toContain('Notebook is unavailable');
+    expect(host?.textContent).not.toContain('Something in this panel could not be displayed safely');
   });
 });

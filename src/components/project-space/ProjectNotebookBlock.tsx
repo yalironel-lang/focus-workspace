@@ -3033,26 +3033,38 @@ export function ProjectNotebookBlock({
       body: effectiveContent.body ?? '',
       codecVersion: effectiveContent.bodyCodecVersion,
     };
+    const isPageSwitch = representation.pageKey !== lastRenderedPageKeyRef.current;
+    if (isPageSwitch) {
+      lastRenderedPageKeyRef.current = representation.pageKey;
+      blocksCodecVersionRef.current = representation.codecVersion;
+      setBlocks(
+        parseBodyToBlocksForCodec(
+          representation.body,
+          undefined,
+          representation.codecVersion,
+        ),
+      );
+      return;
+    }
     setBlocks((prev) => {
-      const isPageSwitch = representation.pageKey !== lastRenderedPageKeyRef.current;
-      if (!isPageSwitch) {
+      try {
         if (
           serializeNotebookBlocks(prev as NotebookDialectBlock[], blocksCodecVersionRef.current) ===
           representation.body
         ) {
           return prev;
         }
-        if (isNotebookEditorFocused()) return prev;
-        if (isDomTextCommitLocked()) return prev;
-        // Free Space toolbar session: never reparse from host while a format session is open.
-        if (selectionToolbarRef.current != null) return prev;
-        if (toolbarActiveBlockIdRef.current != null) return prev;
+      } catch {
+        // If serialization of prev fails under its codec, fall through to reparse from representation.body
       }
-      lastRenderedPageKeyRef.current = representation.pageKey;
-      blocksCodecVersionRef.current = representation.codecVersion;
+      if (isNotebookEditorFocused()) return prev;
+      if (isDomTextCommitLocked()) return prev;
+      // Free Space toolbar session: never reparse from host while a format session is open.
+      if (selectionToolbarRef.current != null) return prev;
+      if (toolbarActiveBlockIdRef.current != null) return prev;
       return parseBodyToBlocksForCodec(
         representation.body,
-        isPageSwitch ? undefined : prev,
+        prev,
         representation.codecVersion,
       );
     });
