@@ -1578,6 +1578,11 @@ export function ProjectNotebookBlock({
       effectiveContent.bodyCodecVersion,
     ),
   );
+  // Track the rendered page key and its corresponding codec version.
+  // Outgoing blocks briefly belong to the prior page during transition reconciliations
+  // and must never be serialized using an incoming page's codec (Incident NBI-01).
+  const lastRenderedPageKeyRef = useRef<string | null>(effectiveContent.activePageId ?? null);
+  const blocksCodecVersionRef = useRef<number | undefined>(effectiveContent.bodyCodecVersion);
   const [, bumpNotebookImageCache] = useState(0);
   const [slashMenu, setSlashMenu] = useState<{
     blockId: string;
@@ -2392,12 +2397,16 @@ export function ProjectNotebookBlock({
             ...(next.bodyCodecVersion !== undefined ? { bodyCodecVersion: next.bodyCodecVersion } : {}),
             pages: next.pages,
           };
+          lastRenderedPageKeyRef.current = next.activePageId ?? null;
+          blocksCodecVersionRef.current = next.bodyCodecVersion;
           navigationOverlayRef.current = nextOverlay;
           setNavigationOverlay(nextOverlay);
           setBlocks(parseBodyToBlocksForCodec(next.body ?? '', undefined, next.bodyCodecVersion));
           return;
         }
 
+        lastRenderedPageKeyRef.current = next.activePageId ?? null;
+        blocksCodecVersionRef.current = next.bodyCodecVersion;
         persistNotebookContent(next, next.activePageId ?? null);
         navigationOverlayRef.current = null;
         setNavigationOverlay(null);
@@ -2590,6 +2599,8 @@ export function ProjectNotebookBlock({
           );
           navigationActivePageIdRef.current = next.activePageId;
         }
+        lastRenderedPageKeyRef.current = next.activePageId ?? null;
+        blocksCodecVersionRef.current = next.bodyCodecVersion;
         persistNotebookContent(next, next.activePageId ?? null);
         navigationOverlayRef.current = null;
         setNavigationOverlay(null);
@@ -3023,18 +3034,27 @@ export function ProjectNotebookBlock({
       codecVersion: effectiveContent.bodyCodecVersion,
     };
     setBlocks((prev) => {
-      if (
-        serializeNotebookBlocks(prev as NotebookDialectBlock[], representation.codecVersion) ===
-        representation.body
-      ) {
-        return prev;
+      const isPageSwitch = representation.pageKey !== lastRenderedPageKeyRef.current;
+      if (!isPageSwitch) {
+        if (
+          serializeNotebookBlocks(prev as NotebookDialectBlock[], blocksCodecVersionRef.current) ===
+          representation.body
+        ) {
+          return prev;
+        }
+        if (isNotebookEditorFocused()) return prev;
+        if (isDomTextCommitLocked()) return prev;
+        // Free Space toolbar session: never reparse from host while a format session is open.
+        if (selectionToolbarRef.current != null) return prev;
+        if (toolbarActiveBlockIdRef.current != null) return prev;
       }
-      if (isNotebookEditorFocused()) return prev;
-      if (isDomTextCommitLocked()) return prev;
-      // Free Space toolbar session: never reparse from host while a format session is open.
-      if (selectionToolbarRef.current != null) return prev;
-      if (toolbarActiveBlockIdRef.current != null) return prev;
-      return parseBodyToBlocksForCodec(representation.body, prev, representation.codecVersion);
+      lastRenderedPageKeyRef.current = representation.pageKey;
+      blocksCodecVersionRef.current = representation.codecVersion;
+      return parseBodyToBlocksForCodec(
+        representation.body,
+        isPageSwitch ? undefined : prev,
+        representation.codecVersion,
+      );
     });
   }, [
     effectiveContent.body,
